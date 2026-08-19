@@ -1162,6 +1162,17 @@ fn mint_anon_ids(n: usize) -> u64 {
     ANON_COUNTER.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// The id the next blank node takes.
+fn anon_counter() -> u64 {
+    ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Carry the counter forward to where a parse left it, so the next document
+/// numbers on from there rather than over the top of it.
+fn set_anon_counter(n: u64) {
+    ANON_COUNTER.store(n, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Start the blank-node counter over.
 ///
 /// The counter's span is one recipe line: everything a single line does — a
@@ -1884,9 +1895,19 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // only ran when that writer was already on would reach it with no record
             // of which expressions were one node.
             let owl_shared_owners = scan_owl_shared_owners(&buf);
+            // The parse numbers this document's blank nodes from the run's own
+            // counter, so an anonymous individual carries the id it would be
+            // written with — `_:genid2147483648` onwards — and two documents
+            // merged in one step keep their nodes apart. The counter comes back
+            // out where the parse left it.
+            let b = horned_owl::model::Build::new_rc();
+            b.set_bnode_base(anon_counter() as i64);
             let (rdfo, _incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
-                horned_owl::io::rdf::reader::read(&mut buf.as_slice(), cfg)
+                horned_owl::io::rdf::reader::read_with_build(&mut buf.as_slice(), &b, cfg)
                     .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
+            if let Some(n) = b.bnode_base() {
+                set_anon_counter(n as u64);
+            }
             // Move components out of the parser's Rc set rather than deep-cloning
             // every one (the naive From<ConcreteRDFOntology>).
             let ont: Onto = rdfo.into_set_ontology_fast();
