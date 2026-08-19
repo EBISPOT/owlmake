@@ -254,7 +254,7 @@ pub struct Plan {
     /// plan-only repo silently loses the edit file's sibling sources from the
     /// source merge and the merged-import seed, and writes its mirrors where its
     /// own steps do not look. Output SHAPE is not decided here — the two
-    /// version-dependent byte behaviours read `robot_version`.
+    /// version-dependent byte behaviours read `emulate_robot_version`.
     pub variables: std::collections::BTreeMap<String, String>,
     /// Gaps in the repo's own rules that *build* declared components (e.g.
     /// uPheno's `python3 upheno_build.py …`): steps owlmake can't reproduce.
@@ -307,7 +307,14 @@ pub struct Plan {
     /// Recorded rather than sniffed at write time: a plan-only repo has no build
     /// scripts or workflows left to re-read, and an ambient version would decide
     /// artefact bytes from outside the plan.
-    pub robot_version: (u32, u32, u32),
+    pub emulate_robot_version: (u32, u32, u32),
+    /// The ODK release this repo's outputs were made under, when the repo states
+    /// one. It settles more than the tool version does — the OBO extended prefix
+    /// map is baked into the image and the releases' maps differ by 388 prefixes —
+    /// so where a repo names it, this is the fact the build obeys and
+    /// `emulate_robot_version` follows from it. `None` for a repo that ships its
+    /// own tool and names only that.
+    pub emulate_odk_version: Option<(u32, u32, u32)>,
     /// `--strict`: reject structurally-broken RDF instead of repairing it while
     /// parsing. It changes WHICH AXIOMS SURVIVE A PARSE, so it is part of what
     /// this plan builds rather than a property of whoever invokes it. Resolved at

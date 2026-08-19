@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// a byte-level convention a repo's existing releases either carry or do not:
 /// ECTO's `ecto.json` carries the nested `meta`, while OBA's and MONDO's `.json`s
 /// do not and would gain two million spurious lines with it on. Ingest resolves
-/// which convention a repo builds under and records it as `Plan::robot_version`;
+/// which convention a repo builds under and records it as `Plan::emulate_robot_version`;
 /// execution sets this once from the plan.
 ///
 /// There is deliberately no environment override: an ambient variable that beat

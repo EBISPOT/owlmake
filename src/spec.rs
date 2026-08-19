@@ -190,11 +190,28 @@ pub struct OwlmakeSpec {
     /// The DOSDP pattern set, enumerated at plan time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dosdp: Option<DosdpSpec>,
-    /// The artefact-format generation this repo builds to, e.g. `"1.9.8"`. Two
-    /// byte-level behaviours flip at 1.9.9 — see `Plan::robot_version` for both.
-    /// Absent means the current generation.
+    /// The ODK release this repo's outputs were made under, e.g. `"1.6"`.
+    ///
+    /// This is the fact a repo actually states — in its `run.sh.conf`, or the
+    /// `container:` of its workflows — and it settles more than the tool version
+    /// does: the OBO extended prefix map is baked into the image, and the two
+    /// releases' maps differ by 388 prefixes. Prefer it to
+    /// [`Self::emulate_robot_version`], which a repo only names when it runs a
+    /// tool of its own rather than the image's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub robot_version: Option<String>,
+    pub emulate_odk_version: Option<String>,
+    /// The artefact-format generation this repo builds to, e.g. `"1.9.8"`. Two
+    /// byte-level behaviours flip at 1.9.9 — see `Plan::emulate_robot_version` for both.
+    /// Absent means the current generation.
+    ///
+    /// A repo that runs the image's own tool states only its ODK release, and this
+    /// follows from it. A repo that ships its own — EFO launches `../../bin/robot`
+    /// at 1.9.7 inside an ODK 1.6.1 image — states this instead, and the two are
+    /// then genuinely different facts. Recording BOTH is an error unless they
+    /// agree, because a plan that says two things about one behaviour cannot be
+    /// obeyed: see [`OwlmakeSpec::check_emulation_versions`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulate_robot_version: Option<String>,
     /// `--strict` parsing: structurally-broken RDF is rejected rather than
     /// repaired, so it decides which axioms survive a parse. Resolved at ingest.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -1076,7 +1093,15 @@ impl OwlmakeSpec {
             edit_file: plan.edit_file.clone(),
             catalog_file: plan.catalog_file.clone(),
             dosdp: plan.dosdp.clone(),
-            robot_version: Some(format_version(plan.robot_version)),
+            // The ODK release is what a repo states when it runs the image's own
+            // tool; the tool version is what it states when it ships one. Ingest
+            // resolves whichever the repo actually says and records that one, so a
+            // round trip never invents the other and never has to reconcile them.
+            emulate_odk_version: plan.emulate_odk_version.map(format_version),
+            emulate_robot_version: plan
+                .emulate_odk_version
+                .is_none()
+                .then(|| format_version(plan.emulate_robot_version)),
             strict: plan.strict,
             xml_entities: plan.xml_entities,
             refresh_groups: plan.refresh_groups.clone(),
@@ -1255,10 +1280,17 @@ impl OwlmakeSpec {
             edit_file: self.edit_file,
             catalog_file: self.catalog_file,
             dosdp: self.dosdp,
-            robot_version: self
-                .robot_version
+            emulate_odk_version: self.emulate_odk_version.as_deref().and_then(parse_version),
+            // A plan that names its ODK release implies the tool version; one that
+            // names the tool states it outright. `check_emulation_versions` has
+            // already refused the case where both are present and disagree, so
+            // preferring the ODK release here cannot silently override anything.
+            emulate_robot_version: self
+                .emulate_odk_version
                 .as_deref()
                 .and_then(parse_version)
+                .map(crate::odk::workflows::odk_robot_version)
+                .or_else(|| self.emulate_robot_version.as_deref().and_then(parse_version))
                 .unwrap_or(CURRENT_ROBOT),
             strict: self.strict,
             xml_entities: self.xml_entities,
@@ -2351,7 +2383,45 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
     let spec: OwlmakeSpec = serde_json::from_value(value)
         .with_context(|| format!("interpreting {}", path.display()))?;
     check_version(&spec, path)?;
+    spec.check_emulation_versions()
+        .with_context(|| format!("in {}", path.display()))?;
     Ok(spec)
+}
+
+impl OwlmakeSpec {
+    /// A plan states which ODK release it emulates, or which tool version, or
+    /// both AGREEING. Both disagreeing is refused.
+    ///
+    /// The two are separate facts — a repo that ships its own tool runs a version
+    /// its image never carried — so neither can be derived from the other in
+    /// general. But when a plan names both, execution would have to pick one, and
+    /// picking silently is how a build produces the older JSON nesting with the
+    /// newer prefix map: a combination no release carries. Refusing says which two
+    /// statements conflict, which is something a repo with no build configuration
+    /// left can still act on.
+    pub fn check_emulation_versions(&self) -> Result<()> {
+        let (Some(odk), Some(robot)) =
+            (self.emulate_odk_version.as_deref(), self.emulate_robot_version.as_deref())
+        else {
+            return Ok(());
+        };
+        let (Some(o), Some(r)) = (parse_version(odk), parse_version(robot)) else {
+            return Ok(());
+        };
+        let implied = crate::odk::workflows::odk_robot_version(o);
+        if implied != r {
+            bail!(
+                "emulate_odk_version {odk} and emulate_robot_version {robot} disagree: \
+                 ODK {odk} carries {}.{}.{}. Record the one the repo actually states — \
+                 the ODK release when it runs the image's own tool, the tool version \
+                 when it ships its own — or make them agree.",
+                implied.0,
+                implied.1,
+                implied.2
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Refuse a plan that declares a minimum owlmake version this binary is below.
@@ -2540,7 +2610,8 @@ mod tests {
             edit_file: Some("tiny-edit.owl".into()),
             catalog_file: Some("catalog-v001.xml".into()),
             dosdp: None,
-            robot_version: (1, 9, 8),
+            emulate_odk_version: Some((1, 6, 0)),
+            emulate_robot_version: (1, 9, 8),
             strict: false,
             xml_entities: false,
             refresh_groups: vec![],
@@ -2620,7 +2691,20 @@ mod format_floor_tests {
     #[test]
     fn plan_schema_is_pinned() {
         // Updated deliberately, in the same commit as any schema change.
-        const PLAN_SCHEMA_DIGEST: &str = "72758147576fddeb";
+        //
+        // `emulate_odk_version` arrives beside `emulate_robot_version`, both
+        // `#[serde(default)]`, so a plan written before it still loads: neither
+        // is present, and the current tool generation is read, which is what the
+        // build did before the field existed. PLAN_FORMAT_MIN_VERSION stays put.
+        //
+        // The two are separate facts rather than one renamed. A repo built by the
+        // ODK image states its RELEASE, and that settles the extended prefix map
+        // as well as the tool — the two images' maps differ by 388 prefixes. A
+        // repo shipping its own tool (EFO launches `../../bin/robot` at 1.9.7
+        // inside a 1.6.1 image) states the TOOL and no release. Recording both is
+        // refused unless they agree, because a plan saying two things about one
+        // behaviour cannot be obeyed.
+        const PLAN_SCHEMA_DIGEST: &str = "9121386e4ac36bd1";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -2694,7 +2778,8 @@ mod round_trip_tests {
             edit_file: Some("tiny-edit.ofn".into()),
             catalog_file: Some("catalog-v001.xml".into()),
             dosdp: None,
-            robot_version: (1, 9, 10),
+            emulate_odk_version: Some((1, 6, 1)),
+            emulate_robot_version: (1, 9, 10),
             strict: true,
             xml_entities: true,
             refresh_groups: vec![crate::plan::RefreshGroup {
@@ -2725,8 +2810,8 @@ mod round_trip_tests {
         assert_eq!(back.edit_file, plan.edit_file, "edit_file was dropped");
         assert_eq!(back.catalog_file, plan.catalog_file, "catalog_file was dropped");
         assert_eq!(
-            back.robot_version, plan.robot_version,
-            "robot_version was dropped — every .json artefact changes shape, and \
+            back.emulate_robot_version, plan.emulate_robot_version,
+            "emulate_robot_version was dropped — every .json artefact changes shape, and \
              so does every artefact downstream of a `query --update`"
         );
         assert_eq!(back.strict, plan.strict, "strict was dropped");
@@ -2773,7 +2858,8 @@ mod round_trip_tests {
             edit_file: None,
             catalog_file: None,
             dosdp: None,
-            robot_version: (1, 9, 8),
+            emulate_odk_version: Some((1, 6, 0)),
+            emulate_robot_version: (1, 9, 8),
             strict: false,
             xml_entities: false,
             refresh_groups: vec![],

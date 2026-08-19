@@ -358,7 +358,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     let plan_write = if args.regenerate { PlanWrite::Regenerate } else { PlanWrite::Check };
     let full_plan =
         obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref())?;
-    // The plan's recorded `robot_version` selects the two version-dependent byte
+    // The plan's recorded `emulate_robot_version` selects the two version-dependent byte
     // behaviours — whether OBO Graphs JSON nests axiom-annotation `meta`, and
     // whether a SPARQL update inherits the document's prefixes. Read from the
     // plan, so a plan-only repo produces the same bytes as the repo it came from.
@@ -917,7 +917,7 @@ fn odk_at_least_1_6_1(plan: &Plan) -> bool {
     // shape and it falls through to the current behaviour: nested.
     //
     // That fallback is coarser than the answer the build actually uses, and nothing
-    // in the tree calls this: the nesting switch is set from `plan.robot_version`,
+    // in the tree calls this: the nesting switch is set from `plan.emulate_robot_version`,
     // which ingest resolves from the repo's CI when the build configuration is
     // hand-written. EFO pins v1.9.7 there, so `efo.json` carries no nested `meta`
     // even though the rule below would answer "nested" for it. MONDO's configuration

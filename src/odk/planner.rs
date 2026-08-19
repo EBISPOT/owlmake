@@ -508,6 +508,9 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     };
 
     Ok(Plan {
+        // What the repo itself states. A repo running the image's own tool names
+        // its ODK release and nothing else; one shipping its own names the tool.
+        emulate_odk_version: odk_declared_version(&repo.root, make),
         native_targets,
         // What a bare `owlmake` builds: the repo's default goal, RESOLVED to the
         // targets it names — because after the Makefile is deleted nothing else
@@ -538,7 +541,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             }
         },
         catalog_file: catalog_file(&repo.dir),
-        robot_version: robot_version(&repo.root, make),
+        emulate_robot_version: emulate_robot_version(&repo.root, make),
         // The global `--strict` / `-x` flags, as the repo's own `$(ROBOT)` launcher
         // declares them: they change which axioms survive a parse and the bytes
         // of every RDF/XML artefact, so they are recorded rather than left to
@@ -998,7 +1001,30 @@ fn declared_components(repo: &OdkRepo) -> Vec<String> {
 /// `.github/workflows/`. EFO installs v1.9.7 there — the same generation its
 /// `ROBOT = ../../bin/robot` launcher points at — so `efo.json` carries no
 /// nested `meta`.
-fn robot_version(root: &Path, make: &super::makefile::MakeModel) -> Version {
+/// The ODK release the repo itself declares, if it declares one.
+///
+/// A repo built by the image states its release — in the Makefile's
+/// `ODK_VERSION_MAKEFILE`, in `run.sh.conf`, or as the `container:` of its
+/// workflows. A repo with a hand-written Makefile that launches its own tool
+/// states no release at all, and `None` is the honest answer: what it emulates is
+/// a tool version, recorded separately.
+fn odk_declared_version(root: &Path, make: &super::makefile::MakeModel) -> Option<Version> {
+    use super::workflows::odk_image_version;
+    let var = |name: &str| make.expand(&format!("$({name})")).trim().to_string();
+    if var("ANNOTATE_ONTOLOGY_VERSION").is_empty() {
+        return None;
+    }
+    let declared = var("ODK_VERSION_MAKEFILE");
+    let declared = declared.trim().trim_start_matches('v');
+    let parts: Vec<u32> = declared.split('.').filter_map(|p| p.parse().ok()).collect();
+    match parts.as_slice() {
+        [maj, min, patch, ..] => Some((*maj, *min, *patch)),
+        [maj, min] => Some((*maj, *min, 0)),
+        _ => odk_image_version(root),
+    }
+}
+
+fn emulate_robot_version(root: &Path, make: &super::makefile::MakeModel) -> Version {
     use super::workflows::{ci_robot_version, odk_image_version, odk_robot_version};
     let var = |name: &str| make.expand(&format!("$({name})")).trim().to_string();
     if var("ANNOTATE_ONTOLOGY_VERSION").is_empty() {
@@ -2330,6 +2356,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
     artefacts.retain(|a| matches(&a.target));
 
     Plan {
+        // No Makefile was read, so the repo stated no ODK release here; the
+        // current tool generation below is the honest default.
+        emulate_odk_version: None,
         // A repo with no Makefile has no conditional rule sets, so it exposes no
         // rebuild switches: an empty list is the honest statement, and
         // `--rebuild <anything>` on it is a hard error rather than a silent no-op.
@@ -2353,7 +2382,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
         catalog_file: catalog_file(&repo.dir),
-        robot_version: CURRENT_ROBOT,
+        emulate_robot_version: CURRENT_ROBOT,
         strict: false,
         xml_entities: false,
         dosdp,

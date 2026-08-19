@@ -458,7 +458,7 @@ pub fn run_target_recipe(
     run_target_recipe_planned(&Repo::of_with(repo, plan, opts), target)
 }
 
-/// The `robot_version` boundary at which both version-dependent byte behaviours
+/// The `emulate_robot_version` boundary at which both version-dependent byte behaviours
 /// flip: axiom annotations start nesting in OBO Graphs JSON, and a SPARQL update
 /// starts inheriting the document's prefixes.
 const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
@@ -467,15 +467,22 @@ const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
 /// under, from the one plan field that records which side of the boundary it is
 /// on.
 ///
-/// Both flip at the same boundary, so both read the same recorded fact. Deciding
-/// them separately would give a repo the older JSON nesting together with the
-/// newer prefix handling — a combination no release carries, and one that puts an
-/// `xmlns:doap`/`xmlns:protege` into `subsets/mondo-clingen.owl` that MONDO's own
+/// All three flip at the same boundary, so all three read the same recorded fact.
+/// Deciding them separately would give a repo the older JSON nesting together with
+/// the newer prefix handling — a combination no release carries, and one that puts
+/// an `xmlns:doap`/`xmlns:protege` into `subsets/mondo-clingen.owl` that MONDO's own
 /// releases do not have.
+///
+/// The third is the OBO extended prefix map. It is a data asset rather than a
+/// behaviour, but it belongs here for the same reason: which map is in hand decides
+/// how every CURIE in every SSSOM artefact resolves, and the two differ by 388
+/// prefixes. A version emulated with the other version's map is not approximately
+/// right, it is a different answer.
 pub fn set_robot_behaviours(plan: &Plan) {
-    let post_1_9_9 = plan.robot_version >= ROBOT_1_9_9;
+    let post_1_9_9 = plan.emulate_robot_version >= ROBOT_1_9_9;
     crate::io::obograph::set_nest_axiom_anns(post_1_9_9);
     crate::cmd::query::set_update_keeps_prefixes(post_1_9_9);
+    crate::sssom::converter::set_obo_epm(plan.emulate_robot_version);
 }
 
 fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {

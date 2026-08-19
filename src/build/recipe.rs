@@ -739,6 +739,31 @@ struct Redirects {
 /// `robot_prefix` is the expanded launcher text a recipe puts at command
 /// position (e.g. `robot`, or `java -jar robot.jar`), used to recognise — and
 /// strip — such an invocation before its arguments reach that subcommand.
+/// Serve a data asset the reference image carries out of owlmake's own bytes.
+///
+/// A recipe that wants one copies it — `cp /tools/obo.epm.json $@` — so there is
+/// no tool to reimplement and nothing to derive: owlmake ships the bytes or the
+/// target cannot be built at all, which is what "owlmake ships nothing" means
+/// when the thing shipped is data rather than code. The vendored copy for the
+/// version being emulated is materialised and the path rewritten, so the recipe
+/// itself runs unchanged.
+fn serve_image_assets(line: &str, dir: &Path) -> String {
+    const EPM: &str = "/tools/obo.epm.json";
+    if !line.contains(EPM) || Path::new(EPM).exists() {
+        return line.to_string();
+    }
+    let dest = dir.join(".owlmake-odk-tmp").join("obo.epm.json");
+    if let Some(parent) = dest.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return line.to_string();
+        }
+    }
+    if std::fs::write(&dest, crate::sssom::converter::obo_epm()).is_err() {
+        return line.to_string();
+    }
+    line.replace(EPM, &dest.to_string_lossy())
+}
+
 pub fn run_line(
     line: &str,
     dir: &Path,
@@ -747,6 +772,7 @@ pub fn run_line(
     env: &[(String, String)],
 ) -> Result<()> {
     RUN_ENV.with(|c| *c.borrow_mut() = env.to_vec());
+    let line = &serve_image_assets(line, dir);
     // Strip the per-line recipe prefixes: `@` (silent), `+` (always run), and a
     // leading `-` (ignore errors).
     let mut l = line.trim();
