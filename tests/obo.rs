@@ -489,3 +489,40 @@ AnnotationAssertion(Annotation(obo:CLM_0010002 \"0.2\") Annotation(<http://www.g
         "{s}"
     );
 }
+
+/// `--clean-obo strict` allows a frame ONE `name:`, `def:` and `comment:`, and the
+/// survivor is the lexically smallest value — including when that value is the
+/// empty string, which writes no line at all.
+///
+/// The empty value is also untranslatable, so `drop-untranslatable-axioms` removes
+/// it. The two must happen in that order: the slot is claimed first and emptied
+/// second. Dropping the empty value first hands the slot to the other value and
+/// writes a line the frame should not have — `CEPH:0000138` holds `rdfs:comment ""`
+/// beside `rdfs:comment "The siphon of Cephalopoda"`, and ends up with neither.
+#[test]
+fn clean_obo_strict_gives_the_single_slot_to_the_empty_value() {
+    let ofn = format!(
+        "{PREAMBLE}Ontology(<http://purl.obolibrary.org/obo/test.owl>
+Declaration(Class(obo:X_0000001))
+Declaration(Class(obo:X_0000002))
+AnnotationAssertion(rdfs:label obo:X_0000001 \"one\")
+AnnotationAssertion(rdfs:comment obo:X_0000001 \"\")
+AnnotationAssertion(rdfs:comment obo:X_0000001 \"zzz\")
+AnnotationAssertion(rdfs:label obo:X_0000002 \"two\")
+AnnotationAssertion(rdfs:comment obo:X_0000002 \"aaa\")
+AnnotationAssertion(rdfs:comment obo:X_0000002 \"zzz\")
+)"
+    );
+    let mut m =
+        io::load_from(std::io::Cursor::new(ofn.as_bytes().to_vec()), Format::Functional).unwrap();
+    owlmake::cmd::convert::apply_clean_obo(&mut m, "strict drop-untranslatable-axioms");
+    let mut out = Vec::new();
+    io::write_to_ref(&m, &mut out, Format::Obo).unwrap();
+    let obo = String::from_utf8(out).unwrap();
+
+    let one = stanza(&obo, "X:0000001");
+    assert!(!one.contains("comment:"), "the empty value holds the slot:\n{one}");
+    let two = stanza(&obo, "X:0000002");
+    assert!(two.contains("comment: aaa"), "the smallest value holds the slot:\n{two}");
+    assert!(!two.contains("comment: zzz"), "only one comment survives:\n{two}");
+}

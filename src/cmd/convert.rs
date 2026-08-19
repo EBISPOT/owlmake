@@ -199,10 +199,19 @@ fn clean_options(spec: &str) -> CleanOptions {
 /// OBO).
 pub fn apply_clean_obo(model: &mut crate::model::Model, spec: &str) {
     let o = clean_options(spec);
-    clean_obo(model, o.drop_untranslatable, o.drop_gci);
-    model.obo_drop_untranslatable |= o.drop_untranslatable;
-    // Supernumerary single-valued annotations go BEFORE the comment merge: a
-    // subject left with one comment has nothing to merge.
+    // Supernumerary single-valued annotations go FIRST, and in particular before
+    // the untranslatable drop. Which of a subject's two `rdfs:comment`s survives
+    // is decided over EVERY value the subject carries — including the ones that
+    // write nothing. A `def:`/`comment:`/`synonym:` whose value is the empty
+    // string is untranslatable, but it still occupies its frame's one slot, and
+    // being the lexically smallest value it is the one that wins it: `CEPH:0000138`
+    // holds `rdfs:comment ""` beside `rdfs:comment "The siphon of Cephalopoda"`,
+    // and the frame ends up with no `comment:` line at all. Dropping the empty
+    // value first hands the slot to the other one and writes a line the frame
+    // should not have.
+    //
+    // It also goes before the comment merge: a subject left with one comment has
+    // nothing to merge.
     let mut single: Vec<&str> = Vec::new();
     if o.drop_extra_labels {
         single.push(RDFS_LABEL);
@@ -219,6 +228,8 @@ pub fn apply_clean_obo(model: &mut crate::model::Model, spec: &str) {
     if o.merge_comments {
         merge_comments(model);
     }
+    clean_obo(model, o.drop_untranslatable, o.drop_gci);
+    model.obo_drop_untranslatable |= o.drop_untranslatable;
 }
 
 const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
