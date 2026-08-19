@@ -560,6 +560,22 @@ impl Genids {
                 self.spend_list_cells(ce);
                 return Some(id);
             }
+            // A cross-owner group is ONE node whichever member reaches it first,
+            // and its two members take different routes: an annotated member
+            // interns under `cross_intern` (by group), a bare one here (by group
+            // AND structure). Take the group's node when it already has one —
+            // otherwise the bare member mints a second id, and that id is then
+            // wasted, because the WRITER resolves the edge to the group's node
+            // either way. Every later blank node moves along by one, which is the
+            // whole of `merged-partonomy`'s renumbering.
+            if let Some(&id) = self.cross_intern.get(&g) {
+                if self.trace.as_deref() == Some(self.cur_owner.as_str()) {
+                    eprintln!("  [trace {}] REUSE-cross-as-span genid{id}", self.cur_owner);
+                }
+                self.spend_list_cells(ce);
+                self.span_intern.insert((g, ce_sig(ce)), id);
+                return Some(id);
+            }
             let out = self.translate_ce_fresh(ce);
             if let Some(id) = out {
                 self.span_intern.insert((g, ce_sig(ce)), id);

@@ -2136,6 +2136,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let mut ind_props: BTreeMap<String, Vec<IndProp>> = BTreeMap::new();
     let mut ann_assertions: BTreeMap<String, Vec<Ann>> = BTreeMap::new();
     let mut anon_ind: BTreeMap<String, Vec<Ann>> = BTreeMap::new();
+    // `rdf:type` of an anonymous individual — `ClassAssertion(C, _:x)`, the first
+    // child of its `<rdf:Description>` block. It is what says the block describes
+    // an individual at all: a reader meeting a bare blank node with only
+    // annotations on it has nothing to tell it apart from the structure a
+    // document leaves behind, and an SSSOM mapping set is exactly this shape.
+    let mut anon_ind_types: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut sub_ann_prop: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut sub_obj_prop: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut sub_data_prop: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -2417,20 +2423,21 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     inverse_of.entry(a).or_default().push(b);
                 }
             }
-            Component::ClassAssertion(ca) => {
-                if let Individual::Named(i) = &ca.i {
-                    match &ca.ce {
-                        CE::Class(c) => ind_types
-                            .entry(i.0.as_ref().to_string())
-                            .or_default()
-                            .push(c.0.as_ref().to_string()),
-                        ce => ind_types_anon
-                            .entry(i.0.as_ref().to_string())
-                            .or_default()
-                            .push(ce.clone()),
-                    }
-                }
-            }
+            Component::ClassAssertion(ca) => match (&ca.i, &ca.ce) {
+                (Individual::Named(i), CE::Class(c)) => ind_types
+                    .entry(i.0.as_ref().to_string())
+                    .or_default()
+                    .push(c.0.as_ref().to_string()),
+                (Individual::Named(i), ce) => ind_types_anon
+                    .entry(i.0.as_ref().to_string())
+                    .or_default()
+                    .push(ce.clone()),
+                (Individual::Anonymous(a), CE::Class(c)) => anon_ind_types
+                    .entry(a.0.as_ref().to_string())
+                    .or_default()
+                    .push(c.0.as_ref().to_string()),
+                _ => {}
+            },
             // A property assertion on a named individual renders as a child of its
             // `<owl:NamedIndividual>`, between the `rdf:type`s and the annotations:
             // OBI's software-module individuals carry `IAO_0000136` ('is about')
@@ -3567,13 +3574,23 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 .position(|l| l == bare)
                 .unwrap_or(usize::MAX)
         };
-        let mut ids: Vec<&String> = anon_ind.keys().collect();
+        let mut ids: Vec<&String> = anon_ind.keys().chain(anon_ind_types.keys()).collect();
         ids.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.cmp(b)));
+        ids.dedup();
         for id in ids {
-            let anns = &anon_ind[id];
-            let mut anns = anns.clone();
-            anns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
             let mut body = String::new();
+            // The type first, as it is for a named individual. It is also what
+            // makes the block readable: without it a bare `<rdf:Description>`
+            // carrying only annotations says nothing that distinguishes an
+            // individual from leftover structure.
+            for c in anon_ind_types.get(id).into_iter().flatten() {
+                body.push_str(&format!(
+                    "        <rdf:type rdf:resource=\"{}\"/>\n",
+                    esc_attr(c)
+                ));
+            }
+            let mut anns = anon_ind.get(id).cloned().unwrap_or_default();
+            anns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
             for (p, av, _) in &anns {
                 body.push_str(&render_ann(p, av, prefixes));
             }
