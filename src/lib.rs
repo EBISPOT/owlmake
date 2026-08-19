@@ -65,6 +65,9 @@ pub mod profile;
 pub mod progress;
 pub mod reason;
 pub mod report;
+// The ontology SQL database (`semsql make`). Native-only: the database is
+// SQLite, whose C amalgamation is statically linked and has no wasm target.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod semsql;
 pub mod sig;
 pub mod sssom;

@@ -673,6 +673,9 @@ pub mod rewrite_def;
 pub mod schema;
 pub mod seed;
 pub mod select;
+// `semsql make` builds the ontology SQL database, so it is native-only for the
+// same reason `crate::semsql` is: SQLite's C has no wasm target.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod semsql;
 pub mod subset;
 pub mod template;
