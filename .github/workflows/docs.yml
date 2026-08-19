@@ -7,9 +7,11 @@ name: Docs
 #   /python  Python API      (pdoc, from the native extension's docstrings)
 #   /js      JS/TS API       (TypeDoc, from the wasm-bindgen .d.ts)
 #
-# The `build` job validates that all four doc sets generate; the `deploy` job
-# publishes them to GitHub Pages (Source: "GitHub Actions"). Both run on every
-# push to dev (the project's primary branch) and on manual `workflow_dispatch`.
+# The doc sets come from three jobs that share no build and so run in parallel,
+# each uploading its slice of the site; `assemble` merges the slices and adds the
+# landing page, and `deploy` publishes the result to GitHub Pages (Source:
+# "GitHub Actions"). Everything runs on every push to dev (the project's primary
+# branch) and on manual `workflow_dispatch`.
 
 on:
   push:
@@ -26,7 +28,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  cli-and-rust:
+    name: cli + rust docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,17 +46,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Install tools
-        run: |
-          python -m pip install --upgrade pip maturin pdoc markdown
-          npm install -g typedoc typescript
-          cargo install wasm-pack --locked || true
+        run: python -m pip install --upgrade pip markdown
 
       # --- CLI reference: generated from the binary's __cli-spec ---
+      # Runs before the Rust docs because it is what creates `site/`.
       - name: CLI docs
         run: |
           cargo build --locked
@@ -72,11 +69,74 @@ jobs:
             printf '<!doctype html><meta http-equiv="refresh" content="0; url=owlmake/index.html">\n' \
               > site/rust/index.html
 
+      - name: Upload slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-cli-rust
+          path: site
+
+  python-docs:
+    name: python docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install tools
+        run: python -m pip install --upgrade pip maturin pdoc
+
       # --- Python API: pdoc over the installed native extension ---
+      # The wheel is unoptimized: pdoc reads the extension's docstrings and never
+      # runs an ontology through it, so the optimized build the shipped wheels get
+      # (.github/workflows/wheels.yml) would buy nothing here but compile time.
       - name: Python docs
         run: |
-          pip install ./crates/owlmake-py
+          maturin build --out dist -m crates/owlmake-py/Cargo.toml
+          python -m pip install --no-index --find-links dist owlmake
           pdoc -o site/python owlmake
+
+      - name: Upload slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-python
+          path: site
+
+  js-docs:
+    name: js docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # A prebuilt wasm-pack, so the job spends its time on owlmake rather than
+      # on compiling its build tool.
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install tools
+        run: npm install -g typedoc typescript
 
       # --- JS/TS API: TypeDoc over the wasm-bindgen .d.ts ---
       - name: JS docs
@@ -84,6 +144,28 @@ jobs:
         run: |
           wasm-pack build --target nodejs --out-dir pkg
           typedoc --out "$GITHUB_WORKSPACE/site/js"
+
+      - name: Upload slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-js
+          path: site
+
+  assemble:
+    name: assemble site
+    needs: [cli-and-rust, python-docs, js-docs]
+    runs-on: ubuntu-latest
+    steps:
+      # For docs/index.html, the landing page; the doc sets themselves arrive as
+      # artifacts.
+      - uses: actions/checkout@v4
+
+      - name: Collect the slices
+        uses: actions/download-artifact@v4
+        with:
+          pattern: docs-*
+          merge-multiple: true
+          path: site
 
       - name: Landing page
         run: cp docs/index.html site/index.html
@@ -94,7 +176,7 @@ jobs:
           path: site
 
   deploy:
-    needs: build
+    needs: assemble
     runs-on: ubuntu-latest
     environment:
       name: github-pages
