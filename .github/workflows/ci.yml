@@ -4,6 +4,13 @@ name: CI
 # every pull request and on pushes to dev. The suite is self-contained — it
 # drives the freshly built owlmake binary against the fixtures in tests/ — so it
 # needs no network services and no language runtime beyond the binary itself.
+#
+# Three independent jobs run in parallel, so a run takes as long as its slowest
+# one rather than all of them end to end:
+#
+#   * test    the Rust suite and clippy
+#   * wasm    the WebAssembly package, smoke-tested under Node
+#   * python  the native extension wheel, smoke-tested under CPython
 
 on:
   push:
@@ -43,8 +50,11 @@ jobs:
       - name: Clippy (deny-by-default lints)
         run: cargo clippy --locked --all-targets
 
-  bindings:
-    name: bindings (wasm + python)
+  # The two binding surfaces build from the same crate but share nothing else —
+  # different toolchains, different targets, different runtimes — so they run as
+  # separate jobs and the run costs the slower of the two rather than their sum.
+  wasm:
+    name: wasm (crates/owlmake-wasm)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +67,6 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      # --- wasm (crates/owlmake-wasm) ---
       - name: Install wasm-pack
         uses: taiki-e/install-action@v2
         with:
@@ -73,7 +82,18 @@ jobs:
           wasm-pack build --target nodejs --out-dir pkg
           node test/smoke.mjs
 
-      # --- python (crates/owlmake-py) ---
+  python:
+    name: python (crates/owlmake-py)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -81,9 +101,14 @@ jobs:
       - name: Install maturin
         run: python -m pip install --upgrade pip maturin pandas polars
 
+      # An unoptimized wheel: this step exists to prove the extension builds and
+      # that every binding below behaves, which an unoptimized build shows just
+      # as well, on inputs of a handful of axioms where the speed is irrelevant.
+      # The wheels that ship are built optimized, for every platform, by
+      # .github/workflows/wheels.yml.
       - name: Build the native extension wheel
         working-directory: crates/owlmake-py
-        run: maturin build --release --out dist
+        run: maturin build --out dist
 
       - name: Install + smoke-test the Python extension
         run: |
