@@ -1285,9 +1285,10 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
 /// for the mask to separate them differently. `HASH_CAPACITY` is therefore fixed
 /// well above any real count.
 ///
-/// `owl:inverseOf` blocks are dropped, not ordered: they are not individuals at
-/// all — they render inline within their property frames, and the input scan
-/// mis-collects them.
+/// A block that is an OWL CONSTRUCT rather than an individual is dropped, not
+/// ordered: an `owl:inverseOf` renders inline within its property frame and a
+/// `NegativePropertyAssertion` after the individual it is about, both from the
+/// model. The input scan sees only `<rdf:Description>` and mis-collects them.
 pub(crate) fn anon_individual_order(
     blocks: &[AnonBlock],
     base: u64,
@@ -1303,8 +1304,12 @@ pub(crate) fn anon_individual_order(
     /// `_:genid2147483648`. The seed is part of the hashed STRING, so it cannot
     /// be dropped as a common offset.
     const COUNTER_SEED: u64 = 2_147_483_648;
+    // The type is named as an IRI in an `rdf:resource`, not as an element, so it
+    // is matched on the local name alone.
+    let is_construct =
+        |t: &str| t.contains("owl:inverseOf") || t.contains("NegativePropertyAssertion");
     let mut kept: Vec<&AnonBlock> =
-        blocks.iter().filter(|b| !b.text.contains("owl:inverseOf")).collect();
+        blocks.iter().filter(|b| !is_construct(&b.text)).collect();
     if std::env::var("OM_ANON_DEBUG").is_ok() {
         eprintln!("[anon] base={base} capacity={capacity} blocks={}", kept.len());
         for b in &kept {

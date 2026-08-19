@@ -35,6 +35,7 @@ pub(crate) fn iri_key(iri: &str) -> (&str, &str) {
 
 const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
 /// `annotatedProperty` IRIs for the domain/range edges reified as `<owl:Axiom>`.
+const P_RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const P_DOMAIN: &str = "http://www.w3.org/2000/01/rdf-schema#domain";
 const P_RANGE: &str = "http://www.w3.org/2000/01/rdf-schema#range";
 
@@ -745,6 +746,24 @@ fn esc_comment(iri: &str) -> String {
 /// Emit one entity block: leading `    \n\n\n`, `<!-- IRI -->`, then the element
 /// (self-closing when the body is empty), then any `<owl:Axiom>` reifications
 /// (`after`) that follow for that entity's annotated annotations.
+/// The root blocks that follow `host`'s own: one per later member of an n-ary
+/// `SameIndividual` or equivalence, in member order, as an untyped
+/// `rdf:Description` — the member's TYPE is stated in its own entity section, not
+/// here.
+fn write_root_blocks<W: Write>(
+    w: &mut W,
+    host: &str,
+    roots: &BTreeMap<String, Vec<(String, String)>>,
+) -> Result<()> {
+    for (member, body) in roots.get(host).into_iter().flatten() {
+        if member == host {
+            continue;
+        }
+        write_entity(w, "rdf:Description", member, body, "")?;
+    }
+    Ok(())
+}
+
 fn write_entity<W: Write>(w: &mut W, elem: &str, iri: &str, body: &str, after: &str) -> Result<()> {
     write!(w, "    \n\n\n")?;
     write!(w, "    <!-- {} -->\n\n", esc_comment(iri))?;
@@ -1328,6 +1347,29 @@ fn render_data_range_at(tag: &str, dr: &horned_owl::model::DataRange<RcStr>, ind
     }
 }
 
+/// A list of literals as a nested `rdf:List`, one cell per member.
+fn render_literal_list(lits: &[Literal<RcStr>], indent: usize) -> String {
+    let pad = " ".repeat(indent);
+    let inner = " ".repeat(indent + 4);
+    let mut s = format!("{pad}<rdf:Description>\n");
+    s.push_str(&format!("{inner}<rdf:type rdf:resource=\"{RDF_LIST}\"/>\n"));
+    match lits.split_first() {
+        None => s.push_str(&format!("{inner}<rdf:rest rdf:resource=\"{RDF_NIL}\"/>\n")),
+        Some((first, rest)) => {
+            s.push_str(&render_literal_tag("rdf:first", first, indent + 4));
+            if rest.is_empty() {
+                s.push_str(&format!("{inner}<rdf:rest rdf:resource=\"{RDF_NIL}\"/>\n"));
+            } else {
+                s.push_str(&format!("{inner}<rdf:rest>\n"));
+                s.push_str(&render_literal_list(rest, indent + 8));
+                s.push_str(&format!("{inner}</rdf:rest>\n"));
+            }
+        }
+    }
+    s.push_str(&format!("{pad}</rdf:Description>\n"));
+    s
+}
+
 /// A DATA property's `rdfs:range` value, and the filler of a data restriction: a
 /// named datatype is a bare `rdf:resource`, every other data range nests as an
 /// `rdfs:Datatype` node (`owl:onDatatype` + `owl:withRestrictions`, `owl:oneOf`,
@@ -1430,13 +1472,11 @@ fn render_datatype_node(dr: &horned_owl::model::DataRange<RcStr>, indent: usize)
             s.push_str(&format!("{pad2}</owl:withRestrictions>\n{pad}</rdfs:Datatype>\n"));
             s
         }
+        // A DATA `owl:oneOf` is an explicit `rdf:List`: its members are literals,
+        // and `rdf:parseType="Collection"` can only hold resources.
         DR::DataOneOf(lits) => {
-            let mut s = format!("{pad}<rdfs:Datatype>\n{pad2}<owl:oneOf rdf:parseType=\"Collection\">\n");
-            for l in lits {
-                s.push_str(&format!("{pad3}<rdf:Description>\n"));
-                s.push_str(&render_literal_tag("rdf:value", l, indent + 12));
-                s.push_str(&format!("{pad3}</rdf:Description>\n"));
-            }
+            let mut s = format!("{pad}<rdfs:Datatype>\n{pad2}<owl:oneOf>\n");
+            s.push_str(&render_literal_list(lits, indent + 8));
             s.push_str(&format!("{pad2}</owl:oneOf>\n{pad}</rdfs:Datatype>\n"));
             s
         }
@@ -2048,7 +2088,19 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             _ => None,
         })
         .unwrap_or_default();
-    let prefixes = owlapi_prefixes(model, &hdr_iri);
+    let mut prefixes = owlapi_prefixes(model, &hdr_iri);
+    // The document namespace is also the DEFAULT one — `xmlns="<ontology IRI>#"`
+    // in the header — so an element in it is written unprefixed even where the
+    // same namespace also has a named prefix. Binding it first is what makes
+    // `qname` reach for the empty prefix ahead of the named one.
+    //
+    // An ontology with no IRI is left alone: the OWL namespace takes the default
+    // position there, and `strip_default_owl_prefix` does that pass over the
+    // finished document.
+    if !hdr_iri.is_empty() {
+        prefixes.insert(0, (String::new(), format!("{hdr_iri}#")));
+    }
+    let prefixes = prefixes;
     // Compute genid blank-node numbering from the model (replaces the ids scanned
     // from the input document, which are wrong once om re-numbers).
     let genid_pass = crate::io::genid::compute(model, 0, 0);
@@ -2174,12 +2226,18 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         BTreeMap::new();
     let mut op_disjoint: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut op_equiv: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    // An equivalence whose FIRST side is an inverse has no named subject to hang
-    // off, so it is its own anonymous block, written straight after the block of
-    // the property that inverse names — the key here. Without it
+    // An axiom whose SUBJECT is an inverse has no named subject to hang off, so it
+    // is its own anonymous block, written straight after the block of the property
+    // that inverse names — the key here. Without it
     // `EquivalentObjectProperties(inverse(IAO_0000235) inverse(STATO_0000205))`
-    // is dropped from `mirror/stato.owl`, and from the merged mirror after it.
-    let mut op_equiv_inv: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // is dropped from `mirror/stato.owl`, and from the merged mirror after it, and
+    // so are `TransitiveObjectProperty(inverse(r))` and
+    // `SubObjectPropertyOf(inverse(s) inverse(r))`.
+    //
+    // One node carries every triple about it, so they accumulate into one block,
+    // ordered as an ordinary property frame orders them: sub-property, then
+    // equivalence, then the characteristic `rdf:type`s.
+    let mut op_inv: BTreeMap<String, Vec<(u8, String)>> = BTreeMap::new();
     let mut dp_equiv: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut dp_disjoint: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut dp_char: BTreeMap<String, Vec<&'static str>> = BTreeMap::new();
@@ -2188,10 +2246,24 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // Keyed by source individual: (0 for an object assertion, 1 for a data one;
     // then the property and target), and the block itself.
     let mut neg_assertions: BTreeMap<String, Vec<(u8, String, String)>> = BTreeMap::new();
+    // An n-ary `SameIndividual` or equivalence splits into CONSECUTIVE pairs, and
+    // every pair is rendered in the FIRST member's graph. The first member keeps
+    // its own pair in its block; each later member is a ROOT of that graph and
+    // gets a block of its own straight after, carrying the pair whose subject it
+    // is — so the last member's block is bare, and none of them says it again in
+    // its own entity section.
+    //
+    // host -> (member, the member's lines in the host's graph), in member order.
+    let mut root_blocks: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     #[allow(clippy::type_complexity)]
     let mut op_chains: BTreeMap<String, Vec<(Vec<OPE<RcStr>>, Vec<(String, AnnotationValue<RcStr>)>)>> =
         BTreeMap::new();
     let mut op_char: BTreeMap<String, Vec<&'static str>> = BTreeMap::new();
+    /// An annotated axiom whose base triple is an `rdf:type`: a `Declaration`, or a
+    /// property characteristic. It reifies like any other annotated axiom, with
+    /// `rdf:type` as the annotated property and the OWL type as the target.
+    type TypeReif = (&'static str, Vec<(String, AnnotationValue<RcStr>)>);
+    let mut type_reif: BTreeMap<String, Vec<TypeReif>> = BTreeMap::new();
     // Anonymous-subject "general axioms" (GCIs, anon disjoints, AllDifferent),
     // rendered last as a section sorted by full block text.
     let mut gci_blocks: Vec<(&AnnotatedComponent<RcStr>, String)> = Vec::new();
@@ -2233,12 +2305,48 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     };
     for ac in model.ont.iter() {
         match &ac.component {
-            Component::DeclareAnnotationProperty(d) => ann_props.push(d.0 .0.as_ref().to_string()),
-            Component::DeclareDatatype(d) => datatypes.push(d.0 .0.as_ref().to_string()),
-            Component::DeclareObjectProperty(d) => obj_props.push(d.0 .0.as_ref().to_string()),
-            Component::DeclareDataProperty(d) => data_props.push(d.0 .0.as_ref().to_string()),
-            Component::DeclareClass(d) => classes.push(d.0 .0.as_ref().to_string()),
-            Component::DeclareNamedIndividual(d) => individuals.push(d.0 .0.as_ref().to_string()),
+            Component::DeclareAnnotationProperty(d) => {
+                let iri = d.0 .0.as_ref().to_string();
+                if !ac.ann.is_empty() {
+                    type_reif.entry(iri.clone()).or_default().push(("http://www.w3.org/2002/07/owl#AnnotationProperty", ax_anns(ac)));
+                }
+                ann_props.push(iri);
+            }
+            Component::DeclareDatatype(d) => {
+                let iri = d.0 .0.as_ref().to_string();
+                if !ac.ann.is_empty() {
+                    type_reif.entry(iri.clone()).or_default().push(("http://www.w3.org/2000/01/rdf-schema#Datatype", ax_anns(ac)));
+                }
+                datatypes.push(iri);
+            }
+            Component::DeclareObjectProperty(d) => {
+                let iri = d.0 .0.as_ref().to_string();
+                if !ac.ann.is_empty() {
+                    type_reif.entry(iri.clone()).or_default().push(("http://www.w3.org/2002/07/owl#ObjectProperty", ax_anns(ac)));
+                }
+                obj_props.push(iri);
+            }
+            Component::DeclareDataProperty(d) => {
+                let iri = d.0 .0.as_ref().to_string();
+                if !ac.ann.is_empty() {
+                    type_reif.entry(iri.clone()).or_default().push(("http://www.w3.org/2002/07/owl#DatatypeProperty", ax_anns(ac)));
+                }
+                data_props.push(iri);
+            }
+            Component::DeclareClass(d) => {
+                let iri = d.0 .0.as_ref().to_string();
+                if !ac.ann.is_empty() {
+                    type_reif.entry(iri.clone()).or_default().push(("http://www.w3.org/2002/07/owl#Class", ax_anns(ac)));
+                }
+                classes.push(iri);
+            }
+            Component::DeclareNamedIndividual(d) => {
+                let iri = d.0 .0.as_ref().to_string();
+                if !ac.ann.is_empty() {
+                    type_reif.entry(iri.clone()).or_default().push(("http://www.w3.org/2002/07/owl#NamedIndividual", ax_anns(ac)));
+                }
+                individuals.push(iri);
+            }
             Component::SubClassOf(sc) => {
                 if let CE::Class(sub) = &sc.sub {
                     let anns: Vec<(String, AnnotationValue<RcStr>)> =
@@ -2365,16 +2473,68 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 // A binary axiom stays whole; a longer one becomes the CONSECUTIVE
                 // pairs of its (sorted) member list.
                 let members = sorted_members(&si.0);
-                for pair in members.windows(2) {
-                    if let Some(subject) = &pair[0] {
+                // The first pair is the host's own; the rest belong to the root
+                // blocks that follow it.
+                if let Some(subject) = members.first().and_then(|m| m.clone()) {
+                    if let Some(pair) = members.windows(2).next() {
                         ind_identity
                             .entry(subject.clone())
                             .or_default()
                             .push(("owl:sameAs", pair[1].clone()));
                     }
+                    for (i, m) in members.iter().enumerate().skip(1) {
+                        let Some(m) = m else { continue };
+                        let body = match members.get(i + 1).and_then(|n| n.clone()) {
+                            Some(next) => format!(
+                                "        <owl:sameAs rdf:resource=\"{}\"/>\n",
+                                esc_attr(&next)
+                            ),
+                            None => String::new(),
+                        };
+                        root_blocks.entry(subject.clone()).or_default().push((m.clone(), body));
+                    }
                 }
             }
             Component::EquivalentClasses(eq) => {
+                // Three or more members split into CONSECUTIVE pairs, all rendered
+                // in the first member's graph: it keeps the first pair, and each
+                // later member is a root block after it carrying its own.
+                if eq.0.len() > 2 {
+                    let mut named: Vec<String> = eq
+                        .0
+                        .iter()
+                        .filter_map(|m| match m {
+                            CE::Class(c) => Some(c.0.as_ref().to_string()),
+                            _ => None,
+                        })
+                        .collect();
+                    named.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
+                    if named.len() == eq.0.len() {
+                        if let Some(host) = named.first().cloned() {
+                            if let Some(second) = named.get(1) {
+                                equiv_class.entry(host.clone()).or_default().push((
+                                    CE::Class(horned_owl::model::Class(
+                                        model.build.iri(second.as_str()),
+                                    )),
+                                    Vec::new(),
+                                ));
+                            }
+                            for (i, m) in named.iter().enumerate().skip(1) {
+                                let body = match named.get(i + 1) {
+                                    Some(next) => format!(
+                                        "        <owl:equivalentClass rdf:resource=\"{}\"/>\n",
+                                        esc_attr(next)
+                                    ),
+                                    None => String::new(),
+                                };
+                                root_blocks
+                                    .entry(host.clone())
+                                    .or_default()
+                                    .push((m.clone(), body));
+                            }
+                        }
+                    }
+                }
                 // Binary `A ≡ expr` with a named A → render on A.
                 if eq.0.len() == 2 {
                     let anns: Vec<(String, AnnotationValue<RcStr>)> =
@@ -2407,6 +2567,20 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                                 .or_default()
                                 .push(p.0.as_ref().to_string()),
                         }
+                    } else if let OPE::InverseObjectProperty(inv) = sub {
+                        // The sub-property is an inverse: the axiom hangs off that
+                        // anonymous node, with the super in its own slot.
+                        let sup = match &s.sup {
+                            OPE::ObjectProperty(p) => format!(
+                                "        <rdfs:subPropertyOf rdf:resource=\"{}\"/>\n",
+                                esc_attr(p.0.as_ref())
+                            ),
+                            OPE::InverseObjectProperty(p) => format!(
+                                "        <rdfs:subPropertyOf>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </rdfs:subPropertyOf>\n",
+                                esc_attr(p.0.as_ref())
+                            ),
+                        };
+                        op_inv.entry(inv.0.as_ref().to_string()).or_default().push((0, sup));
                     }
                 }
                 horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(chain) => {
@@ -2559,10 +2733,13 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                                 .push(b.0.as_ref().to_string());
                         }
                         (OPE::InverseObjectProperty(a), OPE::InverseObjectProperty(b)) => {
-                            op_equiv_inv
-                                .entry(a.0.as_ref().to_string())
-                                .or_default()
-                                .push(b.0.as_ref().to_string());
+                            op_inv.entry(a.0.as_ref().to_string()).or_default().push((
+                                1,
+                                format!(
+                                    "        <owl:equivalentProperty>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </owl:equivalentProperty>\n",
+                                    esc_attr(b.0.as_ref())
+                                ),
+                            ));
                         }
                         _ => {}
                     }
@@ -2630,25 +2807,137 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::FunctionalObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#FunctionalProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#FunctionalProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#FunctionalProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#FunctionalProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::InverseFunctionalObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#InverseFunctionalProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#InverseFunctionalProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#InverseFunctionalProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#InverseFunctionalProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::TransitiveObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#TransitiveProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#TransitiveProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#TransitiveProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#TransitiveProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::SymmetricObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#SymmetricProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#SymmetricProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#SymmetricProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#SymmetricProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::AsymmetricObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#AsymmetricProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#AsymmetricProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#AsymmetricProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#AsymmetricProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::ReflexiveObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#ReflexiveProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#ReflexiveProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#ReflexiveProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#ReflexiveProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::IrreflexiveObjectProperty(p) => {
-                if let Some(n) = op_name(&p.0) { op_char.entry(n).or_default().push("http://www.w3.org/2002/07/owl#IrreflexiveProperty"); }
+                if let OPE::InverseObjectProperty(inv) = &p.0 {
+                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
+                        2,
+                        format!(
+                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#IrreflexiveProperty\"/>\n"
+                        ),
+                    ));
+                }
+                if let Some(n) = op_name(&p.0) {
+                    op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#IrreflexiveProperty");
+                    if !ac.ann.is_empty() {
+                        type_reif.entry(n).or_default().push((
+                            "http://www.w3.org/2002/07/owl#IrreflexiveProperty",
+                            ax_anns(ac),
+                        ));
+                    }
+                }
             }
             Component::AnnotationAssertion(aa) => {
                 let nested: Vec<(String, AnnotationValue<RcStr>)> = ac
@@ -2806,6 +3095,20 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     }
 
     let prefixes = &prefixes;
+    // The `owl:Axiom` blocks for this entity's annotated `rdf:type` axioms — its
+    // `Declaration`, and each property characteristic it carries. They reify like
+    // any other annotated axiom and sit with the rest of the entity's blocks.
+    let type_reifs = |iri: &str| -> String {
+        let mut s = String::new();
+        for (target, anns) in type_reif.get(iri).into_iter().flatten() {
+            let t = format!(
+                "        <owl:annotatedTarget rdf:resource=\"{}\"/>\n",
+                esc_attr(target)
+            );
+            s.push_str(&edge_reif(iri, P_RDF_TYPE, &t, anns, prefixes));
+        }
+        s
+    };
     // The annotation assertions a TYPED block may carry: none, for a punned IRI.
     let entity_anns = |iri: &str| {
         if punned.contains(iri) {
@@ -2856,7 +3159,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
         }
-        let after = order_reifs_by_genid(&format!("{ap_reif}{after}"), reif_genids.get(iri));
+        let after =
+            order_reifs_by_genid(&format!("{ap_reif}{after}{}", type_reifs(iri)), reif_genids.get(iri));
         // An undeclared BUILT-IN property has no `rdf:type` triple in the graph —
         // one is never synthesised for a built-in — so its block is an untyped
         // `rdf:Description`, not `owl:AnnotationProperty`.
@@ -2988,13 +3292,21 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let (abody, ann_after) = annotation_body(iri, entity_anns(iri), prefixes);
         body.push_str(&abody);
         let mut after =
-            order_reifs_by_genid(&format!("{dr_reif}{chain_reif}{ann_after}"), reif_genids.get(iri));
-        for eq in sorted_res(&op_equiv_inv, iri) {
+            order_reifs_by_genid(
+                &format!("{dr_reif}{chain_reif}{ann_after}{}", type_reifs(iri)),
+                reif_genids.get(iri),
+            );
+        if let Some(parts) = op_inv.get(iri) {
+            let mut ps = parts.clone();
+            ps.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
             after.push_str(&format!(
-                "    <rdf:Description>\n        <owl:inverseOf rdf:resource=\"{}\"/>\n        <owl:equivalentProperty>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </owl:equivalentProperty>\n    </rdf:Description>\n",
-                esc_attr(iri),
-                esc_attr(&eq)
+                "    <rdf:Description>\n        <owl:inverseOf rdf:resource=\"{}\"/>\n",
+                esc_attr(iri)
             ));
+            for (_, part) in ps {
+                after.push_str(&part);
+            }
+            after.push_str("    </rdf:Description>\n");
         }
         write_entity(w, "owl:ObjectProperty", iri, &body, &after)?;
     }
@@ -3038,7 +3350,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             let (abody, after) = annotation_body(iri, entity_anns(iri), prefixes);
             body.push_str(&abody);
-            let after = order_reifs_by_genid(&after, reif_genids.get(iri));
+            let after = order_reifs_by_genid(
+                &format!("{after}{}", type_reifs(iri)),
+                reif_genids.get(iri),
+            );
             write_entity(w, "owl:DatatypeProperty", iri, &body, &after)?;
         }
     }
@@ -3395,7 +3710,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             rest = after_q;
         }
         let reifs = order_reifs_by_genid(
-            &format!("{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{ann_reif}"),
+            &format!("{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{ann_reif}{}", type_reifs(iri)),
             reif_genids.get(iri),
         );
         let after = format!("{anon_defs}{reifs}");
@@ -3418,6 +3733,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             "rdf:Description"
         };
         write_entity(w, elem, iri, &body, &after)?;
+        write_root_blocks(w, iri, &root_blocks)?;
     }
     // owl:Thing is a built-in class: when it carries annotations but no explicit
     // declaration it renders at the end of the Classes section (its IRI sorts
@@ -3524,7 +3840,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             body.push_str(&abody);
-            let mut after = order_reifs_by_genid(&after, reif_genids.get(iri));
+            let mut after = order_reifs_by_genid(
+                &format!("{after}{}", type_reifs(iri)),
+                reif_genids.get(iri),
+            );
             if let Some(negs) = neg_assertions.get(iri) {
                 let mut ns = negs.clone();
                 ns.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -3533,6 +3852,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             write_entity(w, &elem, iri, &body, &after)?;
+            write_root_blocks(w, iri, &root_blocks)?;
         }
     }
     // Anonymous-individual annotation blocks (obsolescence records) that horned's
@@ -3665,6 +3985,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
 
 const SWRL: &str = "http://www.w3.org/2003/11/swrl#";
 const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+const RDF_LIST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#List";
 
 /// `<swrl:argument1 rdf:resource="…"/>` for a SWRL individual argument.
 fn swrl_iarg(arg: &horned_owl::model::IArgument<RcStr>) -> String {
@@ -3674,6 +3995,57 @@ fn swrl_iarg(arg: &horned_owl::model::IArgument<RcStr>) -> String {
         IArgument::Individual(Individual::Named(n)) => n.0.as_ref().to_string(),
         IArgument::Individual(Individual::Anonymous(a)) => a.0.as_ref().to_string(),
     }
+}
+
+/// An individual-or-variable argument in its value slot. A variable and a named
+/// individual are the IRI they name; an ANONYMOUS individual is a blank node,
+/// which nests as an empty description where the reference would go.
+fn swrl_iarg_slot(tag: &str, arg: &horned_owl::model::IArgument<RcStr>, indent: usize) -> String {
+    use horned_owl::model::{IArgument, Individual};
+    let pad = " ".repeat(indent);
+    match arg {
+        IArgument::Individual(Individual::Anonymous(_)) => {
+            format!("{pad}<{tag}>\n{pad}    <rdf:Description/>\n{pad}</{tag}>\n")
+        }
+        other => format!("{pad}<{tag} rdf:resource=\"{}\"/>\n", esc_attr(&swrl_iarg(other))),
+    }
+}
+
+/// A data argument in its value slot: a variable is the IRI it names, a literal
+/// is the element's text.
+fn swrl_darg_slot(tag: &str, arg: &horned_owl::model::DArgument<RcStr>, indent: usize) -> String {
+    use horned_owl::model::DArgument;
+    let pad = " ".repeat(indent);
+    match arg {
+        DArgument::Variable(v) => {
+            format!("{pad}<{tag} rdf:resource=\"{}\"/>\n", esc_attr(v.0.as_ref()))
+        }
+        DArgument::Literal(l) => format!("{pad}<{tag}>{}</{tag}>\n", esc(l.literal())),
+    }
+}
+
+/// A built-in atom's `swrl:arguments`: a plain `rdf:List`, not an
+/// `swrl:AtomList`, one cell per argument.
+fn swrl_darg_list(args: &[horned_owl::model::DArgument<RcStr>], indent: usize) -> String {
+    let pad = " ".repeat(indent);
+    let inner = " ".repeat(indent + 4);
+    let mut s = format!("{pad}<rdf:Description>\n");
+    s.push_str(&format!("{inner}<rdf:type rdf:resource=\"{RDF_LIST}\"/>\n"));
+    match args.split_first() {
+        None => s.push_str(&format!("{inner}<rdf:rest rdf:resource=\"{RDF_NIL}\"/>\n")),
+        Some((first, rest)) => {
+            s.push_str(&swrl_darg_slot("rdf:first", first, indent + 4));
+            if rest.is_empty() {
+                s.push_str(&format!("{inner}<rdf:rest rdf:resource=\"{RDF_NIL}\"/>\n"));
+            } else {
+                s.push_str(&format!("{inner}<rdf:rest>\n"));
+                s.push_str(&swrl_darg_list(rest, indent + 8));
+                s.push_str(&format!("{inner}</rdf:rest>\n"));
+            }
+        }
+    }
+    s.push_str(&format!("{pad}</rdf:Description>\n"));
+    s
 }
 
 /// Render one SWRL atom's `rdf:Description` body at `indent` spaces.
@@ -3689,16 +4061,20 @@ fn swrl_atom(atom: &horned_owl::model::Atom<RcStr>, indent: usize) -> String {
     };
     match atom {
         Atom::ClassAtom { pred, arg } => {
-            let p = match pred {
-                CE::Class(c) => c.0.as_ref().to_string(),
-                _ => String::new(),
+            let predicate = match pred {
+                CE::Class(c) => format!(
+                    "{inner}<swrl:classPredicate rdf:resource=\"{}\"/>\n",
+                    esc_attr(c.0.as_ref())
+                ),
+                // An anonymous class is the atom's own block, nested where the
+                // reference would go — the same shape a class expression takes
+                // anywhere else it is not a bare IRI.
+                other => format!(
+                    "{inner}<swrl:classPredicate>\n{}{inner}</swrl:classPredicate>\n",
+                    render_ce(other, indent + 8, &Genids::new())
+                ),
             };
-            let body = format!(
-                "{inner}<swrl:classPredicate rdf:resource=\"{}\"/>\n\
-                 {inner}<swrl:argument1 rdf:resource=\"{}\"/>\n",
-                esc_attr(&p),
-                esc_attr(&swrl_iarg(arg))
-            );
+            let body = format!("{predicate}{}", swrl_iarg_slot("swrl:argument1", arg, indent + 4));
             ty("ClassAtom", &body, &mut s);
         }
         Atom::ObjectPropertyAtom { pred, args } => {
@@ -3706,12 +4082,10 @@ fn swrl_atom(atom: &horned_owl::model::Atom<RcStr>, indent: usize) -> String {
                 OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p) => p.0.as_ref().to_string(),
             };
             let body = format!(
-                "{inner}<swrl:propertyPredicate rdf:resource=\"{}\"/>\n\
-                 {inner}<swrl:argument1 rdf:resource=\"{}\"/>\n\
-                 {inner}<swrl:argument2 rdf:resource=\"{}\"/>\n",
+                "{inner}<swrl:propertyPredicate rdf:resource=\"{}\"/>\n{}{}",
                 esc_attr(&p),
-                esc_attr(&swrl_iarg(&args.0)),
-                esc_attr(&swrl_iarg(&args.1))
+                swrl_iarg_slot("swrl:argument1", &args.0, indent + 4),
+                swrl_iarg_slot("swrl:argument2", &args.1, indent + 4)
             );
             ty("IndividualPropertyAtom", &body, &mut s);
         }
@@ -3740,37 +4114,35 @@ fn swrl_atom(atom: &horned_owl::model::Atom<RcStr>, indent: usize) -> String {
         }
         Atom::SameIndividualAtom(a, b) => {
             let body = format!(
-                "{inner}<swrl:argument1 rdf:resource=\"{}\"/>\n\
-                 {inner}<swrl:argument2 rdf:resource=\"{}\"/>\n",
-                esc_attr(&swrl_iarg(a)),
-                esc_attr(&swrl_iarg(b))
+                "{}{}",
+                swrl_iarg_slot("swrl:argument1", a, indent + 4),
+                swrl_iarg_slot("swrl:argument2", b, indent + 4)
             );
             ty("SameIndividualAtom", &body, &mut s);
         }
         Atom::DifferentIndividualsAtom(a, b) => {
             let body = format!(
-                "{inner}<swrl:argument1 rdf:resource=\"{}\"/>\n\
-                 {inner}<swrl:argument2 rdf:resource=\"{}\"/>\n",
-                esc_attr(&swrl_iarg(a)),
-                esc_attr(&swrl_iarg(b))
+                "{}{}",
+                swrl_iarg_slot("swrl:argument1", a, indent + 4),
+                swrl_iarg_slot("swrl:argument2", b, indent + 4)
             );
             ty("DifferentIndividualsAtom", &body, &mut s);
         }
-        // BuiltInAtom / DataRangeAtom do not occur in the OBO family's rules;
-        // render the type alone rather than silently dropping the atom.
-        Atom::BuiltInAtom { pred, .. } => {
+        Atom::BuiltInAtom { pred, args } => {
             let body = format!(
-                "{inner}<swrl:builtin rdf:resource=\"{}\"/>\n",
-                esc_attr(pred.as_ref())
+                "{inner}<swrl:builtin rdf:resource=\"{}\"/>\n\
+                 {inner}<swrl:arguments>\n{}{inner}</swrl:arguments>\n",
+                esc_attr(pred.as_ref()),
+                swrl_darg_list(args, indent + 8)
             );
             ty("BuiltinAtom", &body, &mut s);
         }
-        Atom::DataRangeAtom { arg, .. } => {
-            let a = match arg {
-                DArgument::Variable(v) => v.0.as_ref().to_string(),
-                DArgument::Literal(l) => l.literal().clone(),
-            };
-            let body = format!("{inner}<swrl:argument1 rdf:resource=\"{}\"/>\n", esc_attr(&a));
+        Atom::DataRangeAtom { pred, arg } => {
+            let body = format!(
+                "{}{}",
+                render_data_range_at("swrl:dataRange", pred, indent + 4),
+                swrl_darg_slot("swrl:argument1", arg, indent + 4)
+            );
             ty("DataRangeAtom", &body, &mut s);
         }
     }
