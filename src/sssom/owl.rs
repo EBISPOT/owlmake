@@ -597,6 +597,10 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
             // ontology where ROBOT writes a 486 KB bridge.
             ("bridge_file", &["--bridge-file"]),
             ("bridge_iri", &["--bridge-iri"]),
+            // The release version a dispatch table's `%date` expands to. Unset,
+            // it is the date this run happens on, which is what a repo releasing
+            // under its build date means by it.
+            ("version", &["--version"]),
         ],
     );
     let model = load_model(model, &opts)?;
@@ -681,7 +685,15 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
     if let Some(dispatch) = opts.one("dispatch") {
         let table = parse_dispatch(&std::fs::read_to_string(dispatch)
             .with_context(|| format!("reading dispatch table {dispatch}"))?);
-        write_dispatched(&prefixes, &mut out, &table)?;
+        let dir = Path::new(dispatch).parent().unwrap_or(Path::new(".")).to_path_buf();
+        // The version this run stamps into `%date`. A date is a run input, so it
+        // is read here once and handed to the writer rather than reached for
+        // inside it.
+        let version = opts
+            .one("version")
+            .map(str::to_string)
+            .unwrap_or_else(crate::plan::today);
+        write_dispatched(&prefixes, &mut out, &table, &dir, &version)?;
     } else if let Some(o) = opts.one("output") {
         // `sssom:inject` injects the generated axioms INTO the in-flight
         // ontology; the output is the input plus those axioms.
@@ -924,15 +936,38 @@ fn parse_statement(
     // A rule: optional `[tag]` prefixes, a filter, then `-> action` or a `{block}`.
     let (tags, rest) = parse_tags(stmt);
     if let Some(body) = block {
-        // `[tag] FILTER { subrules }`
-        let filter = parse_filter(rest.trim())?;
+        // `[tag] FILTER { subrules }` — and `FILTER -> { action; action; }`, where
+        // the arrow introduces a block of BARE actions sharing one filter rather
+        // than a single action. The arrow says nothing the filter needs, so drop
+        // it; left on, it became part of the last comparison's value, and the rule
+        // matched nothing while still looking like a rule.
+        //
+        // UBERON's bridges are almost entirely this form: every taxon-specific
+        // rule pairs an `EquivalentTo:` with a `SubClassOf:` inside one block.
+        // Only the taxon-NEUTRAL bridges — AEO, BFO, CARO, GO — use a single
+        // action, which is why those four came out right and the other 30 came
+        // out holding their annotations and none of their axioms.
+        //
+        // The statement still carries its own `{ … }` text, so the header is
+        // everything before the opening brace — but NOT a `%{slot}` placeholder's
+        // brace, which is part of the filter.
+        let head = {
+            let b = rest.as_bytes();
+            let mut cut = rest.len();
+            for k in 0..b.len() {
+                if b[k] == b'{' && (k == 0 || b[k - 1] != b'%') {
+                    cut = k;
+                    break;
+                }
+            }
+            rest[..cut].trim()
+        };
+        let filter = parse_filter(head.strip_suffix("->").unwrap_or(head).trim())?;
         let mut subrules = Vec::new();
         let inner = parse_ruleset_inner(&body, true)?;
         for mut r in inner.rules {
-            // Subrules inherit the parent's tags (prepended).
-            let mut t = tags.clone();
-            t.extend(r.tags.drain(..));
-            subrules.push(Rule { tags: t, filter: r.filter, action: r.action });
+            inherit_tags(&mut r, &tags);
+            subrules.push(r);
         }
         rs.rules.push(Rule { tags, filter, action: Action::Block(subrules) });
         return Ok(());
@@ -952,6 +987,24 @@ fn parse_statement(
     let action = parse_action(act_str)?;
     rs.rules.push(Rule { tags, filter, action });
     Ok(())
+}
+
+/// Prepend `tags` to `r`, and to every rule nested inside it.
+///
+/// A tag routes the axioms a rule builds to one bridge file, and only the rule
+/// that CREATES an axiom hands its tags to `push_tagged`. So the tags have to
+/// reach the rule that does the creating, however deeply it sits: a tag that
+/// stopped at the outer rule left every axiom built inside a nested block with
+/// no tag, and an untagged axiom goes to no file at all.
+fn inherit_tags(r: &mut Rule, tags: &[String]) {
+    let mut t = tags.to_vec();
+    t.extend(r.tags.drain(..));
+    r.tags = t;
+    if let Action::Block(sub) = &mut r.action {
+        for s in sub.iter_mut() {
+            inherit_tags(s, tags);
+        }
+    }
 }
 
 /// Strip leading `[tag]` markers, returning the tags and the remainder.
@@ -1225,6 +1278,7 @@ fn parse_leaf(a: &str) -> Filter {
 struct DispatchEntry {
     file: Option<String>,
     ontology_iri: Option<String>,
+    ontology_version: Option<String>,
     add_axioms: Vec<String>,
     annotations: Vec<(String, String)>, // (dc property local, value)
 }
@@ -1259,6 +1313,7 @@ fn parse_dispatch(text: &str) -> DispatchTable {
         match k {
             "file" => entry.file = Some(v),
             "ontology-iri" => entry.ontology_iri = Some(v),
+            "ontology-version" => entry.ontology_version = Some(v),
             "add-axiom" => entry.add_axioms.push(v),
             other if other.starts_with("dc-") => {
                 entry.annotations.push((other[3..].to_string(), v));
@@ -1676,11 +1731,17 @@ fn glob_match(glob: &str, val: &str) -> bool {
 }
 
 /// Write generated axioms to per-tag bridge ontologies named by the dispatch table.
+/// `dir` is the directory the dispatch table itself sits in: a `file:` entry names
+/// a bridge beside the table that lists it, not beside whatever directory the
+/// build happens to be standing in.
 fn write_dispatched(
     prefixes: &BTreeMap<String, String>,
     out: &mut BTreeMap<String, Vec<AnnotatedComponent<Str>>>,
     table: &DispatchTable,
+    dir: &Path,
+    version: &str,
 ) -> Result<()> {
+    let _ = prefixes;
     let build = horned_owl::model::Build::new();
     for (tag, axs) in out.iter_mut() {
         if tag.is_empty() {
@@ -1689,7 +1750,11 @@ fn write_dispatched(
         let Some(entry) = table.entries.get(tag) else { continue };
         let Some(file) = &entry.file else { continue };
         let mut m = Model::new();
-        copy_prefixes(prefixes, &mut m);
+        // A bridge is a NEW ontology, so it inherits no prefix map: it declares
+        // the namespaces its own axioms use and nothing else. Left inheriting,
+        // it wrote `dc`, `oboInOwl` and every other default binding into a file
+        // that mentions two namespaces.
+        m.format_prefixes_cleared = true;
         for ax in axs.drain(..) {
             m.ont.insert(ax);
         }
@@ -1700,20 +1765,54 @@ fn write_dispatched(
                 m.ont.insert(ax);
             }
         }
-        // Ontology IRI, with `%filename` → the output's stem.
+        // The dc-* directives are the bridge's own ontology annotations, under
+        // `http://purl.org/dc/terms/`. They are the bridge's title, description and
+        // credits, so a bridge that drops them is unattributed — and the
+        // annotation properties they use have to be declared alongside them.
+        for (local, value) in
+            table.defaults.annotations.iter().chain(entry.annotations.iter())
+        {
+            let ap = build.annotation_property(format!("http://purl.org/dc/terms/{local}"));
+            m.ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
+                horned_owl::model::Annotation {
+                    ann: Default::default(),
+                    ap: ap.clone(),
+                    av: AnnotationValue::Literal(Literal::Simple { literal: value.clone() }),
+                },
+            )));
+            m.ont.insert(Component::DeclareAnnotationProperty(
+                horned_owl::model::DeclareAnnotationProperty(ap),
+            ));
+        }
+        // Ontology IRI and version IRI. `%filename` is the output's stem and
+        // `%date` the version this run stamps, so one pattern in the table's
+        // `__default` section names every bridge.
+        let stem = Path::new(file)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let expand = |pat: &String| -> String {
+            pat.replace("%filename", &stem).replace("%date", version)
+        };
         let iri_pat = entry.ontology_iri.as_ref().or(table.defaults.ontology_iri.as_ref());
+        let viri_pat =
+            entry.ontology_version.as_ref().or(table.defaults.ontology_version.as_ref());
         if let Some(pat) = iri_pat {
-            let stem = Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let iri = pat.replace("%filename", &stem);
+            let iri = expand(pat);
             if !iri.contains('%') {
                 m.ont.insert(Component::OntologyID(horned_owl::model::OntologyID {
                     iri: Some(build.iri(iri.as_str())),
-                    viri: None,
+                    viri: viri_pat
+                        .map(expand)
+                        .filter(|v| !v.contains('%'))
+                        .map(|v| build.iri(v.as_str())),
                 }));
             }
         }
-        crate::io::save(&mut m, Path::new(file))
+        // A bridge names only the prefixes its own axioms use. Carrying the whole
+        // input's prefix map over writes ninety `xmlns:` declarations into a file
+        // that mentions four namespaces.
+        crate::io::save(&mut m, &dir.join(file))
             .with_context(|| format!("writing bridge {file}"))?;
     }
     Ok(())
