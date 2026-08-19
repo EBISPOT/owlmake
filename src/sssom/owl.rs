@@ -750,6 +750,10 @@ struct Rule {
 struct Ruleset {
     prefixes: BTreeMap<String, String>,
     rules: Vec<Rule>,
+    /// Variables a header-level `set_var(name, value)` gives every mapping before
+    /// any rule runs, in the order the ruleset sets them. They are DEFAULTS: a
+    /// rule that fires may set the same name to something else.
+    defaults: Vec<(String, String)>,
 }
 
 // ───────────────────────── SSSOM/T ruleset parser ───────────────────────────
@@ -896,11 +900,25 @@ fn parse_statement(
         }
         return Ok(());
     }
-    // Header-level `declare(...)` / `set_var(...)` with no filter: ignore declare
-    // (entity declarations are implicit in owlmake's output), apply nothing for a
-    // bare set_var (variables are per-mapping in the rules we target).
+    // Header-level `declare(...)`: entity declarations are implicit in owlmake's
+    // output, so there is nothing to record.
     if stmt.starts_with("declare(") {
         return Ok(());
+    }
+    // Header-level `set_var(name, value)` — no filter, so it applies to EVERY
+    // mapping, as the value the variable holds unless a rule overwrites it.
+    // UBERON's bridge ruleset opens with `set_var("TAXREL", BFO:0000050)` and
+    // then narrows it to `BFO:0000066` for the two mappings whose object is a
+    // life-stage class; without the default the other 102 `%TAXREL` uses expand
+    // to nothing and the axiom they build has no property at all.
+    if !in_body {
+        if let Some(args) = call_args(stmt.trim_end_matches(';').trim(), "set_var") {
+            let a = split_top_commas(&args);
+            if a.len() == 2 {
+                rs.defaults.push((unquote(a[0].trim()), a[1].trim().to_string()));
+                return Ok(());
+            }
+        }
     }
 
     // A rule: optional `[tag]` prefixes, a filter, then `-> action` or a `{block}`.
@@ -1288,6 +1306,9 @@ impl<'a> Engine<'a> {
         let mut out: BTreeMap<String, Vec<AnnotatedComponent<Str>>> = BTreeMap::new();
         for m in &ms.mappings {
             let mut ctx = Ctx::from_mapping(m);
+            for (name, value) in &ruleset.defaults {
+                ctx.vars.insert(name.clone(), value.clone());
+            }
             self.run_rules(&ruleset.rules, &mut ctx, exclude, &mut out)?;
         }
         Ok(out)
