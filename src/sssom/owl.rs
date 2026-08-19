@@ -1380,6 +1380,21 @@ impl<'a> Engine<'a> {
             if rule.tags.iter().any(|t| exclude.contains(t.as_str())) {
                 continue;
             }
+            // A `set_var` under a filter is RECORDED here and decided when the
+            // variable is read, so its filter must not be tested now — testing it
+            // here is what the mapping looks like at this point in the ruleset,
+            // and what the variable means is what the mapping looks like where it
+            // is used. See `Engine::resolve_var`.
+            if let Action::SetVar { name, value } = &rule.action {
+                if !matches!(rule.filter, Filter::Always) {
+                    ctx.conditional_vars.push((
+                        name.clone(),
+                        rule.filter.clone(),
+                        value.clone(),
+                    ));
+                    continue;
+                }
+            }
             if !self.eval(&rule.filter, ctx) {
                 continue;
             }
@@ -1484,7 +1499,23 @@ impl<'a> Engine<'a> {
     }
 
     fn resolve_var(&self, name: &str, ctx: &Ctx, short: bool, bracket_iri: bool) -> String {
-        // Variables set via set_var take precedence.
+        // A CONDITIONAL `set_var` — one carrying a filter — is decided HERE, against
+        // the mapping as it stands when the variable is read, not as it stood where
+        // the rule was written. The last condition that holds wins, so a later rule
+        // still overrides an earlier one.
+        //
+        // UBERON's bridges turn on this. `is_a(%{object_id}, UBERON:0000105) ->
+        // set_var("TAXREL", BFO:0000066)` sits ABOVE the preamble's `invert()`, so
+        // where it is written the object is still the foreign term and the test
+        // cannot hold; by the time `%TAXREL` is used, UBERON is on the object side
+        // and it does. Deciding it where it is written gives every life-stage
+        // bridge `part_of` where it should have `occurs_in`.
+        for (n, filter, value) in ctx.conditional_vars.iter().rev() {
+            if n == name && self.eval(filter, ctx) {
+                return self.subst(value, ctx, false);
+            }
+        }
+        // Variables set via an unconditional set_var take precedence over slots.
         if let Some(v) = ctx.vars.get(name) {
             return v.clone();
         }
@@ -1645,6 +1676,9 @@ struct Ctx {
     predicate_id: String,
     cardinality: String,
     vars: HashMap<String, String>,
+    /// `set_var`s that carry a filter, in rule order. They are not decided when
+    /// the rule is reached — see `Engine::resolve_var`.
+    conditional_vars: Vec<(String, Filter, String)>,
     stopped: bool,
     /// The whole mapping row. `/annots="mapping_justification,author_id,…"` reads
     /// slots the four fields above do not carry, so the row has to travel with
@@ -1660,6 +1694,7 @@ impl Ctx {
             predicate_id: m.get("predicate_id").cloned().unwrap_or_default(),
             cardinality: m.get("mapping_cardinality").cloned().unwrap_or_default(),
             vars: HashMap::new(),
+            conditional_vars: Vec::new(),
             stopped: false,
             meta: m.clone(),
         }
