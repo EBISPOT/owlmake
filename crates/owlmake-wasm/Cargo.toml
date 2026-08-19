@@ -1,0 +1,31 @@
+[package]
+name = "owlmake-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WebAssembly (wasm-bindgen) bindings for owlmake: parse, reason, reduce, relax and edit OWL ontologies in the browser and Node."
+license = "Apache-2.0"
+
+[lib]
+# cdylib: the wasm artifact wasm-bindgen/wasm-pack post-process into the npm
+# package. rlib: so the crate is also usable as a normal Rust dependency / for
+# `cargo test` on the host.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+owlmake = { path = "../.." }
+anyhow = "1"
+serde = "1"
+wasm-bindgen = "0.2"
+# Rich, idiomatic JS return values (arrays of arrays, etc.) instead of JSON
+# strings, so subclassPairs() reads natively on the JS side.
+serde-wasm-bindgen = "0.6"
+# Surface Rust panics as JS exceptions with a stack trace instead of an opaque
+# "unreachable" trap — invaluable when a malformed ontology trips an assert.
+console_error_panic_hook = "0.1"
+
+# wasm-opt (binaryen) is fetched from a GitHub release at build time, which is
+# not available in every CI/sandbox; leave it off here. The publish workflow can
+# run binaryen separately when the network allows. Build is correct either way —
+# this only affects the final size/speed pass.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

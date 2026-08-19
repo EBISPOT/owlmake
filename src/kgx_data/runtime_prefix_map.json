@@ -1,0 +1,7 @@
+{
+ "": "https://www.example.org/UNKNOWN/",
+ "MONARCH": "https://monarchinitiative.org/",
+ "MONARCH_NODE": "https://monarchinitiative.org/MONARCH_",
+ "biolink": "https://w3id.org/biolink/vocab/",
+ "owlstar": "http://w3id.org/owlstar/"
+}

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "owlmake"
+version = "0.1.0"
+description = "Native Python bindings for owlmake — a self-contained OWL/OBO toolkit (ODK + ROBOT + reasoner) in a single Rust binary."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "owlmake contributors" }]
+keywords = ["owl", "obo", "ontology", "robot", "odk", "reasoner", "sssom", "bioinformatics"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
+
+[project.optional-dependencies]
+# DataFrame interop: to_pandas / to_polars / mapping_set_from_dataframe and the
+# query_dataframe / dl_query_dataframe helpers import these lazily, only when
+# called. Install an extra from the repo with e.g. `pip install './crates/owlmake-py[pandas]'`.
+pandas = ["pandas>=1.3"]
+polars = ["polars>=0.20"]
+
+[project.urls]
+Homepage = "https://github.com/EBISPOT/owlmake"
+Source = "https://github.com/EBISPOT/owlmake"
+
+[tool.maturin]
+# Mixed Rust/Python layout: the hand-written package lives under python/owlmake,
+# and the compiled extension is installed into it as owlmake._owlmake.
+python-source = "python"
+module-name = "owlmake._owlmake"
+# abi3 wheels (one per platform, CPython 3.9+) — matches the Cargo abi3-py39
+# feature; no per-minor-version build.
+features = ["pyo3/extension-module"]

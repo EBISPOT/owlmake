@@ -1,0 +1,5 @@
+# maturin / pip build outputs
+/dist/
+/build/
+*.egg-info/
+__pycache__/

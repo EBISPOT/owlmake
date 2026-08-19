@@ -1,0 +1,22 @@
+[package]
+name = "owlmake-py"
+version = "0.1.0"
+edition = "2021"
+description = "Native Python (pyo3) bindings for owlmake: parse, reason, reduce, relax and edit OWL ontologies."
+license = "Apache-2.0"
+
+[lib]
+# The Python extension module. `_owlmake` is the native module; the `owlmake`
+# Python package (python/) re-exports it. rlib too, so it stays host-testable.
+name = "_owlmake"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+owlmake = { path = "../.." }
+# abi3-py39: build one wheel that works on CPython 3.9+ (the stable ABI), so we
+# ship a single binary per platform rather than one per Python minor version.
+# generate-import-lib: synthesize the Windows python3 import library at build
+# time so the Windows arm64 wheel can cross-compile on the x86_64 windows-latest
+# runner, which has no aarch64 Python interpreter (see .github/workflows/wheels.yml).
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py39", "anyhow", "generate-import-lib"] }
+anyhow = "1"

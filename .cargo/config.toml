@@ -1,0 +1,5 @@
+# getrandom 0.3 needs an explicit backend for the browser wasm target; the
+# reasoner/HashMap RandomState pull it in transitively. (wasm32-wasip1 has a
+# native backend and needs nothing here.)
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

@@ -1,0 +1,92 @@
+name: npm
+
+# Build the owlmake WebAssembly package (crates/owlmake-wasm) with wasm-pack.
+# Publishing to npm is DISABLED for now (not published yet — build from the repo,
+# see crates/owlmake-wasm/README.md); the publish steps below are gated off until
+# we're ready to release.
+#
+# Triggers (both build + test + upload artifact only; neither publishes):
+#   * push tag `v*`   -> build + test.
+#   * manual dispatch -> build + test.
+#
+# To re-enable publishing, restore the `if: startsWith(github.ref, 'refs/tags/')`
+# conditions on the stamp/publish steps below; it needs an `NPM_TOKEN` repository
+# secret (an npm automation token with publish rights to the package name in
+# crates/owlmake-wasm/Cargo.toml).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: npm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      # nodejs build + smoke test (the assertion suite runs under Node).
+      - name: Build (nodejs) and smoke-test
+        working-directory: crates/owlmake-wasm
+        run: |
+          wasm-pack build --target nodejs --out-dir pkg-node
+          node --input-type=module -e "
+            import { Ontology } from './pkg-node/owlmake_wasm.js';
+            const o = Ontology.parse(new TextEncoder().encode('Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:A))\nDeclaration(Class(:B))\nSubClassOf(:A :B)\n)\n'), 'ofn');
+            o.reason('elk');
+            if (!o.subclassPairs().some(([s,p]) => s==='http://x/A' && p==='http://x/B')) { throw new Error('inference missing'); }
+            console.log('wasm smoke OK', o.axiomCount());
+          "
+
+      # The published artifact is the bundler build (ESM, works with webpack /
+      # vite / rollup and Node ESM). Same API; only the loader glue differs.
+      - name: Build (bundler) for publish
+        working-directory: crates/owlmake-wasm
+        run: wasm-pack build --target bundler --out-dir pkg
+
+      # Publishing disabled until we're ready to release to npm. To re-enable,
+      # restore `if: startsWith(github.ref, 'refs/tags/')` on both steps below.
+      - name: Stamp version from tag
+        if: false
+        working-directory: crates/owlmake-wasm/pkg
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          npm version --no-git-tag-version --allow-same-version "$v"
+
+      - name: Publish to npm
+        if: false
+        working-directory: crates/owlmake-wasm/pkg
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: crates/owlmake-wasm/pkg
+          if-no-files-found: error

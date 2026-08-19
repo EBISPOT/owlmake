@@ -1,0 +1,122 @@
+name: Wheels
+
+# Build the native `owlmake` Python extension (crates/owlmake-py, pyo3) as an
+# abi3 wheel for every supported platform. Publishing to PyPI is DISABLED for now
+# (not published yet — install from the repo with `pip install ./crates/owlmake-py`);
+# the publish job below is gated off until we're ready to release.
+#
+# The extension is built with maturin via PyO3/maturin-action, which runs each
+# target in the appropriate manylinux container / cross toolchain. abi3 means one
+# wheel per platform works on CPython 3.9+, so there is no per-minor-version
+# matrix. An sdist is built too.
+#
+# Triggers (both build + upload artifacts only; neither publishes):
+#   * push tag `v*`   -> build all wheels + sdist.
+#   * manual dispatch -> build all wheels + sdist.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheels:
+    name: wheel ${{ matrix.platform }} ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,  platform: linux,   target: x86_64,  manylinux: '2_28' }
+          - { runner: ubuntu-latest,  platform: linux,   target: aarch64, manylinux: '2_28' }
+          - { runner: macos-13,       platform: macos,   target: x86_64 }
+          - { runner: macos-14,       platform: macos,   target: aarch64 }
+          - { runner: windows-latest, platform: windows, target: x64 }
+          - { runner: windows-latest, platform: windows, target: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          # crates/owlmake-py holds the pyproject; the Rust crate it builds
+          # depends on the workspace root, so the whole repo is the build context.
+          working-directory: crates/owlmake-py
+          target: ${{ matrix.target }}
+          # manylinux container only applies to the Linux targets; ignored else.
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+          sccache: 'true'
+
+      # Validate the wheel we can actually run here (native Linux x86_64).
+      - name: Smoke-test wheel
+        if: matrix.platform == 'linux' && matrix.target == 'x86_64'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --no-index --find-links crates/owlmake-py/dist owlmake
+          # Run from a clean dir so the installed wheel is imported.
+          cd /tmp
+          python - <<'PY'
+          from owlmake import Ontology
+          o = Ontology.parse(b"Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:A))\nDeclaration(Class(:B))\nSubClassOf(:A :B)\n)\n", "ofn")
+          o.reason("elk")
+          assert ("http://x/A", "http://x/B") in o.subclass_pairs()
+          print("wheel OK:", len(o), "components")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform }}-${{ matrix.target }}
+          path: crates/owlmake-py/dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates/owlmake-py
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: crates/owlmake-py/dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    needs: [wheels, sdist]
+    # Publishing disabled until we're ready to release to PyPI. To re-enable,
+    # restore: if: startsWith(github.ref, 'refs/tags/')
+    if: false
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted publishing (OIDC) — configure a PyPI publisher for this repo +
+      # workflow, or replace this job with a token-based `twine upload`.
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: 'wheel-*'
+          merge-multiple: true
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

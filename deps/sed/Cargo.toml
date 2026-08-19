@@ -1,0 +1,113 @@
+# Local in-tree copy of the `sed` crate (uutils' POSIX/GNU sed) v0.1.1,
+# redirected from crates.io by the root `[patch.crates-io]`. See src/util/mod.rs
+# — owlmake embeds `sed` so build recipes that shell out to it work from the
+# single static binary.
+#
+# The ONLY change from the published 0.1.1 manifest is dropping the (unused)
+# `sysinfo` dependency: `sed` declares it but never references it (it is a stray
+# dep inherited from the uutils workspace template). On macOS `sysinfo` links the
+# CoreFoundation and IOKit frameworks (via objc2-io-kit / objc2-core-foundation),
+# which the Apple-SDK-free cargo-zigbuild cross-build in .github/workflows/release.yml
+# cannot resolve ("unable to find framework 'CoreFoundation'"). Removing the dead
+# dep keeps the macOS binary linking against libSystem only, as the rest of the
+# tree already does. The library sources are otherwise byte-for-byte upstream.
+#
+# Trimmed for the in-tree copy: the test/bench targets, their fixtures, dev-deps,
+# and release profiles (all irrelevant to building sed as a library) are omitted.
+
+[package]
+edition = "2024"
+rust-version = "1.88"
+name = "sed"
+version = "0.1.1"
+authors = ["uutils developers"]
+build = "build.rs"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+default-run = "sed"
+description = "sed ~ implemented as universal (cross-platform) utils, written in Rust"
+homepage = "https://github.com/uutils/sed"
+readme = "README.md"
+keywords = [
+    "sed",
+    "uutils",
+    "cross-platform",
+    "cli",
+    "utility",
+]
+categories = ["command-line-utilities"]
+license = "MIT"
+repository = "https://github.com/uutils/sed"
+
+[features]
+default = ["feat_common_core"]
+feat_common_core = ["sed"]
+sed = []
+
+[lib]
+name = "sed"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sed"
+path = "src/bin/sed.rs"
+
+[dependencies.assert_fs]
+version = "1.1.3"
+
+[dependencies.clap]
+version = "4.4"
+features = [
+    "wrap_help",
+    "cargo",
+]
+
+[dependencies.clap_complete]
+version = "4.5"
+
+[dependencies.clap_mangen]
+version = "0.2"
+
+[dependencies.ctor]
+version = "0.6.0"
+
+[dependencies.fancy-regex]
+version = "0.17.0"
+
+[dependencies.memchr]
+version = "2.7.4"
+
+[dependencies.memmap2]
+version = "0.9"
+
+[dependencies.once_cell]
+version = "1.21.3"
+
+[dependencies.phf]
+version = "0.13.0"
+
+[dependencies.predicates]
+version = "3.1.3"
+
+[dependencies.regex]
+version = "1.10.4"
+
+[dependencies.tempfile]
+version = "3.10.1"
+
+[dependencies.terminal_size]
+version = "0.4.2"
+
+[dependencies.textwrap]
+version = "0.16.1"
+features = ["terminal_size"]
+
+[dependencies.uucore]
+version = "0.5.0"
+features = ["libc"]
+
+[build-dependencies.phf_codegen]
+version = "0.13.0"

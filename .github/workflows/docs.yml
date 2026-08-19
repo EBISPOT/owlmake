@@ -1,0 +1,104 @@
+name: Docs
+
+# Build auto-generated documentation for all four owlmake interfaces and publish
+# them to GitHub Pages as one site:
+#   /cli     CLI reference   (generated from `owlmake __cli-spec`)
+#   /rust    Rust API        (cargo doc)
+#   /python  Python API      (pdoc, from the native extension's docstrings)
+#   /js      JS/TS API       (TypeDoc, from the wasm-bindgen .d.ts)
+#
+# The `build` job validates that all four doc sets generate; the `deploy` job
+# publishes them to GitHub Pages (Source: "GitHub Actions"). Both run on every
+# push to dev (the project's primary branch) and on manual `workflow_dispatch`.
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip maturin pdoc markdown
+          npm install -g typedoc typescript
+          cargo install wasm-pack --locked || true
+
+      # --- CLI reference: generated from the binary's __cli-spec ---
+      - name: CLI docs
+        run: |
+          cargo build --locked
+          python scripts/gen_cli_docs.py
+          python scripts/md_to_html.py docs/cli.md site/cli/index.html "owlmake CLI reference"
+
+      # --- Rust API: cargo doc for the workspace crates ---
+      - name: Rust docs
+        run: |
+          cargo doc --no-deps --workspace
+          cp -r target/doc site/rust
+          # `cargo doc --workspace` documents several crates and so emits no
+          # top-level index.html; redirect /rust/ to the main crate's docs so the
+          # Pages landing link resolves instead of 404ing.
+          test -f site/rust/index.html || \
+            printf '<!doctype html><meta http-equiv="refresh" content="0; url=owlmake/index.html">\n' \
+              > site/rust/index.html
+
+      # --- Python API: pdoc over the installed native extension ---
+      - name: Python docs
+        run: |
+          pip install ./crates/owlmake-py
+          pdoc -o site/python owlmake
+
+      # --- JS/TS API: TypeDoc over the wasm-bindgen .d.ts ---
+      - name: JS docs
+        working-directory: crates/owlmake-wasm
+        run: |
+          wasm-pack build --target nodejs --out-dir pkg
+          typedoc --out "$GITHUB_WORKSPACE/site/js"
+
+      - name: Landing page
+        run: cp docs/index.html site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

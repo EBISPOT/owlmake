@@ -1,0 +1,10 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["pkg/owlmake_wasm.d.ts"],
+  "name": "owlmake (WebAssembly / TypeScript)",
+  "readme": "README.md",
+  "skipErrorChecking": true,
+  "excludeExternals": true,
+  "githubPages": false,
+  "hideGenerator": true
+}

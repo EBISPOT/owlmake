@@ -1,0 +1,130 @@
+name: Release
+
+# Cross-build the `om` binary for Linux, macOS, and Windows (amd64 + arm64)
+# entirely on cheap `ubuntu-latest` runners using cargo-zigbuild, which uses Zig
+# as the C compiler/linker so the C/asm deps in the tree (mimalloc, ring) and the
+# platform cert crates (security-framework on macOS, schannel on Windows) all
+# cross-compile and link from a single Linux host.
+#
+# Notes:
+#   * macOS needs no Apple SDK: ureq's native-certs (which pulls in
+#     Security.framework) is disabled on macOS in Cargo.toml, so the binary links
+#     only against libSystem, whose stubs Zig ships itself. macOS falls back to
+#     bundled webpki-roots for HTTPS. This keeps the build license-clean.
+#   * Windows binaries use the gnullvm ABI (the cross-from-Linux flavour); they are
+#     standalone .exe files, fine for a CLI.
+#
+# Triggers:
+#   * pushing a tag `v*`  -> build all targets AND publish a GitHub Release.
+#   * manual dispatch     -> build all targets, upload as artifacts only.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu,     os: linux,   arch: amd64, ext: ""     }
+          - { target: aarch64-unknown-linux-gnu,    os: linux,   arch: arm64, ext: ""     }
+          - { target: x86_64-apple-darwin,          os: macos,   arch: amd64, ext: ""     }
+          - { target: aarch64-apple-darwin,         os: macos,   arch: arm64, ext: ""     }
+          - { target: x86_64-pc-windows-gnullvm,    os: windows, arch: amd64, ext: ".exe" }
+          - { target: aarch64-pc-windows-gnullvm,   os: windows, arch: arm64, ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        # mimalloc v3's macOS randomness path #includes <CommonCrypto/...> whenever
+        # the deployment target is >= 10.15. Zig's bundled macOS SDK stubs don't
+        # carry the CommonCrypto framework headers, so that branch breaks the
+        # cross-build (and pulling in a real Apple SDK would defeat the whole
+        # build-on-Linux-with-no-SDK design above). Capping MAC_OS_X_VERSION_MIN_REQUIRED
+        # below 10.15 for the two Apple targets selects mimalloc's arc4random_buf
+        # path instead, which lives in libSystem (whose stubs Zig does ship). These
+        # cc-rs target-scoped CFLAGS are ignored when building the non-Apple targets.
+        #
+        # `-F .github/macos-stubs` supplies a hand-written CoreFoundation stub for
+        # the same reason: arrow-array turns on chrono's `clock`, which on Apple
+        # targets pulls iana-time-zone and a link against the CoreFoundation
+        # framework that Zig's libSystem-only stubs cannot resolve. The stub is a
+        # symbol list, not Apple code — the real framework is loaded from the
+        # system at run time (see the file's own comment). Harmless on the other
+        # targets: a framework search path they never consult.
+        env:
+          CFLAGS_x86_64_apple_darwin: -DMAC_OS_X_VERSION_MIN_REQUIRED=101400
+          CFLAGS_aarch64_apple_darwin: -DMAC_OS_X_VERSION_MIN_REQUIRED=101400
+          RUSTFLAGS: -C link-arg=-F${{ github.workspace }}/.github/macos-stubs
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }}
+
+      # Ship the bare binary (named per OS/arch) plus a checksum, so installing
+      # is a single download with no archive to unpack.
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="om-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          cp "target/${{ matrix.target }}/release/om${{ matrix.ext }}" "$out"
+          sha256sum "$out" > "$out.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: om-${{ matrix.os }}-${{ matrix.arch }}
+          path: om-${{ matrix.os }}-${{ matrix.arch }}*
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

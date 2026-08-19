@@ -1,0 +1,12 @@
+# Keep the Docker build context small. The builder needs the sources + vendored
+# crates + lockfile, but not build outputs, git history, or docs/data.
+/target
+/.git
+/.github
+*.md
+/data
+# …but ubergraph_ontologies.txt is compiled into the binary (include_str!), so it
+# is a build input, not disposable data — it must stay in the build context.
+!/data/ubergraph_ontologies.txt
+/scripts
+.gitignore

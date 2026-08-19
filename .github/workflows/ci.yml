@@ -1,0 +1,146 @@
+name: CI
+
+# Build and run the full test suite (the `cargo test` suites under tests/) on
+# every pull request and on pushes to dev. The suite is self-contained — it
+# drives the freshly built owlmake binary against the fixtures in tests/ — so it
+# needs no network services and no language runtime beyond the binary itself.
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-progress run when the same ref is pushed again.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (tests)
+        run: cargo test --locked --no-run
+
+      - name: Test
+        run: cargo test --locked -- --nocapture
+
+      # Clippy's deny-by-default lints are the ones that catch real mistakes: a
+      # match arm that can never fire, a loop whose condition cannot change. They
+      # fail the build on their own, so no `-D warnings` is needed here — and
+      # adding it would gate on a large existing warning backlog that says
+      # nothing about the change under review.
+      - name: Clippy (deny-by-default lints)
+        run: cargo clippy --locked --all-targets
+
+  bindings:
+    name: bindings (wasm + python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # --- wasm (crates/owlmake-wasm) ---
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build wasm package and smoke-test in Node
+        working-directory: crates/owlmake-wasm
+        run: |
+          wasm-pack build --target nodejs --out-dir pkg
+          node test/smoke.mjs
+
+      # --- python (crates/owlmake-py) ---
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install maturin
+        run: python -m pip install --upgrade pip maturin pandas polars
+
+      - name: Build the native extension wheel
+        working-directory: crates/owlmake-py
+        run: maturin build --release --out dist
+
+      - name: Install + smoke-test the Python extension
+        run: |
+          python -m pip install --no-index --find-links crates/owlmake-py/dist owlmake
+          cd /tmp
+          python - <<'PY'
+          import owlmake
+          from owlmake import Ontology
+          # native object model
+          o = Ontology.parse(b"Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:A))\nDeclaration(Class(:B))\nSubClassOf(:A :B)\n)\n", "ofn")
+          assert len(o) == 4
+          assert o.add_axioms("Declaration(Class(:C))\nSubClassOf(:B :C)") == 2
+          o.reason("hermit")
+          assert ("http://x/A", "http://x/B") in o.subclass_pairs()
+          # in-process command functions + Chain + sssom + jq
+          assert all(hasattr(owlmake, n) for n in ["convert","reason","query","measure","sssom","chain","run"])
+          open("e.ofn","w").write("Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:A))\nDeclaration(Class(:B))\nSubClassOf(:A :B)\n)\n")
+          assert owlmake.convert(input="e.ofn", output="e.obo").ok
+          assert "metric" in (owlmake.measure(input="e.ofn").stdout or "")
+          assert owlmake.chain().merge(input="e.ofn").reason(reasoner="elk").reduce().convert(output="c.owl").run().ok
+          # in-memory data commands (string -> string)
+          # jq is CLI-only (no dedicated binding by design); drive it via run().
+          open("j.json","w").write('{"a": 1}')
+          assert owlmake.run("jq", ".a", "j.json").stdout.strip() == "1"
+          tsv = "#curie_map:\n#  X: http://ex/x/\n#  Y: http://ex/y/\n#mapping_set_id: http://ex/ms\nsubject_id\tpredicate_id\tobject_id\tmapping_justification\nX:1\tskos:exactMatch\tY:1\tsemapv:ManualMappingCuration\n"
+          assert len(owlmake.sssom_convert(tsv, "ttl")) > 0
+          # in-memory ontology command methods
+          assert "classes" in o.measure()
+          # SPARQL TSV keeps a literal's full Turtle form ("8"^^<xsd:integer>).
+          import re as _re
+          _row = o.query("SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }").strip().split("\n")[-1]
+          assert int(_re.sub(r'^"(.*?)"\^\^.*$', r"\1", _row)) > 0, _row
+          # MappingSet <-> pandas / polars
+          import pandas as pd, polars as pl
+          from owlmake import MappingSet
+          tsv = "#curie_map:\n#  X: http://ex/x/\n#  Y: http://ex/y/\n#mapping_set_id: http://ex/ms\nsubject_id\tpredicate_id\tobject_id\tmapping_justification\nX:1\tskos:exactMatch\tY:1\tsemapv:ManualMappingCuration\n"
+          ms = MappingSet.parse(tsv, "tsv")
+          assert owlmake.to_pandas(ms).shape[0] == 1
+          assert owlmake.to_polars(ms).shape[0] == 1
+          assert len(owlmake.mapping_set_from_dataframe(owlmake.to_pandas(ms), curie_map=ms.curie_map)) == 1
+          assert len(owlmake.to_pandas(o.query_records("SELECT ?s ?p ?o WHERE { ?s ?p ?o }"))) > 0
+          # reason over the ontology and get a DataFrame back (inferred edges)
+          eq = Ontology.parse(b"Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:A))\nDeclaration(Class(:B))\nEquivalentClasses(:A :B)\n)\n", "ofn")
+          SCQ = "SELECT ?s ?o WHERE { ?s <http://www.w3.org/2000/01/rdf-schema#subClassOf> ?o }"
+          assert len(eq.query_dataframe(SCQ)) == 0
+          assert len(eq.query_dataframe(SCQ, reasoner="elk")) > 0
+          assert eq.query_dataframe(SCQ, reasoner="elk", backend="polars").shape[0] > 0
+          # Protege-style DL query (Manchester syntax, bare names)
+          dlo = Ontology.parse(b"Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:Cell))\nDeclaration(Class(:Neuron))\nDeclaration(Class(:Brain))\nDeclaration(ObjectProperty(:part_of))\nSubClassOf(:Neuron :Cell)\nSubClassOf(:Neuron ObjectSomeValuesFrom(:part_of :Brain))\n)\n", "ofn")
+          assert "http://x/Neuron" in dlo.dl_query("part_of some Brain", "descendants")
+          assert "http://x/Cell" in dlo.dl_query("Neuron", "ancestors")
+          assert dlo.dl_query_dataframe("Cell", "descendants").shape[0] == 1
+          # Template from a DataFrame; DOSDP pattern from a DataFrame
+          from owlmake import Ontology as O
+          tdf = pd.DataFrame([{"ID":"ID","Label":"LABEL"},{"ID":"ex:1","Label":"One"},{"ID":"ex:2","Label":"Two"}])
+          ot = O(); ot.template(tdf); assert len(ot.classes()) == 2
+          pat = "pattern_name: t\nclasses: {thing: owl:Thing}\nrelations: {}\nvars: {item: \"'thing'\"}\nname: {text: \"n %s\", vars: [item]}\nequivalentTo: {text: \"'thing' and ('thing' some %s)\", vars: [item]}\n"
+          assert len(owlmake.dosdp(pat, pl.DataFrame([{"defined_class":"ex:1","item":"ex:0"}]))) > 0
+          print("python smoke OK")
+          PY

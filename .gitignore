@@ -1,0 +1,16 @@
+/target
+
+# Claude Code runtime lock for scheduled tasks (per-process; never commit)
+/.claude/scheduled_tasks.lock
+
+__pycache__/
+*.pyc
+.claude/
+efo
+
+
+# Built docs site (assembled by .github/workflows/docs.yml)
+/site/
+target-bullseye
+
+api_key

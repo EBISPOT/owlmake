@@ -1,0 +1,30 @@
+--- !tapi-tbd
+# A hand-written stub for the seven CoreFoundation symbols `iana-time-zone`
+# references on Apple targets (system timezone lookup, reached through
+# chrono -> arrow-array -> parquet). It carries no Apple code: a `.tbd` is a
+# symbol list, and the real framework is resolved from the system at run time
+# through the install-name below.
+#
+# The release workflow cross-builds macOS binaries on Linux with cargo-zigbuild,
+# and Zig ships stubs for libSystem only — without this the link fails with
+# "unable to find framework 'CoreFoundation'". Adding a real Apple SDK would
+# defeat the SDK-free design (see .github/workflows/release.yml).
+tbd-version: 4
+targets: [ x86_64-macos, arm64-macos ]
+install-name: '/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation'
+# Deliberately LOW: dyld refuses to load a dylib whose compatibility version is
+# older than the one recorded at link time, so claiming 1.0.0 always passes
+# against the real framework (150.0.0 today) on every macOS version.
+current-version: 1
+compatibility-version: 1
+exports:
+  - targets: [ x86_64-macos, arm64-macos ]
+    symbols:
+      - _CFRelease
+      - _CFStringGetBytes
+      - _CFStringGetCStringPtr
+      - _CFStringGetLength
+      - _CFTimeZoneCopySystem
+      - _CFTimeZoneGetName
+      - _CFTimeZoneResetSystem
+...
