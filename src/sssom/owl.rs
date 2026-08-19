@@ -1609,7 +1609,15 @@ fn manchester_axiom(
     let rc = crate::io::manchester_parse::parse_class_expression(build, rhs.trim(), &resolver)
         .map_err(|e| anyhow::anyhow!("axiom RHS `{}`: {e}", rhs.trim()))?;
     let comp = if equiv {
-        Component::EquivalentClasses(EquivalentClasses(vec![lc, rc]))
+        // An equivalence has no direction: it is written in the frame of its
+        // FIRST operand, and which operand that is comes from the axiom, not from
+        // which side of `EquivalentTo:` the rule happened to write. Sorted, the
+        // clause lands on the smaller IRI — `GO:0005623 EquivalentTo: CL:0000000`
+        // belongs in the `CL:0000000` frame, and a rule that spells the same pair
+        // the other way round produces the same file.
+        let mut ops = vec![lc, rc];
+        ops.sort_by(crate::io::owlfunc::cmp_ce);
+        Component::EquivalentClasses(EquivalentClasses(ops))
     } else {
         Component::SubClassOf(SubClassOf { sub: lc, sup: rc })
     };
@@ -1677,6 +1685,18 @@ impl Ctx {
     }
     fn invert(&mut self) {
         std::mem::swap(&mut self.subject_id, &mut self.object_id);
+        // A DIRECTED predicate turns round with the sides it relates: what is a
+        // narrow match from A to B is a broad match from B to A. A symmetric one
+        // — `exactMatch`, `closeMatch`, `relatedMatch`, `crossSpeciesExactMatch` —
+        // reads the same either way and is left alone.
+        //
+        // UBERON's SCTID and NCIT bridges are the case: their rows are
+        // `skos:narrowMatch` with UBERON on the subject side, the preamble
+        // inverts them to put UBERON on the object side, and the bridge rules
+        // then select `predicate==skos:broadMatch`. Leaving the predicate as it
+        // was left both bridges with every label and none of their 8,159
+        // subsumptions.
+        self.predicate_id = inverse_predicate(&self.predicate_id);
         // `mapping_cardinality` is oriented SUBJECT:OBJECT, so inverting the
         // mapping inverts it too. Leaving it alone made UBERON's very next rule,
         // `!cardinality==*:1 -> stop()`, test the pre-inversion orientation and
@@ -1708,6 +1728,25 @@ impl Ctx {
             }
         }
     }
+}
+
+/// The predicate a mapping carries when read from the other side.
+///
+/// Only the local name decides, so a CURIE and the IRI it expands to invert
+/// alike; anything with no inverse comes back unchanged.
+fn inverse_predicate(p: &str) -> String {
+    let cut = p.rfind(['#', '/', ':']).map_or(0, |i| i + 1);
+    let (head, local) = p.split_at(cut);
+    let flipped = match local {
+        "narrowMatch" => "broadMatch",
+        "broadMatch" => "narrowMatch",
+        "narrower" => "broader",
+        "broader" => "narrower",
+        "narrowerTransitive" => "broaderTransitive",
+        "broaderTransitive" => "narrowerTransitive",
+        _ => return p.to_string(),
+    };
+    format!("{head}{flipped}")
 }
 
 /// Glob match with a single `*` ANYWHERE in the pattern.
