@@ -623,16 +623,23 @@ fn plan_rule(
     // one run's switches into a plan meant to be portable: planned under `MIR=false`,
     // MONDO's recipes would record the permanently-dead `[ false = true ]`, with
     // every fetch beneath it unreachable however the plan was later invoked.
-    let mut input = prereqs.first().cloned();
-    // A rule can have no NORMAL prerequisite and still read a file: the ODK mirror
-    // rules are `mirror-<id>: | $(TMPDIR)` — an order-only prereq, so `$<` is empty
-    // — whose recipe curls the ontology to `$(TMPDIR)/<id>-download.owl` and then
-    // names it explicitly, `robot remove -i $(TMPDIR)/<id>-download.owl … -o
-    // $(TMPDIR)/mirror-<id>.owl`. With no input the executor would thread an EMPTY
-    // model through `remove`, leaving every `tmp/mirror-*.owl` a stub — which in
-    // turn empties the merged mirror and collapses `merged_import.owl` with it.
-    // Take the first `--input` a robot step names.
+    let prereq_input = prereqs.first().cloned();
+    // What the recipe's FIRST invocation opens its pipeline with, which is what
+    // the pipeline actually reads. A rule's first prerequisite is a dependency
+    // edge; only a recipe that spells `$<` also makes it the input.
+    //
+    // uPheno's mappings component is `components/upheno-mappings.owl: $(SRC)
+    // …sssom.owl` with a recipe of `merge -i …sssom.owl -i …sssom.owl`. Opening
+    // from `$(SRC)` there merged the edit ontology's whole import closure —
+    // including the component's own previous build — into its replacement: 57 MB
+    // of mapping sets became 195 MB, and every artefact above it grew with them.
+    //
+    // The mirror rules are the other side of it: `mirror-<id>: | $(TMPDIR)` has
+    // no normal prerequisite at all, and its recipe curls the ontology and then
+    // names the download explicitly. With no input the executor would thread an
+    // EMPTY model through `remove`, leaving every `tmp/mirror-*.owl` a stub.
     let mut recipe_input: Option<String> = None;
+    let mut saw_robot_line = false;
     let mut extra_needs: Vec<String> = Vec::new();
     let mut steps = Vec::new();
     // Where the recipe redirects its console output, when the redirect is the
@@ -653,7 +660,13 @@ fn plan_rule(
             continue;
         }
         let expanded = make.expand_with(line, &autos);
-        if input.is_none() && recipe_input.is_none() {
+        // The pipeline opens with the first ROBOT invocation's own input. A line
+        // that runs something else — `$(MAKE) …`, `sssom convert …` — threads no
+        // model, so the scan continues past it; the first robot line that names
+        // no input is where the rule's own `$<` comes in, and the scan stops
+        // there rather than reaching a later line's `--input`.
+        if !saw_robot_line && is_robot_line(&expanded, robot_prefix) {
+            saw_robot_line = true;
             recipe_input = first_robot_input(&expanded, robot_prefix);
         }
         if stdout_file.is_none() {
@@ -672,7 +685,7 @@ fn plan_rule(
         }
         steps.extend(line_steps);
     }
-    input = input.or(recipe_input);
+    let mut input = recipe_input.or(prereq_input);
     drop_target_round_trip(&mut steps, target);
     // A recipe that is nothing but recursive make is an aggregate wearing a
     // disguise: `feature_diff: make reports/a.txt -B; make reports/b.txt -B` says
@@ -2507,8 +2520,17 @@ fn mirror_steps(repo: &OdkRepo, id: &str) -> Vec<Step> {
     steps
 }
 
+/// Whether a recipe line invokes robot at all — as against running a script, a
+/// sub-make, or one of the other tools a recipe reaches for.
+fn is_robot_line(cmd: &str, robot_prefix: &str) -> bool {
+    cmd.split(['|', ';', '&']).any(|seg| {
+        let toks = robot::tokenize(seg);
+        !toks.is_empty() && robot::is_robot(&toks, robot_prefix)
+    })
+}
+
 /// The file the first `robot` invocation on this recipe line reads (`-i`/`--input`),
-/// used as a rule's input when it has no normal prerequisite to take one from.
+/// which is what opens the pipeline for the rule it belongs to.
 ///
 /// Only a robot command counts — `sed -i` is an in-place edit, not an input — and
 /// only a path: a `--input` naming an http(s) IRI loads over the network, and is

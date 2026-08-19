@@ -2215,3 +2215,73 @@ fn a_malformed_tagger_db_is_rejected_not_followed() {
         String::from_utf8_lossy(&done.stdout)
     );
 }
+
+/// A rule's first prerequisite is a dependency edge; the pipeline opens with
+/// whatever the recipe's first invocation names.
+///
+/// uPheno's mappings component is `components/upheno-mappings.owl: $(SRC)
+/// …sssom.owl` and its recipe is `merge -i …sssom.owl -i …sssom.owl`. Opening
+/// from `$(SRC)` there merges the edit ontology — and, through its
+/// `owl:imports`, the component's own previous build — into its replacement.
+#[test]
+fn a_recipe_that_names_its_own_input_does_not_also_read_the_first_prerequisite() {
+    let root = tmp("recipe_opens_pipeline");
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(ont.join("components")).unwrap();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+
+    std::fs::write(
+        ont.join("foo-odk.yaml"),
+        "id: foo\nreasoner: ELK\nrelease_artefacts:\n  - full\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("Makefile"),
+        "VERSION = 2026-01-01\nONTBASE = http://example.org/foo\nROBOT = robot\nSRC = foo-edit.ofn\n\n\
+         components/merged.ofn: $(SRC) components/a.ofn components/b.ofn\n\
+         \t$(ROBOT) merge -i components/a.ofn -i components/b.ofn -o $@\n",
+    )
+    .unwrap();
+    let ont_of = |iri: &str, decl: &str| {
+        format!(
+            "Prefix(:=<http://example.org/foo#>)\nOntology(<{iri}>\nDeclaration(Class(:{decl}))\n)\n"
+        )
+    };
+    std::fs::write(ont.join("foo-edit.ofn"), ont_of("http://example.org/foo.owl", "EDIT_ONLY"))
+        .unwrap();
+    std::fs::write(ont.join("components/a.ofn"), ont_of("http://example.org/a.owl", "A")).unwrap();
+    std::fs::write(ont.join("components/b.ofn"), ont_of("http://example.org/b.owl", "B")).unwrap();
+
+    let out = bin()
+        .current_dir(&ont)
+        .args(["make", "components/merged.ofn"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "the component should build: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let merged = std::fs::read_to_string(ont.join("components/merged.ofn")).unwrap();
+    assert!(merged.contains(":A)") || merged.contains("/foo#A>"), "merged should carry A:\n{merged}");
+    assert!(merged.contains(":B)") || merged.contains("/foo#B>"), "merged should carry B:\n{merged}");
+    assert!(
+        !merged.contains("EDIT_ONLY"),
+        "the recipe never reads $<, so the edit ontology must not be in the product:\n{merged}"
+    );
+
+    // …and the plan says so: the recorded input is the recipe's own first
+    // `--input`, not the rule's first prerequisite.
+    let plan = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
+    let entry = plan
+        .split("- target: ")
+        .find(|s| s.starts_with("src/ontology/components/merged.ofn\n"))
+        .expect("the plan should carry the component");
+    let input = entry
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("input: "))
+        .expect("the component should record an input");
+    assert_eq!(input, "src/ontology/components/a.ofn", "plan entry:\n{entry}");
+}
