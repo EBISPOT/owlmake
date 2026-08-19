@@ -213,17 +213,23 @@ fn subset_module(
         status!("extract: subset — materializing {} relation(s)", relations.len());
     }
     let source_anns = property_annotation_axioms(&model);
-    // The object sharing `materialize` records does NOT survive into the module.
-    // `materialize` builds one `∃R.D` per (property, filler) and asserts it for
-    // every subclass that gets it — one object, one blank node — and that is what
-    // a `materialize` STEP writes. A subset module is rebuilt from the axioms the
-    // filter keeps, so each retained restriction is an object of its own again:
-    // MONDO's `subsets/mondo-rare.owl` carries 363 more blank nodes than the
-    // shared count, and the offset renders as swapped `owl:Axiom` blocks wherever
-    // it crosses a digit-length boundary.
+    // No object sharing created while BUILDING the module survives into it. Two
+    // steps here make one expression stand for several classes: `materialize`
+    // builds one `∃R.D` per (property, filler) and asserts it for every subclass
+    // that gets it, and `--preserve-structure` re-links several classes through
+    // one source expression. Both are real sharing in the model they were made
+    // in — a `materialize` STEP writes exactly that — and neither is sharing
+    // here, because a subset module is rebuilt from the axioms the filter keeps
+    // and each retained restriction is an object of its own again.
+    //
+    // Carrying either in leaves the module short of blank nodes: MONDO's
+    // `subsets/mondo-rare.owl` carries 363 more than the shared count, and
+    // `uberon`'s `subsets/cumbo.owl` three classes bridged through one removed
+    // ancestor spend one node instead of three. The offset renders as swapped
+    // `owl:Axiom` blocks wherever it crosses a digit-length boundary.
     let span_before = model.span_shared.clone();
-    let mut materialized = crate::cmd::materialize::materialize(model, &relations);
-    materialized.span_shared = span_before;
+    let cross_before = model.cross_shared.clone();
+    let materialized = crate::cmd::materialize::materialize(model, &relations);
     let terms: Vec<String> = seed.iter().cloned().collect();
     let mut filtered =
         crate::cmd::filter::filter(materialized, &terms, &[], &["annotations".to_string()], Some(true))?;
@@ -248,6 +254,8 @@ fn subset_module(
         }
     }
     let mut out = crate::cmd::reduce::reduce(&filtered);
+    out.span_shared = span_before;
+    out.cross_shared = cross_before;
     // A materialized subset is a NEW ontology, so it takes no version from its
     // source. Its `<owl:Axiom>` blocks are ordered by the blank-node counter, not
     // by the source document: `reduce` builds its result from parts, which starts
