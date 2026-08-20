@@ -2285,3 +2285,60 @@ fn a_recipe_that_names_its_own_input_does_not_also_read_the_first_prerequisite()
         .expect("the component should record an input");
     assert_eq!(input, "src/ontology/components/a.ofn", "plan entry:\n{entry}");
 }
+
+/// owlmake's own OFN cache is named for the target it stands in for — the cache
+/// for `x.owl` is `x.owl.ofn` — and only it carries the `#…` state markers. A
+/// `.ofn` a REPO names as a target has no such second extension, and gets the
+/// bytes the repo's own recipe would write, wherever it lives. uPheno's
+/// `$(SRCMERGED)` is `tmp/merged-upheno-edit.ofn`.
+#[test]
+fn a_repo_named_ofn_target_carries_no_cache_markers() {
+    let dir = tmp("ofn_markers");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+
+    // RDF/XML in, so there is an xmlns block for a marker to carry.
+    let src = dir.join("src.owl");
+    std::fs::write(
+        &src,
+        "<?xml version=\"1.0\"?>\n\
+         <rdf:RDF xmlns=\"http://www.w3.org/2002/07/owl#\"\n\
+              xmlns:owl=\"http://www.w3.org/2002/07/owl#\"\n\
+              xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"\n\
+              xmlns:rdfs=\"http://www.w3.org/2000/01/rdf-schema#\"\n\
+              xmlns:xsd=\"http://www.w3.org/2001/XMLSchema#\"\n\
+              xmlns:ex=\"http://example.org/\">\n\
+             <Ontology rdf:about=\"http://example.org/o\"/>\n\
+             <Class rdf:about=\"http://example.org/A\"/>\n\
+         </rdf:RDF>\n",
+    )
+    .unwrap();
+
+    let convert = |out: &std::path::Path| {
+        assert!(
+            bin().args(["convert", "-i"]).arg(&src).args(["-f", "ofn", "-o"]).arg(out)
+                .status().unwrap().success(),
+            "convert to {} should succeed",
+            out.display()
+        );
+        std::fs::read_to_string(out).unwrap()
+    };
+
+    // The repo's own target: no marker, whatever directory it is in.
+    let target = dir.join("tmp/merged-src.ofn");
+    let text = convert(&target);
+    assert!(
+        !text.starts_with('#'),
+        "a repo-named .ofn target must start with its own content:\n{}",
+        text.lines().next().unwrap_or("")
+    );
+
+    // owlmake's cache for `src.owl`: markers are its whole point.
+    let cache = dir.join("tmp/src.owl.ofn");
+    let text = convert(&cache);
+    assert!(
+        text.starts_with("#rdfxmlns "),
+        "the cache should carry the source's xmlns:\n{}",
+        text.lines().next().unwrap_or("")
+    );
+}
