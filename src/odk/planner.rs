@@ -508,6 +508,9 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     };
 
     Ok(Plan {
+        // What the repo itself states. A repo running the image's own tool names
+        // its ODK release and nothing else; one shipping its own names the tool.
+        emulate_odk_version: odk_declared_version(&repo.root, make),
         native_targets,
         // What a bare `owlmake` builds: the repo's default goal, RESOLVED to the
         // targets it names — because after the Makefile is deleted nothing else
@@ -538,7 +541,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             }
         },
         catalog_file: catalog_file(&repo.dir),
-        robot_version: robot_version(&repo.root, make),
+        emulate_robot_version: emulate_robot_version(&repo.root, make),
         // The global `--strict` / `-x` flags, as the repo's own `$(ROBOT)` launcher
         // declares them: they change which axioms survive a parse and the bytes
         // of every RDF/XML artefact, so they are recorded rather than left to
@@ -673,11 +676,31 @@ fn plan_rule(
             stdout_file = robot::chain_stdout_file(&expanded, robot_prefix);
         }
         let mut line_steps = recorded_steps(&expanded, robot_prefix);
-        if command_lines > 0 {
-            if let Some(Step::Op(Op::Merge { inputs, restart, .. })) = line_steps.first_mut() {
-                if !inputs.is_empty() {
-                    *restart = true;
-                }
+        // A later line that is ITSELF a robot invocation naming its OWN input opens
+        // a new pipeline over that input: a separate process shares nothing with
+        // the last but files. Recording the boundary only for a line that happens
+        // to open with `merge --input` left every other opening op reading
+        // whatever the previous line had in memory — a CONSTRUCT's whole source
+        // ontology in place of the construct, or a query run against the wrong
+        // file entirely.
+        //
+        // Both conditions are load-bearing, and each was learnt from a build that
+        // came out wrong without it:
+        //
+        //  * a NON-robot line is a separate process too, but it neither takes nor
+        //    leaves an in-memory ontology, so the model in hand must SURVIVE it.
+        //    MONDO's `filtered.obo` is two `perl -ne …` filters and then a robot
+        //    invocation; resetting at the perl lines discarded the model the rest
+        //    of the recipe works on, growing four release artefacts by ~17 MB and
+        //    failing two outright. A shell line that rewrites the target on disk is
+        //    already handled downstream, by re-reading what it staged.
+        //  * a robot line naming NO input of its own continues from what it was
+        //    given, so it is not a boundary either. Every case that motivated this
+        //    — uPheno's bridge, OBA's PATO construct, EFO's legal_diseases — names
+        //    its input explicitly.
+        if command_lines > 0 && !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
+            if let Some(opens_with) = first_robot_input(&expanded, robot_prefix) {
+                line_steps.insert(0, Step::Boundary { input: Some(opens_with) });
             }
         }
         if !line_steps.is_empty() {
@@ -686,6 +709,13 @@ fn plan_rule(
         steps.extend(line_steps);
     }
     let mut input = recipe_input.or(prereq_input);
+    // A recipe whose ontology input is the target itself writes that file in an
+    // earlier step of the same recipe — `git show master:… > $@` ahead of
+    // `merge -i $@ reason -o $@.owl`. The rule PRODUCES its input, so recording it
+    // as one asks execution to build the target in order to build the target.
+    if input.as_deref() == Some(target) {
+        input = None;
+    }
     drop_target_round_trip(&mut steps, target);
     // A recipe that is nothing but recursive make is an aggregate wearing a
     // disguise: `feature_diff: make reports/a.txt -B; make reports/b.txt -B` says
@@ -998,7 +1028,30 @@ fn declared_components(repo: &OdkRepo) -> Vec<String> {
 /// `.github/workflows/`. EFO installs v1.9.7 there — the same generation its
 /// `ROBOT = ../../bin/robot` launcher points at — so `efo.json` carries no
 /// nested `meta`.
-fn robot_version(root: &Path, make: &super::makefile::MakeModel) -> Version {
+/// The ODK release the repo itself declares, if it declares one.
+///
+/// A repo built by the image states its release — in the Makefile's
+/// `ODK_VERSION_MAKEFILE`, in `run.sh.conf`, or as the `container:` of its
+/// workflows. A repo with a hand-written Makefile that launches its own tool
+/// states no release at all, and `None` is the honest answer: what it emulates is
+/// a tool version, recorded separately.
+fn odk_declared_version(root: &Path, make: &super::makefile::MakeModel) -> Option<Version> {
+    use super::workflows::odk_image_version;
+    let var = |name: &str| make.expand(&format!("$({name})")).trim().to_string();
+    if var("ANNOTATE_ONTOLOGY_VERSION").is_empty() {
+        return None;
+    }
+    let declared = var("ODK_VERSION_MAKEFILE");
+    let declared = declared.trim().trim_start_matches('v');
+    let parts: Vec<u32> = declared.split('.').filter_map(|p| p.parse().ok()).collect();
+    match parts.as_slice() {
+        [maj, min, patch, ..] => Some((*maj, *min, *patch)),
+        [maj, min] => Some((*maj, *min, 0)),
+        _ => odk_image_version(root),
+    }
+}
+
+fn emulate_robot_version(root: &Path, make: &super::makefile::MakeModel) -> Version {
     use super::workflows::{ci_robot_version, odk_image_version, odk_robot_version};
     let var = |name: &str| make.expand(&format!("$({name})")).trim().to_string();
     if var("ANNOTATE_ONTOLOGY_VERSION").is_empty() {
@@ -2123,7 +2176,7 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
         // drop redundant subclass axioms. Relaxed/simple then remove equivalence
         // axioms; simple additionally keeps only native ID-space classes.
         let mut steps = vec![
-            Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None, restart: false }),
+            Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None }),
             Step::Op(Op::Relax { include_subclass_of: false }),
             Step::Op(Op::Reason {
                 reasoner: Some(reasoner),
@@ -2231,7 +2284,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         create_new_ontology_with_annotations: None,
         exclude_duplicate_axioms: None,
     };
-    let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None, restart: false };
+    let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None };
     let ann = |art: &str| {
         Op::Annotate(AnnotateSpec {
             ontology_iri: Some(format!("{ontbase}/{art}")),
@@ -2330,6 +2383,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
     artefacts.retain(|a| matches(&a.target));
 
     Plan {
+        // No Makefile was read, so the repo stated no ODK release here; the
+        // current tool generation below is the honest default.
+        emulate_odk_version: None,
         // A repo with no Makefile has no conditional rule sets, so it exposes no
         // rebuild switches: an empty list is the honest statement, and
         // `--rebuild <anything>` on it is a hard error rather than a silent no-op.
@@ -2353,7 +2409,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
         catalog_file: catalog_file(&repo.dir),
-        robot_version: CURRENT_ROBOT,
+        emulate_robot_version: CURRENT_ROBOT,
         strict: false,
         xml_entities: false,
         dosdp,
@@ -2858,8 +2914,12 @@ fn kept_after_build(make: &MakeModel, path: &str) -> bool {
     if make.rules.values().any(|r| names(&r.prereqs) || names(&r.order_only)) {
         return true;
     }
-    // `.PRECIOUS` keeps what it covers, whether it names a file or a pattern.
-    make.rules.get(".PRECIOUS").is_some_and(|r| {
+    // `.PRECIOUS` and `.SECONDARY` both keep what they cover, whether they name a
+    // file or a pattern. `.SECONDARY` is the one that says "these are
+    // intermediates, but do not delete them", so a build configuration that
+    // declares it is asking for exactly the file the sweep would remove.
+    [".PRECIOUS", ".SECONDARY"].iter().any(|special| {
+    make.rules.get(*special).is_some_and(|r| {
         r.prereqs.iter().any(|p| {
             make.expand(p).split_whitespace().any(|t| {
                 super::makefile::match_pattern(t, path).is_some()
@@ -2868,6 +2928,7 @@ fn kept_after_build(make: &MakeModel, path: &str) -> bool {
                         .is_some_and(|(_, base)| super::makefile::match_pattern(t, base).is_some())
             })
         })
+    })
     })
 }
 

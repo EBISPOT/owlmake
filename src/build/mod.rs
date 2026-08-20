@@ -80,6 +80,10 @@ pub struct Repo<'a> {
     /// Borrowed from [`crate::odk::OdkRepo`], which lives for the whole run — a
     /// `Repo` is rebuilt per phase and could not carry this itself.
     pub built: &'a std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Targets whose build FAILED in this invocation — see [`crate::odk::OdkRepo`].
+    /// A target naming one of these as a prerequisite cannot be up to date,
+    /// however old the file sharing its name is.
+    pub failed: &'a std::cell::RefCell<std::collections::HashSet<String>>,
     /// Where release artefacts are written — the repo root for an ODK layout.
     ///
     /// The ODK builds each artefact IN `src/ontology` and copies it to the root
@@ -108,6 +112,7 @@ impl<'a> Repo<'a> {
             regenerate_patterns: true,
             kept_groups: Vec::new(),
             built: &repo.built,
+            failed: &repo.failed,
             output_dir: repo.root.clone(),
         }
     }
@@ -131,6 +136,7 @@ impl<'a> Repo<'a> {
                 .cloned()
                 .collect(),
             built: &repo.built,
+            failed: &repo.failed,
             output_dir: opts.output_dir.clone(),
         }
     }
@@ -458,7 +464,7 @@ pub fn run_target_recipe(
     run_target_recipe_planned(&Repo::of_with(repo, plan, opts), target)
 }
 
-/// The `robot_version` boundary at which both version-dependent byte behaviours
+/// The `emulate_robot_version` boundary at which both version-dependent byte behaviours
 /// flip: axiom annotations start nesting in OBO Graphs JSON, and a SPARQL update
 /// starts inheriting the document's prefixes.
 const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
@@ -467,15 +473,22 @@ const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
 /// under, from the one plan field that records which side of the boundary it is
 /// on.
 ///
-/// Both flip at the same boundary, so both read the same recorded fact. Deciding
-/// them separately would give a repo the older JSON nesting together with the
-/// newer prefix handling — a combination no release carries, and one that puts an
-/// `xmlns:doap`/`xmlns:protege` into `subsets/mondo-clingen.owl` that MONDO's own
+/// All three flip at the same boundary, so all three read the same recorded fact.
+/// Deciding them separately would give a repo the older JSON nesting together with
+/// the newer prefix handling — a combination no release carries, and one that puts
+/// an `xmlns:doap`/`xmlns:protege` into `subsets/mondo-clingen.owl` that MONDO's own
 /// releases do not have.
+///
+/// The third is the OBO extended prefix map. It is a data asset rather than a
+/// behaviour, but it belongs here for the same reason: which map is in hand decides
+/// how every CURIE in every SSSOM artefact resolves, and the two differ by 388
+/// prefixes. A version emulated with the other version's map is not approximately
+/// right, it is a different answer.
 pub fn set_robot_behaviours(plan: &Plan) {
-    let post_1_9_9 = plan.robot_version >= ROBOT_1_9_9;
+    let post_1_9_9 = plan.emulate_robot_version >= ROBOT_1_9_9;
     crate::io::obograph::set_nest_axiom_anns(post_1_9_9);
     crate::cmd::query::set_update_keeps_prefixes(post_1_9_9);
+    crate::sssom::converter::set_obo_epm(plan.emulate_robot_version);
 }
 
 fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
@@ -657,6 +670,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                 return Err(e).with_context(|| format!("building {}", a.target));
             }
             eprintln!("odk: *** [{}] {e:#}", a.target);
+            repo.failed.borrow_mut().insert(a.target.clone());
             failed.push(a.target.clone());
             continue;
         }
@@ -688,9 +702,32 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
             stage.finish_ok();
             continue;
         }
+        // A prerequisite that FAILED is not a prerequisite that is merely absent.
+        // Both look identical to the staleness test below — no file to stat — and
+        // reading the failure as "not newer" declares the target up to date, so
+        // whatever bytes happen to be on disk are published as this run's output.
+        // EFO's `components/legal_diseases.txt` is the case: its input
+        // `disease_to_phenotype_merged.owl` cannot be built (its own upstream
+        // serves a 404 page where an ontology should be), and om reported the
+        // target up to date and kept a file from a previous run. GNU make says
+        // `Target 'x' not remade because of errors`, and P5 says the same: a
+        // declared file that is missing is an error, not a filter.
+        if let Some(bad) = a.needs.iter().find(|n| repo.failed.borrow().contains(*n)) {
+            stage.finish_err();
+            let e = anyhow::anyhow!(
+                "not remade because of errors: prerequisite `{bad}` failed in this run"
+            );
+            if !opts.keep_going {
+                return Err(e).with_context(|| format!("building {}", a.target));
+            }
+            eprintln!("odk: *** [{}] {e:#}", a.target);
+            repo.failed.borrow_mut().insert(a.target.clone());
+            failed.push(a.target.clone());
+            continue;
+        }
         // A phony target names no file, so it is out of date however old the file
         // that happens to share its name is.
-        if !plan.phony.iter().any(|p| p == &a.target)
+        if !plan.is_phony(&a.target)
             && is_up_to_date(&out, &a.needs, &a.order_only, a.input.as_deref(), &opts.output_dir)
         {
             stage.finish_ok();
@@ -712,6 +749,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                     return Err(e).with_context(|| format!("building {}", a.target));
                 }
                 eprintln!("odk: *** [{}] {e:#}", a.target);
+                repo.failed.borrow_mut().insert(a.target.clone());
                 failed.push(a.target.clone());
             }
         }
@@ -1676,7 +1714,7 @@ fn run_target_recipe_inner(
     let forced = repo.always_make
         || (repo.refresh_imports && is_import_target(repo, target))
         || (repo.refresh_mirrors && is_mirror_target(repo, target));
-    if !a.steps.is_empty() && !forced && !repo.plan.phony.iter().any(|p| p == target) {
+    if !a.steps.is_empty() && !forced && !repo.plan.is_phony(target) {
         if let Some(out) = repo.target_file(target).filter(|p| p.is_file()) {
             let out_mtime = std::fs::metadata(&out).and_then(|m| m.modified()).ok();
             let newer = a.needs.iter().any(|pre| {
@@ -1988,10 +2026,19 @@ fn remove_transient(repo: &Repo, path: &str) {
 ///
 /// A run that did not remake one leaves it where it found it: the build removes
 /// what it wrote, not what was already there.
-pub fn sweep_transients(repo: &crate::odk::OdkRepo, plan: &Plan) {
+pub fn sweep_transients(repo: &crate::odk::OdkRepo, plan: &Plan, goals: &[String]) {
     let built = repo.built.borrow();
     for target in &plan.transient_targets {
         if !built.iter().any(|b| same_path(b, target)) {
+            continue;
+        }
+        // An intermediate the CALLER ASKED FOR is not an intermediate. GNU make
+        // deletes the files it made only on its way to something else; a file
+        // named on the command line is a goal, and a goal is never swept. Without
+        // this, `om make imports/chebi_bot.owl` wrote the 39 MB file, deleted it,
+        // and exited 0 — nine of EFO's targets producing nothing while reporting
+        // success, and no way to inspect an intermediate at all.
+        if goals.iter().any(|g| same_path(g, target)) {
             continue;
         }
         for base in [&repo.root, &repo.dir] {
@@ -2174,6 +2221,10 @@ fn run_cli_robot_step(
     args: &[String],
     model: crate::model::Model,
     work: &Path,
+    // The file the threaded model was loaded from, if any. A recorded `-i` that
+    // names it is the rule's own `$<` and is served from memory; one that names
+    // anything else is a command line reading its OWN input, and must read it.
+    pipeline_input: Option<&Path>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
     // Terminality is a property of the COMMAND, not of a flag scan. These write
@@ -2228,10 +2279,29 @@ fn run_cli_robot_step(
     let mut argv = vec![name.to_string()];
     let mut i = 0;
     let mut saw_input = false;
+    // Whether a recorded `-i <path>` is the rule's own pipeline input. A rule with
+    // more than one command line can name a different one — CL's `sparql_test` is
+    // `verify -i $(SRCMERGED) …` followed by `verify -i cl-full.owl …` — and
+    // serving that from the threaded model runs the first check twice and never
+    // runs the second. With no pipeline input at all, the model IS the input.
+    let threaded = pipeline_input.and_then(|p| p.canonicalize().ok());
+    let is_threaded = |tok: &str| match &threaded {
+        None => true,
+        Some(t) => {
+            let rel = tok.strip_prefix("src/ontology/").unwrap_or(tok);
+            repo.dir.join(rel).canonicalize().ok().as_ref() == Some(t)
+        }
+    };
     while i < args.len() {
         if args[i] == "-i" || args[i] == "--input" {
-            argv.push("--input".to_string());
-            argv.push(arg_path(&piped_in));
+            let recorded = args.get(i + 1).cloned().unwrap_or_default();
+            if is_threaded(&recorded) {
+                argv.push("--input".to_string());
+                argv.push(arg_path(&piped_in));
+            } else {
+                argv.push("--input".to_string());
+                argv.push(resolve_published_token(repo, &recorded));
+            }
             saw_input = true;
             i += 2; // drop the recorded path
             continue;
@@ -2255,6 +2325,21 @@ fn run_cli_robot_step(
         let _ = std::fs::remove_file(&piped_out);
         argv.push("--output".to_string());
         argv.push(arg_path(&piped_out));
+    }
+
+    // The handed-over model is written as the root document alone: its
+    // `Import(…)` declarations survive, the axioms they stand for do not. The
+    // child therefore has to resolve the same closure the parent did, and the
+    // repo's catalog is what resolves it — the chain file sits in owlmake's own
+    // working directory, so there is no importing-file neighbour to fall back on.
+    if !argv.iter().any(|a| a == "--catalog") {
+        if let Some(cat) = repo.plan.catalog_file.as_deref() {
+            let p = repo.dir.join(cat);
+            if p.exists() {
+                argv.push("--catalog".to_string());
+                argv.push(arg_path(&p));
+            }
+        }
     }
 
     recipe::run_owlmake_args(&argv, &repo.dir)
@@ -2337,11 +2422,12 @@ fn run_shell_step_in_pipeline(
     // produced. MONDO's second `filtered.obo` perl reads `$@`, and re-rendering it
     // would hand that perl owlmake's OBO output instead of the first perl's.
     model_on_disk: bool,
+    pipeline_input: Option<&Path>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
     // A chained command step threads the model rather than touching files.
     if let Step::CliRobot { name, args } = step {
-        return run_cli_robot_step(repo, name, args, model, work);
+        return run_cli_robot_step(repo, name, args, model, work, pipeline_input);
     }
     let touches_target = match (target, step_command_text(step)) {
         // Only an ontology target can be round-tripped; a rule writing a `.tsv`
@@ -2486,10 +2572,50 @@ fn run_steps(
     let mut model = model;
     let mut model_on_disk = false;
     let mut staged_by_shell = false;
-    for step in steps {
+    // The file the CURRENT invocation's model was loaded from. It changes at every
+    // `Boundary`, so it is state rather than a parameter: the ops after a boundary
+    // must see the new invocation's input, not the one the caller opened with.
+    let mut pipe: Option<PathBuf> = pipeline_input.map(|p| p.to_path_buf());
+    for (step_ix, step) in steps.iter().enumerate() {
         match step {
+            // A new invocation. It shares nothing with the last but files, so the
+            // model it starts from is its OWN `--input` — never what the previous
+            // command line happened to leave in memory.
+            Step::Boundary { input } => {
+                // A new command line is a new run, so its blank nodes number from
+                // the start again.
+                crate::io::reset_anon_counter();
+                match input.as_deref() {
+                    Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
+                        model = crate::io::load_iri(first, None)?;
+                        pipe = None;
+                    }
+                    Some(first) => {
+                        if resolve_repo_file(repo, first, work).is_none()
+                            && repo.target(first).is_some()
+                        {
+                            let mut s = std::collections::HashSet::new();
+                            run_target_recipe_inner(repo, first, &mut s)
+                                .with_context(|| format!("building invocation input {first}"))?;
+                        }
+                        let p = resolve_repo_file(repo, first, work).with_context(|| {
+                            format!("invocation input `{first}` does not exist and cannot be built")
+                        })?;
+                        model = crate::io::load(&p)?;
+                        pipe = Some(p);
+                    }
+                    // An invocation that names no input of its own starts from
+                    // nothing; its steps build the model themselves.
+                    None => {
+                        model = crate::model::Model::new();
+                        pipe = None;
+                    }
+                }
+                model_on_disk = false;
+                staged_by_shell = false;
+            }
             Step::Op(op) | Step::Partial { op, .. } => {
-                model = apply_op(repo, op, model, catalog, work, None, pipeline_input)?;
+                model = apply_op(repo, op, model, catalog, work, None, pipe.as_deref())?;
                 if let Some(t) = target {
                     dump_step(t, &model);
                 }
@@ -2500,7 +2626,7 @@ fn run_steps(
             Step::Branch { condition, then_steps, else_steps } => {
                 let body = if eval_condition(repo, condition) { then_steps } else { else_steps };
                 model =
-                    run_steps(repo, body, model, catalog, work, target, writes_model_after, pipeline_input)?;
+                    run_steps(repo, body, model, catalog, work, target, writes_model_after, pipe.as_deref())?;
             }
             // Side-effect file ops (append/sort/print) genuinely mutate the
             // filesystem later steps read, so run them; output-bookkeeping ops
@@ -2537,7 +2663,16 @@ fn run_steps(
                     // temp file the pipeline never wrote still falls through to the
                     // final write.
                     op.run(&repo.dir)?;
-                    if crate::io::Format::from_path(Path::new(&dst)).is_ok() {
+                    // Re-read only where a later op will operate on it. The
+                    // re-read exists to hand the REST of the recipe what is now on
+                    // disk; with nothing left to hand it to, a target whose
+                    // extension merely looks like an ontology must not be parsed as
+                    // one. `tmp/obo.epm.json` is a prefix map that a `.json` reader
+                    // rejects, and the recipe that copies it has no later op.
+                    let later_op = steps[step_ix + 1..]
+                        .iter()
+                        .any(|s| matches!(s, Step::Op(_) | Step::Partial { .. }));
+                    if later_op && crate::io::Format::from_path(Path::new(&dst)).is_ok() {
                         model = crate::io::load(&repo.dir.join(&dst))
                             .with_context(|| format!("re-reading {dst} after a staged move"))?;
                         model_on_disk = true;
@@ -2546,7 +2681,9 @@ fn run_steps(
             }
             Step::Inert(_) => {} // no observable effect; never reaches a plan
             s if is_shell_step(s) => {
-                model = run_shell_step_in_pipeline(repo, s, model, target, work, model_on_disk)?;
+                model = run_shell_step_in_pipeline(
+                    repo, s, model, target, work, model_on_disk, pipeline_input,
+                )?;
                 model_on_disk = false;
                 staged_by_shell = true;
             }
@@ -3239,6 +3376,7 @@ fn strip_import_annotation_properties(
 /// template output it was built from, losing all 20,047 constructed triples and
 /// with them every `gwas_trait` assertion in `components/gwas_import.owl`.
 fn step_writes_target(steps: &[Step], target: &str) -> bool {
+    let written = step_built_paths(steps);
     steps.iter().any(|s| match s {
         Step::Op(Op::Query { constructs, selects, .. })
         | Step::Partial { op: Op::Query { constructs, selects, .. }, .. } => constructs
@@ -3274,8 +3412,63 @@ fn step_writes_target(steps: &[Step], target: &str) -> bool {
         // reports are read out of it: written over with an empty ontology, the
         // diff sees no previous release and calls all 22,000 terms new.
         Step::File(crate::build::recipe::FileOp::Fetch { dst, .. }) => dst == target,
+        // A `mv`/`cp` onto the target whose SOURCE an earlier step of this same
+        // recipe wrote is a real move: the file it names exists because the recipe
+        // put it there, and moving it is how the target gets its content.
+        //
+        // That is what separates it from output bookkeeping. The common shape,
+        // `--output $@.tmp.owl && mv $@.tmp.owl $@`, has its `-o` elided at ingest
+        // because the temp file and the target want the same serialization — no
+        // step writes `$@.tmp.owl`, the model write puts the bytes straight on the
+        // target, and the move is a no-op standing in for it. But where the two
+        // want DIFFERENT serializations, ingest keeps the write: ECTO's
+        // `merge -i $(SRC) reason -o $@.owl && mv $@.owl $@` builds
+        // `tmp/ecto-quick.obo` out of a genuine RDF/XML round trip through
+        // `tmp/ecto-quick.obo.owl`. Read as bookkeeping, that produced 27 MB of
+        // correct RDF/XML and then replaced it with OBO inferred from the target's
+        // extension.
+        Step::File(
+            crate::build::recipe::FileOp::Move { src, dst }
+            | crate::build::recipe::FileOp::Copy { src, dst, .. },
+        ) => {
+            same_path(dst, target) && src.iter().any(|s| written.iter().any(|w| same_path(w, s)))
+        }
         _ => false,
     })
+}
+
+/// The paths this recipe's steps write by building something, as against by
+/// moving or copying a file that already exists. What a later `mv`/`cp` onto the
+/// target would be moving, if the recipe made it.
+fn step_built_paths(steps: &[Step]) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in steps {
+        match s {
+            Step::Op(Op::RoundTrip { path, .. }) | Step::Partial { op: Op::RoundTrip { path, .. }, .. } => {
+                out.push(path.clone());
+            }
+            Step::Op(Op::Query { constructs, selects, .. })
+            | Step::Partial { op: Op::Query { constructs, selects, .. }, .. } => {
+                out.extend(constructs.iter().chain(selects.iter()).map(|(_, o)| o.clone()));
+            }
+            Step::Op(Op::Babelon { output: Some(o), .. })
+            | Step::Partial { op: Op::Babelon { output: Some(o), .. }, .. } => out.push(o.clone()),
+            Step::CliRobot { args, .. } => {
+                for w in args.windows(2) {
+                    if matches!(w[0].as_str(), "-o" | "--output" | "--write-tags-to" | "--bridge-file") {
+                        out.push(w[1].clone());
+                    }
+                }
+            }
+            Step::File(crate::build::recipe::FileOp::Fetch { dst, .. }) => out.push(dst.clone()),
+            // A shell line's `> FILE` redirect is the file that line builds.
+            Step::Shell { .. } | Step::Fallback { .. } => {
+                out.extend(crate::plan::gaps::recipe_outputs(std::slice::from_ref(s)));
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn run_artefact(
@@ -3315,7 +3508,7 @@ fn run_artefact(
             .with_context(|| format!("creating {} for `{}`", dst.display(), a.target))?;
     }
     let input_path =
-        a.input.as_deref().and_then(|i| resolve_input(repo, Some(i), out_dir, work).ok());
+        a.input.as_deref().and_then(|i| resolve_input(repo, Some(i), out_dir, work, &a.target).ok());
     // …but an input the plan can BUILD and that is still missing is a failed
     // prerequisite, not "this rule has no input". The cases above are all rules
     // whose input the plan never claims to make; discarding the error for those
@@ -3330,7 +3523,12 @@ fn run_artefact(
     if input_path.is_none() {
         if let Some(i) = a.input.as_deref() {
             let names_ontology = crate::io::Format::from_path(Path::new(i)).is_ok();
-            if names_ontology && repo.target(i).is_some() {
+            // …unless the input IS the target, which is not a prerequisite at all
+            // but a file this recipe's own earlier step writes (`wget … -O $@` /
+            // `git show … > $@`, then `merge -i $@`). Nothing has built it yet
+            // because nothing was supposed to.
+            let self_input = i == a.target;
+            if names_ontology && !self_input && repo.target(i).is_some() {
                 bail!(
                     "input `{i}` of `{}` was not built — its rule failed or was skipped, \
                      so there is nothing to build `{}` from",
@@ -3425,8 +3623,20 @@ fn run_artefact(
         // model built from a TSV, and every one of those files is committed — so
         // a presence test skips the write and the release ships the previous
         // release's translation under this release's version IRI.
-        let writes_model_after =
-            target_is_ontology && threads_model && !step_writes_target(&a.steps, &a.target);
+        // …and only when there is a model to write. A recipe made entirely of file
+        // operations threads nothing: `needs_model` is false, so the model here is
+        // the empty one, and serializing it over the target replaces whatever the
+        // recipe produced with an empty ontology.
+        //
+        // …and never for a phony target. A phony names no file, so the model a
+        // rule like `component-download-<x>.owl` threads belongs wherever its own
+        // `--output` puts it, and writing it under the target's name as well leaves
+        // a file the build configuration says does not exist.
+        let writes_model_after = target_is_ontology
+            && threads_model
+            && needs_model
+            && !repo.plan.is_phony(&a.target)
+            && !step_writes_target(&a.steps, &a.target);
         let mut model = run_steps(
             repo,
             &a.steps,
@@ -3460,8 +3670,19 @@ fn run_artefact(
     } else {
         // Load the pipeline input (`$<`) once, then thread the model through every
         // step in memory — no temp-file re-parsing between steps.
-        let input = resolve_input(repo, a.input.as_deref(), out_dir, work)?;
-        let m = crate::io::load(&input)?;
+        let input = resolve_input(repo, a.input.as_deref(), out_dir, work, &a.target)?;
+        let mut m = crate::io::load(&input)?;
+        // A functional document banners each entity with the label it carries
+        // ANYWHERE in the closure — an edit file that only DECLARES a class still
+        // names it by the label its imported pattern module asserts. The closure is
+        // read for its labels alone and dropped; nothing here changes an axiom.
+        //
+        // Only for a rule that writes functional syntax: reading the closure costs
+        // a load of every imported document, and no other serialization has these
+        // banners to fill in.
+        if m.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+            m.banner_labels = closure_banner_labels(&m, &repo.dir, catalog);
+        }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
         m
     };
@@ -3519,6 +3740,32 @@ fn run_artefact(
     for step in &a.steps {
         let op = match step {
             Step::Op(op) => op,
+            // A new tool invocation: it shares nothing with the last but files, so
+            // the model it works on is its OWN input, re-read from disk. The
+            // artefact pipeline reaches the same boundaries the prerequisite
+            // pipeline does — MONDO's `mondo-international.owl` builds
+            // `../translations/mondo-jp.babelon.owl`, whose recipe has one — and
+            // without this arm the step fell through to the catch-all and failed
+            // the target outright.
+            Step::Boundary { input } => {
+                crate::io::reset_anon_counter();
+                match input.as_deref() {
+                    Some(first) => {
+                        let p = resolve_repo_file(repo, first, work).with_context(|| {
+                            format!("invocation input `{first}` of `{}` does not exist", a.target)
+                        })?;
+                        model = crate::io::load(&p)?;
+                        threaded_from = Some(p);
+                    }
+                    None => {
+                        model = crate::model::Model::new();
+                        threaded_from = None;
+                    }
+                }
+                model_on_disk = false;
+                staged_by_shell = false;
+                continue;
+            }
             // benign (echo/cat) or a file op — the in-memory pipeline writes the
             // output itself, so output-bookkeeping ops are no-ops here; only
             // genuine side-effect file ops (append/sort/print) actually run.
@@ -3569,8 +3816,15 @@ fn run_artefact(
                         shell_wrote_target = true;
                     }
                 }
-                model =
-                    run_shell_step_in_pipeline(repo, s, model, Some(&a.target), work, model_on_disk)?;
+                model = run_shell_step_in_pipeline(
+                    repo,
+                    s,
+                    model,
+                    Some(&a.target),
+                    work,
+                    model_on_disk,
+                    threaded_from.as_deref(),
+                )?;
                 model_on_disk = false;
                 staged_by_shell = true;
                 continue;
@@ -3607,6 +3861,12 @@ fn run_artefact(
         if let Some(cl) = &closure {
             model.closure_ann_ns = annotation_property_namespaces(cl);
             model.closure_declared = closure_declared_entities(cl);
+            // A functional document names each entity's section after its label,
+            // and an entity the root only REFERENCES is labelled by the ontology
+            // that declares it. `oba-edit.obo` gives `OBA:0000003` no `name:` at
+            // all — the label is in the `patterns/definitions.owl` it imports — so
+            // without the closure every such section falls back to the IRI.
+            model.banner_labels = closure_labels(cl);
         }
         withdraw_materialised_declarations(&mut model);
     }
@@ -3668,6 +3928,26 @@ fn run_artefact(
     let no_model_op = !a.steps.is_empty()
         && !a.steps.iter().any(|s| matches!(s, Step::Op(_) | Step::Partial { .. }));
     if no_model_op {
+        return surface_produced(repo, &a.target, &a.steps, work, out);
+    }
+    // A DECLARED phony target gets no file. This write never asked, and a `.PHONY`
+    // target whose recipe threads a model was handed one anyway — materialised as
+    // a real file named after something that was never meant to be one, which a
+    // later rule then reads as though the build had produced it.
+    //
+    // The declared list ONLY, deliberately, and not the shape test that
+    // `names_a_file` also applies. The two questions are not the same question,
+    // and they are not symmetric in what a wrong answer costs:
+    //
+    //   * DEMANDING a file (the post-condition below) may be waived on a bare
+    //     name, because a rule that legitimately writes nothing must not fail.
+    //     Being lenient there costs a missed check.
+    //   * SKIPPING a write may not. ECTO's `mre` is a bare name — no directory,
+    //     no extension, absent from `.PHONY` — whose recipe is
+    //     `filter -i $(SRC) -T tmp/mre_seed.txt -o $@`, so the terminal write IS
+    //     how the target is produced. Judging it by shape here would skip that
+    //     write and destroy the output rather than merely fail to check for it.
+    if repo.plan.is_phony(&a.target) {
         return surface_produced(repo, &a.target, &a.steps, work, out);
     }
     let write_res = match explicit_fmt.or_else(|| crate::io::Format::from_path(out).ok()) {
@@ -3848,12 +4128,14 @@ fn collapse_rdf_roundtrip(model: &mut crate::model::Model) {
 /// Nothing named after the target is ever created, so requiring one fails the
 /// release build at artefact 23 of 35.
 ///
-/// Judge by shape rather than by the plan's `phony` list, which carries only the
-/// names a repo declared literally and so never covers a pattern rule's
-/// expansions: no directory component and no extension means the name cannot be a
-/// file. Anything that does look like a path must still appear — a rule that
-/// silently produced nothing is a real failure, and that is what this check is
-/// for.
+/// Two things say a target names no file, and both are needed. The plan's
+/// `phony` list is authoritative for the names a repo declared, and covers the
+/// ones that look exactly like paths — `component-download-<x>.owl`. Shape
+/// covers what the list cannot: a pattern rule's expansions are never declared
+/// literally, and there a name with no directory component and no extension
+/// cannot be a file. Anything that neither rule excuses must still appear — a
+/// rule that silently produced nothing is a real failure, and that is what this
+/// check is for.
 ///
 /// Unless the rule's own steps write nothing anywhere. A recipe carries no
 /// post-condition, and a repo may override a rule precisely to turn a check off —
@@ -3870,8 +4152,13 @@ fn surface_produced(
 ) -> Result<()> {
     let produced = repo.dir.join(target);
     if !produced.exists() {
-        let t = Path::new(target);
-        if t.parent().is_none_or(|p| p.as_os_str().is_empty()) && t.extension().is_none() {
+        if !repo.plan.names_a_file(target) {
+            return Ok(());
+        }
+        // A PHONY target names no file, whatever its name looks like, so there is
+        // nothing to find here. CL's component refresh is four phony rules called
+        // `component-download-<x>.owl`, each writing its download into `tmp/`.
+        if repo.plan.phony.iter().any(|p| p == target) {
             return Ok(());
         }
         // A step that cannot name the target cannot have written it. There is no
@@ -4312,6 +4599,37 @@ pub(crate) fn annotation_property_namespaces(model: &crate::model::Model) -> Vec
 /// in `filtered.owl`/`reasoned.owl`, and from there into `tmp/simple_seed.txt`
 /// (whose query asks for `?cls a owl:AnnotationProperty`), which keeps axioms
 /// `filter` must drop from `mondo-simple.owl`.
+/// `entity IRI → rdfs:label` across a resolved import closure, for the banner
+/// comment a functional document heads each entity's section with.
+///
+/// The FIRST label an entity carries wins, which is how a subject with several
+/// is settled everywhere else here.
+fn closure_labels(
+    model: &crate::model::Model,
+) -> std::collections::HashMap<String, String> {
+    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component, Literal};
+    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+    let mut labels = std::collections::HashMap::new();
+    for ac in model.ont.iter() {
+        if let Component::AnnotationAssertion(aa) = &ac.component {
+            if aa.ann.ap.0.as_ref() != RDFS_LABEL {
+                continue;
+            }
+            if let (AnnotationSubject::IRI(subj), AnnotationValue::Literal(lit)) =
+                (&aa.subject, &aa.ann.av)
+            {
+                let text = match lit {
+                    Literal::Simple { literal }
+                    | Literal::Language { literal, .. }
+                    | Literal::Datatype { literal, .. } => literal.clone(),
+                };
+                labels.entry(subj.as_ref().to_string()).or_insert(text);
+            }
+        }
+    }
+    labels
+}
+
 pub(crate) fn closure_declared_entities(
     model: &crate::model::Model,
 ) -> std::collections::HashSet<String> {
@@ -4348,16 +4666,18 @@ fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
     if model.materialised_declarations.is_empty() || model.closure_declared.is_empty() {
         return;
     }
-    // A CLASS is never withdrawn: OBO format allows dangling references to classes
-    // in class expressions, so every class met in one is declared explicitly, as is
-    // each term frame's own class. An OBO-sourced ontology therefore genuinely
-    // holds all 8,087 `identifiers.org/hgnc/*` declarations and stubs them, closure
-    // or no closure. Only properties are in question: an annotation property named
-    // by a `property_value:` predicate, and an object property used in a
-    // `relationship:` with no `[Typedef]` frame, get no declaration from the OBO
-    // translation.
+    // Which classes are in question is settled at read time: a class named as the
+    // FILLER of a `relationship:` is declared by the document outright and never
+    // reaches the materialised set, so it keeps its stub whatever the closure holds,
+    // and an OBO-sourced ontology still stubs all 8,087 `identifiers.org/hgnc/*`
+    // classes. A class named only as a PLAIN operand — of `is_a:`,
+    // `disjoint_from:`, a bare `intersection_of:` or a `union_of:` — is left to the
+    // signature, so an imported ontology that types it suppresses the stub.
+    // Properties work the same way: an annotation property named by a
+    // `property_value:` predicate, and an object property used in a `relationship:`
+    // with no `[Typedef]` frame, get no declaration from the OBO translation.
     //
-    // Nor is a BUILT-IN withdrawn. The property behind every OBO *tag* is declared,
+    // A BUILT-IN is never withdrawn. The property behind every OBO *tag* is declared,
     // which is where `rdfs:label`, `rdfs:comment` and `owl:deprecated` come from;
     // those are genuine, and the writer's signature path skips built-ins, so
     // withdrawing them loses the section entirely.
@@ -4372,6 +4692,9 @@ fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
         .iter()
         .filter(|ac| {
             let (key, iri) = match &ac.component {
+                Component::DeclareClass(d) => {
+                    (format!("class\u{0}{}", d.0 .0.as_ref()), d.0 .0.as_ref())
+                }
                 Component::DeclareObjectProperty(d) => {
                     (format!("op\u{0}{}", d.0 .0.as_ref()), d.0 .0.as_ref())
                 }
@@ -4396,8 +4719,19 @@ pub(crate) fn load_closure(
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
 ) -> Result<Option<crate::model::Model>> {
+    // The build reaches the closure here rather than through
+    // `resolve_import_closure`, so it reports itself here too — otherwise
+    // `OM_IMPORT_DEBUG` is silent on this path while the closure IS loaded, and
+    // that silence reads as proof it is not.
+    let debug = std::env::var("OM_IMPORT_DEBUG").is_ok();
     if !model_has_imports(model) {
+        if debug {
+            eprintln!("[import] load_closure: model declares no imports, no closure loaded");
+        }
         return Ok(None);
+    }
+    if debug {
+        eprintln!("[import] load_closure: building the closure for entity typing");
     }
     let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     let mut closure = empty_model();
@@ -4606,7 +4940,13 @@ fn staged_target(
     // `cp reports/report-base-…tsv $@` followed by three `sed -i $@`, so gating on
     // a readable model would skip the `cp` and leave every `sed` failing on a file
     // that was never created. The caller re-reads the model only when it can.
-    if src.is_empty() || !src.iter().all(|s| repo.dir.join(s).exists()) {
+    // A source owlmake serves from its own bytes counts as present. It exists at
+    // the reference image's path rather than this machine's, and the copy
+    // materialises it when it runs — so asking the filesystem alone skips the
+    // step that would have created the file.
+    let available =
+        |s: &String| repo.dir.join(s).exists() || recipe::is_served_image_asset(s);
+    if src.is_empty() || !src.iter().all(available) {
         return None;
     }
     Some(dst.clone())
@@ -4684,6 +5024,19 @@ fn write_step_output(
         .as_deref()
         .and_then(|f| crate::io::Format::from_name(f).ok())
         .or_else(|| crate::io::Format::from_path(&out).ok());
+    // What the closure declares decides what this document must stub, exactly as
+    // it does for a target's own closing write. A mirror recipe is the case:
+    // `convert -I …/taxslim-disjoint-over-in-taxon.owl -o tmp/mirror-<id>.owl`
+    // states nothing but disjointness over taxa that `taxslim.owl` declares, and
+    // every one of them belongs to the import rather than to this document.
+    if matches!(fmt, Some(crate::io::Format::RdfXml) | None) && model_has_imports(model) {
+        let catalog = load_catalog_planned(repo);
+        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+            model.closure_ann_ns = annotation_property_namespaces(&cl);
+            model.closure_declared = closure_declared_entities(&cl);
+        }
+        withdraw_materialised_declarations(model);
+    }
     match fmt {
         Some(f) => crate::io::save_as(model, &out, f),
         None => crate::io::save(model, &out),
@@ -4705,41 +5058,8 @@ fn apply_op(
 ) -> Result<crate::model::Model> {
     let mut model = model;
     Ok(match op {
-        Op::Merge { inputs, collapse_import_closure, restart } => {
+        Op::Merge { inputs, collapse_import_closure } => {
             let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-            // A merge that OPENS a pipeline reads its inputs and nothing else:
-            // the model becomes the first input, LOADED as this invocation's own,
-            // and the rest merge into it. What the previous command line left
-            // behind is another invocation's business — and an empty model in its
-            // place would give the document owlmake's built-in prefix map rather
-            // than the file's own.
-            if *restart {
-                let first = inputs
-                    .first()
-                    .context("a merge that opens a pipeline names no input to open it with")?;
-                if first.starts_with("http://") || first.starts_with("https://") {
-                    // A new command line is a new run, so its blank nodes number
-                    // from the start again — the second line of uPheno's bridge
-                    // recipe reads `tmp/bridge.ttl` as `_:genid2147483648` onwards
-                    // however many the first line consumed.
-                    crate::io::reset_anon_counter();
-                    model = crate::io::load_iri(first, None)?;
-                } else {
-                    if resolve_repo_file(repo, first, work).is_none()
-                        && repo.target(first).is_some()
-                    {
-                        let mut s = std::collections::HashSet::new();
-                        run_target_recipe_inner(repo, first, &mut s)
-                            .with_context(|| format!("building merge prerequisite {first}"))?;
-                    }
-                    let p = resolve_repo_file(repo, first, work).with_context(|| {
-                        format!("merge input `{first}` does not exist and cannot be built")
-                    })?;
-                    crate::io::reset_anon_counter();
-                    model = crate::io::load(&p)?;
-                    seen.insert(p);
-                }
-            }
             // The pipeline input is ALREADY this model. `merge -i $<` is one read of
             // one file; owlmake loads `$<` to start the chain and then reaches this
             // op with `$<` still listed as an input, so merging it again would read
@@ -4753,7 +5073,7 @@ fn apply_op(
             // Compared canonically: the chain resolves `$<` through `resolve_input`
             // (which may hand back an OFN cache) and this op through
             // `resolve_repo_file`, so the two spellings of one file need not match.
-            let threaded = pipeline_input.filter(|_| !*restart).and_then(|p| p.canonicalize().ok());
+            let threaded = pipeline_input.and_then(|p| p.canonicalize().ok());
             let is_threaded = |p: &Path| {
                 threaded.is_some() && p.canonicalize().ok() == threaded
             };
@@ -5109,6 +5429,37 @@ fn apply_op(
             };
             cmd::mint::step(Some(model), &args)?
                 .expect("mint returns the model it was piped")
+        }
+        Op::AddPrefix { prefixes } => {
+            // `"foo: http://bar"` — the spelling ROBOT's global option takes. The
+            // binding goes on the model, so the document written at the end of the
+            // chain declares it even where nothing references it: an `xmlns:obo`
+            // the reference emits and owlmake did not is a byte difference, and a
+            // binding a later step DOES resolve a CURIE against is a different IRI.
+            //
+            // Both maps: an RDF/XML document's `xmlns` block is written from
+            // `idspaces` — the verbatim bindings its source carried — and the
+            // formal prefix map is consulted only where there are none. A binding
+            // that reaches one and not the other declares itself in some output
+            // formats and not others.
+            for spec in prefixes {
+                if let Some((name, ns)) = spec.split_once(':') {
+                    let (name, ns) = (name.trim(), ns.trim());
+                    let _ = model.prefixes.add_prefix(name, ns);
+                    if !model.idspaces.iter().any(|(p, _)| p == name) {
+                        model.idspaces.push((name.to_string(), ns.to_string()));
+                    }
+                    // …including the format prefixes an RDF/XML source carried:
+                    // those take precedence over both maps above when the xmlns
+                    // block is written, so a binding that reached only the others
+                    // would be declared in every output format except the one this
+                    // recipe writes.
+                    if !model.rdf_prefixes.iter().any(|(p, _)| p == name) {
+                        model.rdf_prefixes.push((name.to_string(), ns.to_string()));
+                    }
+                }
+            }
+            model
         }
         Op::Normalize { base_iris, subset_decls, synonym_decls, add_source } => {
             // A recorded `--base-iri` NARROWS nothing: the namespaces it names are
@@ -5503,6 +5854,38 @@ fn fetch_import_iri(iri: &str, dir: &Path) -> Result<PathBuf> {
 }
 
 /// Files imported (`owl:imports`) by the current model, resolved via the catalog.
+/// Does this recipe write OWL functional syntax — the one serialization whose
+/// per-entity banners carry labels?
+fn writes_functional_syntax(steps: &[Step]) -> bool {
+    steps.iter().any(|s| {
+        matches!(
+            s,
+            Step::Op(Op::Convert { format: Some(f), .. })
+                | Step::Partial { op: Op::Convert { format: Some(f), .. }, .. }
+            if matches!(crate::io::Format::from_name(f), Ok(crate::io::Format::Functional))
+        )
+    })
+}
+
+/// The banner label set for a document with an import closure: the labels its own
+/// axioms assert together with those its closure asserts, decided between by the
+/// one rule (`cmd::rdfs_labels`). Best-effort — a closure that cannot be read
+/// leaves the document's own labels, and banners fall back to the entity IRI.
+fn closure_banner_labels(
+    model: &crate::model::Model,
+    dir: &Path,
+    catalog: &BTreeMap<String, PathBuf>,
+) -> std::collections::HashMap<String, String> {
+    let mut scratch = model.clone();
+    let mut seen = std::collections::HashSet::new();
+    if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
+        for f in &files {
+            let _ = merge_file_into(&mut scratch, f);
+        }
+    }
+    crate::cmd::rdfs_labels(&scratch)
+}
+
 fn import_closure_of_model(
     model: &crate::model::Model,
     dir: &Path,
@@ -5636,7 +6019,13 @@ pub(crate) fn merge_file_into_as(
 
 /// Resolve a recipe input token to a concrete file, building it from its rule
 /// if it is a (convert-only) intermediate such as `EDIT_PREPROCESSED`.
-fn resolve_input(repo: &Repo, input: Option<&str>, out_dir: &Path, work: &Path) -> Result<PathBuf> {
+fn resolve_input(
+    repo: &Repo,
+    input: Option<&str>,
+    out_dir: &Path,
+    work: &Path,
+    target: &str,
+) -> Result<PathBuf> {
     let inp = input.ok_or_else(|| anyhow::anyhow!("recipe has no input ($<)"))?;
     // A real file in the ontology dir WINS over the OFN cache. The cache is more
     // faithful than an RDF/XML round trip — that is exactly the problem. Each
@@ -5700,6 +6089,29 @@ fn resolve_input(repo: &Repo, input: Option<&str>, out_dir: &Path, work: &Path) 
     // is left to its import to declare — so the file would lose the 2192
     // declarations the merged one carries, leaving every seed and artefact drawn
     // from it short by the imported properties.
+    // A recipe whose input IS its own target names a file the recipe itself
+    // creates, not a prerequisite: EFO's
+    //
+    // ```text
+    // tmp/efo-master.owl:
+    //     git show master:src/ontology/efo-edit.owl > $@
+    //     robot --catalog catalog-v001.xml merge -i $@ -o $@.owl && mv $@.owl $@
+    // ```
+    //
+    // has no prerequisites at all — the first line writes `$@` and the second
+    // reads it back. Treating `-i $@` as something to build re-enters the rule
+    // that is already running, and because this path bypasses the run-wide memo
+    // in `ensure_prerequisite` the recursion is unbounded: the process dies of a
+    // stack overflow rather than reporting anything.
+    //
+    // The file is absent at this point only because the step that writes it has
+    // not run yet, so there is nothing to resolve and the caller's own steps must
+    // produce it.
+    if inp == target {
+        bail!(
+            "`{target}` names itself as its recipe input, and the step that writes it has not run yet"
+        );
+    }
     if let Some(planned) = repo.target(inp) {
         let pure_convert = planned
             .steps
@@ -5864,6 +6276,27 @@ fn build_seed(repo: &Repo, seed_rel: &str, work: &Path) -> Result<PathBuf> {
         }
     }
 
+    // Literal IRIs appended by the recipe (e.g. SubsetProperty/SynonymTypeProperty).
+    let echoed: Vec<String> = planned
+        .steps
+        .iter()
+        .flat_map(step_shell_text)
+        .flat_map(|l| extract_echo_iris(&l))
+        .collect();
+
+    // A seed is DERIVED from what its rule runs. A rule with no recipe runs
+    // nothing, and there is nothing to derive it from: ECTO's `tmp/mre_seed.txt:`
+    // is an empty rule, which make treats as made without creating a file. Writing
+    // an empty seed here would answer a missing term file with one that selects
+    // nothing, filtering the artefact down to nothing instead of saying the file
+    // is absent — a declared file that is missing is an error, not a filter.
+    if query_files.is_empty() && echoed.is_empty() {
+        bail!(
+            "term file `{seed_rel}` does not exist and nothing derives it: its rule runs no \
+             query and names no terms, so no file is produced"
+        );
+    }
+
     let mut terms: BTreeSet<String> = BTreeSet::new();
     for qf in &query_files {
         let sparql = std::fs::read_to_string(qf).with_context(|| format!("reading {}", qf.display()))?;
@@ -5877,8 +6310,7 @@ fn build_seed(repo: &Repo, seed_rel: &str, work: &Path) -> Result<PathBuf> {
             }
         }
     }
-    // Literal IRIs appended by the recipe (e.g. SubsetProperty/SynonymTypeProperty).
-    for iri in planned.steps.iter().flat_map(step_shell_text).flat_map(|l| extract_echo_iris(&l)) {
+    for iri in echoed {
         terms.insert(iri);
     }
 

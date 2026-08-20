@@ -716,10 +716,8 @@ fn obsolete_classes(model: &Model) -> HashSet<String> {
             continue;
         }
         let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
-        if let AnnotationValue::Literal(l) = &aa.ann.av {
-            if l.literal() == "true" {
-                out.insert(subj.as_ref().to_string());
-            }
+        if crate::model::asserts_deprecated(&aa.ann.av) {
+            out.insert(subj.as_ref().to_string());
         }
     }
     out

@@ -200,6 +200,12 @@ pub fn prerequisite_gaps(
         if phony.contains(n) {
             continue;
         }
+        // A data asset owlmake serves from its own bytes is not a missing input.
+        // The path is the reference image's, so it never exists here, and the
+        // bytes arrive when the recipe runs — which is after this gate.
+        if crate::build::recipe::is_served_image_asset(n) {
+            continue;
+        }
         if !planned.contains(n) && !dir.join(n).exists() {
             gaps.push(format!(
                 "needs `{n}`, which is absent and has no rule to build"

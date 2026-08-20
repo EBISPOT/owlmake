@@ -69,6 +69,48 @@ pub const SLOT_ORDER: &[&str] = &[
     "extension_definitions", "record_id",
 ];
 
+/// The mapping-level schema: every slot a mapping record may carry as a TSV
+/// column, in the order the columns are written.
+///
+/// This is deliberately NOT [`SLOT_ORDER`]. That sequence declares the schema as
+/// a whole, header slots included, and its order governs the YAML header; the
+/// columns of the table are their own sequence, and the two disagree in four
+/// places (`predicate_label` precedes `predicate_modifier` here; author, then
+/// reviewer, then creator; the curation-rule pair precedes `match_string`;
+/// `see_also` precedes `issue_tracker_item`).
+///
+/// A slot absent from this list is not written as a column even when a record
+/// holds a value for it. Seven are known to the schema yet have no mapping-level
+/// column — `cardinality_scope`, `derived_from`, `mapping_tool_id`,
+/// `predicate_type`, `record_id`, `review_date` and `reviewer_agreement`. Some
+/// are set-level only: `mapping_tool_id` still reaches the header when
+/// `condense` lifts it, which is why the value is dropped from the COLUMN set
+/// and never from the record.
+///
+/// `mapping_cardinality` is NOT among them, though `sssom-cli` never writes one.
+/// That is the COMMAND's behaviour and not the slot's: `sssom:xref-extract
+/// --drop-duplicates` writes the column, and feeding its output straight back
+/// through `sssom-cli` takes the column away again. So the slot has a column
+/// here, and `sssom-cli` clears it from the records it is about to write,
+/// because a cardinality it did not derive describes a set that no longer
+/// exists.
+///
+/// Columns the schema does not describe at all are extensions, and those are
+/// kept, appended after these in the order the extension rules give.
+pub const MAPPING_COLUMN_ORDER: &[&str] = &[
+    "subject_id", "subject_label", "subject_category", "predicate_id", "predicate_label",
+    "predicate_modifier", "object_id", "object_label", "object_category",
+    "mapping_justification", "author_id", "author_label", "reviewer_id", "reviewer_label",
+    "creator_id", "creator_label", "license", "subject_type", "subject_source",
+    "subject_source_version", "object_type", "object_source", "object_source_version",
+    "mapping_provider", "mapping_source", "mapping_cardinality", "mapping_tool",
+    "mapping_tool_version",
+    "mapping_date", "publication_date", "confidence", "curation_rule", "curation_rule_text",
+    "subject_match_field", "object_match_field", "match_string", "subject_preprocessing",
+    "object_preprocessing", "similarity_score", "similarity_measure", "see_also",
+    "issue_tracker_item", "other", "comment",
+];
+
 /// Slots whose set-level value propagates to individual records (and back, on
 /// condensation). Verbatim from the schema's `propagated: true` annotations.
 pub const PROPAGATABLE_SLOTS: &[&str] = &[
@@ -239,31 +281,28 @@ impl MappingSet {
                 }
             }
         }
-        // Drop columns no longer present.
-        self.columns.retain(|c| present.contains(c.as_str()));
-        let have: std::collections::BTreeSet<String> = self.columns.iter().cloned().collect();
-        // Append newly-seen columns in canonical schema order, extras (unknown
-        // slots) alphabetically last.
-        let mut extras: Vec<String> = Vec::new();
-        for &slot in SLOT_ORDER {
-            if present.contains(slot) && !have.contains(slot) {
-                self.columns.push(slot.to_string());
-            }
-        }
-        for c in &present {
-            if !SLOT_ORDER.contains(c) && !have.contains(*c) {
-                extras.push(c.to_string());
-            }
-        }
+        // The column sequence is the schema's, not the order the columns happened
+        // to arrive in: a set read with `object_label` last, or gaining one from a
+        // later step, still writes it in its schema position. Slots the
+        // mapping-level schema has no column for are not written; extensions,
+        // which the schema does not describe at all, follow alphabetically.
+        let mut cols: Vec<String> = MAPPING_COLUMN_ORDER
+            .iter()
+            .filter(|s| present.contains(**s))
+            .map(|s| (*s).to_string())
+            .collect();
+        let mut extras: Vec<String> =
+            present.iter().filter(|c| !SLOT_ORDER.contains(c)).map(|c| (*c).to_string()).collect();
         extras.sort();
-        self.columns.extend(extras);
+        cols.extend(extras);
+        self.columns = cols;
     }
 
-    /// Order columns canonically: schema declaration order first, then any
-    /// unknown slots alphabetically.
+    /// Order columns canonically: mapping-level schema order first, then any
+    /// extension columns alphabetically.
     pub fn sort_columns(&mut self) {
         let present: std::collections::BTreeSet<String> = self.columns.iter().cloned().collect();
-        let mut cols: Vec<String> = SLOT_ORDER
+        let mut cols: Vec<String> = MAPPING_COLUMN_ORDER
             .iter()
             .filter(|s| present.contains(**s))
             .map(|s| s.to_string())
@@ -458,13 +497,12 @@ impl MappingSet {
     }
 
     /// Rewrite the set into **canonical SSSOM/TSV** form (spec §"Canonical
-    /// SSSOM/TSV"): lift constant propagatable slots, declare `sssom_version` when
-    /// 1.1, round float slots to ≤3 decimals, drop unused and built-in prefixes
+    /// SSSOM/TSV"): lift constant propagatable slots, round float slots to ≤3
+    /// decimals, drop unused and built-in prefixes
     /// from the `curie_map`, order columns by schema (extensions last, by their
     /// declared `property`), and sort the records lexicographically.
     pub fn canonicalize(&mut self) {
         self.condense();
-        self.enforce_version();
         self.round_floats(3);
         self.prune_curie_map();
         self.sort_columns_canonical();
@@ -499,19 +537,24 @@ impl MappingSet {
 
     /// Drop prefixes from the `curie_map` that are unused or built-in (built-ins
     /// are implicit and MUST NOT be redeclared in canonical form).
+    ///
+    /// "Used" means used by the table that gets written. A CURIE sitting in a
+    /// record slot with no column — a `mapping_tool_id`, say — is not in the
+    /// output, so declaring its prefix leaves the reader a binding nothing
+    /// resolves against.
     pub fn prune_curie_map(&mut self) {
-        let used = self.prefixes_used();
+        let used = self.prefixes_used_written();
         self.curie_map
             .retain(|p, _| used.contains(p) && BUILTIN_PREFIXES.iter().all(|(b, _)| b != p));
     }
 
-    /// Order columns canonically: schema order first, then extension/unknown
-    /// columns sorted by their declared `property` (falling back to the column
-    /// name when undeclared).
+    /// Order columns canonically: mapping-level schema order first, then
+    /// extension columns sorted by their declared `property` (falling back to the
+    /// column name when undeclared).
     pub fn sort_columns_canonical(&mut self) {
         let prop = self.extension_properties();
         let present: std::collections::BTreeSet<String> = self.columns.iter().cloned().collect();
-        let mut cols: Vec<String> = SLOT_ORDER
+        let mut cols: Vec<String> = MAPPING_COLUMN_ORDER
             .iter()
             .filter(|s| present.contains(**s))
             .map(|s| s.to_string())
@@ -555,10 +598,41 @@ impl MappingSet {
         conformance::infer_version(self)
     }
 
-    /// Set `sssom_version` to the inferred version when 1.1 features are present
-    /// (a writer SHOULD declare 1.1; for a pure-1.0 set the slot MAY be omitted).
+    /// Drop everything the set's DECLARED version does not define.
+    ///
+    /// A set is read at the version it says it is, and one that declares no
+    /// `sssom_version` is a 1.0 set. So a 1.0 set carrying a
+    /// `mapping_set_confidence` — a slot 1.1 introduced — does not have one: the
+    /// header line is not a value the set holds, it is a line a 1.0 reader has no
+    /// slot for. Reading it anyway would let a set claim a feature its own
+    /// version never defined, and would then declare 1.1 on the way out, turning
+    /// an undeclared input into a 1.1 output.
+    pub fn restrict_to_declared_version(&mut self) {
+        let declared = self
+            .metadata
+            .get("sssom_version")
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| conformance::SSSOM_VERSION_1_0.to_string());
+        if declared.as_str() >= conformance::SSSOM_VERSION_1_1 {
+            return;
+        }
+        self.metadata.retain(|k, _| !conformance::is_slot_added_1_1(k));
+        for m in &mut self.mappings {
+            m.retain(|k, _| !conformance::is_record_slot_added_1_1(k));
+        }
+        self.recompute_columns();
+    }
+
+    /// Declare `sssom_version` when the set AS WRITTEN uses 1.1 features.
+    ///
+    /// The question the writer asks is not the one [`Self::infer_version`]
+    /// answers. That reports what the data uses, which is what validation needs;
+    /// this reports what the serialized table uses. The two part company because
+    /// no 1.1 slot has a mapping-level column: a record may carry a
+    /// `reviewer_agreement`, but nothing in the written table does, so declaring
+    /// the table 1.1 on its account describes bytes that were never emitted.
     pub fn enforce_version(&mut self) {
-        if self.infer_version() == conformance::SSSOM_VERSION_1_1 {
+        if conformance::written_version(self) == conformance::SSSOM_VERSION_1_1 {
             self.metadata.insert(
                 "sssom_version".to_string(),
                 serde_yaml::Value::String(conformance::SSSOM_VERSION_1_1.to_string()),
@@ -617,6 +691,38 @@ impl MappingSet {
         for m in &self.mappings {
             for (k, v) in m {
                 if is_entity_reference(k) {
+                    for part in split_multivalued(v) {
+                        if let Some((p, _)) = part.split_once(':') {
+                            if !part.starts_with("http") {
+                                used.insert(p.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (k, v) in &self.metadata {
+            if is_entity_reference(k) {
+                for s in flatten_value(v) {
+                    if let Some((p, _)) = s.split_once(':') {
+                        if !s.starts_with("http") {
+                            used.insert(p.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        used
+    }
+
+    /// The prefixes the WRITTEN table uses: as [`Self::prefixes_used`], but a
+    /// record's value counts only when its slot has a column to appear in.
+    pub fn prefixes_used_written(&self) -> std::collections::BTreeSet<String> {
+        let writable = |k: &str| MAPPING_COLUMN_ORDER.contains(&k) || !SLOT_ORDER.contains(&k);
+        let mut used = std::collections::BTreeSet::new();
+        for m in &self.mappings {
+            for (k, v) in m {
+                if is_entity_reference(k) && writable(k.as_str()) {
                     for part in split_multivalued(v) {
                         if let Some((p, _)) = part.split_once(':') {
                             if !part.starts_with("http") {
@@ -799,10 +905,45 @@ mod tests {
         let mut ms = MappingSet::new();
         ms.mappings = vec![rec(&[("subject_id", "A"), ("object_id", "X")])];
         assert_eq!(ms.infer_version(), "1.0");
-        // record_id was added in 1.1.
+        // record_id was added in 1.1, and the DATA now uses it.
         ms.mappings[0].insert("record_id".into(), "urn:x:1".into());
         assert_eq!(ms.infer_version(), "1.1");
+        // The written table does not. No 1.1 slot has a mapping-level column, so
+        // serializing this set emits nothing that needs 1.1, and it must not
+        // claim a version its bytes do not use.
+        ms.enforce_version();
+        assert!(!ms.metadata.contains_key("sssom_version"));
+        // A set-level 1.1 slot IS written, and that one does claim it.
+        ms.metadata
+            .insert("mapping_set_confidence".into(), serde_yaml::Value::String("0.9".into()));
         ms.enforce_version();
         assert_eq!(value_to_cell(&ms.metadata["sssom_version"]), "1.1");
+    }
+
+    #[test]
+    fn a_set_is_read_at_the_version_it_declares() {
+        let mut ms = MappingSet::new();
+        ms.mappings = vec![rec(&[("subject_id", "A"), ("object_id", "X")])];
+        ms.mappings[0].insert("record_id".into(), "urn:x:1".into());
+        ms.metadata
+            .insert("mapping_set_confidence".into(), serde_yaml::Value::String("0.9".into()));
+        // Declaring no version makes it a 1.0 set, and a 1.0 set has neither slot.
+        ms.restrict_to_declared_version();
+        assert!(!ms.mappings[0].contains_key("record_id"));
+        assert!(!ms.metadata.contains_key("mapping_set_confidence"));
+
+        // Declaring 1.1 keeps both.
+        let mut declared = MappingSet::new();
+        declared.mappings = vec![rec(&[("subject_id", "A"), ("object_id", "X")])];
+        declared.mappings[0].insert("record_id".into(), "urn:x:1".into());
+        declared
+            .metadata
+            .insert("sssom_version".into(), serde_yaml::Value::String("1.1".into()));
+        declared
+            .metadata
+            .insert("mapping_set_confidence".into(), serde_yaml::Value::String("0.9".into()));
+        declared.restrict_to_declared_version();
+        assert!(declared.mappings[0].contains_key("record_id"));
+        assert!(declared.metadata.contains_key("mapping_set_confidence"));
     }
 }

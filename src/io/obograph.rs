@@ -20,7 +20,7 @@ use horned_owl::ontology::set::SetOntology;
 use serde::{Deserialize, Serialize};
 
 use crate::io::obo::{expand_id, ncname_suffix_index};
-use crate::model::{default_prefixes, Model};
+use crate::model::{default_prefixes, Model, XSD_BOOLEAN};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Whether per-element axiom annotations (an xref's / synonym's / definition's /
@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// a byte-level convention a repo's existing releases either carry or do not:
 /// ECTO's `ecto.json` carries the nested `meta`, while OBA's and MONDO's `.json`s
 /// do not and would gain two million spurious lines with it on. Ingest resolves
-/// which convention a repo builds under and records it as `Plan::robot_version`;
+/// which convention a repo builds under and records it as `Plan::emulate_robot_version`;
 /// execution sets this once from the plan.
 ///
 /// There is deliberately no environment override: an ambient variable that beat
@@ -786,7 +786,12 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
                         e.subsets.push(if val_is_iri { v } else { format!("\"{v}\"") });
                     }
                 } else if prop == OWL_DEPRECATED {
-                    if matches!(val_lit.as_deref(), Some("true")) {
+                    // A TYPED boolean marks deprecation. An untyped `"true"` is a
+                    // string that happens to spell it and marks nothing, so the
+                    // datatype is the test rather than the lexical form.
+                    if matches!(val_lit.as_deref(), Some("true"))
+                        && val_datatype == XSD_BOOLEAN
+                    {
                         e.deprecated = true;
                     }
                 } else if prop == format!("{OIO}id") {

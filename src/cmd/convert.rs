@@ -48,8 +48,30 @@ pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
+    let piped_input = piped.is_some();
     let mut model = crate::cmd::take_or_load_no_imports(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
+
+    // A conversion keeps the document's `owl:imports` as declarations rather than
+    // folding the imported axioms in — but what the closure DECLARES still decides
+    // the output, because a class the closure declares needs no stub of its own
+    // here. `taxslim-disjoint-over-in-taxon.owl` imports `taxslim.owl` and states
+    // nothing but disjointness over its taxa; every one of them is written
+    // untyped, and materialising 106,000 `owl:Class` stubs for them put 2.2 MB
+    // into `mirror/ncbitaxondisjoints.owl` that the document does not carry.
+    //
+    // Best-effort and only when this command owns the load: piped into a pipeline
+    // the closure is whatever the earlier steps established.
+    if model.closure_declared.is_empty() {
+        let declared = crate::cmd::closure_declared_signature(
+            &model,
+            args.input.as_deref(),
+            &args.common,
+        );
+        if !declared.is_empty() {
+            model.closure_declared = declared;
+        }
+    }
 
     // `--check` (default true): run OBO document-structure checks when the
     // output is OBO, reporting issues to stderr. `--check false` skips them. The
@@ -87,8 +109,34 @@ pub fn step(
         }
     }
 
+    // Functional-syntax banners name each entity as `# Class: <IRI> (label)`, and
+    // the label an entity carries is the one anywhere in the document's import
+    // closure — an edit file that only DECLARES a class still banners it with the
+    // label its imported pattern module asserts. The closure is loaded for its
+    // labels alone and discarded; only the root is serialised.
+    if !piped_input && writes_functional(args) && has_imports(&model) {
+        model.banner_labels = crate::cmd::closure_labels(args.input.as_deref(), &args.common);
+    }
+
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(model))
+}
+
+/// Whether this conversion writes Functional syntax, the one format whose
+/// per-entity banners carry labels.
+fn writes_functional(args: &Args) -> bool {
+    let fmt = match (args.format.as_deref(), args.output.as_deref()) {
+        (Some(name), _) => crate::io::Format::from_name(name),
+        (None, Some(path)) => crate::io::Format::from_path(path),
+        (None, None) => return false,
+    };
+    matches!(fmt, Ok(crate::io::Format::Functional))
+}
+
+/// Whether the document declares any `owl:imports`, i.e. whether it has a closure
+/// to resolve at all.
+fn has_imports(model: &crate::model::Model) -> bool {
+    model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)))
 }
 
 /// `convert --check` (OBO output): report OBO document-structure problems

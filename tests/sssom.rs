@@ -692,12 +692,16 @@ HP:0000020\tskos:exactMatch\tMP:0000020\tsemapv:LexicalMatching\t
 }
 
 #[test]
-fn convert_declares_version_1_1_when_features_present() {
-    // record_id forces 1.1; the writer should add sssom_version.
+fn convert_never_declares_a_version_the_set_did_not() {
+    // A set is written at the version it DECLARES. Carrying a 1.1 slot —
+    // `record_id` on a record, `mapping_set_confidence` on the set — is a fact
+    // about the data and not an instruction to the writer, so an undeclared set
+    // stays undeclared through a convert.
     let f = tmp(
         "conf_writever.sssom.tsv",
         "\
 # license: https://creativecommons.org/publicdomain/zero/1.0/
+# mapping_set_confidence: 0.9
 # mapping_set_id: https://example.org/w
 subject_id\tpredicate_id\tobject_id\tmapping_justification\trecord_id
 HP:0000010\tskos:exactMatch\tMP:0000010\tsemapv:LexicalMatching\tex:r1
@@ -705,7 +709,23 @@ HP:0000010\tskos:exactMatch\tMP:0000010\tsemapv:LexicalMatching\tex:r1
     );
     let (out, err, rc) = run(&["sssom", "convert", f.to_str().unwrap()], None);
     assert_eq!(rc, 0, "{err}");
-    assert!(out.contains("sssom_version"), "writer declares the version: {out}");
+    assert!(!out.contains("sssom_version"), "no version invented: {out}");
+    // A declaration that IS there survives, and so do the slots it licenses.
+    let g = tmp(
+        "conf_writever_declared.sssom.tsv",
+        "\
+# license: https://creativecommons.org/publicdomain/zero/1.0/
+# mapping_set_confidence: 0.9
+# mapping_set_id: https://example.org/w3
+# sssom_version: \"1.1\"
+subject_id\tpredicate_id\tobject_id\tmapping_justification\trecord_id
+HP:0000010\tskos:exactMatch\tMP:0000010\tsemapv:LexicalMatching\tex:r1
+",
+    );
+    let (out, err, rc) = run(&["sssom", "convert", g.to_str().unwrap()], None);
+    assert_eq!(rc, 0, "{err}");
+    assert!(out.contains("sssom_version: '1.1'"), "declaration survives: {out}");
+    assert!(out.contains("record_id"), "and the slots it licenses: {out}");
 }
 
 #[test]

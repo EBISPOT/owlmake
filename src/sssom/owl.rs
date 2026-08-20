@@ -261,12 +261,8 @@ fn labels_and_obsoletes(model: &Model) -> (HashMap<String, String>, HashSet<Stri
             if let AnnotationValue::Literal(l) = &aa.ann.av {
                 labels.entry(s.as_ref().to_string()).or_insert_with(|| lit_text(l));
             }
-        } else if prop == OWL_DEPRECATED {
-            if let AnnotationValue::Literal(l) = &aa.ann.av {
-                if lit_text(l) == "true" {
-                    obsolete.insert(s.as_ref().to_string());
-                }
-            }
+        } else if prop == OWL_DEPRECATED && crate::model::asserts_deprecated(&aa.ann.av) {
+            obsolete.insert(s.as_ref().to_string());
         }
     }
     (labels, obsolete)
@@ -341,7 +337,17 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
     }
 
     // prefix → predicate map from treat-xrefs-as-* plus --map-prefix-to-predicate.
-    let mut pred_map = treat_xrefs_predicates(&model);
+    //
+    // `--ignore-treat-xrefs` drops the ontology's own `treat-xrefs-as-*` tags, so
+    // only the prefixes named on the command line yield mappings. That is how a
+    // caller extracts one ontology's cross-references to a single target: ZFA
+    // declares `treat-xrefs-as-equivalent` for TAO, CARO and VSAO, and asking for
+    // `CL` alone means the other three prefixes contribute nothing.
+    let mut pred_map = if opts.has("ignore-treat-xrefs") {
+        std::collections::BTreeMap::new()
+    } else {
+        treat_xrefs_predicates(&model)
+    };
     for spec in opts.many("map_pred") {
         let mut it = spec.split_whitespace();
         if let (Some(p), Some(pred)) = (it.next(), it.next()) {
@@ -597,6 +603,10 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
             // ontology where ROBOT writes a 486 KB bridge.
             ("bridge_file", &["--bridge-file"]),
             ("bridge_iri", &["--bridge-iri"]),
+            // The release version a dispatch table's `%date` expands to. Unset,
+            // it is the date this run happens on, which is what a repo releasing
+            // under its build date means by it.
+            ("version", &["--version"]),
         ],
     );
     let model = load_model(model, &opts)?;
@@ -681,7 +691,15 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
     if let Some(dispatch) = opts.one("dispatch") {
         let table = parse_dispatch(&std::fs::read_to_string(dispatch)
             .with_context(|| format!("reading dispatch table {dispatch}"))?);
-        write_dispatched(&prefixes, &mut out, &table)?;
+        let dir = Path::new(dispatch).parent().unwrap_or(Path::new(".")).to_path_buf();
+        // The version this run stamps into `%date`. A date is a run input, so it
+        // is read here once and handed to the writer rather than reached for
+        // inside it.
+        let version = opts
+            .one("version")
+            .map(str::to_string)
+            .unwrap_or_else(crate::plan::today);
+        write_dispatched(&prefixes, &mut out, &table, &dir, &version)?;
     } else if let Some(o) = opts.one("output") {
         // `sssom:inject` injects the generated axioms INTO the in-flight
         // ontology; the output is the input plus those axioms.
@@ -750,6 +768,10 @@ struct Rule {
 struct Ruleset {
     prefixes: BTreeMap<String, String>,
     rules: Vec<Rule>,
+    /// Variables a header-level `set_var(name, value)` gives every mapping before
+    /// any rule runs, in the order the ruleset sets them. They are DEFAULTS: a
+    /// rule that fires may set the same name to something else.
+    defaults: Vec<(String, String)>,
 }
 
 // ───────────────────────── SSSOM/T ruleset parser ───────────────────────────
@@ -896,25 +918,62 @@ fn parse_statement(
         }
         return Ok(());
     }
-    // Header-level `declare(...)` / `set_var(...)` with no filter: ignore declare
-    // (entity declarations are implicit in owlmake's output), apply nothing for a
-    // bare set_var (variables are per-mapping in the rules we target).
+    // Header-level `declare(...)`: entity declarations are implicit in owlmake's
+    // output, so there is nothing to record.
     if stmt.starts_with("declare(") {
         return Ok(());
+    }
+    // Header-level `set_var(name, value)` — no filter, so it applies to EVERY
+    // mapping, as the value the variable holds unless a rule overwrites it.
+    // UBERON's bridge ruleset opens with `set_var("TAXREL", BFO:0000050)` and
+    // then narrows it to `BFO:0000066` for the two mappings whose object is a
+    // life-stage class; without the default the other 102 `%TAXREL` uses expand
+    // to nothing and the axiom they build has no property at all.
+    if !in_body {
+        if let Some(args) = call_args(stmt.trim_end_matches(';').trim(), "set_var") {
+            let a = split_top_commas(&args);
+            if a.len() == 2 {
+                rs.defaults.push((unquote(a[0].trim()), a[1].trim().to_string()));
+                return Ok(());
+            }
+        }
     }
 
     // A rule: optional `[tag]` prefixes, a filter, then `-> action` or a `{block}`.
     let (tags, rest) = parse_tags(stmt);
     if let Some(body) = block {
-        // `[tag] FILTER { subrules }`
-        let filter = parse_filter(rest.trim())?;
+        // `[tag] FILTER { subrules }` — and `FILTER -> { action; action; }`, where
+        // the arrow introduces a block of BARE actions sharing one filter rather
+        // than a single action. The arrow says nothing the filter needs, so drop
+        // it; left on, it became part of the last comparison's value, and the rule
+        // matched nothing while still looking like a rule.
+        //
+        // UBERON's bridges are almost entirely this form: every taxon-specific
+        // rule pairs an `EquivalentTo:` with a `SubClassOf:` inside one block.
+        // Only the taxon-NEUTRAL bridges — AEO, BFO, CARO, GO — use a single
+        // action, which is why those four came out right and the other 30 came
+        // out holding their annotations and none of their axioms.
+        //
+        // The statement still carries its own `{ … }` text, so the header is
+        // everything before the opening brace — but NOT a `%{slot}` placeholder's
+        // brace, which is part of the filter.
+        let head = {
+            let b = rest.as_bytes();
+            let mut cut = rest.len();
+            for k in 0..b.len() {
+                if b[k] == b'{' && (k == 0 || b[k - 1] != b'%') {
+                    cut = k;
+                    break;
+                }
+            }
+            rest[..cut].trim()
+        };
+        let filter = parse_filter(head.strip_suffix("->").unwrap_or(head).trim())?;
         let mut subrules = Vec::new();
         let inner = parse_ruleset_inner(&body, true)?;
         for mut r in inner.rules {
-            // Subrules inherit the parent's tags (prepended).
-            let mut t = tags.clone();
-            t.extend(r.tags.drain(..));
-            subrules.push(Rule { tags: t, filter: r.filter, action: r.action });
+            inherit_tags(&mut r, &tags);
+            subrules.push(r);
         }
         rs.rules.push(Rule { tags, filter, action: Action::Block(subrules) });
         return Ok(());
@@ -934,6 +993,24 @@ fn parse_statement(
     let action = parse_action(act_str)?;
     rs.rules.push(Rule { tags, filter, action });
     Ok(())
+}
+
+/// Prepend `tags` to `r`, and to every rule nested inside it.
+///
+/// A tag routes the axioms a rule builds to one bridge file, and only the rule
+/// that CREATES an axiom hands its tags to `push_tagged`. So the tags have to
+/// reach the rule that does the creating, however deeply it sits: a tag that
+/// stopped at the outer rule left every axiom built inside a nested block with
+/// no tag, and an untagged axiom goes to no file at all.
+fn inherit_tags(r: &mut Rule, tags: &[String]) {
+    let mut t = tags.to_vec();
+    t.extend(r.tags.drain(..));
+    r.tags = t;
+    if let Action::Block(sub) = &mut r.action {
+        for s in sub.iter_mut() {
+            inherit_tags(s, tags);
+        }
+    }
 }
 
 /// Strip leading `[tag]` markers, returning the tags and the remainder.
@@ -1207,6 +1284,7 @@ fn parse_leaf(a: &str) -> Filter {
 struct DispatchEntry {
     file: Option<String>,
     ontology_iri: Option<String>,
+    ontology_version: Option<String>,
     add_axioms: Vec<String>,
     annotations: Vec<(String, String)>, // (dc property local, value)
 }
@@ -1241,6 +1319,7 @@ fn parse_dispatch(text: &str) -> DispatchTable {
         match k {
             "file" => entry.file = Some(v),
             "ontology-iri" => entry.ontology_iri = Some(v),
+            "ontology-version" => entry.ontology_version = Some(v),
             "add-axiom" => entry.add_axioms.push(v),
             other if other.starts_with("dc-") => {
                 entry.annotations.push((other[3..].to_string(), v));
@@ -1288,6 +1367,9 @@ impl<'a> Engine<'a> {
         let mut out: BTreeMap<String, Vec<AnnotatedComponent<Str>>> = BTreeMap::new();
         for m in &ms.mappings {
             let mut ctx = Ctx::from_mapping(m);
+            for (name, value) in &ruleset.defaults {
+                ctx.vars.insert(name.clone(), value.clone());
+            }
             self.run_rules(&ruleset.rules, &mut ctx, exclude, &mut out)?;
         }
         Ok(out)
@@ -1303,6 +1385,21 @@ impl<'a> Engine<'a> {
         for rule in rules {
             if rule.tags.iter().any(|t| exclude.contains(t.as_str())) {
                 continue;
+            }
+            // A `set_var` under a filter is RECORDED here and decided when the
+            // variable is read, so its filter must not be tested now — testing it
+            // here is what the mapping looks like at this point in the ruleset,
+            // and what the variable means is what the mapping looks like where it
+            // is used. See `Engine::resolve_var`.
+            if let Action::SetVar { name, value } = &rule.action {
+                if !matches!(rule.filter, Filter::Always) {
+                    ctx.conditional_vars.push((
+                        name.clone(),
+                        rule.filter.clone(),
+                        value.clone(),
+                    ));
+                    continue;
+                }
             }
             if !self.eval(&rule.filter, ctx) {
                 continue;
@@ -1408,7 +1505,23 @@ impl<'a> Engine<'a> {
     }
 
     fn resolve_var(&self, name: &str, ctx: &Ctx, short: bool, bracket_iri: bool) -> String {
-        // Variables set via set_var take precedence.
+        // A CONDITIONAL `set_var` — one carrying a filter — is decided HERE, against
+        // the mapping as it stands when the variable is read, not as it stood where
+        // the rule was written. The last condition that holds wins, so a later rule
+        // still overrides an earlier one.
+        //
+        // UBERON's bridges turn on this. `is_a(%{object_id}, UBERON:0000105) ->
+        // set_var("TAXREL", BFO:0000066)` sits ABOVE the preamble's `invert()`, so
+        // where it is written the object is still the foreign term and the test
+        // cannot hold; by the time `%TAXREL` is used, UBERON is on the object side
+        // and it does. Deciding it where it is written gives every life-stage
+        // bridge `part_of` where it should have `occurs_in`.
+        for (n, filter, value) in ctx.conditional_vars.iter().rev() {
+            if n == name && self.eval(filter, ctx) {
+                return self.subst(value, ctx, false);
+            }
+        }
+        // Variables set via an unconditional set_var take precedence over slots.
         if let Some(v) = ctx.vars.get(name) {
             return v.clone();
         }
@@ -1533,7 +1646,15 @@ fn manchester_axiom(
     let rc = crate::io::manchester_parse::parse_class_expression(build, rhs.trim(), &resolver)
         .map_err(|e| anyhow::anyhow!("axiom RHS `{}`: {e}", rhs.trim()))?;
     let comp = if equiv {
-        Component::EquivalentClasses(EquivalentClasses(vec![lc, rc]))
+        // An equivalence has no direction: it is written in the frame of its
+        // FIRST operand, and which operand that is comes from the axiom, not from
+        // which side of `EquivalentTo:` the rule happened to write. Sorted, the
+        // clause lands on the smaller IRI — `GO:0005623 EquivalentTo: CL:0000000`
+        // belongs in the `CL:0000000` frame, and a rule that spells the same pair
+        // the other way round produces the same file.
+        let mut ops = vec![lc, rc];
+        ops.sort_by(crate::io::owlfunc::cmp_ce);
+        Component::EquivalentClasses(EquivalentClasses(ops))
     } else {
         Component::SubClassOf(SubClassOf { sub: lc, sup: rc })
     };
@@ -1561,6 +1682,9 @@ struct Ctx {
     predicate_id: String,
     cardinality: String,
     vars: HashMap<String, String>,
+    /// `set_var`s that carry a filter, in rule order. They are not decided when
+    /// the rule is reached — see `Engine::resolve_var`.
+    conditional_vars: Vec<(String, Filter, String)>,
     stopped: bool,
     /// The whole mapping row. `/annots="mapping_justification,author_id,…"` reads
     /// slots the four fields above do not carry, so the row has to travel with
@@ -1576,6 +1700,7 @@ impl Ctx {
             predicate_id: m.get("predicate_id").cloned().unwrap_or_default(),
             cardinality: m.get("mapping_cardinality").cloned().unwrap_or_default(),
             vars: HashMap::new(),
+            conditional_vars: Vec::new(),
             stopped: false,
             meta: m.clone(),
         }
@@ -1601,6 +1726,18 @@ impl Ctx {
     }
     fn invert(&mut self) {
         std::mem::swap(&mut self.subject_id, &mut self.object_id);
+        // A DIRECTED predicate turns round with the sides it relates: what is a
+        // narrow match from A to B is a broad match from B to A. A symmetric one
+        // — `exactMatch`, `closeMatch`, `relatedMatch`, `crossSpeciesExactMatch` —
+        // reads the same either way and is left alone.
+        //
+        // UBERON's SCTID and NCIT bridges are the case: their rows are
+        // `skos:narrowMatch` with UBERON on the subject side, the preamble
+        // inverts them to put UBERON on the object side, and the bridge rules
+        // then select `predicate==skos:broadMatch`. Leaving the predicate as it
+        // was left both bridges with every label and none of their 8,159
+        // subsumptions.
+        self.predicate_id = inverse_predicate(&self.predicate_id);
         // `mapping_cardinality` is oriented SUBJECT:OBJECT, so inverting the
         // mapping inverts it too. Leaving it alone made UBERON's very next rule,
         // `!cardinality==*:1 -> stop()`, test the pre-inversion orientation and
@@ -1634,6 +1771,25 @@ impl Ctx {
     }
 }
 
+/// The predicate a mapping carries when read from the other side.
+///
+/// Only the local name decides, so a CURIE and the IRI it expands to invert
+/// alike; anything with no inverse comes back unchanged.
+fn inverse_predicate(p: &str) -> String {
+    let cut = p.rfind(['#', '/', ':']).map_or(0, |i| i + 1);
+    let (head, local) = p.split_at(cut);
+    let flipped = match local {
+        "narrowMatch" => "broadMatch",
+        "broadMatch" => "narrowMatch",
+        "narrower" => "broader",
+        "broader" => "narrower",
+        "narrowerTransitive" => "broaderTransitive",
+        "broaderTransitive" => "narrowerTransitive",
+        _ => return p.to_string(),
+    };
+    format!("{head}{flipped}")
+}
+
 /// Glob match with a single `*` ANYWHERE in the pattern.
 ///
 /// Handling only a trailing `*` was enough for `subject==UBERON:*` and wrong for
@@ -1655,11 +1811,17 @@ fn glob_match(glob: &str, val: &str) -> bool {
 }
 
 /// Write generated axioms to per-tag bridge ontologies named by the dispatch table.
+/// `dir` is the directory the dispatch table itself sits in: a `file:` entry names
+/// a bridge beside the table that lists it, not beside whatever directory the
+/// build happens to be standing in.
 fn write_dispatched(
     prefixes: &BTreeMap<String, String>,
     out: &mut BTreeMap<String, Vec<AnnotatedComponent<Str>>>,
     table: &DispatchTable,
+    dir: &Path,
+    version: &str,
 ) -> Result<()> {
+    let _ = prefixes;
     let build = horned_owl::model::Build::new();
     for (tag, axs) in out.iter_mut() {
         if tag.is_empty() {
@@ -1668,7 +1830,11 @@ fn write_dispatched(
         let Some(entry) = table.entries.get(tag) else { continue };
         let Some(file) = &entry.file else { continue };
         let mut m = Model::new();
-        copy_prefixes(prefixes, &mut m);
+        // A bridge is a NEW ontology, so it inherits no prefix map: it declares
+        // the namespaces its own axioms use and nothing else. Left inheriting,
+        // it wrote `dc`, `oboInOwl` and every other default binding into a file
+        // that mentions two namespaces.
+        m.format_prefixes_cleared = true;
         for ax in axs.drain(..) {
             m.ont.insert(ax);
         }
@@ -1679,20 +1845,54 @@ fn write_dispatched(
                 m.ont.insert(ax);
             }
         }
-        // Ontology IRI, with `%filename` → the output's stem.
+        // The dc-* directives are the bridge's own ontology annotations, under
+        // `http://purl.org/dc/terms/`. They are the bridge's title, description and
+        // credits, so a bridge that drops them is unattributed — and the
+        // annotation properties they use have to be declared alongside them.
+        for (local, value) in
+            table.defaults.annotations.iter().chain(entry.annotations.iter())
+        {
+            let ap = build.annotation_property(format!("http://purl.org/dc/terms/{local}"));
+            m.ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
+                horned_owl::model::Annotation {
+                    ann: Default::default(),
+                    ap: ap.clone(),
+                    av: AnnotationValue::Literal(Literal::Simple { literal: value.clone() }),
+                },
+            )));
+            m.ont.insert(Component::DeclareAnnotationProperty(
+                horned_owl::model::DeclareAnnotationProperty(ap),
+            ));
+        }
+        // Ontology IRI and version IRI. `%filename` is the output's stem and
+        // `%date` the version this run stamps, so one pattern in the table's
+        // `__default` section names every bridge.
+        let stem = Path::new(file)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let expand = |pat: &String| -> String {
+            pat.replace("%filename", &stem).replace("%date", version)
+        };
         let iri_pat = entry.ontology_iri.as_ref().or(table.defaults.ontology_iri.as_ref());
+        let viri_pat =
+            entry.ontology_version.as_ref().or(table.defaults.ontology_version.as_ref());
         if let Some(pat) = iri_pat {
-            let stem = Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let iri = pat.replace("%filename", &stem);
+            let iri = expand(pat);
             if !iri.contains('%') {
                 m.ont.insert(Component::OntologyID(horned_owl::model::OntologyID {
                     iri: Some(build.iri(iri.as_str())),
-                    viri: None,
+                    viri: viri_pat
+                        .map(expand)
+                        .filter(|v| !v.contains('%'))
+                        .map(|v| build.iri(v.as_str())),
                 }));
             }
         }
-        crate::io::save(&mut m, Path::new(file))
+        // A bridge names only the prefixes its own axioms use. Carrying the whole
+        // input's prefix map over writes ninety `xmlns:` declarations into a file
+        // that mentions four namespaces.
+        crate::io::save(&mut m, &dir.join(file))
             .with_context(|| format!("writing bridge {file}"))?;
     }
     Ok(())
