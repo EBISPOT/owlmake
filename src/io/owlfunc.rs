@@ -1153,6 +1153,22 @@ fn escape_str(s: &str) -> String {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/// One component in functional syntax, standing on its own — for a report that
+/// lists components a line at a time rather than assembling a document.
+///
+/// An ontology annotation is written the way the header writes it,
+/// `Annotation(<property> <value>)`: on its own line there is no `Ontology(` for
+/// it to sit inside, and the axiom renderer passes it over for that reason.
+pub(crate) fn render_component_line(ac: &AnnotatedComponent<RcStr>) -> String {
+    let labels = std::collections::HashMap::new();
+    let mut r = Renderer { out: String::new(), labels: &labels, focused: None };
+    match &ac.component {
+        Component::OntologyAnnotation(a) => r.annotation(&a.0),
+        _ => r.axiom(ac),
+    }
+    r.out
+}
+
 /// Build the functional-syntax `owl-axioms:` value (before OBO escaping) from the
 /// untranslatable axioms. Returns `None` if there are none.
 pub fn render_owl_axioms(

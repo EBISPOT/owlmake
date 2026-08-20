@@ -456,7 +456,8 @@ impl FileOp {
             FileOp::Copy { src, dst, recursive } => {
                 let dst = p(dst);
                 for s in src {
-                    let from = p(s);
+                    // A `cp` whose source is an image asset reads owlmake's bytes.
+                    let from = materialise_served_asset(s, dir).unwrap_or_else(|| p(s));
                     if *recursive && from.is_dir() {
                         copy_dir_recursive(&from, &dst.join(from.file_name().unwrap_or_default()))?;
                     } else {
@@ -732,6 +733,66 @@ struct Redirects {
     stderr: Option<(String, bool)>, // (file, append); a file of "&1" inherits stdout
 }
 
+/// The reference image's data assets, by the path a recipe names them at.
+pub const SERVED_IMAGE_ASSETS: [&str; 1] = ["/tools/obo.epm.json"];
+
+/// Whether a path names an asset owlmake serves from its own bytes.
+///
+/// Such a path is never a missing input: it is the reference image's location,
+/// not this machine's, and the bytes are materialised when the recipe runs. The
+/// prerequisite check has to agree, because it runs FIRST — OBA reaches the
+/// asset as `$(EXTENDED_PREFIX_MAP): /tools/obo.epm.json`, so a gate that only
+/// asks the filesystem refuses the target before the recipe can serve it.
+pub fn is_served_image_asset(path: &str) -> bool {
+    // Ingest relativises an absolute prerequisite against the repo root, so the
+    // plan carries `../../../tools/obo.epm.json` where the recipe wrote
+    // `/tools/obo.epm.json`. Both name the same file inside the reference image,
+    // so the tail is what identifies it.
+    let norm = path.replace('\\', "/");
+    SERVED_IMAGE_ASSETS.iter().any(|a| {
+        let tail = a.trim_start_matches('/');
+        norm == *a || norm == tail || norm.ends_with(&format!("/{tail}"))
+    })
+}
+
+/// Materialise a served asset under `dir` and answer where it landed.
+///
+/// EVERY place that resolves a recipe's input has to come through here. A recipe
+/// names the asset either as a shell word or as the source of a `cp`, and those
+/// are resolved by different code — rewriting only the shell line leaves `cp
+/// /tools/obo.epm.json $@` reading a path that does not exist on this machine.
+pub fn materialise_served_asset(path: &str, dir: &Path) -> Option<std::path::PathBuf> {
+    if !is_served_image_asset(path) {
+        return None;
+    }
+    // A machine that really has the file (the reference image itself) uses it.
+    if Path::new(path).exists() || dir.join(path).exists() {
+        return None;
+    }
+    let dest = dir.join(".owlmake-odk-tmp").join("obo.epm.json");
+    std::fs::create_dir_all(dest.parent()?).ok()?;
+    std::fs::write(&dest, crate::sssom::converter::obo_epm()).ok()?;
+    Some(dest)
+}
+
+/// Serve a data asset the reference image carries out of owlmake's own bytes.
+///
+/// A recipe that wants one copies it — `cp /tools/obo.epm.json $@` — so there is
+/// no tool to reimplement and nothing to derive: owlmake ships the bytes or the
+/// target cannot be built at all, which is what "owlmake ships nothing" means
+/// when the thing shipped is data rather than code. The vendored copy for the
+/// version being emulated is materialised and the path rewritten, so the recipe
+/// itself runs unchanged.
+fn serve_image_assets(line: &str, dir: &Path) -> String {
+    let mut out = line.to_string();
+    for tok in line.split_whitespace() {
+        if let Some(dest) = materialise_served_asset(tok, dir) {
+            out = out.replace(tok, &dest.to_string_lossy());
+        }
+    }
+    out
+}
+
 /// Run one already-expanded recipe line in `dir`, dispatching a `robot`/`jq`/
 /// `sssom` command to the matching owlmake subcommand via the `exe` binary and
 /// performing file ops natively.
@@ -747,6 +808,7 @@ pub fn run_line(
     env: &[(String, String)],
 ) -> Result<()> {
     RUN_ENV.with(|c| *c.borrow_mut() = env.to_vec());
+    let line = &serve_image_assets(line, dir);
     // Strip the per-line recipe prefixes: `@` (silent), `+` (always run), and a
     // leading `-` (ignore errors).
     let mut l = line.trim();

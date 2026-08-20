@@ -231,3 +231,84 @@ fn the_scratch_directory_is_resolved_once() {
         readings[0]
     );
 }
+
+/// **Every `Step` variant is handled by every step-dispatch loop.** The executor
+/// walks a step list in two places — `run_steps`, for prerequisites, and a second
+/// loop inside `run_artefact` for the artefact pipeline — and both end in a
+/// catch-all that bails. So a variant handled by one and missed by the other
+/// compiles cleanly and fails at run time, on whichever repo happens to have a
+/// recipe of that shape.
+///
+/// `Step::Boundary` is the case this guards. It was added to `run_steps` and
+/// missed in `run_artefact`, and the result was not a wrong artefact but a hard
+/// failure forty minutes into a MONDO build:
+/// `internal: uncovered step reached executor: ── new invocation`.
+///
+/// That is one of three instances of the same shape in a single night — the
+/// boundary rule implemented on `Op::Merge` alone, `owl_anon_blocks`
+/// invalidation implemented in `extract` and `remove` but not `filter`, and this
+/// — so the guard is worth more than the one variant it names. A rule that holds
+/// of a family has to be checked against the family, because the compiler cannot:
+/// a catch-all arm satisfies exhaustiveness while handling nothing.
+#[test]
+fn every_step_variant_reaches_both_dispatch_loops() {
+    let step_src = std::fs::read_to_string(src_root().join("plan/step.rs")).unwrap();
+    // The `Step` enum's variants, read off its declaration.
+    let enum_body = step_src
+        .split_once("pub enum Step {")
+        .expect("Step enum")
+        .1
+        .split_once("\n}")
+        .expect("end of Step enum")
+        .0;
+    let variants: Vec<String> = enum_body
+        .lines()
+        .filter_map(|l| {
+            let t = l.trim();
+            let name = t.split(['{', '(', ',']).next()?.trim();
+            (!name.is_empty()
+                && name.chars().next()?.is_ascii_uppercase()
+                && name.chars().all(|c| c.is_ascii_alphanumeric()))
+            .then(|| name.to_string())
+        })
+        .collect();
+    assert!(variants.len() >= 8, "expected the full Step enum, found {variants:?}");
+
+    let build = std::fs::read_to_string(src_root().join("build/mod.rs")).unwrap();
+    // The two loops, split at the second one's opening.
+    let (prereq_loop, artefact_loop) = build
+        .split_once("fn run_artefact")
+        .expect("run_artefact exists in build/mod.rs");
+
+    // `Inert` never reaches a plan (the planner drops it) and `Partial` is always
+    // matched alongside `Op`; both are handled, just not by bare name.
+    let exempt = ["Inert", "Partial"];
+    let mut missing: Vec<String> = Vec::new();
+    for v in &variants {
+        if exempt.contains(&v.as_str()) {
+            continue;
+        }
+        let pat = format!("Step::{v}");
+        // `Op` is matched as `Step::Op(op)`; the shell-shaped variants are routed
+        // through the `is_shell_step` guard rather than by name.
+        let shell_routed = ["Shell", "Fallback", "Jq", "Sssom", "Oort", "CliRobot", "UnknownRobot"];
+        let in_prereq = prereq_loop.contains(&pat)
+            || (shell_routed.contains(&v.as_str()) && prereq_loop.contains("is_shell_step"));
+        let in_artefact = artefact_loop.contains(&pat)
+            || (shell_routed.contains(&v.as_str()) && artefact_loop.contains("is_shell_step"));
+        if !in_prereq || !in_artefact {
+            missing.push(format!(
+                "Step::{v} (run_steps: {}, run_artefact: {})",
+                if in_prereq { "handled" } else { "MISSING" },
+                if in_artefact { "handled" } else { "MISSING" },
+            ));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "a Step variant is handled by one dispatch loop and not the other. Both end in a \
+         catch-all `bail!`, so this compiles and fails at run time on whichever repo has a \
+         recipe of that shape:\n  {}",
+        missing.join("\n  ")
+    );
+}

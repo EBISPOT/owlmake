@@ -115,6 +115,15 @@ pub struct OdkRepo {
     /// afterwards makes it newer, the release rule re-makes `hp.obo`, and the build
     /// ships its own conversion instead of the product `test_obo` wrote.
     pub built: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Targets whose build FAILED in this invocation.
+    ///
+    /// Distinct from "not built yet", and the distinction cannot be recovered
+    /// from the filesystem — both are an absent file. Under `-k` a failure does
+    /// not stop the run, so a later target naming the failed one as a
+    /// prerequisite reaches its staleness test with that prerequisite missing;
+    /// read as "not newer" it declares the target up to date and whatever is on
+    /// disk survives. This is the record that lets the test tell the two apart.
+    pub failed: std::cell::RefCell<std::collections::HashSet<String>>,
     /// The `src/ontology` directory.
     pub dir: PathBuf,
     /// The repository root — where `owlmake.json` lives (the nearest `.git`
@@ -235,6 +244,7 @@ impl OdkRepo {
                 let root = repo_root(&dir);
                 return Ok(OdkRepo {
                     built: Default::default(),
+                    failed: Default::default(),
                     dir,
                     root,
                     yaml,
@@ -268,6 +278,7 @@ impl OdkRepo {
                 let root = repo_root(&dir);
                 return Ok(OdkRepo {
                     built: Default::default(),
+                    failed: Default::default(),
                     dir,
                     root,
                     yaml,
@@ -334,6 +345,7 @@ impl OdkRepo {
         let root = repo_root(&dir);
         Ok(OdkRepo {
             built: Default::default(),
+            failed: Default::default(),
             dir,
             root,
             yaml,
@@ -396,6 +408,7 @@ impl OdkRepo {
         make.base_dir = Some(dir.clone());
         Ok(OdkRepo {
                     built: Default::default(),
+                    failed: Default::default(),
             dir,
             root,
             yaml,
@@ -502,6 +515,7 @@ pub fn seed_spec(id: &str, edit: Option<&str>, dir: &Path) -> Result<OwlmakeSpec
     };
     let repo = OdkRepo {
         built: Default::default(),
+        failed: Default::default(),
         dir: dir.to_path_buf(),
         root: dir.to_path_buf(),
         yaml,

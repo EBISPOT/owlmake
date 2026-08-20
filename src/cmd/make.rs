@@ -223,6 +223,17 @@ fn pattern_product_targets(plan: &Plan) -> Vec<String> {
     if let Some(p) = std::path::Path::new(&d.output).parent() {
         out.push(p.join("pattern.owl").to_string_lossy().into_owned());
     }
+    // The per-pattern products, one pair per pattern: the `.ofn` module the
+    // generator writes beside its data table, and the `.txt` term file the seed
+    // is built from. They are files the build produces and a caller can name, so
+    // they belong in every enumeration of the target surface — `definitions.owl`
+    // alone hides fifty-eight of them.
+    for p in &d.patterns {
+        let data = std::path::Path::new(&p.data);
+        for ext in ["ofn", "txt"] {
+            out.push(data.with_extension(ext).to_string_lossy().into_owned());
+        }
+    }
     out
 }
 
@@ -357,8 +368,8 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     let plan_format = spec::PlanFormat::parse(&args.plan_format)?;
     let plan_write = if args.regenerate { PlanWrite::Regenerate } else { PlanWrite::Check };
     let full_plan =
-        obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref())?;
-    // The plan's recorded `robot_version` selects the two version-dependent byte
+        obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref(), make_vars.today.as_deref())?;
+    // The plan's recorded `emulate_robot_version` selects the two version-dependent byte
     // behaviours — whether OBO Graphs JSON nests axiom-annotation `meta`, and
     // whether a SPARQL update inherits the document's prefixes. Read from the
     // plan, so a plan-only repo produces the same bytes as the repo it came from.
@@ -616,7 +627,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             full_plan
         } else {
             spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref())?,
                 &switches,
             )
         };
@@ -777,7 +788,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             build_plan(&repo, &full_plan, &run_opts, publish)
         } else {
             let plan = spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref())?,
                 &switches,
             );
             build_plan(&repo, &plan, &run_opts, publish)
@@ -795,8 +806,11 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         let r = run_one(t, kind, &repo, &full_plan);
         report(t, r);
     }
-    // Whatever this run wrote on its way to something else and does not keep.
-    build::sweep_transients(&repo, &full_plan);
+    // Whatever this run wrote on its way to something else and does not keep —
+    // excluding the targets the caller actually asked for, which are goals rather
+    // than intermediates however the plan classifies them.
+    let goals: Vec<String> = kinds.iter().map(|(t, _)| t.clone()).collect();
+    build::sweep_transients(&repo, &full_plan, &goals);
     if !failures.is_empty() || artefact_err.is_some() {
         let mut parts: Vec<String> = Vec::new();
         if let Some(e) = &artefact_err {
@@ -817,7 +831,7 @@ pub fn prepare_release(a: &TargetArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
     // A release never rewrites the committed plan: `--regenerate` is a
     // deliberate, separate act, not something a build does on the way past.
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None)?;
+    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -838,14 +852,16 @@ pub fn prepare_release(a: &TargetArgs) -> Result<()> {
         keep_going: false,
     };
     build_plan(&repo, &plan, &opts, true)?;
-    build::sweep_transients(&repo, &plan);
+    // A curated whole-release command names no individual target, so nothing here
+    // is a goal in the command-line sense and everything transient is swept.
+    build::sweep_transients(&repo, &plan, &[]);
     Ok(())
 }
 
 /// `refresh-imports`: rebuild import modules from upstream (native).
 pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None)?;
+    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -856,7 +872,7 @@ pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
 /// `all-imports`: rebuild every individual import module from upstream.
 pub fn all_imports(a: &RepoArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None)?;
+    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -872,7 +888,7 @@ pub fn all_imports(a: &RepoArgs) -> Result<()> {
 /// nothing beyond the `om` binary itself.
 pub fn test(a: &RepoArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None)?;
+    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -917,7 +933,7 @@ fn odk_at_least_1_6_1(plan: &Plan) -> bool {
     // shape and it falls through to the current behaviour: nested.
     //
     // That fallback is coarser than the answer the build actually uses, and nothing
-    // in the tree calls this: the nesting switch is set from `plan.robot_version`,
+    // in the tree calls this: the nesting switch is set from `plan.emulate_robot_version`,
     // which ingest resolves from the repo's CI when the build configuration is
     // hand-written. EFO pins v1.9.7 there, so `efo.json` carries no nested `meta`
     // even though the rule below would answer "nested" for it. MONDO's configuration
@@ -955,13 +971,14 @@ fn obtain_plan(
     format: spec::PlanFormat,
     write: PlanWrite,
     version: Option<&str>,
+    today: Option<&str>,
 ) -> Result<Plan> {
     let plan = if repo.spec.is_some() {
         repo.plan(&[])?
     } else {
         regen_plan(repo, format, write)?
     };
-    bind_run_version(repo, &plan, version)
+    bind_run_version(repo, &plan, version, today)
 }
 
 /// The switch values an entry point that takes none resolves to: whatever the
@@ -985,9 +1002,14 @@ fn default_switches(plan: &Plan) -> Vec<(String, String)> {
 /// released on any date; a plan that is about to RUN needs the date itself. This
 /// is the one place the two meet, and it runs after the plan is written — the
 /// file on disk keeps the reference.
-fn bind_run_version(repo: &OdkRepo, plan: &Plan, requested: Option<&str>) -> Result<Plan> {
+fn bind_run_version(
+    repo: &OdkRepo,
+    plan: &Plan,
+    requested: Option<&str>,
+    today: Option<&str>,
+) -> Result<Plan> {
     let version = crate::plan::release_version(&plan.version, requested);
-    spec::bind_version(plan, &version, &repo.dir)
+    spec::bind_version(plan, &version, today, &repo.dir)
 }
 
 /// Regenerate the plan (at the repo root) from the repo's build configuration and
@@ -1211,6 +1233,12 @@ struct MakeVars {
     /// carries a default and refers to it from every string that needs it, so a
     /// caller can release the SAME plan under any date.
     version: Option<String>,
+    /// The CALENDAR DATE this run stamps (`TODAY=`), which is a different fact
+    /// from the release version even though ODK's `TODAY=` supplies both. A repo
+    /// can release version `3.93.0` on any day, and `VERSION=3.93.0` says nothing
+    /// about the date — so only `TODAY=` sets this, and a run that names neither
+    /// falls back to the clock.
+    today: Option<String>,
     /// Other `VAR=value` assignments, placed in each recipe's spawn environment
     /// (e.g. `ROBOT_ENV`, `ROBOT_JAVA_ARGS`) for any recipe target that reads them.
     env: Vec<(String, String)>,
@@ -1284,6 +1312,11 @@ fn apply_make_var(vars: &mut MakeVars, name: &str, value: &str) {
         // replaces the field's default for this run.
         "TODAY" | "VERSION" => {
             vars.version = Some(value.trim().to_string());
+            // `TODAY=` is the run's calendar date as well as its version;
+            // `VERSION=` is only the version and leaves the date to the clock.
+            if name == "TODAY" {
+                vars.today = Some(value.trim().to_string());
+            }
             vars.env.push((name.to_string(), value.to_string()));
         }
         // Anything else (ROBOT_ENV, ROBOT_JAVA_ARGS, …) is placed in the spawn

@@ -187,3 +187,52 @@ pub fn all_iris(comp: &Component<RcStr>) -> HashSet<String> {
     walk.component(comp);
     walk.into_visit().iris.into_iter().collect()
 }
+
+#[derive(Default)]
+struct EntitySig {
+    iris: HashSet<String>,
+}
+
+impl EntitySig {
+    fn add(&mut self, iri: &str) {
+        if !self.iris.contains(iri) {
+            self.iris.insert(iri.to_string());
+        }
+    }
+}
+
+impl Visit<RcStr> for EntitySig {
+    fn visit_class(&mut self, c: &Class<RcStr>) {
+        self.add(c.0.as_ref());
+    }
+    fn visit_object_property(&mut self, p: &ObjectProperty<RcStr>) {
+        self.add(p.0.as_ref());
+    }
+    fn visit_data_property(&mut self, p: &DataProperty<RcStr>) {
+        self.add(p.0.as_ref());
+    }
+    fn visit_named_individual(&mut self, i: &NamedIndividual<RcStr>) {
+        self.add(i.0.as_ref());
+    }
+    fn visit_datatype(&mut self, d: &Datatype<RcStr>) {
+        self.add(d.0.as_ref());
+    }
+    fn visit_annotation_property(&mut self, p: &AnnotationProperty<RcStr>) {
+        self.add(p.0.as_ref());
+    }
+}
+
+/// Every entity IRI the ontology mentions in an *entity* position — classes,
+/// object/data properties, named individuals, datatypes and annotation
+/// properties, whether declared or merely used. This is what it means for a term
+/// to exist in an ontology: a class named only as the filler of an existential
+/// restriction is there, while an IRI that appears only as the subject or the
+/// value of an annotation is not — annotations can be hung on anything, so
+/// carrying one says nothing about being a term of the ontology.
+pub fn entity_signature(model: &crate::model::Model) -> HashSet<String> {
+    let mut walk = Walk::new(EntitySig::default());
+    for ac in model.ont.iter() {
+        walk.component(&ac.component);
+    }
+    walk.into_visit().iris
+}

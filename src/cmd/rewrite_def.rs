@@ -231,7 +231,7 @@ pub fn rewrite_with_maps(mut model: Model, maps: &Maps, opts: &RewriteOptions) -
                     match aa.ann.ap.0.as_ref() {
                         DEFINITION => def_axioms.entry(s.clone()).or_default().push(i),
                         OWL_DEPRECATED => {
-                            if matches!(&aa.ann.av, AnnotationValue::Literal(l) if l.literal() == "true") {
+                            if crate::model::asserts_deprecated(&aa.ann.av) {
                                 obsolete.insert(s.clone());
                             }
                         }

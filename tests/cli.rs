@@ -2286,13 +2286,16 @@ fn a_recipe_that_names_its_own_input_does_not_also_read_the_first_prerequisite()
     assert_eq!(input, "src/ontology/components/a.ofn", "plan entry:\n{entry}");
 }
 
-/// owlmake's own OFN cache is named for the target it stands in for — the cache
-/// for `x.owl` is `x.owl.ofn` — and only it carries the `#…` state markers. A
-/// `.ofn` a REPO names as a target has no such second extension, and gets the
-/// bytes the repo's own recipe would write, wherever it lives. uPheno's
-/// `$(SRCMERGED)` is `tmp/merged-upheno-edit.ofn`.
+/// An `.ofn` document is byte-clean wherever it is written: the state a cache
+/// carries about the document it stands in for lives in a companion beside it,
+/// never in the document's own bytes.
+///
+/// The companion is written only for owlmake's own cache, which is named for the
+/// target it stands in for — the cache for `x.owl` is `x.owl.ofn`. A `.ofn` a
+/// REPO names as a target has no such second extension and gets no companion,
+/// wherever it lives: uPheno's `$(SRCMERGED)` is `tmp/merged-upheno-edit.ofn`.
 #[test]
-fn a_repo_named_ofn_target_carries_no_cache_markers() {
+fn an_ofn_cache_keeps_its_state_in_a_companion() {
     let dir = tmp("ofn_markers");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("tmp")).unwrap();
@@ -2324,7 +2327,7 @@ fn a_repo_named_ofn_target_carries_no_cache_markers() {
         std::fs::read_to_string(out).unwrap()
     };
 
-    // The repo's own target: no marker, whatever directory it is in.
+    // The repo's own target: its own content, and no companion at all.
     let target = dir.join("tmp/merged-src.ofn");
     let text = convert(&target);
     assert!(
@@ -2332,13 +2335,28 @@ fn a_repo_named_ofn_target_carries_no_cache_markers() {
         "a repo-named .ofn target must start with its own content:\n{}",
         text.lines().next().unwrap_or("")
     );
+    assert!(
+        !dir.join("tmp/.omcache/merged-src.ofn.omcache").exists(),
+        "a repo-named .ofn target is not a cache and gets no companion"
+    );
 
-    // owlmake's cache for `src.owl`: markers are its whole point.
+    // owlmake's cache for `src.owl`: the document is just as clean, and the
+    // source's xmlns is carried beside it, keyed to the bytes it describes.
     let cache = dir.join("tmp/src.owl.ofn");
     let text = convert(&cache);
     assert!(
-        text.starts_with("#rdfxmlns "),
-        "the cache should carry the source's xmlns:\n{}",
+        !text.starts_with('#'),
+        "a cache document carries no markers of its own:\n{}",
         text.lines().next().unwrap_or("")
+    );
+    let companion = std::fs::read_to_string(dir.join("tmp/.omcache/src.owl.ofn.omcache"))
+        .expect("the cache should have a companion");
+    assert!(
+        companion.contains("\n#rdfxmlns "),
+        "the companion should carry the source's xmlns:\n{companion}"
+    );
+    assert!(
+        companion.contains(&format!("#doc {}:", text.len())),
+        "the companion should name the bytes it describes:\n{companion}"
     );
 }

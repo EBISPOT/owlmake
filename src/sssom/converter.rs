@@ -5,7 +5,7 @@
 //! `curie_map`, then the six SSSOM built-ins, then the extended prefix map
 //! bundled beside this file.
 //!
-//! That EPM — 1,711 records — is where
+//! That EPM is where
 //! `RO`, `BFO`, `SCTID: http://snomed.info/id/` and the rest of MONDO's mapping
 //! namespaces come from; the repo's own `metadata/mondo.sssom.config.yml`
 //! declares barely a third of them. Compressing with owlmake's own small
@@ -20,6 +20,7 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One `curies` record: a canonical prefix and URI prefix, plus the synonyms
 /// that resolve to them.
@@ -33,8 +34,36 @@ pub struct Record {
     pub uri_prefix_synonyms: Vec<String>,
 }
 
-/// The bundled extended prefix map, vendored from `obo.epm.json` (0.4.16).
+/// The OBO extended prefix map, vendored verbatim — one copy per emulated
+/// version, because the map is part of what a version IS.
+///
+/// It is a data asset rather than a tool: a recipe that wants it copies it out of
+/// the reference image, so there is nothing to reimplement and no way to derive
+/// it — owlmake carries the bytes or the map does not exist. Each entry is a
+/// prefix with its URI prefix and the synonyms that resolve to it.
+///
+/// The two differ by 388 prefixes and 1,418 shared entries, so which one is in
+/// hand decides how every CURIE in every SSSOM artefact resolves. Emulating one
+/// version with the other's map is not an approximation, it is a different
+/// answer. Re-vendor by copying the file straight out of the image for that
+/// version; there is no generation step to run.
+const OBO_EPM_PRE_1_9_9: &str = include_str!("obo.epm.1.9.8.json");
 const OBO_EPM: &str = include_str!("obo.epm.json");
+
+/// Which of the two maps is in hand. Resolved at ingest, recorded as
+/// `Plan::emulate_robot_version`, and set ONCE by `build::set_robot_behaviours` —
+/// the plan is its only writer, as it is for the other version-dependent
+/// switches. There is deliberately no environment override: it decides bytes.
+static EPM_POST_1_9_9: AtomicBool = AtomicBool::new(true);
+
+/// Select the map for the version being emulated — see the static above.
+pub fn set_obo_epm(emulate_robot_version: (u32, u32, u32)) {
+    EPM_POST_1_9_9.store(emulate_robot_version >= (1, 9, 9), Ordering::Relaxed);
+}
+
+pub fn obo_epm() -> &'static str {
+    if EPM_POST_1_9_9.load(Ordering::Relaxed) { OBO_EPM } else { OBO_EPM_PRE_1_9_9 }
+}
 
 /// The six prefixes `_get_built_in_prefix_map` keeps from the SSSOM schema
 /// context — the ones a converter chain always puts FIRST, so a metadata file
@@ -116,7 +145,7 @@ impl Converter {
 
     /// The standing chain: the SSSOM built-ins, then the bundled EPM.
     pub fn sssom_default() -> Converter {
-        let epm: Vec<Record> = serde_json::from_str(OBO_EPM).unwrap_or_default();
+        let epm: Vec<Record> = serde_json::from_str(obo_epm()).unwrap_or_default();
         // `_get_default_converter` drops any record whose prefix is not an
         // NCName, and any prefix synonym that is not one.
         let epm: Vec<Record> = epm
@@ -163,6 +192,35 @@ impl Converter {
         }
         let (len, prefix, _) = best?;
         Some(format!("{prefix}:{}", &uri[len..]))
+    }
+
+    /// The CURIE for `id`, which may be given as a URI **or** as a CURIE.
+    ///
+    /// A URI compresses. A string that is already a CURIE is STANDARDISED: its
+    /// prefix is looked up among the canonical prefixes and their synonyms and
+    /// replaced by the canonical one, so `OMIM:610799` becomes `omim:610799` and
+    /// `Wikipedia:Foo` becomes `wikipedia.en:Foo`. A prefix the map does not know
+    /// yields `None`, and the caller drops the record.
+    ///
+    /// Both forms occur in one document. OBO Graphs JSON gives a node's
+    /// `meta.xrefs` as CURIEs and its edges and `basicPropertyValues` as full
+    /// URIs, so a compressor that took URIs alone silently discarded every
+    /// xref-derived mapping — on MONDO, all 142,731 of them.
+    pub fn safe_compress(&self, id: &str) -> Option<String> {
+        if let Some(curie) = self.compress(id) {
+            return Some(curie);
+        }
+        // Not a URI under this map. Treat it as a CURIE and standardise the
+        // prefix. A URI that no prefix covers is not rescued by this: `://`
+        // never appears in a CURIE's prefix.
+        let (prefix, local) = id.split_once(':')?;
+        if prefix.is_empty() || local.starts_with("//") {
+            return None;
+        }
+        let canonical = self.records.iter().find(|r| {
+            r.prefix == prefix || r.prefix_synonyms.iter().any(|s| s == prefix)
+        })?;
+        Some(format!("{}:{local}", canonical.prefix))
     }
 
     /// The URI prefix `prefix` is declared with — what the written `curie_map`

@@ -47,6 +47,8 @@ struct OntologyUpdate {
     side: String,
     label: bool,
     existence: bool,
+    /// Record the ontology as that side's source (`<side>_source`).
+    source: bool,
 }
 
 fn parse_update_spec(spec: &str) -> OntologyUpdate {
@@ -60,12 +62,14 @@ fn parse_update_spec(spec: &str) -> OntologyUpdate {
         side: "subject".into(),
         label: false,
         existence: false,
+        source: false,
     };
     for opt in opts.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         match opt {
             "subject" | "object" => u.side = opt.to_string(),
             "label" => u.label = true,
             "existence" => u.existence = true,
+            "source" => u.source = true,
             _ => {}
         }
     }
@@ -74,22 +78,37 @@ fn parse_update_spec(spec: &str) -> OntologyUpdate {
 
 /// Apply one `--update-from-ontology` to the set.
 fn apply_ontology_update(set: &mut MappingSet, u: &OntologyUpdate) -> Result<()> {
-    let model = crate::io::load(std::path::Path::new(&u.path))
-        .with_context(|| format!("reading ontology {}", u.path))?;
-    let declared: std::collections::HashSet<String> =
-        crate::cmd::select::entities(&model).classes.into_iter().collect();
+    let path = std::path::Path::new(&u.path);
+    let mut model =
+        crate::io::load(path).with_context(|| format!("reading ontology {}", u.path))?;
+    // An ontology is its import closure. A term an edit file gets from a
+    // component or a generated pattern file exists just as much as one written
+    // in the edit file itself, and its label lives there too, so the closure is
+    // resolved before either question is asked of the model.
+    crate::cmd::resolve_imports_auto(&mut model, None, Some(path))
+        .with_context(|| format!("resolving imports of {}", u.path))?;
+    let present = crate::sig::entity_signature(&model);
     let mut labels: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    // A term the ontology has retired does not exist for the purpose of this
+    // check. It is still in the signature — that is what makes it obsolete
+    // rather than absent — so a mapping onto it would survive a test that only
+    // asks whether the term is there.
+    let mut deprecated: std::collections::HashSet<String> = std::collections::HashSet::new();
     for ac in model.ont.iter() {
         if let horned_owl::model::Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() != "http://www.w3.org/2000/01/rdf-schema#label" {
-                continue;
-            }
-            if let (
-                horned_owl::model::AnnotationSubject::IRI(s),
-                horned_owl::model::AnnotationValue::Literal(l),
-            ) = (&aa.subject, &aa.ann.av)
-            {
-                labels.insert(s.as_ref().to_string(), l.literal().to_string());
+            let horned_owl::model::AnnotationSubject::IRI(s) = &aa.subject else { continue };
+            match aa.ann.ap.0.as_ref() {
+                "http://www.w3.org/2000/01/rdf-schema#label" => {
+                    if let horned_owl::model::AnnotationValue::Literal(l) = &aa.ann.av {
+                        labels.insert(s.as_ref().to_string(), l.literal().to_string());
+                    }
+                }
+                crate::model::OWL_DEPRECATED
+                    if crate::model::asserts_deprecated(&aa.ann.av) =>
+                {
+                    deprecated.insert(s.as_ref().to_string());
+                }
+                _ => {}
             }
         }
     }
@@ -101,7 +120,7 @@ fn apply_ontology_update(set: &mut MappingSet, u: &OntologyUpdate) -> Result<()>
     for mut m in std::mem::take(&mut set.mappings) {
         let Some(id) = m.get(&id_slot).cloned() else { continue };
         let iri = crate::sssom::owl::expand(&prefixes, &id);
-        if u.existence && !declared.contains(&iri) {
+        if u.existence && (!present.contains(&iri) || deprecated.contains(&iri)) {
             continue;
         }
         if u.label {
@@ -112,6 +131,20 @@ fn apply_ontology_update(set: &mut MappingSet, u: &OntologyUpdate) -> Result<()>
         kept.push(m);
     }
     set.mappings = kept;
+    // `source` names the ontology the side was refreshed from, as set-level
+    // metadata: every record on that side comes from the one ontology, so it is
+    // the ontology's own IRI and not a per-row value.
+    if u.source {
+        if let Some(iri) = model.ont.iter().find_map(|ac| match &ac.component {
+            horned_owl::model::Component::OntologyID(id) => {
+                id.iri.as_ref().map(|i| i.as_ref().to_string())
+            }
+            _ => None,
+        }) {
+            set.metadata
+                .insert(format!("{}_source", u.side), serde_yaml::Value::String(iri));
+        }
+    }
     set.recompute_columns();
     Ok(())
 }
@@ -201,12 +234,13 @@ fn run(args: &[String]) -> Result<i32> {
             Some((p, m)) if !p.contains("://") => (p, Some(m)),
             _ => (spec.as_str(), None),
         };
-        let ms = crate::sssom::io::read_path(
+        let mut ms = crate::sssom::io::read_path(
             std::path::Path::new(path),
             None,
             meta.map(std::path::Path::new),
         )
         .with_context(|| format!("reading {path}"))?;
+        ms.restrict_to_declared_version();
         merge_into(&mut set, ms);
         loaded_any = true;
     }
@@ -215,7 +249,9 @@ fn run(args: &[String]) -> Result<i32> {
         let mut buf = String::new();
         std::io::stdin().read_to_string(&mut buf).context("reading stdin")?;
         if !buf.trim().is_empty() {
-            let ms = crate::sssom::io::read_table(&buf, '\t', None).context("parsing stdin set")?;
+            let mut ms =
+                crate::sssom::io::read_table(&buf, '\t', None).context("parsing stdin set")?;
+            ms.restrict_to_declared_version();
             merge_into(&mut set, ms);
         }
     }
@@ -258,19 +294,6 @@ fn run(args: &[String]) -> Result<i32> {
     // Apply the rule pipeline.
     transform::apply(&mut set, &o.rules, o.include_all);
 
-    // A rule pipeline changes which mappings exist and which way round they face,
-    // so any `mapping_cardinality` carried in from an input now describes a set
-    // that no longer exists. It is a DERIVED slot: stale is worse than absent, and
-    // the reference drops it. UBERON's `uberon.sssom.tsv` merges the local xref
-    // set — which does carry the column — under `object==UBERON:* -> invert()`,
-    // and comes out with no cardinality column at all. With no rules the command
-    // is a pure converter and the column passes through untouched.
-    if !o.rules.is_empty() || o.include_all {
-        for m in &mut set.mappings {
-            m.remove("mapping_cardinality");
-        }
-        set.recompute_columns();
-    }
 
     // …then the ontology updates. AFTER the rules, because UBERON's
     // `object==UBERON:* -> invert()` has to have moved UBERON onto the subject
@@ -282,6 +305,17 @@ fn run(args: &[String]) -> Result<i32> {
     // Keep only prefixes still used by surviving mappings, so the output curie
     // map declares exactly what the result references and no more.
     set.prune_curie_map();
+    set.recompute_columns();
+    // `sssom-cli` writes no `mapping_cardinality`, whatever the input carried and
+    // whatever this run did to the set: feeding it a table straight from
+    // `sssom:xref-extract --drop-duplicates` — which DOES write the column — gives
+    // the same records back with the column gone, under no rules and no updates.
+    // So it is unconditional here, and it is the RECORDS that are cleared rather
+    // than the column list: the write condenses first, and condensation rebuilds
+    // the columns from the records that still hold a value.
+    for m in &mut set.mappings {
+        m.remove("mapping_cardinality");
+    }
     set.recompute_columns();
 
     // The SSSOM-Java header style — a bare `#`, schema slot order — because this

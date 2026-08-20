@@ -195,6 +195,12 @@ pub fn step(
         justification_axioms.extend(axioms);
     }
 
+    // An ontology with nothing to explain still gets a report that says so, rather
+    // than an empty file that reads as a check which did not run.
+    if report.is_empty() {
+        report.push_str("No explanations found.");
+    }
+
     // `--output`: when a format is given or the path extension names an ontology
     // serialization, write an ontology of the justification axioms; otherwise fall
     // back to writing the human-readable report.

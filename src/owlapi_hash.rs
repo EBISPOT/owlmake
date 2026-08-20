@@ -312,10 +312,40 @@ pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
     }
 }
 
+/// A literal's contribution to its own hash: `n * 65536`, where `n` is the
+/// value the literal's datatype reads out of the lexical form — the parsed
+/// number for `xsd:integer`/`xsd:double`/`xsd:float`, 1/0 for `xsd:boolean` —
+/// and the Java string hash of the lexical form for every other datatype.
+///
+/// So `"007"^^xsd:integer` contributes 7, not the hash of `"007"`. A lexical
+/// form the datatype cannot read as a number — an integer too wide for 32 bits —
+/// falls back to the string hash, exactly as an untyped literal would.
+pub(crate) fn literal_payload_hash(text: &str, datatype: &str) -> i32 {
+    const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+    let string_payload = || java_string_hash(text).wrapping_mul(65536);
+    match datatype.strip_prefix(XSD) {
+        Some("integer") => match text.parse::<i32>() {
+            Ok(n) => n.wrapping_mul(65536),
+            Err(_) => string_payload(),
+        },
+        Some("boolean") => i32::from(text.eq_ignore_ascii_case("true")).wrapping_mul(65536),
+        // A fractional value is SCALED and then narrowed, not narrowed and then
+        // scaled, so 2.5 contributes 163840 rather than 2·65536.
+        Some("double") => match text.parse::<f64>() {
+            Ok(d) => (d * 65536.0) as i32,
+            Err(_) => string_payload(),
+        },
+        Some("float") => match text.parse::<f32>() {
+            Ok(f) => (f * 65536.0f32) as i32,
+            Err(_) => string_payload(),
+        },
+        _ => string_payload(),
+    }
+}
+
 /// `OWLLiteralImpl.hashCode()`: `(277*37 + datatype.hash)*37 + payload`, where
 /// a plain/xsd:string/langString literal normalizes its datatype to
-/// `rdf:PlainLiteral` and the payload is `literal.hashCode() * 65536` (numeric
-/// literals contribute their parsed value instead).
+/// `rdf:PlainLiteral` and the payload is [`literal_payload_hash`].
 fn literal_hash(lit: &Literal<RcStr>) -> i32 {
     const PLAIN: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
     let (text, dt): (&str, &str) = match lit {
@@ -331,13 +361,7 @@ fn literal_hash(lit: &Literal<RcStr>) -> i32 {
         }
     };
     let dt_hash = tag(P_DATATYPE, &[iri_hash(dt)]);
-    let payload = if dt.ends_with("#integer") {
-        text.parse::<i32>().unwrap_or_else(|_| java_string_hash(text)).wrapping_mul(65536)
-    } else if dt.ends_with("#boolean") {
-        if text == "true" { 65536 } else { 0 }
-    } else {
-        java_string_hash(text).wrapping_mul(65536)
-    };
+    let payload = literal_payload_hash(text, dt);
     let h = (277i32.wrapping_mul(37).wrapping_add(dt_hash)).wrapping_mul(37).wrapping_add(payload);
     // A language tag is folded in after the payload.
     match lit {
@@ -498,6 +522,35 @@ pub fn class_node_order(iris: &[String]) -> Vec<usize> {
 mod tests {
     use super::*;
     use horned_owl::model::Build;
+
+    /// Ground truth: `OWLLiteral.hashCode()` read off the OWLAPI runtime, minus
+    /// the `(277*37 + datatype.hash)*37` base, for each datatype that reads its
+    /// lexical form as a number.
+    #[test]
+    fn literal_payload_matches_owlapi() {
+        let xsd = "http://www.w3.org/2001/XMLSchema#";
+        let int = format!("{xsd}integer");
+        assert_eq!(literal_payload_hash("20", &int), 20 * 65536);
+        assert_eq!(literal_payload_hash("0", &int), 0);
+        assert_eq!(literal_payload_hash("-7", &int), -7 * 65536);
+        // A leading zero is not the canonical form, but the datatype still reads
+        // the number out of it.
+        assert_eq!(literal_payload_hash("007", &int), 7 * 65536);
+        // …and one too wide for 32 bits falls back to the string hash.
+        assert_eq!(
+            literal_payload_hash("99999999999999999999", &int),
+            java_string_hash("99999999999999999999").wrapping_mul(65536)
+        );
+        assert_eq!(literal_payload_hash("true", &format!("{xsd}boolean")), 65536);
+        assert_eq!(literal_payload_hash("false", &format!("{xsd}boolean")), 0);
+        assert_eq!(literal_payload_hash("2.5", &format!("{xsd}double")), 163840);
+        assert_eq!(literal_payload_hash("2.5", &format!("{xsd}float")), 163840);
+        // Every other datatype hashes the lexical form.
+        assert_eq!(
+            literal_payload_hash("306.764", &format!("{xsd}decimal")),
+            java_string_hash("306.764").wrapping_mul(65536)
+        );
+    }
 
     // Ground truth from the OWLAPI 4.5.29 runtime (HashProbe/PartProbe).
     #[test]

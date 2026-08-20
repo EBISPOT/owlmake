@@ -15,7 +15,6 @@ use horned_owl::model::{AnnotatedComponent, Component, RcStr};
 
 use crate::diff;
 use crate::io;
-use crate::sparql::Queryable;
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -99,17 +98,10 @@ fn document_iri(path: Option<&std::path::Path>, iri: Option<&str>) -> String {
 
 /// Build an IRI -> label map for label annotation in the report.
 fn label_map(model: &crate::model::Model) -> anyhow::Result<HashMap<String, String>> {
-    let q = Queryable::from_model(model)?;
-    let table = q.query_table(
-        "SELECT ?e ?l WHERE { ?e <http://www.w3.org/2000/01/rdf-schema#label> ?l }",
-    )?;
-    let mut map = HashMap::new();
-    for row in &table.rows {
-        if row.len() >= 2 {
-            map.insert(row[0].clone(), row[1].clone());
-        }
-    }
-    Ok(map)
+    // The same label set the rest of the build names entities by — an entity with
+    // competing labels must not be called one thing in a banner and another in a
+    // diff report.
+    Ok(crate::cmd::rdfs_labels(model))
 }
 
 /// Append known labels after IRIs appearing in `text`.
@@ -581,13 +573,61 @@ fn short_form(iri: &str, labels: &HashMap<String, String>) -> String {
     if let Some(l) = labels.get(iri) {
         return l.clone();
     }
+    if let Some(s) = ncname_suffix(iri) {
+        return s.to_string();
+    }
+    // No NCName suffix — an ORCID that ends in a digit has none, since an NCName
+    // may not begin with one. The last path segment stands in.
     match iri.rsplit_once('#') {
         Some((_, frag)) if !frag.is_empty() => frag.to_string(),
         _ => match iri.rsplit_once('/') {
             Some((_, seg)) if !seg.is_empty() => seg.to_string(),
-            _ => iri.to_string(),
+            // …and where there is no segment either, because the IRI ends in a
+            // separator, the whole IRI stands, in angle brackets, so a reader can
+            // see it is the short form rather than a truncation of one.
+            _ => format!("<{iri}>"),
         },
     }
+}
+
+/// The IRI's local name: its longest suffix that is a valid XML NCName.
+///
+/// This is what makes `…/ECTO_0000985` shorten to `ECTO_0000985` while
+/// `https://orcid.org/0000-0002-2996-719X` shortens to `X` — an NCName may not
+/// begin with a digit or a hyphen, so the local name starts at the last character
+/// that can begin one. Scanning stops at the first character that cannot appear in
+/// an NCName at all (`/`, `:`), so an IRI ending in a separator has no local name.
+fn ncname_suffix(iri: &str) -> Option<&str> {
+    let mut start: Option<usize> = None;
+    for (i, c) in iri.char_indices().rev() {
+        if !is_ncname_char(c) {
+            break;
+        }
+        if is_ncname_start_char(c) {
+            start = Some(i);
+        }
+    }
+    start.map(|i| &iri[i..])
+}
+
+/// `NCNameStartChar` from XML 1.0 (5th ed.), less `:`.
+fn is_ncname_start_char(c: char) -> bool {
+    matches!(c,
+        'A'..='Z' | '_' | 'a'..='z'
+        | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+        | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}'
+        | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}'
+        | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+        | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}'
+        | '\u{10000}'..='\u{EFFFF}')
+}
+
+/// `NCNameChar`: a start character, or one of the characters that may follow one.
+fn is_ncname_char(c: char) -> bool {
+    is_ncname_start_char(c)
+        || matches!(c,
+            '-' | '.' | '0'..='9' | '\u{B7}'
+            | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }
 
 /// Manchester syntax with every IRI rendered as a markdown link, e.g.
@@ -691,6 +731,20 @@ fn link_iris(text: &str, labels: &HashMap<String, String>) -> String {
     out
 }
 
+/// One operand of an intersection or union: bracketed when it is a compound
+/// expression, bare when it is a name.
+fn bracket_operand_md(
+    ce: &horned_owl::model::ClassExpression<RcStr>,
+    labels: &HashMap<String, String>,
+) -> String {
+    use horned_owl::model::ClassExpression as CE;
+    let body = render_ce_md(ce, labels);
+    match ce {
+        CE::Class(_) | CE::ObjectOneOf(_) => body,
+        _ => format!("({body})"),
+    }
+}
+
 fn render_ce_md(
     ce: &horned_owl::model::ClassExpression<RcStr>,
     labels: &HashMap<String, String>,
@@ -699,11 +753,15 @@ fn render_ce_md(
     let rec = |x| render_ce_md(x, labels);
     match ce {
         CE::Class(c) => md_iri(c.0.as_ref(), labels),
+        // `A and (R some B) and (S some C)`: the operands carry the brackets, not
+        // the intersection. A named class needs none — the brackets are there to
+        // keep a restriction's own operand from reading as another operand of the
+        // intersection, and around a whole list there is nothing to disambiguate.
         CE::ObjectIntersectionOf(v) => {
-            format!("({})", v.iter().map(rec).collect::<Vec<_>>().join(" and "))
+            v.iter().map(|x| bracket_operand_md(x, labels)).collect::<Vec<_>>().join(" and ")
         }
         CE::ObjectUnionOf(v) => {
-            format!("({})", v.iter().map(rec).collect::<Vec<_>>().join(" or "))
+            v.iter().map(|x| bracket_operand_md(x, labels)).collect::<Vec<_>>().join(" or ")
         }
         CE::ObjectComplementOf(b) => format!("not {}", rec(b)),
         CE::ObjectSomeValuesFrom { ope, bce } => {
@@ -821,8 +879,8 @@ mod tests {
             "0 axioms in left ontology but not in right ontology:\n\
              \n\
              2 axioms in right ontology but not in left ontology:\n\
-             + Declaration(Class(http://x/A))\n\
-             + Declaration(Class(http://x/B))\n"
+             + Declaration(Class(<http://x/A>))\n\
+             + Declaration(Class(<http://x/B>))\n"
         );
     }
 
@@ -910,12 +968,27 @@ mod tests {
     }
 
     #[test]
-    fn short_form_prefers_a_label_then_the_fragment_then_the_last_segment() {
+    fn short_form_prefers_a_label_then_the_ncname_suffix() {
         let mut labels = HashMap::new();
         labels.insert("http://x/A".to_string(), "alpha".to_string());
         assert_eq!(short_form("http://x/A", &labels), "alpha");
         assert_eq!(short_form("http://x/ns#B", &labels), "B");
         assert_eq!(short_form("http://purl.obolibrary.org/obo/CL_0000000", &labels), "CL_0000000");
+        // An NCName cannot begin with a digit or a hyphen, so an ORCID ending in a
+        // letter has that letter alone as its local name…
+        assert_eq!(short_form("https://orcid.org/0000-0002-2996-719X", &labels), "X");
+        // …while one ending in a digit has no NCName suffix at all, and falls back
+        // to the last path segment.
+        assert_eq!(
+            short_form("https://orcid.org/0000-0002-2996-7190", &labels),
+            "0000-0002-2996-7190"
+        );
+        assert_eq!(short_form("http://example.org/2026-08-19", &labels), "2026-08-19");
+        // Only where there is no segment either does the whole IRI stand, bracketed.
+        assert_eq!(
+            short_form("https://example.org/a/b/", &labels),
+            "<https://example.org/a/b/>"
+        );
     }
 
     /// Frames are keyed by the axiom's SUBJECT, so both a declaration and a

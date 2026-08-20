@@ -32,6 +32,7 @@ use clap::Args as ClapArgs;
 use horned_owl::model::{AnnotationSubject, AnnotationValue, ClassExpression as CE, Component, Literal};
 use sha1::Digest;
 use tiktoken_rs::{cl100k_base, CoreBPE};
+use crate::model::XSD_BOOLEAN;
 
 const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 const DC11_TITLE: &str = "http://purl.org/dc/elements/1.1/title";
@@ -178,15 +179,14 @@ fn collect_entities(
             Component::AnnotationAssertion(aa) => {
                 let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
                 let prop = aa.ann.ap.0.as_ref();
-                // owl:deprecated true → is_obsolete column.
+                // owl:deprecated → is_obsolete column. A TYPED boolean marks
+                // deprecation; an untyped `"true"`, or one carrying a language
+                // tag, is a string that happens to spell it and marks nothing.
                 if prop == OWL_DEPRECATED {
-                    if let AnnotationValue::Literal(lit) = &aa.ann.av {
-                        let v = match lit {
-                            Literal::Simple { literal }
-                            | Literal::Language { literal, .. }
-                            | Literal::Datatype { literal, .. } => literal.as_str(),
-                        };
-                        if v == "true" {
+                    if let AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri }) =
+                        &aa.ann.av
+                    {
+                        if literal == "true" && datatype_iri.as_ref() == XSD_BOOLEAN {
                             ents.entry(subj.as_ref().to_string()).or_default().deprecated = true;
                         }
                     }

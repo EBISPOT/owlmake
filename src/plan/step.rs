@@ -21,17 +21,6 @@ pub enum Op {
         /// their axioms are NOT merged — they remain a read-only reasoning closure
         /// until a later collapsing merge.
         collapse_import_closure: Option<bool>,
-        /// Whether this merge STARTS the pipeline: the model it leaves is its
-        /// inputs alone, not its inputs merged into whatever came before.
-        ///
-        /// A recipe's every command line is its own invocation, so a line that
-        /// opens with `merge --input` opens a new pipeline over that input.
-        /// uPheno's `components/upheno-bridge.owl` is two of them — the first
-        /// constructs `tmp/bridge.ttl` from the edit file and a mapping set, the
-        /// second builds the component from `tmp/bridge.ttl` alone — and carrying
-        /// the first line's model into the second put the whole edit file and its
-        /// import closure into the component, 158 MB against 8.
-        restart: bool,
     },
     /// `unmerge` — remove a second ontology's axioms from the current one.
     Unmerge {
@@ -174,6 +163,13 @@ pub enum Op {
         /// provenance annotation.
         add_source: bool,
     },
+    /// A prefix binding the LAUNCHER states, before any subcommand — ROBOT's
+    /// global `--prefix`/`--add-prefix "foo: http://bar"`. It binds for the whole
+    /// chain, so it is recorded as the chain's opening step; the document written
+    /// at the end declares it whether or not any axiom uses it. CL's
+    /// `components/hra_subset.owl` is `robot --add-prefix "obo: …" annotate …`,
+    /// and without the binding the component loses its `xmlns:obo` declaration.
+    AddPrefix { prefixes: Vec<String> },
     /// `template` — generate axioms from template tables (a row of template
     /// strings over a table of terms) and merge them in.
     Template {
@@ -511,6 +507,28 @@ pub fn filter_step(spec: FilterSpec) -> Step {
 /// One element of a parsed recipe.
 #[derive(Debug, Clone)]
 pub enum Step {
+    /// The start of a new tool invocation.
+    ///
+    /// A recipe's every command line is its own process, and processes share
+    /// nothing but files. So a line does NOT continue the previous line's
+    /// in-memory ontology: it opens a new pipeline over whatever its own
+    /// `--input` names, and if it names none it starts from nothing.
+    ///
+    /// Losing that boundary is losing the shell that stood between the two
+    /// invocations, and it has written a wrong artefact three times over.
+    /// uPheno's `components/upheno-bridge.owl` carried the edit file and its
+    /// whole import closure into a component built from `tmp/bridge.ttl` alone,
+    /// 158 MB against 8. OBA's `construct_pato_attribute` serialised the whole of
+    /// PATO instead of the CONSTRUCT its second invocation reads back from disk,
+    /// 8,981 nodes against 488. EFO's `components/legal_diseases.txt` ran its
+    /// second invocation's query against the merged edit ontology rather than the
+    /// `disease_to_phenotype_merged.owl` that invocation names — which also hid
+    /// that the file was missing, because nothing ever opened it.
+    ///
+    /// `input` is the invocation's own `--input`, and the model is re-established
+    /// from it. `None` means the invocation names no input of its own and starts
+    /// empty; the steps that follow build the model themselves.
+    Boundary { input: Option<String> },
     /// A fully-mapped, executable operation.
     Op(Op),
     /// A mapped operation that uses options owlmake can't execute yet.
@@ -586,6 +604,8 @@ impl Step {
     pub fn gaps(&self) -> Vec<String> {
         match self {
             Step::Op(_) | Step::Inert(_) | Step::Shell { .. } | Step::Fallback { .. } | Step::Oort(_) => vec![],
+            // A boundary is bookkeeping about where one invocation ends, not work.
+            Step::Boundary { .. } => vec![],
             Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::CliRobot { .. } => vec![],
             Step::Partial { gaps, .. } => gaps.clone(),
             Step::UnknownRobot(name) => vec![format!("unsupported ROBOT command `{name}`")],
@@ -619,6 +639,10 @@ impl Step {
     pub fn label(&self) -> String {
         match self {
             Step::Op(op) | Step::Partial { op, .. } => op_label(op),
+            Step::Boundary { input } => match input {
+                Some(i) => format!("── new invocation, from {i}"),
+                None => "── new invocation".to_string(),
+            },
             Step::UnknownRobot(n) => format!("robot {n} (UNSUPPORTED)"),
             Step::CliRobot { name, .. } => format!("robot {name}"),
             Step::File(f) => f.label(),
@@ -723,6 +747,7 @@ fn op_label(op: &Op) -> String {
             if *synonym_decls { bits.push("synonym-decls"); }
             format!("normalize[{}]", bits.join(", "))
         }
+        Op::AddPrefix { prefixes } => format!("add-prefix[{}]", prefixes.len()),
         Op::Template { templates, merge, prefixes } => {
             let p =
                 if prefixes.is_empty() { String::new() } else { format!(", +{}pfx", prefixes.len()) };

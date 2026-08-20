@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// An update rebuilds the document from its triples, so a prefix no triple uses
 /// survives only if the document format's prefix map is carried across. Which
 /// way a repo wants it is resolved at INGEST and recorded as
-/// `Plan::robot_version` — execution sets this once, from the plan
+/// `Plan::emulate_robot_version` — execution sets this once, from the plan
 /// (`build::set_robot_behaviours`). There is deliberately no environment
 /// override: it decides artefact bytes.
 static UPDATE_KEEPS_PREFIXES: AtomicBool = AtomicBool::new(true);
@@ -1716,7 +1716,7 @@ pub fn step(
         // value.
         out.plain_literals_typed = true;
         // Whether the round trip also drops the document format's prefixes is
-        // decided by the one recorded fact `Plan::robot_version`, resolved at
+        // decided by the one recorded fact `Plan::emulate_robot_version`, resolved at
         // ingest. The boundary is 1.9.9:
         //
         // - Below 1.9.9 the prefix map does not survive the update, which is why

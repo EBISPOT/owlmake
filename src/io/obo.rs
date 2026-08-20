@@ -451,14 +451,23 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     Ok(m)
 }
 
-/// Each standard oboInOwl annotation property *that is actually used* carries a
-/// canonical `rdfs:label` (e.g. `hasExactSynonym` → "has_exact_synonym"). Add
-/// those for any used+unlabelled built-in property.
-fn add_oboinowl_builtin_labels(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>) {
+/// The OBO built-in annotation properties, each with the canonical `rdfs:label`
+/// it carries (`hasExactSynonym` → "has_exact_synonym").
+///
+/// A property in this table is INTRODUCED by the OBO tag that used it — `def:`
+/// gives `IAO_0000115`, `synonym:` gives `oboInOwl:hasExactSynonym`, `xref:`
+/// gives `oboInOwl:hasDbXref` — so its declaration is the document's own and
+/// stands whatever the import closure declares. A property merely named as a
+/// `property_value:` predicate is referenced rather than introduced, and an
+/// imported ontology that declares it takes that job over.
+///
+/// One table, two readers: [`add_oboinowl_builtin_labels`] labels them, and
+/// [`declare_referenced_entities`] keeps them out of the withdrawable set.
+fn obo_builtin_annotation_properties() -> [(String, &'static str); 31] {
     // Full IRIs so the IAO_* and oboInOwl meta-properties (SubsetProperty …) sit
     // alongside the oboInOwl synonym/xref properties.
     const OBO: &str = "http://purl.obolibrary.org/obo/";
-    let labels: [(String, &str); 31] = [
+    [
         (format!("{OIO}hasExactSynonym"), "has_exact_synonym"),
         (format!("{OIO}hasNarrowSynonym"), "has_narrow_synonym"),
         (format!("{OIO}hasBroadSynonym"), "has_broad_synonym"),
@@ -493,7 +502,14 @@ fn add_oboinowl_builtin_labels(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>) {
         (format!("{OBO}IAO_0000425"), "expand assertion to"),
         (format!("{OBO}IAO_0000427"), "antisymmetric property"),
         (format!("{OBO}IAO_0100001"), "term replaced by"),
-    ];
+    ]
+}
+
+/// Each standard oboInOwl annotation property *that is actually used* carries a
+/// canonical `rdfs:label` (e.g. `hasExactSynonym` → "has_exact_synonym"). Add
+/// those for any used+unlabelled built-in property.
+fn add_oboinowl_builtin_labels(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>) {
+    let labels = obo_builtin_annotation_properties();
     // Annotation-property IRIs referenced anywhere (assertions, axiom/ontology
     // annotations, declarations, sub-property axioms) and subjects already labelled.
     let mut used: BTreeSet<String> = BTreeSet::new();
@@ -546,29 +562,47 @@ fn declare_referenced_entities(
     ont: &mut SetOntology<RcStr>,
 ) -> std::collections::HashSet<String> {
     let mut classes: BTreeSet<String> = BTreeSet::new();
+    // Classes met as the FILLER of a relation restriction. An OBO `relationship:`
+    // (and an `intersection_of:` that names a relation) declares its filler
+    // outright, because obo format allows a dangling reference there and the
+    // translation makes the class explicit to be sure. Such a declaration is the
+    // document's own, so it stands whatever the import closure holds — unlike a
+    // class named as a PLAIN operand of `is_a:`, `disjoint_from:`, a bare
+    // `intersection_of:` or a `union_of:`, which the translation leaves to the
+    // signature and which the closure therefore suppresses.
+    let mut filler_classes: BTreeSet<String> = BTreeSet::new();
     let mut obj_props: BTreeSet<String> = BTreeSet::new();
     let mut ann_props: BTreeSet<String> = BTreeSet::new();
     let mut declared_c: BTreeSet<String> = BTreeSet::new();
     let mut declared_o: BTreeSet<String> = BTreeSet::new();
     let mut declared_a: BTreeSet<String> = BTreeSet::new();
 
-    fn walk_ce(ce: &CE<RcStr>, classes: &mut BTreeSet<String>, ops: &mut BTreeSet<String>) {
+    fn walk_ce(
+        ce: &CE<RcStr>,
+        classes: &mut BTreeSet<String>,
+        filler_classes: &mut BTreeSet<String>,
+        ops: &mut BTreeSet<String>,
+        in_filler: bool,
+    ) {
         match ce {
             CE::Class(c) => {
                 classes.insert(c.0.to_string());
+                if in_filler {
+                    filler_classes.insert(c.0.to_string());
+                }
             }
             CE::ObjectSomeValuesFrom { ope, bce } | CE::ObjectAllValuesFrom { ope, bce } => {
                 if let OPE::ObjectProperty(p) = ope {
                     ops.insert(p.0.to_string());
                 }
-                walk_ce(bce, classes, ops);
+                walk_ce(bce, classes, filler_classes, ops, true);
             }
             CE::ObjectIntersectionOf(v) | CE::ObjectUnionOf(v) => {
                 for x in v {
-                    walk_ce(x, classes, ops);
+                    walk_ce(x, classes, filler_classes, ops, in_filler);
                 }
             }
-            CE::ObjectComplementOf(x) => walk_ce(x, classes, ops),
+            CE::ObjectComplementOf(x) => walk_ce(x, classes, filler_classes, ops, in_filler),
             _ => {}
         }
     }
@@ -588,17 +622,17 @@ fn declare_referenced_entities(
                 declared_a.insert(d.0 .0.to_string());
             }
             Component::SubClassOf(ax) => {
-                walk_ce(&ax.sub, &mut classes, &mut obj_props);
-                walk_ce(&ax.sup, &mut classes, &mut obj_props);
+                walk_ce(&ax.sub, &mut classes, &mut filler_classes, &mut obj_props, false);
+                walk_ce(&ax.sup, &mut classes, &mut filler_classes, &mut obj_props, false);
             }
             Component::EquivalentClasses(ax) => {
                 for ce in &ax.0 {
-                    walk_ce(ce, &mut classes, &mut obj_props);
+                    walk_ce(ce, &mut classes, &mut filler_classes, &mut obj_props, false);
                 }
             }
             Component::DisjointClasses(ax) => {
                 for ce in &ax.0 {
-                    walk_ce(ce, &mut classes, &mut obj_props);
+                    walk_ce(ce, &mut classes, &mut filler_classes, &mut obj_props, false);
                 }
             }
             Component::AnnotationAssertion(ax) => {
@@ -618,7 +652,12 @@ fn declare_referenced_entities(
     let mut materialised: std::collections::HashSet<String> = Default::default();
     for c in classes.difference(&declared_c) {
         ont.insert(Component::DeclareClass(DeclareClass(b.class(c.as_str()))));
-        materialised.insert(format!("class\u{0}{c}"));
+        // A relation's filler is declared by the document itself, so it is not
+        // withdrawable; a plain operand is ours to withdraw once the closure is
+        // known to type it.
+        if !filler_classes.contains(c) {
+            materialised.insert(format!("class\u{0}{c}"));
+        }
     }
     for p in obj_props.difference(&declared_o) {
         ont.insert(Component::DeclareObjectProperty(DeclareObjectProperty(
@@ -626,11 +665,19 @@ fn declare_referenced_entities(
         )));
         materialised.insert(format!("op\u{0}{p}"));
     }
+    // A built-in property is introduced by the tag that used it, so its
+    // declaration is the document's own and no import can stand in for it; one
+    // named as a `property_value:` predicate is ours to withdraw once the closure
+    // is known to type it.
+    let builtin: BTreeSet<String> =
+        obo_builtin_annotation_properties().into_iter().map(|(iri, _)| iri).collect();
     for p in ann_props.difference(&declared_a) {
         ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
             b.annotation_property(p.as_str()),
         )));
-        materialised.insert(format!("ap\u{0}{p}"));
+        if !builtin.contains(p) {
+            materialised.insert(format!("ap\u{0}{p}"));
+        }
     }
     materialised
 }
@@ -4422,16 +4469,18 @@ const RDF_PLAIN_LITERAL_IRI: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#
 /// IRI-hash difference from `rdf:PlainLiteral`; a language tag then folds in as
 /// `base*37 + hash(lang)`.
 fn owlapi_lit_hash(value: &str, datatype: Option<&str>, lang: Option<&str>) -> i32 {
-    let jv = java_hash(value).wrapping_mul(65536);
-    let base = match datatype {
-        Some(dt) if dt != XSD_STRING_IRI => {
-            let d = owlapi_iri_hash(dt)
-                .wrapping_sub(owlapi_iri_hash(RDF_PLAIN_LITERAL_IRI))
-                .wrapping_mul(37);
-            (3231644899u32 as i32).wrapping_add(d).wrapping_add(jv)
-        }
-        _ => (3231644899u32 as i32).wrapping_add(jv),
+    // The datatype the literal hashes UNDER, which also decides how the value
+    // itself contributes: a typed number contributes the number, so
+    // `"20"^^xsd:integer` and `"20"^^xsd:string` do not hash alike.
+    let dt = match datatype {
+        Some(d) if d != XSD_STRING_IRI => d,
+        _ => RDF_PLAIN_LITERAL_IRI,
     };
+    let jv = crate::owlapi_hash::literal_payload_hash(value, dt);
+    let d = owlapi_iri_hash(dt)
+        .wrapping_sub(owlapi_iri_hash(RDF_PLAIN_LITERAL_IRI))
+        .wrapping_mul(37);
+    let base = (3231644899u32 as i32).wrapping_add(d).wrapping_add(jv);
     match lang {
         Some(l) => base.wrapping_mul(37).wrapping_add(java_hash(l)),
         None => base,

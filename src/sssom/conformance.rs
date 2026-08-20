@@ -101,6 +101,51 @@ pub fn infer_version(ms: &MappingSet) -> &'static str {
     }
 }
 
+/// True when 1.1 introduced `slot` anywhere — at set level or on a record.
+pub fn is_slot_added_1_1(slot: &str) -> bool {
+    SLOTS_ADDED_1_1.contains(&slot) || SET_SLOTS_ADDED_1_1.contains(&slot)
+}
+
+/// True when 1.1 introduced `slot` ON A RECORD. The set-level additions are not
+/// among these: `curation_rule` and its siblings were already record slots in
+/// 1.0, and only their set-level spelling is new.
+pub fn is_record_slot_added_1_1(slot: &str) -> bool {
+    SLOTS_ADDED_1_1.contains(&slot)
+}
+
+/// True when `slot` reaches the written table: a mapping-level column, or an
+/// extension, which the schema does not describe and so cannot exclude.
+fn is_written_slot(slot: &str) -> bool {
+    super::MAPPING_COLUMN_ORDER.contains(&slot) || !SLOT_ORDER.contains(&slot)
+}
+
+/// The version the set declares once serialized — 1.1 only where a 1.1 feature
+/// survives into the written bytes.
+///
+/// Set-level slots are written as they stand, so they count as [`infer_version`]
+/// counts them. Record slots count only when they have a column; of the entity
+/// types that mark a composed expression, `predicate_type` has none, so only the
+/// subject's and the object's can be seen in a table.
+pub fn written_version(ms: &MappingSet) -> &'static str {
+    let meta_1_1 = ms
+        .metadata
+        .keys()
+        .any(|k| SLOTS_ADDED_1_1.contains(&k.as_str()) || SET_SLOTS_ADDED_1_1.contains(&k.as_str()));
+    let record_1_1 = ms.mappings.iter().any(|m| {
+        m.keys().any(|k| SLOTS_ADDED_1_1.contains(&k.as_str()) && is_written_slot(k))
+    });
+    let value_1_1 = ms.mappings.iter().any(|m| {
+        ["subject_type", "object_type"]
+            .iter()
+            .any(|t| m.get(*t).map(|v| v == COMPOSED_ENTITY).unwrap_or(false))
+    });
+    if record_1_1 || meta_1_1 || value_1_1 {
+        SSSOM_VERSION_1_1
+    } else {
+        SSSOM_VERSION_1_0
+    }
+}
+
 /// Validation categories. The default `validate` runs them all. `structure` is
 /// raw-text-only (see [`structure`]); the rest operate on the parsed model.
 pub const ALL_CATEGORIES: &[&str] = &[
@@ -553,7 +598,18 @@ mod tests {
         ms.mappings[0].insert("predicate_type".into(), "owl object property".into());
         // Uses predicate_type (1.1) without declaring the version.
         assert!(validate(&ms).iter().any(|e| e.contains("1.1")));
-        ms.enforce_version();
+        // Declaring the version settles it. `enforce_version` will NOT, because
+        // `predicate_type` has no column: what the set holds uses 1.1, what the
+        // table would say does not, and the writer speaks for the table.
+        ms.metadata.insert("sssom_version".into(), serde_yaml::Value::String("1.1".into()));
         assert!(!validate(&ms).iter().any(|e| e.contains("1.1 features")));
+
+        // The other way to settle it is to read the set at the version it
+        // declares — undeclared means 1.0, and a 1.0 set has no predicate_type.
+        let mut undeclared = clean();
+        undeclared.mappings[0].insert("predicate_type".into(), "owl object property".into());
+        undeclared.restrict_to_declared_version();
+        assert!(!undeclared.mappings[0].contains_key("predicate_type"));
+        assert!(!validate(&undeclared).iter().any(|e| e.contains("1.1 features")));
     }
 }
