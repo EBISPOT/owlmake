@@ -3681,7 +3681,14 @@ fn run_artefact(
         // a load of every imported document, and no other serialization has these
         // banners to fill in.
         if m.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+            // …and it spends no blank-node ids either. The documents are read for
+            // their labels and dropped, so the ids their anonymous individuals
+            // would take are ids this artefact never writes; leaving the count
+            // where the read pushed it numbers the artefact's OWN nodes from after
+            // a whole closure that is not in it.
+            let mark = crate::io::anon_counter();
             m.banner_labels = closure_banner_labels(&m, &repo.dir, catalog);
+            crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
         m

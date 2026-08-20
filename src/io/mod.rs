@@ -1183,13 +1183,13 @@ fn mint_anon_ids(n: usize) -> u64 {
 }
 
 /// The id the next blank node takes.
-fn anon_counter() -> u64 {
+pub(crate) fn anon_counter() -> u64 {
     ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Carry the counter forward to where a parse left it, so the next document
 /// numbers on from there rather than over the top of it.
-fn set_anon_counter(n: u64) {
+pub(crate) fn set_anon_counter(n: u64) {
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
         eprintln!(
             "[anon] carry {} -> {n}",
