@@ -133,6 +133,11 @@ pub struct OwlmakeSpec {
     pub id: String,
     /// Release version (typically a date, `YYYY-MM-DD`).
     pub version: String,
+    /// Optional: the repo file the release version is read from, relative to the
+    /// repo root. When present a run that names no version reads it, and
+    /// [`version`](Self::version) is only the fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_file: Option<String>,
     /// The ontology IRI of the primary product.
     pub ontology_iri: String,
     /// Reasoner backend (`ELK`, `whelk`, …).
@@ -1122,6 +1127,7 @@ impl OwlmakeSpec {
             min_owlmake_version: Some(PLAN_FORMAT_MIN_VERSION.to_string()),
             id: plan.id.clone(),
             version: plan.version.clone(),
+            version_file: plan.version_file.clone(),
             ontology_iri: plan.ontology_iri.clone(),
             reasoner: plan.reasoner.clone(),
             use_base_merging: plan.use_base_merging,
@@ -1306,6 +1312,7 @@ impl OwlmakeSpec {
             gating_flags: self.gating_flags,
             id: self.id,
             version: self.version,
+            version_file: self.version_file,
             ontology_iri: self.ontology_iri,
             reasoner: self.reasoner,
             use_base_merging: self.use_base_merging,
@@ -2616,6 +2623,7 @@ mod tests {
         let plan = Plan {
             id: "tiny".into(),
             version: "1".into(),
+            version_file: None,
             ontology_iri: "http://example.org/tiny.owl".into(),
             reasoner: "ELK".into(),
             use_base_merging: false,
@@ -2743,7 +2751,11 @@ mod format_floor_tests {
         // inside it, so it is its own step and carries the invocation's `input`.
         // A plan carrying the old flag would lose the boundary rather than
         // mis-execute it, and there is nothing to migrate, so the floor stays put.
-        const PLAN_SCHEMA_DIGEST: &str = "83426c663e38a057";
+        // `version_file` arrived as an OPTIONAL field with a default, so a plan
+        // written before it loads unchanged and one written with it is ignored by
+        // a build that does not know it — only the frozen version comes back.
+        // That is a format an older owlmake can still execute, so the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "1666186e12be8423";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -2774,6 +2786,7 @@ mod round_trip_tests {
         let plan = Plan {
             id: "tiny".into(),
             version: "2026-08-07".into(),
+            version_file: None,
             ontology_iri: "http://example.org/tiny.owl".into(),
             reasoner: "ELK".into(),
             use_base_merging: true,
@@ -2877,6 +2890,7 @@ mod round_trip_tests {
         let spec = OwlmakeSpec::from_plan(&Plan {
             id: "x".into(),
             version: "1".into(),
+            version_file: None,
             ontology_iri: "http://example.org/x.owl".into(),
             reasoner: "ELK".into(),
             use_base_merging: false,

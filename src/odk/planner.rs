@@ -507,6 +507,11 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         v
     };
 
+    // Recorded while the recipes above were expanded: a backtick that reads the
+    // version out of a file names it here. Path fields are `repo.dir`-relative,
+    // as `edit_file` and `catalog_file` are, so it is carried as written.
+    let version_file = make.version_file.borrow().clone();
+
     Ok(Plan {
         // What the repo itself states. A repo running the image's own tool names
         // its ODK release and nothing else; one shipping its own names the tool.
@@ -563,7 +568,16 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         // The DEFAULT release version. Every other string that needs it holds
         // `{version}`, a reference to this field, so the run can supply a
         // different date without the plan being regenerated.
-        version: make.version_default.clone(),
+        //
+        // A configuration that reads the version out of a file gets that file's
+        // CURRENT contents as the default and the file itself as `version_file`,
+        // which the run re-reads. Read here rather than at expansion time because
+        // the recipes that mention the file have all been expanded by now.
+        version: version_file
+            .as_deref()
+            .and_then(|f| read_version_file(&repo.dir, f))
+            .unwrap_or_else(|| make.version_default.clone()),
+        version_file: version_file.clone(),
         ontology_iri: format!("{ontbase}.owl"),
         reasoner,
         use_base_merging,
@@ -701,6 +715,20 @@ fn plan_rule(
         if command_lines > 0 && !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
             if let Some(opens_with) = first_robot_input(&expanded, robot_prefix) {
                 line_steps.insert(0, Step::Boundary { input: Some(opens_with) });
+            }
+        }
+        // A `mint` line that names no `--id-ranges` takes the single
+        // `*-idranges.owl` beside the edit file, which is how the recipe's ROBOT
+        // resolves it. Resolve it HERE so the plan NAMES the file: leaving it
+        // unset made execution glob for it, and it globbed the directory `om` was
+        // launched from rather than the ontology directory, so EFO's
+        // `allocate-definitive-ids` — which CI runs unattended on every merge to
+        // master — failed with "no *-idranges.owl file found in .".
+        for step in &mut line_steps {
+            if let Step::Op(Op::Mint { id_ranges, .. }) = step {
+                if id_ranges.is_none() {
+                    *id_ranges = idranges_beside_edit_file(&repo.dir);
+                }
             }
         }
         if !line_steps.is_empty() {
@@ -2383,6 +2411,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
     artefacts.retain(|a| matches(&a.target));
 
     Plan {
+        // No Makefile was read, so no backtick named a version file: an ODK yaml
+        // states its version directly, and `version` below is that literal.
+        version_file: None,
         // No Makefile was read, so the repo stated no ODK release here; the
         // current tool generation below is the honest default.
         emulate_odk_version: None,
@@ -3174,4 +3205,32 @@ pub(super) fn expanded_prereqs_opt(
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+/// The release version a repo's version file holds right now, trimmed.
+///
+/// `rel` is `repo.dir`-relative, the convention every path field in the plan
+/// follows. An unreadable or empty file yields `None`, which leaves the recorded
+/// default in place rather than stamping a release with an empty version.
+fn read_version_file(dir: &std::path::Path, rel: &str) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(rel)).ok()?;
+    let v = text.trim().to_string();
+    (!v.is_empty()).then_some(v)
+}
+
+/// The single `*-idranges.owl` beside the edit file, as a `repo.dir`-relative
+/// name — the ID policy `mint` draws definitive IDs from.
+///
+/// `None` when there is no such file, or more than one and so no single answer:
+/// the op then reaches execution unresolved and fails naming the problem, rather
+/// than picking one of several ID policies.
+pub(super) fn idranges_beside_edit_file(dir: &std::path::Path) -> Option<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.ends_with("-idranges.owl"))
+        .collect();
+    found.sort();
+    (found.len() == 1).then(|| found.remove(0))
 }

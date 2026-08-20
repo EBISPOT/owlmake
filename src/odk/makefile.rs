@@ -84,6 +84,17 @@ pub struct MakeModel {
     ///
     /// [`VERSION_TODAY`]: crate::plan::VERSION_TODAY
     pub version_default: String,
+    /// The file a backtick substitution reads the release version out of,
+    /// relative to [`base_dir`](Self::base_dir). EFO stamps
+    /// `` v`cat version.txt` `` into every release version IRI.
+    ///
+    /// Recorded during expansion, because that is the only place the command is
+    /// seen, and behind a `RefCell` because expansion runs behind `&self`. It
+    /// reaches the plan as [`Plan::version_file`], so a run reads the version the
+    /// file holds NOW rather than the one it held when the plan was written.
+    ///
+    /// [`Plan::version_file`]: crate::plan::Plan::version_file
+    pub version_file: std::cell::RefCell<Option<String>>,
     /// Explicit rules keyed by (already-expanded) target name; last wins.
     pub rules: HashMap<String, Rule>,
     /// Pattern rules in declaration order; last matching wins.
@@ -795,7 +806,7 @@ impl MakeModel {
     }
 
     pub fn expand_with(&self, s: &str, autos: &Autos) -> String {
-        eval_backticks(&self.expand_inner(s, autos, 0), self.base_dir.as_deref())
+        eval_backticks(&self.expand_inner(s, autos, 0), self.base_dir.as_deref(), &self.version_file)
     }
 
     fn expand_inner(&self, s: &str, autos: &Autos, depth: usize) -> String {
@@ -999,7 +1010,7 @@ impl MakeModel {
             "words" => eargs.split_whitespace().count().to_string(),
             "firstword" => eargs.split_whitespace().next().unwrap_or("").to_string(),
             "lastword" => eargs.split_whitespace().next_back().unwrap_or("").to_string(),
-            "shell" => run_shell(eargs.trim(), self.base_dir.as_deref()),
+            "shell" => run_shell(eargs.trim(), self.base_dir.as_deref(), &self.version_file),
             _ => String::new(),
         }
     }
@@ -1407,7 +1418,11 @@ fn glob_simple(pat: &str, base_dir: Option<&Path>) -> Vec<String> {
 /// literal backtick. Evaluating here keeps the in-memory and shell-replay paths
 /// consistent (idempotent for the shell-replay path, which would just re-run an
 /// already-substituted line).
-fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
+fn eval_backticks(
+    s: &str,
+    base_dir: Option<&Path>,
+    version_file: &std::cell::RefCell<Option<String>>,
+) -> String {
     if !s.contains('`') {
         return s.to_string();
     }
@@ -1418,7 +1433,7 @@ fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
         let after = &rest[open + 1..];
         match after.find('`') {
             Some(close) => {
-                out.push_str(&run_shell(&after[..close], base_dir));
+                out.push_str(&run_shell(&after[..close], base_dir, version_file));
                 rest = &after[close + 1..];
             }
             None => {
@@ -1433,7 +1448,11 @@ fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
     out
 }
 
-fn run_shell(cmd: &str, base_dir: Option<&Path>) -> String {
+fn run_shell(
+    cmd: &str,
+    base_dir: Option<&Path>,
+    version_file: &std::cell::RefCell<Option<String>>,
+) -> String {
     // A command that reads the calendar date is a run input, not a value to
     // freeze: it resolves to [`VERSION_CLOCK`], which the run binds to the day
     // it builds on — the shell's answer, which a `TODAY=` assignment does not
@@ -1445,6 +1464,17 @@ fn run_shell(cmd: &str, base_dir: Option<&Path>) -> String {
     // [`VERSION_CLOCK`]: crate::plan::VERSION_CLOCK
     if is_today_command(cmd) {
         return crate::plan::VERSION_CLOCK.to_string();
+    }
+    // A command that reads the release version out of a file is a run input for
+    // the same reason: the file is repo content a curator edits for each release,
+    // so its CONTENTS are data the run reads, not a value to freeze. EFO stamps
+    // `` v`cat version.txt` `` into four version IRIs and two `owl:versionInfo`
+    // annotations; running the command here wrote 3.92.0 into all six, and the
+    // file was named by nothing, so bumping it to 3.93.0 neither changed the
+    // artefacts nor made them out of date.
+    if let Some(file) = version_file_command(cmd) {
+        *version_file.borrow_mut() = Some(file.to_string());
+        return crate::plan::VERSION_REF.to_string();
     }
     // A `$(shell …)` expansion may itself call `jq`/`sssom`; substitute the
     // bundled tools named directly in it by explicit binary path, and put the
@@ -1474,6 +1504,21 @@ fn run_shell(cmd: &str, base_dir: Option<&Path>) -> String {
 /// Only the bare day: a command that also prints the time — ODK's
 /// `date +'%d:%m:%Y %H:%M'` — is not a release version, and a plan that
 /// referred to it would resolve to a different string on every run.
+/// The file `cmd` reads the release version out of, if reading that file is all
+/// it does — `cat version.txt`, and the `tr`/`echo` dressings that mean the same.
+///
+/// Only a bare read qualifies. A substitution that computes something from a file
+/// is not a reference to the file's contents, and freezing its result is right.
+fn version_file_command(cmd: &str) -> Option<&str> {
+    let mut words = cmd.split_whitespace();
+    if words.next() != Some("cat") {
+        return None;
+    }
+    let path = words.next()?;
+    // `cat a b` concatenates two files; that is not a version reference.
+    words.next().is_none().then_some(path.trim_matches(['\'', '"']))
+}
+
 fn is_today_command(cmd: &str) -> bool {
     let mut words = cmd.split_whitespace();
     if words.next() != Some("date") {
@@ -1623,25 +1668,90 @@ mod tests {
         );
     }
 
-    /// Backtick command substitution (e.g. EFO's `` v`cat version.txt` `` version
-    /// IRI) must resolve relative files against the Makefile's directory, not the
-    /// process cwd `om` was launched from. Without `base_dir` the `cat` finds no
-    /// file and the IRI collapses to `.../releases/v/efo.owl`.
+    /// A backtick substitution that is EVALUATED must resolve its relative files
+    /// against the Makefile's directory, not the process cwd `om` was launched
+    /// from. Without `base_dir` the `cat` finds no file and the substitution
+    /// collapses to the empty string.
+    ///
+    /// Two files, so this stays an evaluated substitution: a bare one-file read
+    /// is a version reference and resolves without running anything
+    /// (`a_version_read_from_a_file_is_a_reference_not_a_value`).
     #[test]
     fn backticks_resolve_relative_to_base_dir() {
         let dir = std::env::temp_dir().join(format!("owlmake_mk_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("version.txt"), "3.90.0\n").unwrap();
+        std::fs::write(dir.join("suffix.txt"), "rc1\n").unwrap();
+
+        let mut m = MakeModel::default();
+        m.base_dir = Some(dir.clone());
+        assert_eq!(
+            m.expand("http://www.ebi.ac.uk/efo/releases/v`cat version.txt suffix.txt`/efo.owl"),
+            "http://www.ebi.ac.uk/efo/releases/v3.90.0 rc1/efo.owl"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A backtick that reads the version out of a FILE resolves to a reference to
+    /// that file, not to the version it happens to hold at plan time. EFO's
+    /// `` v`cat version.txt` `` reached six release strings; freezing it there
+    /// meant a curator could bump `version.txt` to 3.93.0 and get 3.92.0
+    /// artefacts, with nothing naming the file to make them out of date.
+    #[test]
+    fn a_version_read_from_a_file_is_a_reference_not_a_value() {
+        let dir = std::env::temp_dir().join(format!("owlmake_vf_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("version.txt"), "3.92.0\n").unwrap();
 
         let mut m = MakeModel::default();
         m.base_dir = Some(dir.clone());
         assert_eq!(
             m.expand("http://www.ebi.ac.uk/efo/releases/v`cat version.txt`/efo.owl"),
-            "http://www.ebi.ac.uk/efo/releases/v3.90.0/efo.owl"
+            format!("http://www.ebi.ac.uk/efo/releases/v{}/efo.owl", crate::plan::VERSION_REF)
         );
+        // …and the file is named, so the plan can carry it and the run re-read it.
+        assert_eq!(m.version_file.borrow().as_deref(), Some("version.txt"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `mint` takes its ID policy from the single `*-idranges.owl` beside the
+    /// edit file, and the PLAN has to name it: when it did not, execution globbed
+    /// for one and globbed the wrong directory, so EFO's `allocate-definitive-ids`
+    /// died with "no *-idranges.owl file found in .". Two candidates is no answer
+    /// — minting from the wrong ID policy is worse than not minting.
+    #[test]
+    fn idranges_is_resolved_when_there_is_exactly_one() {
+        let dir = std::env::temp_dir().join(format!("owlmake_ir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(super::super::planner::idranges_beside_edit_file(&dir), None);
+
+        std::fs::write(dir.join("efo-idranges.owl"), "").unwrap();
+        assert_eq!(
+            super::super::planner::idranges_beside_edit_file(&dir).as_deref(),
+            Some("efo-idranges.owl")
+        );
+
+        std::fs::write(dir.join("cl-idranges.owl"), "").unwrap();
+        assert_eq!(super::super::planner::idranges_beside_edit_file(&dir), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only a BARE read is a version reference. `cat a b` concatenates two files
+    /// and `wc -l < f` computes from one; neither is "the version lives here", so
+    /// both keep running at plan time.
+    #[test]
+    fn a_computed_substitution_is_still_a_value() {
+        assert_eq!(version_file_command("cat version.txt"), Some("version.txt"));
+        assert_eq!(version_file_command("cat 'version.txt'"), Some("version.txt"));
+        assert_eq!(version_file_command("cat a.txt b.txt"), None);
+        assert_eq!(version_file_command("wc -l < version.txt"), None);
+        assert_eq!(version_file_command("date +%Y-%m-%d"), None);
     }
 
     /// `$(wildcard …)` resolves against the Makefile's directory too. CL's DOSDP

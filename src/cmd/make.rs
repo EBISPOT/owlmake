@@ -1008,7 +1008,22 @@ fn bind_run_version(
     requested: Option<&str>,
     today: Option<&str>,
 ) -> Result<Plan> {
-    let version = crate::plan::release_version(&plan.version, requested);
+    // A plan that names a version FILE is asking for the version the file holds
+    // on the day of the build, not the one it held when the plan was written —
+    // bumping it is ordinary curation, and it must not require regenerating the
+    // plan. An explicit `VERSION=` still wins, and a file that has gone missing
+    // falls back to the default the plan recorded rather than failing the build.
+    let from_file = requested.is_none().then(|| plan.version_file.as_deref()).flatten().and_then(
+        |rel| {
+            let text = std::fs::read_to_string(repo.dir.join(rel)).ok()?;
+            let v = text.trim().to_string();
+            (!v.is_empty()).then_some(v)
+        },
+    );
+    let version = match from_file {
+        Some(v) => v,
+        None => crate::plan::release_version(&plan.version, requested),
+    };
     spec::bind_version(plan, &version, today, &repo.dir)
 }
 
@@ -1079,8 +1094,22 @@ fn check_committed_plan(path: &Path, fresh: &OwlmakeSpec) -> Result<()> {
     // such value, on a plan owlmake itself had just written.
     let fresh = round_trip(fresh, path)?;
 
-    let old = serde_json::to_value(&committed)?;
-    let new = serde_json::to_value(&fresh)?;
+    let mut old = serde_json::to_value(&committed)?;
+    let mut new = serde_json::to_value(&fresh)?;
+    // A plan that names a `version_file` records the version as a DEFAULT read
+    // from that file, and the run re-reads it. Bumping the file for a release is
+    // therefore a run input, and a run input must never make the plan stale: the
+    // repo a "regenerate it" instruction points at is exactly what the plan
+    // exists to replace, so answering that to `3.92.0 -> 3.93.0` would demand a
+    // plan rewrite for every release. The two plans still have to agree on WHICH
+    // file the version comes from, which is what the comparison keeps.
+    if fresh.version_file.is_some() && committed.version_file == fresh.version_file {
+        for v in [&mut old, &mut new] {
+            if let Some(obj) = v.as_object_mut() {
+                obj.remove("version");
+            }
+        }
+    }
     if old == new {
         return Ok(());
     }

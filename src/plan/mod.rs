@@ -243,6 +243,15 @@ pub struct Plan {
     /// a reference to this field, and a run binds the two together — so the same
     /// plan releases on any date without being regenerated.
     pub version: String,
+    /// The repo file the release version is read from, relative to the repo root
+    /// (EFO's `src/ontology/version.txt`), when the build configuration takes it
+    /// from one rather than pinning it.
+    ///
+    /// [`version`](Self::version) still records what the file held when the plan
+    /// was written, so a plan whose file has gone missing keeps a usable default;
+    /// but a run that names no version reads the file, because bumping it is
+    /// ordinary curation and the plan must not fix one release forever.
+    pub version_file: Option<String>,
     pub ontology_iri: String,
     pub reasoner: String,
     pub use_base_merging: bool,
