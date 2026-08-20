@@ -262,12 +262,48 @@ pub fn write_table_styled(
     for m in &ms.mappings {
         let row: Vec<String> = cols
             .iter()
-            .map(|c| escape_cell(m.get(c).map(String::as_str).unwrap_or(""), sep))
+            .map(|c| {
+                let raw = m.get(c).map(String::as_str).unwrap_or("");
+                let cell = if style == MetaStyle::Java
+                    && !raw.is_empty()
+                    && crate::sssom::NUMERIC_SLOTS.contains(&c.as_str())
+                {
+                    render_numeric(raw)
+                } else {
+                    raw.to_string()
+                };
+                escape_cell(&cell, sep)
+            })
             .collect();
         out.push_str(&row.join(&sep.to_string()));
         out.push('\n');
     }
     Ok(out)
+}
+
+/// Render a numeric cell as the table carries numbers: the value rounded to
+/// three decimal places, with trailing zeros and any trailing point removed.
+///
+/// So `0.10` is written `0.1`, `1.0` is written `1`, and a confidence carrying
+/// more precision than the column keeps — `0.3333333333333333` — is written
+/// `0.333`. Rounding is of the value itself rather than of the digits it was
+/// spelled with, which is why `0.1235` gives `0.123`: the nearest double to
+/// `0.1235` is below it, so three places round down.
+///
+/// A cell that is not a number is left exactly as it stands.
+fn render_numeric(v: &str) -> String {
+    match v.trim().parse::<f64>() {
+        Ok(x) if x.is_finite() => {
+            let s = format!("{x:.3}");
+            let s = s.trim_end_matches('0').trim_end_matches('.');
+            if s.is_empty() || s == "-" {
+                "0".to_string()
+            } else {
+                s.to_string()
+            }
+        }
+        _ => v.to_string(),
+    }
 }
 
 fn escape_cell(v: &str, sep: char) -> String {

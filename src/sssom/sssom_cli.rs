@@ -201,12 +201,13 @@ fn run(args: &[String]) -> Result<i32> {
             Some((p, m)) if !p.contains("://") => (p, Some(m)),
             _ => (spec.as_str(), None),
         };
-        let ms = crate::sssom::io::read_path(
+        let mut ms = crate::sssom::io::read_path(
             std::path::Path::new(path),
             None,
             meta.map(std::path::Path::new),
         )
         .with_context(|| format!("reading {path}"))?;
+        ms.restrict_to_declared_version();
         merge_into(&mut set, ms);
         loaded_any = true;
     }
@@ -215,7 +216,9 @@ fn run(args: &[String]) -> Result<i32> {
         let mut buf = String::new();
         std::io::stdin().read_to_string(&mut buf).context("reading stdin")?;
         if !buf.trim().is_empty() {
-            let ms = crate::sssom::io::read_table(&buf, '\t', None).context("parsing stdin set")?;
+            let mut ms =
+                crate::sssom::io::read_table(&buf, '\t', None).context("parsing stdin set")?;
+            ms.restrict_to_declared_version();
             merge_into(&mut set, ms);
         }
     }
