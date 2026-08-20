@@ -1159,7 +1159,11 @@ static ANON_COUNTER: std::sync::atomic::AtomicU64 =
 
 /// Reserve `n` consecutive blank-node ids and return the first.
 fn mint_anon_ids(n: usize) -> u64 {
-    ANON_COUNTER.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed)
+    let first = ANON_COUNTER.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+    if std::env::var_os("OM_ANON_DEBUG").is_some() {
+        eprintln!("[anon] mint {n} from {first} ({})", out_name());
+    }
+    first
 }
 
 /// The id the next blank node takes.
@@ -1170,6 +1174,12 @@ fn anon_counter() -> u64 {
 /// Carry the counter forward to where a parse left it, so the next document
 /// numbers on from there rather than over the top of it.
 fn set_anon_counter(n: u64) {
+    if std::env::var_os("OM_ANON_DEBUG").is_some() {
+        eprintln!(
+            "[anon] carry {} -> {n}",
+            ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
     ANON_COUNTER.store(n, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -1180,6 +1190,12 @@ fn set_anon_counter(n: u64) {
 /// again. A build that ran the whole release off one counter would give the second
 /// artefact ids the first one's parses had already used up.
 pub fn reset_anon_counter() {
+    if std::env::var_os("OM_ANON_DEBUG").is_some() {
+        eprintln!(
+            "[anon] reset from {}",
+            ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
     ANON_COUNTER.store(2_147_483_648, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -2216,25 +2232,27 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
     // own `*.ofn` cache files, never to a released artefact: MONDO's
     // `imports/merged_import.owl` is written by `convert -f ofn` under a `.owl`
     // name, and a released document carries no such lines.
-    // …and only for a `.ofn` living in a BUILD directory. Intermediates are parked
-    // in the build's temporary directory and owlmake's own cache in
-    // `.owlmake-odk-tmp`; a `.ofn` written anywhere else is on its way to being a
-    // released artefact. OBA builds `patterns/definitions.owl` by merging into
-    // `definitions.ofn` and moving it into place — in `src/ontology`, not `tmp` —
-    // so it must not gain a `#prefixes-cleared` first line, while MONDO's
-    // `tmp/mondo.owl.ofn` needs its markers because `mondo.obo` re-reads it.
-    // The directory the file is written INTO decides this, not any directory the
-    // path happens to pass through: a temp-dir `x.ofn` and a `<work>/x.ofn` both
-    // put the cache directly in the build dir, whereas matching any path component
-    // would tag every `.ofn` a repo checked out under a path containing `tmp` ever
-    // wrote — including its released artefacts.
+    // …and only for owlmake's OWN cache, which is named for the target it stands
+    // in for: the cache for `mondo.owl` is `mondo.owl.ofn`, so the stem still
+    // carries an ontology extension. A `.ofn` a REPO names as a target has no
+    // such second extension and is that repo's own artefact — uPheno's
+    // `$(SRCMERGED)` is `tmp/merged-upheno-edit.ofn`, written by `convert -f ofn`
+    // and read back by the term queries and the edit report, and OBA builds
+    // `patterns/definitions.owl` through a `definitions.ofn` in `src/ontology`.
+    // Neither may gain a marker line. Anything under `.owlmake-odk-tmp` is
+    // owlmake's by construction, whatever it is called.
+    let cache_name = path
+        .file_stem()
+        .map(Path::new)
+        .and_then(|s| s.extension())
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e, "owl" | "obo" | "ofn" | "omn" | "owx" | "ttl" | "json"));
     OFN_CACHE.with(|c| {
         c.set(
             path.extension().and_then(|e| e.to_str()) == Some("ofn")
-                && matches!(
-                    path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()),
-                    Some("tmp" | ".owlmake-odk-tmp")
-                ),
+                && (cache_name
+                    || path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+                        == Some(".owlmake-odk-tmp")),
         )
     });
     OUT_NAME.with(|c| *c.borrow_mut() = display_name(path));

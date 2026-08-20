@@ -3350,6 +3350,13 @@ fn run_artefact(
     // op is not: `touch $@` asks for an empty file and `wget … -O $@` writes the
     // download, and serializing a model over either replaces what the recipe
     // built with an ontology it never asked for.
+    //
+    // This target's recipe is its own run, so its blank nodes number from the
+    // start: the ids an artefact carries are the same whether it is built alone
+    // or after twenty others. Reset HERE, before either branch and past the
+    // prerequisite walk — a prerequisite built on the way in is a run of its own
+    // and leaves the counter wherever its last parse did.
+    crate::io::reset_anon_counter();
     let threads_model = a.steps.iter().any(|s| match s {
         Step::File(op) => !op.is_side_effect(),
         Step::Op(_) | Step::Partial { .. } | Step::CliRobot { .. } => true,
@@ -3383,12 +3390,6 @@ fn run_artefact(
             .steps
             .iter()
             .any(|s| !matches!(s, Step::File(_) | Step::Inert(_)));
-        // This target's recipe is its own run, so its blank nodes number from the
-        // start: the ids an artefact carries are the same whether it is built alone
-        // or after twenty others. Reset HERE, past the prerequisite walk — a
-        // prerequisite built on the way in is a run of its own and leaves the
-        // counter wherever its last parse did.
-        crate::io::reset_anon_counter();
         let model = match &input_path {
             Some(p) if input_is_ontology && needs_model => crate::io::load(p)?,
             _ => crate::model::Model::new(),
