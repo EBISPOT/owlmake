@@ -1357,6 +1357,10 @@ pub fn bind_version(
     // TODAY=2026-08-19 across midnight.
     let today = today.map(str::to_string).unwrap_or_else(crate::plan::today);
     substitute(&mut value, crate::plan::VERSION_TODAY, &today);
+    // …and the clock is the clock. A recipe that shells out to `date` gets the
+    // day the build runs whatever version it stamps, because that is what the
+    // recipe would have got.
+    substitute(&mut value, crate::plan::VERSION_CLOCK, &crate::plan::today());
     let mut bound: OwlmakeSpec = serde_json::from_value(value)
         .context("internal: a plan did not read back while binding its release version")?;
     bound.version = version.to_string();

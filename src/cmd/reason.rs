@@ -650,11 +650,23 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         direct.clone()
     };
     {
-        let has_named_super: std::collections::HashSet<&String> = direct
+        let mut has_named_super: std::collections::HashSet<String> = direct
             .iter()
             .filter(|(_, sup)| sup.as_str() != OWL_THING)
-            .map(|(sub, _)| sub)
+            .map(|(sub, _)| sub.clone())
             .collect();
+        // …and so does a class whose asserted superclass is an ANONYMOUS
+        // expression. `BFO_0000002 ⊑ (part_of some BFO_0000001)` puts something
+        // between that class and the top, so the root edge is not its to carry:
+        // asserting `⊑ owl:Thing` beside it names a parent the class already has
+        // by way of the restriction.
+        for ac in model.as_ref().map(|m| m.ont.iter()).into_iter().flatten() {
+            if let Component::SubClassOf(SubClassOf { sub: CE::Class(sub), sup }) = &ac.component {
+                if !matches!(sup, CE::Class(c) if c.0.as_ref() == OWL_THING) {
+                    has_named_super.insert(sub.0.as_ref().to_string());
+                }
+            }
+        }
         // Every class in the SIGNATURE, declared or not: a merge can leave an
         // undeclared class referenced by surviving axioms, and its inferred
         // superclass is still asserted — under a bare `reason` that is the
@@ -671,7 +683,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if c == OWL_THING || c == OWL_NOTHING {
                 continue;
             }
-            if opts.include_indirect || !has_named_super.contains(c) {
+            if opts.include_indirect || !has_named_super.contains(c.as_str()) {
                 base.push((c.clone(), OWL_THING.to_string()));
             }
         }

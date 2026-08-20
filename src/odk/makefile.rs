@@ -1435,15 +1435,16 @@ fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
 
 fn run_shell(cmd: &str, base_dir: Option<&Path>) -> String {
     // A command that reads the calendar date is a run input, not a value to
-    // freeze: it resolves to [`VERSION_TODAY`], which the run binds to the date
-    // it builds on. uPheno's `../patterns/pattern-merged.owl` stamps
+    // freeze: it resolves to [`VERSION_CLOCK`], which the run binds to the day
+    // it builds on — the shell's answer, which a `TODAY=` assignment does not
+    // reach. uPheno's `../patterns/pattern-merged.owl` stamps
     // `annotate -V $(ONTBASE)/releases/`date +%Y-%m-%d`/…`, and running the
     // command here wrote the planning day's date into the plan, so every later
     // build published that same version IRI.
     //
-    // [`VERSION_TODAY`]: crate::plan::VERSION_TODAY
+    // [`VERSION_CLOCK`]: crate::plan::VERSION_CLOCK
     if is_today_command(cmd) {
-        return crate::plan::VERSION_TODAY.to_string();
+        return crate::plan::VERSION_CLOCK.to_string();
     }
     // A `$(shell …)` expansion may itself call `jq`/`sssom`; substitute the
     // bundled tools named directly in it by explicit binary path, and put the

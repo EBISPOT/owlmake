@@ -197,6 +197,14 @@ pub const VERSION_REF: &str = "{version}";
 /// literal instead, and either way the run may override it.
 pub const VERSION_TODAY: &str = "{today}";
 
+/// The calendar date the build runs, for a recipe that asks the shell for it —
+/// `annotate -V $(ONTBASE)/releases/`date +%Y-%m-%d`/…`. That is a different
+/// question from [`VERSION_TODAY`]: `TODAY=` on a make command line sets a
+/// variable, and cannot change what `date` prints, so a run that stamps one
+/// release version still writes the real day here. uPheno's pattern ontology
+/// names both, one in each of two version IRIs.
+pub const VERSION_CLOCK: &str = "{clock}";
+
 /// Whether a switch's value reads as ON. The spellings a build configuration and
 /// a command line use between them, in one place, so a `BRI=1` means what a
 /// `BRI=true` means wherever the question is asked.

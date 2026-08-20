@@ -1485,6 +1485,12 @@ fn assert_text_ann(
     val: &str,
     ann: std::collections::BTreeSet<Annotation<RcStr>>,
 ) {
+    // A filled template is trimmed. A pattern writes its text for reading, and
+    // the spacing that separates a `%s` from what follows it is part of the
+    // template, not of the value: uPheno's `abnormalMorphologyOfCellularComponent\
+    // InLocation` ends `name.text` with `"… in %s "`, and the label it stands for
+    // has no trailing space.
+    let val = val.trim();
     ont.insert(AnnotatedComponent {
         component: Component::AnnotationAssertion(AnnotationAssertion {
             subject: AnnotationSubject::IRI(b.iri(subj.to_string())),
