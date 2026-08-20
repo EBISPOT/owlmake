@@ -369,6 +369,16 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Whether `target` is declared `.PHONY`.
+    ///
+    /// A phony target names no file. It is always out of date however old a file
+    /// sharing its name happens to be, and nothing may write a file under it —
+    /// its recipe puts its output wherever the recipe says, which for a name like
+    /// `component-download-hra_subset.owl` is a staging copy under `tmp/`.
+    pub fn is_phony(&self, target: &str) -> bool {
+        self.phony.iter().any(|p| p == target)
+    }
+
     /// All gaps that block the requested release (imports + on-path artefacts).
     pub fn blocking_gaps(&self) -> Vec<String> {
         let mut g = Vec::new();

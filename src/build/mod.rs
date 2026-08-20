@@ -697,7 +697,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         }
         // A phony target names no file, so it is out of date however old the file
         // that happens to share its name is.
-        if !plan.phony.iter().any(|p| p == &a.target)
+        if !plan.is_phony(&a.target)
             && is_up_to_date(&out, &a.needs, &a.order_only, a.input.as_deref(), &opts.output_dir)
         {
             stage.finish_ok();
@@ -1683,7 +1683,7 @@ fn run_target_recipe_inner(
     let forced = repo.always_make
         || (repo.refresh_imports && is_import_target(repo, target))
         || (repo.refresh_mirrors && is_mirror_target(repo, target));
-    if !a.steps.is_empty() && !forced && !repo.plan.phony.iter().any(|p| p == target) {
+    if !a.steps.is_empty() && !forced && !repo.plan.is_phony(target) {
         if let Some(out) = repo.target_file(target).filter(|p| p.is_file()) {
             let out_mtime = std::fs::metadata(&out).and_then(|m| m.modified()).ok();
             let newer = a.needs.iter().any(|pre| {
@@ -3431,8 +3431,15 @@ fn run_artefact(
         // model built from a TSV, and every one of those files is committed — so
         // a presence test skips the write and the release ships the previous
         // release's translation under this release's version IRI.
-        let writes_model_after =
-            target_is_ontology && threads_model && !step_writes_target(&a.steps, &a.target);
+        // …and never for a phony target. A phony names no file, so the model a
+        // rule like `component-download-<x>.owl` threads belongs wherever its own
+        // `--output` puts it — a staging copy under `tmp/` — and writing it under
+        // the target's name as well leaves a file the build configuration says
+        // does not exist. The name ending in `.owl` is what makes this reachable.
+        let writes_model_after = target_is_ontology
+            && threads_model
+            && !repo.plan.is_phony(&a.target)
+            && !step_writes_target(&a.steps, &a.target);
         let mut model = run_steps(
             repo,
             &a.steps,

@@ -732,14 +732,7 @@ struct Redirects {
     stderr: Option<(String, bool)>, // (file, append); a file of "&1" inherits stdout
 }
 
-/// Run one already-expanded recipe line in `dir`, dispatching a `robot`/`jq`/
-/// `sssom` command to the matching owlmake subcommand via the `exe` binary and
-/// performing file ops natively.
-///
-/// `robot_prefix` is the expanded launcher text a recipe puts at command
-/// position (e.g. `robot`, or `java -jar robot.jar`), used to recognise — and
-/// strip — such an invocation before its arguments reach that subcommand.
-/// Serve a data asset the reference image carries out of owlmake's own bytes.
+/// Serve a data asset out of owlmake's own bytes.
 ///
 /// A recipe that wants one copies it — `cp /tools/obo.epm.json $@` — so there is
 /// no tool to reimplement and nothing to derive: owlmake ships the bytes or the
@@ -747,15 +740,6 @@ struct Redirects {
 /// when the thing shipped is data rather than code. The vendored copy for the
 /// version being emulated is materialised and the path rewritten, so the recipe
 /// itself runs unchanged.
-///
-/// This is NOT yet enough to build `tmp/obo.epm.json`, and two things stand in
-/// the way. The gap check refuses that target before any recipe line runs, so
-/// this is never reached; and lifting the check alone makes matters worse rather
-/// than better, because `.json` reads as an ontology extension and the
-/// artefact-level write then replaces the copied map with an empty OBO-graph
-/// document — 44 bytes. A loud failure is better than a silently wrong file, so
-/// the check stays until the write stops inferring its format from the target's
-/// name. Measured on ECTO and confirmed on UBERON.
 fn serve_image_assets(line: &str, dir: &Path) -> String {
     const EPM: &str = "/tools/obo.epm.json";
     if !line.contains(EPM) || Path::new(EPM).exists() {
@@ -773,6 +757,13 @@ fn serve_image_assets(line: &str, dir: &Path) -> String {
     line.replace(EPM, &dest.to_string_lossy())
 }
 
+/// Run one already-expanded recipe line in `dir`, dispatching a `robot`/`jq`/
+/// `sssom` command to the matching owlmake subcommand via the `exe` binary and
+/// performing file ops natively.
+///
+/// `robot_prefix` is the expanded launcher text a recipe puts at command
+/// position (e.g. `robot`, or `java -jar robot.jar`), used to recognise — and
+/// strip — such an invocation before its arguments reach that subcommand.
 pub fn run_line(
     line: &str,
     dir: &Path,

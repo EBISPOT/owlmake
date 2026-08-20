@@ -201,8 +201,6 @@ pub fn write_table_styled(
     if condense {
         ms.condense();
     }
-    // A writer SHOULD declare sssom_version=1.1 when the set uses 1.1 features.
-    ms.enforce_version();
     if sort {
         ms.sort_columns();
         ms.sort_rows();
@@ -323,7 +321,6 @@ pub fn to_json(ms: &MappingSet, condense: bool) -> Result<String> {
     if condense {
         ms.condense();
     }
-    ms.enforce_version();
     let mut obj = serde_json::Map::new();
     for (k, v) in &ms.metadata {
         obj.insert(k.clone(), yaml_to_json(v));

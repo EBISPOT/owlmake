@@ -74,22 +74,37 @@ fn parse_update_spec(spec: &str) -> OntologyUpdate {
 
 /// Apply one `--update-from-ontology` to the set.
 fn apply_ontology_update(set: &mut MappingSet, u: &OntologyUpdate) -> Result<()> {
-    let model = crate::io::load(std::path::Path::new(&u.path))
-        .with_context(|| format!("reading ontology {}", u.path))?;
-    let declared: std::collections::HashSet<String> =
-        crate::cmd::select::entities(&model).classes.into_iter().collect();
+    let path = std::path::Path::new(&u.path);
+    let mut model =
+        crate::io::load(path).with_context(|| format!("reading ontology {}", u.path))?;
+    // An ontology is its import closure. A term an edit file gets from a
+    // component or a generated pattern file exists just as much as one written
+    // in the edit file itself, and its label lives there too, so the closure is
+    // resolved before either question is asked of the model.
+    crate::cmd::resolve_imports_auto(&mut model, None, Some(path))
+        .with_context(|| format!("resolving imports of {}", u.path))?;
+    let present = crate::sig::entity_signature(&model);
     let mut labels: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    // A term the ontology has retired does not exist for the purpose of this
+    // check. It is still in the signature — that is what makes it obsolete
+    // rather than absent — so a mapping onto it would survive a test that only
+    // asks whether the term is there.
+    let mut deprecated: std::collections::HashSet<String> = std::collections::HashSet::new();
     for ac in model.ont.iter() {
         if let horned_owl::model::Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() != "http://www.w3.org/2000/01/rdf-schema#label" {
-                continue;
-            }
-            if let (
-                horned_owl::model::AnnotationSubject::IRI(s),
-                horned_owl::model::AnnotationValue::Literal(l),
-            ) = (&aa.subject, &aa.ann.av)
-            {
-                labels.insert(s.as_ref().to_string(), l.literal().to_string());
+            let horned_owl::model::AnnotationSubject::IRI(s) = &aa.subject else { continue };
+            match aa.ann.ap.0.as_ref() {
+                "http://www.w3.org/2000/01/rdf-schema#label" => {
+                    if let horned_owl::model::AnnotationValue::Literal(l) = &aa.ann.av {
+                        labels.insert(s.as_ref().to_string(), l.literal().to_string());
+                    }
+                }
+                crate::model::OWL_DEPRECATED
+                    if crate::model::asserts_deprecated(&aa.ann.av) =>
+                {
+                    deprecated.insert(s.as_ref().to_string());
+                }
+                _ => {}
             }
         }
     }
@@ -101,7 +116,7 @@ fn apply_ontology_update(set: &mut MappingSet, u: &OntologyUpdate) -> Result<()>
     for mut m in std::mem::take(&mut set.mappings) {
         let Some(id) = m.get(&id_slot).cloned() else { continue };
         let iri = crate::sssom::owl::expand(&prefixes, &id);
-        if u.existence && !declared.contains(&iri) {
+        if u.existence && (!present.contains(&iri) || deprecated.contains(&iri)) {
             continue;
         }
         if u.label {
@@ -261,19 +276,18 @@ fn run(args: &[String]) -> Result<i32> {
     // Apply the rule pipeline.
     transform::apply(&mut set, &o.rules, o.include_all);
 
-    // A rule pipeline changes which mappings exist and which way round they face,
-    // so any `mapping_cardinality` carried in from an input now describes a set
-    // that no longer exists. It is a DERIVED slot: stale is worse than absent, and
-    // the reference drops it. UBERON's `uberon.sssom.tsv` merges the local xref
-    // set — which does carry the column — under `object==UBERON:* -> invert()`,
-    // and comes out with no cardinality column at all. With no rules the command
-    // is a pure converter and the column passes through untouched.
-    if !o.rules.is_empty() || o.include_all {
-        for m in &mut set.mappings {
-            m.remove("mapping_cardinality");
-        }
-        set.recompute_columns();
+    // `mapping_cardinality` is DERIVED from which mappings a set contains and
+    // which way round they face, so a value carried in from an input describes
+    // some earlier set rather than this one. This command never derives it, and
+    // stale is worse than absent, so it is cleared whatever the pipeline did —
+    // with no rules at all as much as after an `invert()`. It goes from the
+    // RECORDS: writing condenses first, and condensing rebuilds the column list
+    // from what the records still hold, so clearing the column list alone would
+    // do nothing.
+    for m in &mut set.mappings {
+        m.remove("mapping_cardinality");
     }
+    set.recompute_columns();
 
     // …then the ontology updates. AFTER the rules, because UBERON's
     // `object==UBERON:* -> invert()` has to have moved UBERON onto the subject

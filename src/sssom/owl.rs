@@ -261,12 +261,8 @@ fn labels_and_obsoletes(model: &Model) -> (HashMap<String, String>, HashSet<Stri
             if let AnnotationValue::Literal(l) = &aa.ann.av {
                 labels.entry(s.as_ref().to_string()).or_insert_with(|| lit_text(l));
             }
-        } else if prop == OWL_DEPRECATED {
-            if let AnnotationValue::Literal(l) = &aa.ann.av {
-                if lit_text(l) == "true" {
-                    obsolete.insert(s.as_ref().to_string());
-                }
-            }
+        } else if prop == OWL_DEPRECATED && crate::model::asserts_deprecated(&aa.ann.av) {
+            obsolete.insert(s.as_ref().to_string());
         }
     }
     (labels, obsolete)

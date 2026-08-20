@@ -80,12 +80,18 @@ pub const SLOT_ORDER: &[&str] = &[
 /// `see_also` precedes `issue_tracker_item`).
 ///
 /// A slot absent from this list is not written as a column even when a record
-/// holds a value for it. Eight are known to the schema yet have no mapping-level
-/// column — `cardinality_scope`, `derived_from`, `mapping_cardinality`,
-/// `mapping_tool_id`, `predicate_type`, `record_id`, `review_date` and
-/// `reviewer_agreement`. Some are set-level only: `mapping_tool_id` still
-/// reaches the header when `condense` lifts it, which is why the value is
-/// dropped from the COLUMN set and never from the record.
+/// holds a value for it. Seven are known to the schema yet have no mapping-level
+/// column — `cardinality_scope`, `derived_from`, `mapping_tool_id`,
+/// `predicate_type`, `record_id`, `review_date` and `reviewer_agreement`. Some
+/// are set-level only: `mapping_tool_id` still reaches the header when
+/// `condense` lifts it, which is why the value is dropped from the COLUMN set
+/// and never from the record.
+///
+/// Whether a slot reaches the table is a property of this writer; whether a
+/// COMMAND wants it is that command's own. `mapping_cardinality` is a column
+/// here — xref extraction writes it — and the mapping-set transformer clears it
+/// from the records it is about to write, because a cardinality it did not
+/// derive describes a set that no longer exists.
 ///
 /// Columns the schema does not describe at all are extensions, and those are
 /// kept, appended after these in the order the extension rules give.
@@ -95,7 +101,8 @@ pub const MAPPING_COLUMN_ORDER: &[&str] = &[
     "mapping_justification", "author_id", "author_label", "reviewer_id", "reviewer_label",
     "creator_id", "creator_label", "license", "subject_type", "subject_source",
     "subject_source_version", "object_type", "object_source", "object_source_version",
-    "mapping_provider", "mapping_source", "mapping_tool", "mapping_tool_version",
+    "mapping_provider", "mapping_source", "mapping_cardinality", "mapping_tool",
+    "mapping_tool_version",
     "mapping_date", "publication_date", "confidence", "curation_rule", "curation_rule_text",
     "subject_match_field", "object_match_field", "match_string", "subject_preprocessing",
     "object_preprocessing", "similarity_score", "similarity_measure", "see_also",
@@ -488,13 +495,12 @@ impl MappingSet {
     }
 
     /// Rewrite the set into **canonical SSSOM/TSV** form (spec §"Canonical
-    /// SSSOM/TSV"): lift constant propagatable slots, declare `sssom_version` when
-    /// 1.1, round float slots to ≤3 decimals, drop unused and built-in prefixes
+    /// SSSOM/TSV"): lift constant propagatable slots, round float slots to ≤3
+    /// decimals, drop unused and built-in prefixes
     /// from the `curie_map`, order columns by schema (extensions last, by their
     /// declared `property`), and sort the records lexicographically.
     pub fn canonicalize(&mut self) {
         self.condense();
-        self.enforce_version();
         self.round_floats(3);
         self.prune_curie_map();
         self.sort_columns_canonical();
@@ -613,23 +619,6 @@ impl MappingSet {
             m.retain(|k, _| !conformance::is_record_slot_added_1_1(k));
         }
         self.recompute_columns();
-    }
-
-    /// Declare `sssom_version` when the set AS WRITTEN uses 1.1 features.
-    ///
-    /// The question the writer asks is not the one [`Self::infer_version`]
-    /// answers. That reports what the data uses, which is what validation needs;
-    /// this reports what the serialized table uses. The two part company because
-    /// no 1.1 slot has a mapping-level column: a record may carry a
-    /// `reviewer_agreement`, but nothing in the written table does, so declaring
-    /// the table 1.1 on its account describes bytes that were never emitted.
-    pub fn enforce_version(&mut self) {
-        if conformance::written_version(self) == conformance::SSSOM_VERSION_1_1 {
-            self.metadata.insert(
-                "sssom_version".to_string(),
-                serde_yaml::Value::String(conformance::SSSOM_VERSION_1_1.to_string()),
-            );
-        }
     }
 
     /// The effective prefix map: built-ins overlaid by the declared `curie_map`.
@@ -900,16 +889,13 @@ mod tests {
         // record_id was added in 1.1, and the DATA now uses it.
         ms.mappings[0].insert("record_id".into(), "urn:x:1".into());
         assert_eq!(ms.infer_version(), "1.1");
-        // The written table does not. No 1.1 slot has a mapping-level column, so
-        // serializing this set emits nothing that needs 1.1, and it must not
-        // claim a version its bytes do not use.
-        ms.enforce_version();
-        assert!(!ms.metadata.contains_key("sssom_version"));
-        // A set-level 1.1 slot IS written, and that one does claim it.
-        ms.metadata
-            .insert("mapping_set_confidence".into(), serde_yaml::Value::String("0.9".into()));
-        ms.enforce_version();
-        assert_eq!(value_to_cell(&ms.metadata["sssom_version"]), "1.1");
+        // Which is a fact about the data, not an instruction to the writer: a set
+        // is written at the version it DECLARES, and one that declares none stays
+        // undeclared however many 1.1 slots it carries.
+        let before = ms.metadata.clone();
+        let tsv = crate::sssom::io::write_table(&ms, '\t', false, false).expect("writes");
+        assert!(!tsv.contains("sssom_version"), "{tsv}");
+        assert_eq!(ms.metadata, before);
     }
 
     #[test]

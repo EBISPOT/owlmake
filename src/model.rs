@@ -556,3 +556,22 @@ pub fn default_prefixes() -> PrefixMapping {
     let _ = p.add_prefix("obo", "http://purl.obolibrary.org/obo/");
     p
 }
+
+/// The IRI of `owl:deprecated`.
+pub const OWL_DEPRECATED: &str = "http://www.w3.org/2002/07/owl#deprecated";
+
+/// Whether an annotation value asserts deprecation.
+///
+/// Deprecation is the typed boolean `true`. An untyped `"true"`, or one carrying
+/// a language tag, is a string that happens to spell the word and marks nothing —
+/// so a term annotated that way is live, and every code path that asks whether a
+/// term is obsolete gets the same answer from this one predicate.
+pub fn asserts_deprecated(av: &horned_owl::model::AnnotationValue<Str>) -> bool {
+    use horned_owl::model::{AnnotationValue, Literal};
+    matches!(
+        av,
+        AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri })
+            if literal == "true"
+                && datatype_iri.as_ref() == "http://www.w3.org/2001/XMLSchema#boolean"
+    )
+}
