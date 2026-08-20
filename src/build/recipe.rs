@@ -747,6 +747,15 @@ struct Redirects {
 /// when the thing shipped is data rather than code. The vendored copy for the
 /// version being emulated is materialised and the path rewritten, so the recipe
 /// itself runs unchanged.
+///
+/// This is NOT yet enough to build `tmp/obo.epm.json`, and two things stand in
+/// the way. The gap check refuses that target before any recipe line runs, so
+/// this is never reached; and lifting the check alone makes matters worse rather
+/// than better, because `.json` reads as an ontology extension and the
+/// artefact-level write then replaces the copied map with an empty OBO-graph
+/// document — 44 bytes. A loud failure is better than a silently wrong file, so
+/// the check stays until the write stops inferring its format from the target's
+/// name. Measured on ECTO and confirmed on UBERON.
 fn serve_image_assets(line: &str, dir: &Path) -> String {
     const EPM: &str = "/tools/obo.epm.json";
     if !line.contains(EPM) || Path::new(EPM).exists() {
