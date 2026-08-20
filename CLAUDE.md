@@ -128,6 +128,69 @@ The one boundary: a repo's **own** scripts (MONDO's Perl, EFO's Python) are repo
 content, not ODK tooling. They run; an interpreter is an ordinary environment
 dependency. owlmake names them in `requires` and otherwise leaves them alone.
 
+## A number is only as good as what it was measured over
+
+Parity work is measurement, and a measurement that is wrong in the safe-looking
+direction is worse than no measurement: it reads as progress. Four hazards
+account for every bad number this project has produced, and each one defeats the
+guard for the hazard above it — so all four have to hold at once.
+
+**Derive the comparison set; never curate it.** `om make --list-targets` prints
+what the repo can build. A hand-written list of files becomes the definition of
+"done", and the targets outside it are exactly where the defects sit: UBERON's
+42 bridge targets sat outside its list at **0 of 42** identical, hiding five
+distinct defects including a rule-language construct that never fired at all.
+Do not treat a *goal* as the surface either — `all_assets` does not reach every
+target a repo declares. State the surface with every number.
+
+**A file neither side rebuilt matches vacuously.** Both are reading the same
+committed bytes. Time every file against its own tree's checkout instant and
+report a carried file as carried, not as agreement.
+
+**A step's closure is whatever the tree held when it ran.** This defeats the
+staleness check above, which asks whether a file was rebuilt and not whether its
+inputs were the same when it was. Two builds of one step, both fresh, both
+correct, are still not comparable if a shared input changed between them — so
+build both sides in the same order, from one tree, and measure once.
+
+**A binary that does not match its source invalidates the run, in either
+direction.** Rebuilding while a build is in flight has twice produced a
+confident wrong verdict here: once judging a correct fix broken because the
+binary predated it, once nearly rejecting a correct fix because a replaced
+binary made `/proc/self/exe` resolve to `… (deleted)` and broke every recipe
+that spawns a second command. Prove the code is in the binary before believing
+a failure — functionally where a token is not a literal.
+
+And two rules about what to conclude:
+
+- **A target absent from both sides needs a reason, not a tick.** It can mean the
+  recipe correctly produces nothing, or that the build died leaving no error and
+  no partial file. A comparison that walks the files present in both trees cannot
+  see the second kind at all.
+- **"The reference is non-deterministic" is a measurement, not an explanation.**
+  Run it two or three times on identical input and show it disagrees with itself.
+  The same command can be reproducible on a small input and not on a large one,
+  so one file proves nothing either way.
+
+### Two shapes most defects turn out to have
+
+- **A mechanism exists and a second code path does not know about it.** A gap
+  check that does not consult the resolver beside it; a debug flag instrumenting
+  one of two routes; a boundary rule implemented for one operation. These rarely
+  surface as a wrong value — they surface as a hard failure, or as an absent log
+  line, and that second form is the dangerous one because it makes a true
+  conclusion look proven by an instrument that could not have shown otherwise.
+- **State attached to a document that some operation invalidates or never
+  establishes.** Verbatim source blocks replayed after a filter dropped their
+  subject; a marker derived from a directory that cannot tell a cache from a
+  declared intermediate; a numbering pass whose axiom coverage silently omits a
+  construct. The design question is not "does this state survive a write" but
+  **what operation makes it a lie, and does the carrier know**.
+
+When a rule is right for one command, ask which other commands it is right for
+before implementing it once. `tests/architecture.rs` is where that question gets
+a permanent answer.
+
 ## The tests that hold this up
 
 - `tests/plan_only.rs` — plan a repo, **move its Makefile out of the tree**, and
@@ -140,6 +203,11 @@ dependency. owlmake names them in `requires` and otherwise leaves them alone.
   ingest computes and execution reads cannot be forgotten by the serializer.
 - `spec.rs::format_floor_tests` — the plan schema is digest-pinned, so changing
   it forces a decision about `PLAN_FORMAT_MIN_VERSION`.
+
+A guard that has never been seen to fail is a guard whose failure mode is
+untested — it may be passing because the bug is absent rather than because it
+can see the bug. Reintroduce the defect, watch the test name it, then put it
+back. That is what makes the guard evidence rather than decoration.
 
 ## There is nothing in the wild
 
