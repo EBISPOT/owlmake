@@ -3862,12 +3862,14 @@ fn collapse_rdf_roundtrip(model: &mut crate::model::Model) {
 /// Nothing named after the target is ever created, so requiring one fails the
 /// release build at artefact 23 of 35.
 ///
-/// Judge by shape rather than by the plan's `phony` list, which carries only the
-/// names a repo declared literally and so never covers a pattern rule's
-/// expansions: no directory component and no extension means the name cannot be a
-/// file. Anything that does look like a path must still appear — a rule that
-/// silently produced nothing is a real failure, and that is what this check is
-/// for.
+/// Two things say a target names no file, and both are needed. The plan's
+/// `phony` list is authoritative for the names a repo declared, and covers the
+/// ones that look exactly like paths — `component-download-<x>.owl`. Shape
+/// covers what the list cannot: a pattern rule's expansions are never declared
+/// literally, and there a name with no directory component and no extension
+/// cannot be a file. Anything that neither rule excuses must still appear — a
+/// rule that silently produced nothing is a real failure, and that is what this
+/// check is for.
 ///
 /// Unless the rule's own steps write nothing anywhere. A recipe carries no
 /// post-condition, and a repo may override a rule precisely to turn a check off —
@@ -3884,6 +3886,16 @@ fn surface_produced(
 ) -> Result<()> {
     let produced = repo.dir.join(target);
     if !produced.exists() {
+        // A target the plan declares phony names no file, so no file is missing
+        // when none appears. Its recipe puts its output wherever the recipe says
+        // — `component-download-<x>.owl` writes a staging copy under `tmp/` — and
+        // the shape rule below cannot see that, because the name ends in `.owl`
+        // and reads as a path. The write refuses to materialise such a target;
+        // this has to agree with it, or a rule fails for producing exactly what
+        // it should.
+        if repo.plan.is_phony(target) {
+            return Ok(());
+        }
         let t = Path::new(target);
         if t.parent().is_none_or(|p| p.as_os_str().is_empty()) && t.extension().is_none() {
             return Ok(());
