@@ -686,7 +686,14 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
                 let (val_lit, val_is_iri) = match &aa.ann.av {
                     AnnotationValue::Literal(l) => (Some(literal_text(l)), false),
                     AnnotationValue::IRI(i) => (Some(i.as_ref().to_string()), true),
-                    _ => (None, false),
+                    // An anonymous individual is named by the node id the
+                    // document gives it — `_:genid…` — and is neither an IRI nor
+                    // a literal. uPheno's mapping sets hang 112,352 of these off
+                    // `sssom:mappings`, and dropping them cost `upheno.json`
+                    // 11,796,960 bytes against what the recipe writes.
+                    AnnotationValue::AnonymousIndividual(a) => {
+                        (Some(format!("_:{}", a.0.as_ref())), false)
+                    }
                 };
                 let val_plain = is_xsd_string(&aa.ann.av);
                 let val_datatype = value_datatype(&aa.ann.av);
