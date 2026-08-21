@@ -254,11 +254,16 @@ now.
 
 ### Commit messages
 
+**Do not take the style from the existing log.** Most of it was written by
+agents and none of it is a model to copy. Two habits in there to avoid
+specifically: subjects written as aphorisms or as invariants that now hold
+(`A file the build reads is named by the plan`), and subjects written as a
+lowercase area prefix plus a declarative clause (`query: a path drives the row
+order`). Follow the rules here instead.
+
 Write the subject in the imperative, naming concretely what changed:
 `Match ROBOT on --input-iri, unmerge, query format, GCI reification and owl:Thing`.
-If one commit touches several areas, list them. Do not write the subject as an
-aphorism or as a statement of an invariant that now holds — some of the older
-log does this and it is not a style to copy.
+If one commit touches several areas, list them.
 
 The body says what changed and why, and ends with the evidence: the artefacts
 compared, the tool and version compared against, and the byte counts before and
