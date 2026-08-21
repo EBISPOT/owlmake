@@ -441,7 +441,8 @@ impl Queryable {
     /// `mondo-simple.owl`.
     pub fn from_model(model: &Model) -> Result<Queryable> {
         let mut rdf = Vec::new();
-        crate::io::write_to_ref(model, &mut rdf, Format::RdfXml)?;
+        // The artefact layout, because that is the document a query's order follows.
+        crate::io::write_artefact_to_ref(model, &mut rdf, Format::RdfXml)?;
         let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
         // The parser names an unlabelled blank node for itself, and those names are
         // drawn fresh every run — so a query that returns one would answer

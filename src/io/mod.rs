@@ -2338,6 +2338,23 @@ pub fn write_to_ref<W: Write>(model: &Model, writer: W, fmt: Format) -> Result<(
     write_to_with(&mut tmp, writer, fmt, RdfXmlWriter::Horned)
 }
 
+/// Serialize `model` into the layout a file on disk carries — the artefact shape.
+///
+/// A query answers in the order the document states its triples, so anything that
+/// reproduces that order has to be built from THIS layout and not the
+/// internal-transport one: the two place a reified axiom's triples in different
+/// places, which is the difference between one bunch and another.
+///
+/// Writing spends blank-node ids, and a query is a side operation that must not
+/// move the counter for the writes that follow it, so the counter is put back.
+pub fn write_artefact_to_ref<W: Write>(model: &Model, writer: W, fmt: Format) -> Result<()> {
+    let mut tmp = Model::from_parts(model.ont.clone(), crate::model::clone_prefixes(&model.prefixes));
+    let mark = anon_counter();
+    let r = write_to_with(&mut tmp, writer, fmt, RdfXmlWriter::Owlapi);
+    set_anon_counter(mark);
+    r
+}
+
 /// FNV-1a over a `ce_sig` string. Stable across builds (unlike the default
 /// hasher), which matters because these values are written into the OFN cache and
 /// read back by a later process.
