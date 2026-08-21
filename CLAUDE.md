@@ -242,12 +242,30 @@ state you would design from scratch, not the one that minimises churn.
 ### Comments
 
 Although we functionally mirror other tooling, this tooling may not be relevant 
-forever and we need to assume owlmake will be. So code comments should be written
-as if owlmake is the only tooling that exists. Describe OUR behavior, not how it
-relates to other tools.
+forever and we need to assume owlmake will be from the perspective of our comments
+(because we ARE owlmake). So code comments should be written as if owlmake is the
+main tooling that exists. Describe OUR behavior, not how it relates to other tools.
 
 Also, don't describe in comments how we achieved our current behavior (e.g. explaining
 how old versions of owlmake broke something and how we fixed it). This is completely
-irrelevant as old versions of owlmake were never published. We just describe what we have
+irrelevant as old versions of owlmake were never deployed. We just describe what we have
 now.
 
+
+### Commit messages
+
+Write the subject in the imperative, naming concretely what changed:
+`Match ROBOT on --input-iri, unmerge, query format, GCI reification and owl:Thing`.
+If one commit touches several areas, list them. Do not write the subject as an
+aphorism or as a statement of an invariant that now holds — some of the older
+log does this and it is not a style to copy.
+
+The body says what changed and why, and ends with the evidence: the artefacts
+compared, the tool and version compared against, and the byte counts before and
+after. Numbers must be ones actually measured — see "A number is only as good as
+what it was measured over".
+
+Unlike code comments, a commit message IS history, so it may name other tooling
+and say what the behaviour used to be. That is the one place the Comments rules
+above do not apply. Keep it proportionate: a one-line fix does not need ten
+paragraphs.
