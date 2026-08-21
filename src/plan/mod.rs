@@ -729,7 +729,7 @@ impl fmt::Display for Plan {
                     Step::Shell { .. } => "›",
                     // Covered, but run by invoking owlmake's own subcommand rather
                     // than threaded through the pipeline — not a gap, so not `✗`.
-                    Step::CliRobot { .. } => "▪",
+                    Step::OwlmakeCli { .. } => "▪",
                     _ => "✗",
                 };
                 writeln!(f, "║       {bullet} {}", s.label())?;

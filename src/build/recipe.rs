@@ -1456,7 +1456,7 @@ pub fn run_step_command(
 
 /// Invoke the owlmake binary directly with `args` in argv order (no shell, no
 /// redirection), for steps that recorded their tokens rather than a line:
-/// `Jq`, `Sssom`, `CliRobot`.
+/// `Jq`, `Sssom`, `OwlmakeCli`.
 pub fn run_owlmake_args(args: &[String], dir: &Path) -> Result<()> {
     run_tool(&owlmake_exe(), args, dir, &Redirects::default())
 }

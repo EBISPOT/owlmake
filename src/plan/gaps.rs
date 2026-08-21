@@ -45,6 +45,7 @@ pub fn step_outputs(steps: &[Step]) -> HashSet<String> {
     let mut out = HashSet::new();
     fn walk(steps: &[Step], out: &mut HashSet<String>) {
         for s in steps {
+            let s = s.effective();
             if let Step::Branch { then_steps, else_steps, .. } = s {
                 walk(then_steps, out);
                 walk(else_steps, out);
@@ -83,6 +84,7 @@ pub fn step_term_files(steps: &[Step]) -> Vec<String> {
 
 fn collect_term_files(steps: &[Step], out: &mut Vec<String>) {
     for s in steps {
+        let s = s.effective();
         match s {
             Step::Branch { then_steps, else_steps, .. } => {
                 collect_term_files(then_steps, out);
@@ -127,7 +129,7 @@ pub fn recipe_outputs(steps: &[crate::plan::step::Step]) -> Vec<String> {
     use crate::plan::step::Step;
     let mut out = Vec::new();
     for step in steps {
-        match step {
+        match step.effective() {
             Step::Shell { command, .. } | Step::Fallback { command, .. } => {
                 out.extend(redirect_targets(command));
             }

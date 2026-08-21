@@ -1205,7 +1205,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
     // pipeline, `dosdp.steps`. The two IRI stamps are in there; so is any
     // post-processing the repo adds, such as OBA's `query --update`.
     let steps: Vec<crate::plan::step::Step> =
-        dosdp.steps.iter().cloned().map(crate::spec::StepSpec::into_step).collect();
+        dosdp.steps.iter().cloned().map(crate::spec::StepEntry::into_step).collect();
     let work = repo.dir.join(".owlmake-odk-tmp");
     std::fs::create_dir_all(&work).ok();
     let mut defs = run_steps(repo, &steps, defs, &catalog, &work, Some(&dosdp.output), true, None)?;
@@ -1247,7 +1247,7 @@ fn staged_writes(steps: &[crate::plan::step::Step]) -> Vec<String> {
     use crate::plan::step::{Op, Step};
     let mut out = Vec::new();
     for step in steps {
-        match step {
+        match step.effective() {
             Step::Branch { then_steps, else_steps, .. } => {
                 out.extend(staged_writes(then_steps));
                 out.extend(staged_writes(else_steps));
@@ -2061,7 +2061,7 @@ fn is_shell_step(s: &crate::plan::step::Step) -> bool {
         Step::Shell { .. }
             | Step::Jq(_)
             | Step::Sssom(_)
-            | Step::CliRobot { .. }
+            | Step::OwlmakeCli { .. }
     )
 }
 
@@ -2069,7 +2069,7 @@ fn is_shell_step(s: &crate::plan::step::Step) -> bool {
 /// command line, decomposed here exactly as a recipe line would be (the
 /// `robot`/`jq`/`sssom` command words resolving to the owlmake binary, file ops
 /// run natively, only genuine text processors reaching `sh`). `Jq`/`Sssom`/
-/// `CliRobot` recorded argv tokens, so they invoke the binary directly.
+/// `OwlmakeCli` recorded argv tokens, so they invoke the binary directly.
 ///
 /// `UnsupportedShell` is "unsupported" only in the sense that owlmake has no
 /// native engine for the command word and does not probe the PATH at plan time —
@@ -2193,8 +2193,8 @@ fn run_shell_step(repo: &Repo, step: &Step) -> Result<()> {
         Step::Sssom(args) => {
             args_run(args).with_context(|| format!("step: {}", args.join(" ")))
         }
-        // A `CliRobot` outside a model pipeline (no ontology to thread) just runs.
-        Step::CliRobot { name, args } => {
+        // A `OwlmakeCli` outside a model pipeline (no ontology to thread) just runs.
+        Step::OwlmakeCli { name, args } => {
             let mut argv = vec![name.clone()];
             argv.extend(resolve_published_argv(repo, args));
             args_run(&argv).with_context(|| format!("step: robot {name}"))
@@ -2203,7 +2203,7 @@ fn run_shell_step(repo: &Repo, step: &Step) -> Result<()> {
     }
 }
 
-/// Run a `CliRobot` step *inside* a model pipeline.
+/// Run a `OwlmakeCli` step *inside* a model pipeline.
 ///
 /// owlmake exposes these as chained CLI commands that thread a model — UBERON's
 /// `create-species-subset` prunes the ontology and the recipe's `reason … relax …
@@ -2357,7 +2357,7 @@ fn step_command_text(step: &Step) -> Option<String> {
     match step {
         Step::Shell { command: c, .. } => Some(c.clone()),
         Step::Jq(args) | Step::Sssom(args) => Some(args.join(" ")),
-        Step::CliRobot { name, args } => Some(format!("{name} {}", args.join(" "))),
+        Step::OwlmakeCli { name, args } => Some(format!("{name} {}", args.join(" "))),
         _ => None,
     }
 }
@@ -2426,7 +2426,7 @@ fn run_shell_step_in_pipeline(
 ) -> Result<crate::model::Model> {
     let mut model = model;
     // A chained command step threads the model rather than touching files.
-    if let Step::CliRobot { name, args } = step {
+    if let Step::OwlmakeCli { name, args } = step {
         return run_cli_robot_step(repo, name, args, model, work, pipeline_input);
     }
     let touches_target = match (target, step_command_text(step)) {
@@ -2627,6 +2627,29 @@ fn run_steps(
                 let body = if eval_condition(repo, condition) { then_steps } else { else_steps };
                 model =
                     run_steps(repo, body, model, catalog, work, target, writes_model_after, pipe.as_deref())?;
+            }
+            // `cmd || true`. The model is kept aside so a failed step leaves the
+            // pipeline exactly as it was rather than half-applied, and the failure
+            // is REPORTED: the recipe tolerates it, which is not a reason for the
+            // build to be quiet about having done less than it says.
+            Step::MayFail(inner) => {
+                let spare = model.clone();
+                model = match run_steps(
+                    repo,
+                    std::slice::from_ref(inner.as_ref()),
+                    model,
+                    catalog,
+                    work,
+                    target,
+                    writes_model_after,
+                    pipe.as_deref(),
+                ) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        status!("(tolerated) {}: {e:#}", inner.label());
+                        spare
+                    }
+                };
             }
             // Side-effect file ops (append/sort/print) genuinely mutate the
             // filesystem later steps read, so run them; output-bookkeeping ops
@@ -3401,7 +3424,7 @@ fn step_writes_target(steps: &[Step], target: &str) -> bool {
         // over it: 267,196 lines of full ontology — Declarations, SubClassOf,
         // DisjointClasses — where ROBOT writes tags alone. `uberon.owl` merges
         // both tags files, so the 10x bloat reached every subset built from it.
-        Step::CliRobot { args, .. } => args
+        Step::OwlmakeCli { args, .. } => args
             .windows(2)
             .any(|w| matches!(w[0].as_str(), "--write-tags-to" | "--bridge-file" | "-o" | "--output")
                 && w[1] == target),
@@ -3443,7 +3466,7 @@ fn step_writes_target(steps: &[Step], target: &str) -> bool {
 fn step_built_paths(steps: &[Step]) -> Vec<String> {
     let mut out = Vec::new();
     for s in steps {
-        match s {
+        match s.effective() {
             Step::Op(Op::RoundTrip { path, .. }) | Step::Partial { op: Op::RoundTrip { path, .. }, .. } => {
                 out.push(path.clone());
             }
@@ -3453,7 +3476,7 @@ fn step_built_paths(steps: &[Step]) -> Vec<String> {
             }
             Step::Op(Op::Babelon { output: Some(o), .. })
             | Step::Partial { op: Op::Babelon { output: Some(o), .. }, .. } => out.push(o.clone()),
-            Step::CliRobot { args, .. } => {
+            Step::OwlmakeCli { args, .. } => {
                 for w in args.windows(2) {
                     if matches!(w[0].as_str(), "-o" | "--output" | "--write-tags-to" | "--bridge-file") {
                         out.push(w[1].clone());
@@ -3557,7 +3580,7 @@ fn run_artefact(
     crate::io::reset_anon_counter();
     let threads_model = a.steps.iter().any(|s| match s {
         Step::File(op) => !op.is_side_effect(),
-        Step::Op(_) | Step::Partial { .. } | Step::CliRobot { .. } => true,
+        Step::Op(_) | Step::Partial { .. } | Step::OwlmakeCli { .. } => true,
         _ => false,
     });
     // A *source* op (`babelon convert`) reads a non-OWL input — `$<` is a TSV — and
@@ -3818,6 +3841,22 @@ fn run_artefact(
                     true,
                     threaded_from.as_deref(),
                 )?;
+                continue;
+            }
+            // `cmd || true` — handed to `run_steps`, which owns the one
+            // implementation of tolerating a failure.
+            Step::MayFail(_) => {
+                model = run_steps(
+                    repo,
+                    std::slice::from_ref(step),
+                    model,
+                    catalog,
+                    work,
+                    Some(&a.target),
+                    true,
+                    threaded_from.as_deref(),
+                )?;
+                model_on_disk = false;
                 continue;
             }
             // An out-of-pipeline step (perl/sed/jq/`report`/…) runs where it
@@ -6377,7 +6416,7 @@ fn build_srcmerged(repo: &Repo, work: &Path) -> Result<PathBuf> {
 fn step_shell_text(step: &Step) -> Option<String> {
     match step {
         Step::Shell { command: c, .. } => Some(c.clone()),
-        Step::CliRobot { name, args } => Some(format!("{name} {}", args.join(" "))),
+        Step::OwlmakeCli { name, args } => Some(format!("{name} {}", args.join(" "))),
         _ => None,
     }
 }

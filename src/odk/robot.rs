@@ -180,6 +180,28 @@ fn is_python(tok: &str) -> bool {
         || tok.ends_with("/python3")
 }
 
+/// Whether owlmake performs this step itself, with no command line involved.
+///
+/// The test for whether a parse is worth keeping over the text it came from: a
+/// step that ends up shelling out anyway has been decomposed for nothing, and
+/// decomposing costs the shell's own short-circuiting and redirection.
+fn runs_without_a_shell(s: &Step) -> bool {
+    match s {
+        Step::Op(_) | Step::Partial { .. } | Step::Boundary { .. } => true,
+        Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::OwlmakeCli { .. } => true,
+        Step::MayFail(inner) => runs_without_a_shell(inner),
+        // `Shell`/`Fallback` are command lines by definition; an unsupported
+        // subcommand is one owlmake has no implementation for, and `Branch`/`Oort`
+        // are replayed rather than threaded. `Inert` alone is not work to keep.
+        Step::Shell { .. }
+        | Step::Fallback { .. }
+        | Step::UnsupportedSubcommand(_)
+        | Step::Branch { .. }
+        | Step::Oort(_)
+        | Step::Inert(_) => false,
+    }
+}
+
 /// Parse one shell command line (already variable-expanded) into steps.
 pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
     // A shell `if … then … [else …] fi` construct is one logical command whose
@@ -242,17 +264,30 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
         if sub == "true" || sub == ":" {
             continue;
         }
-        // `cmd || true` says cmd MAY FAIL. Dropping the `true` did not express
-        // that — it left `cmd` an ordinary step whose failure aborts the recipe.
-        // MONDO's OMIM-gene check is `grep -Ff $< mondo-edit.obo | grep '^xref' >
-        // $@ || true`, and grep exits 1 when it matches nothing, which is the
-        // PASSING case: the check fails only if the file it writes is non-empty.
-        // Keeping the `|| true` in the command hands the semantics to the shell
-        // that already runs it, and the plan reads as what happens.
+        // `cmd || true` says cmd MAY FAIL. Dropping the `true` would not express
+        // that — it would leave `cmd` an ordinary step whose failure aborts the
+        // recipe — so the tolerance is recorded as `may_fail` on the step itself.
+        //
+        // Tolerating a failure says nothing about what the command IS, so the
+        // command is still parsed. A plan is the whole build once the recipe it
+        // came from is gone, and an ontology command belongs in it as the op
+        // owlmake runs — EFO's mondo import excludes HGNC terms with a tolerated
+        // `query`, which the plan names as `op: query` like any other.
+        //
+        // Only when the parse is fully native, though. MONDO's OMIM-gene check is
+        // `grep -Ff $< mondo-edit.obo | grep '^xref' > $@ || true` — a pipeline of
+        // text tools, where grep exits 1 on no match and that is the PASSING case.
+        // Nothing is gained by taking it apart, so it stays one command and the
+        // shell that runs it applies its own semantics.
         let tolerated = matches!(seq[idx].1, Some(ShellSep::Or))
             && matches!(seq.get(idx + 1), Some((next, _)) if next.trim() == "true" || next.trim() == ":");
         if tolerated {
-            steps.push(shell_step(format!("{sub} || true")));
+            let parsed = parse_command(sub, robot_prefix);
+            if !parsed.is_empty() && parsed.iter().all(runs_without_a_shell) {
+                steps.extend(parsed.into_iter().map(|s| Step::MayFail(Box::new(s))));
+            } else {
+                steps.push(shell_step(format!("{sub} || true")));
+            }
             continue;
         }
         // The right-hand side of `||` runs only on failure, whatever it parses as,
@@ -352,7 +387,7 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
                 .filter(|t| !is_make_flag(t))
                 .cloned()
                 .collect();
-            steps.push(Step::CliRobot { name: "make".to_string(), args });
+            steps.push(Step::OwlmakeCli { name: "make".to_string(), args });
         } else if BENIGN_SHELL.contains(&toks[0].as_str()) && !writes_a_file(&toks) {
             steps.push(Step::Inert(sub.to_string()));
         } else if BENIGN_SHELL.contains(&toks[0].as_str()) {
@@ -1049,7 +1084,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
     };
     let boolv = |key: &str| -> Option<bool> { val(key).map(|s| s == "true") };
     // Every option token of this invocation, flattened back to argv order, for the
-    // `CliRobot` steps that are executed by re-invoking the owlmake binary.
+    // `OwlmakeCli` steps that are executed by re-invoking the owlmake binary.
     let argv = || -> Vec<String> {
         opts.iter()
             .flat_map(|(k, v)| std::iter::once(k.clone()).chain(v.iter().cloned()))
@@ -1109,7 +1144,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
                 add_annotation_iri: all("--add-annotation-iri"),
             })),
             "create-species-subset" => {
-                Step::CliRobot { name: name.to_string(), args: argv() }
+                Step::OwlmakeCli { name: name.to_string(), args: argv() }
             }
             // `kgcl:mint` is a pipeline op rather than a CLI re-invocation: EFO's
             // `allocate-definitive-ids` chains it into `convert`, so it has to
@@ -1128,9 +1163,9 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             // real op instead, or the chain it sits in loses the model.
             "report" | "verify" | "validate-profile" | "measure" | "diff" | "export"
             | "export-prefixes" | "explain" | "mirror" => {
-                Step::CliRobot { name: name.to_string(), args: argv() }
+                Step::OwlmakeCli { name: name.to_string(), args: argv() }
             }
-            _ => Step::UnknownRobot(name.to_string()),
+            _ => Step::UnsupportedSubcommand(name.to_string()),
         };
     }
 
@@ -1399,9 +1434,9 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
         // operation, and no model has to thread through.
         "report" | "verify" | "validate-profile" | "measure" | "diff" | "export"
         | "export-prefixes" | "explain" | "mirror" => {
-            Step::CliRobot { name: name.to_string(), args: argv() }
+            Step::OwlmakeCli { name: name.to_string(), args: argv() }
         }
-        other => Step::UnknownRobot(other.to_string()),
+        other => Step::UnsupportedSubcommand(other.to_string()),
     }
 }
 
@@ -1878,6 +1913,60 @@ mod tests {
             spec.prefixes,
             vec!["uberon: http://purl.obolibrary.org/obo/uberon/core#"],
             "the --prefix binding must reach the plan"
+        );
+    }
+
+    /// A tolerated ontology command is an op that may fail, not a command line.
+    ///
+    /// EFO's mondo import excludes HGNC terms with a query whose failure the
+    /// recipe walks past. The redirection and the `|| true` around it are the
+    /// shell's, and neither changes what the command does, so both are read and
+    /// the query itself is what the plan names.
+    #[test]
+    fn a_tolerated_robot_command_is_parsed_and_marked_may_fail() {
+        let steps = parse_command(
+            "bin/robot query -i imports/mondo_import.owl.tmp.owl \
+             -q ../sparql/hgnc_terms.sparql imports/mondo_import.owl.hgnc.tsv \
+             2>/dev/null || true",
+            "bin/robot",
+        );
+        let inner = steps
+            .iter()
+            .find_map(|s| match s {
+                Step::MayFail(inner) => Some(inner.as_ref()),
+                _ => None,
+            })
+            .expect("the tolerated command is a step that may fail");
+        match inner {
+            Step::Op(Op::Query { selects, .. }) => assert_eq!(
+                selects,
+                &[(
+                    "../sparql/hgnc_terms.sparql".to_string(),
+                    "imports/mondo_import.owl.hgnc.tsv".to_string()
+                )]
+            ),
+            other => panic!("expected a native query, got {other:?}"),
+        }
+        assert!(
+            !steps.iter().any(|s| matches!(s, Step::Shell { .. })),
+            "nothing is left for a shell — and so nothing names a robot binary"
+        );
+    }
+
+    /// A tolerated command owlmake does NOT implement stays one shell command.
+    ///
+    /// MONDO's OMIM-gene check is a pipeline of text tools whose `grep` exits 1
+    /// when it matches nothing — the passing case. Taking it apart would buy
+    /// nothing and cost the shell's own short-circuiting.
+    #[test]
+    fn a_tolerated_shell_pipeline_is_left_whole() {
+        let steps = parse_command(
+            "grep -Ff $< mondo-edit.obo | grep '^xref' > omim.txt || true",
+            "robot",
+        );
+        assert!(
+            matches!(steps.as_slice(), [Step::Shell { command, .. }] if command.ends_with("|| true")),
+            "expected one tolerated shell command, got {steps:?}"
         );
     }
 }

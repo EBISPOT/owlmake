@@ -276,7 +276,7 @@ pub struct ImportSpec {
     /// source paths (e.g. `iri_dependencies/<id>_terms.txt`), so the build never
     /// re-guesses where the term list lives.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
     /// The import product declaration this module came from — mirror URL/type,
     /// base-IRI flags, `is_large`. A `--imports fresh` run reads these, so
     /// recording them keeps that path working from the plan alone.
@@ -287,7 +287,7 @@ pub struct ImportSpec {
     /// plan-only fresh-import run has no way to produce `mirror/<id>.owl`. A
     /// mirror rule threads no model, so these are whole-command shell steps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mirror_steps: Vec<StepSpec>,
+    pub mirror_steps: Vec<StepEntry>,
     /// Files the mirror steps read that another rule makes (MONDO's
     /// `mirror/hgnc_gene.nt`, `mirror/ncbi_gene.nt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -395,7 +395,7 @@ pub struct DosdpSpec {
     /// edit merge, an `oba.owl`, `oba-base.owl`, `oba-full.owl` and `oba-basic.owl`
     /// — that the repo never asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
     /// Every template in the pattern directory — a SUPERSET of `patterns`,
     /// because `dosdp validate` covers templates that have no data table yet.
     /// Recorded separately so validation cannot silently check a subset while
@@ -464,7 +464,7 @@ pub struct ArtefactSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order_only: Vec<String>,
     /// Ordered operations applied to the input.
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
     /// Set when ingest found no rule for this target. It blocks the release, so
     /// it is recorded: without it the artefact loads as one with no steps and
     /// silently builds nothing instead of reporting "no rule found".
@@ -489,7 +489,7 @@ impl ArtefactSpec {
             input: a.input.clone(),
             needs: a.needs.clone(),
             order_only: a.order_only.clone(),
-            steps: a.steps.iter().map(StepSpec::from_step).collect(),
+            steps: a.steps.iter().map(StepEntry::from_step).collect(),
             missing_rule: a.missing_rule,
             stdout_file: a.stdout_file.clone(),
             branches: a
@@ -500,7 +500,7 @@ impl ArtefactSpec {
                     value: b.value.clone(),
                     input: b.input.clone(),
                     needs: b.needs.clone(),
-                    steps: b.steps.iter().map(StepSpec::from_step).collect(),
+                    steps: b.steps.iter().map(StepEntry::from_step).collect(),
                 })
                 .collect(),
         }
@@ -514,7 +514,7 @@ impl ArtefactSpec {
 /// structural equality has to be maintained alongside the serializer to say so.
 pub(crate) fn steps_differ(a: &[Step], b: &[Step]) -> bool {
     let text = |v: &[Step]| {
-        serde_json::to_string(&v.iter().map(StepSpec::from_step).collect::<Vec<_>>()).ok()
+        serde_json::to_string(&v.iter().map(StepEntry::from_step).collect::<Vec<_>>()).ok()
     };
     text(a) != text(b)
 }
@@ -526,7 +526,7 @@ impl BranchSpec {
             value: self.value,
             input: self.input,
             needs: self.needs,
-            steps: self.steps.into_iter().map(StepSpec::into_step).collect(),
+            steps: self.steps.into_iter().map(StepEntry::into_step).collect(),
         }
     }
 }
@@ -545,12 +545,44 @@ pub struct BranchSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
+}
+
+/// A step as a plan writes it: the operation, plus the per-step settings that
+/// apply whatever the operation is.
+///
+/// Flattened, so a step stays one mapping — `op: query` with `may_fail: true`
+/// beside it, not an operation nested inside a wrapper.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StepEntry {
+    #[serde(flatten)]
+    pub spec: StepSpec,
+    /// The step's failure is not the build's. A recipe writes this `cmd || true`;
+    /// see [`crate::plan::step::Step::MayFail`] for why it is a property of the
+    /// one step rather than of the steps around it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub may_fail: bool,
+}
+
+impl StepEntry {
+    pub fn from_step(s: &Step) -> Self {
+        match s {
+            Step::MayFail(inner) => {
+                StepEntry { spec: StepSpec::from_step(inner), may_fail: true }
+            }
+            other => StepEntry { spec: StepSpec::from_step(other), may_fail: false },
+        }
+    }
+
+    pub fn into_step(self) -> Step {
+        let step = self.spec.into_step();
+        if self.may_fail { Step::MayFail(Box::new(step)) } else { step }
+    }
 }
 
 /// One step of an artefact's pipeline. Most variants are owlmake's own ops,
 /// applied to the model in memory; `shell`/`fallback` carry a command line run
-/// outside the pipeline, and `unsupported-robot` records an ontology subcommand
+/// outside the pipeline, and `unsupported-subcommand` records an ontology subcommand
 /// owlmake has no implementation for, so a coverage gap shows up in the plan
 /// rather than vanishing from it.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1046,17 +1078,17 @@ pub enum StepSpec {
         #[serde(rename = "if")]
         r#if: ConditionSpec,
         #[serde(default, rename = "then", skip_serializing_if = "Vec::is_empty")]
-        then_steps: Vec<StepSpec>,
+        then_steps: Vec<StepEntry>,
         #[serde(default, rename = "else", skip_serializing_if = "Vec::is_empty")]
-        else_steps: Vec<StepSpec>,
+        else_steps: Vec<StepEntry>,
     },
     /// An ontology subcommand a recipe names that owlmake does not implement (a
     /// coverage gap).
-    UnsupportedRobot { command: String },
+    UnsupportedSubcommand { command: String },
     /// An ontology subcommand owlmake implements on its CLI but not as a pipeline
     /// op; executed by invoking the owlmake binary's matching subcommand with
     /// `args` (the invocation's own option tokens, in argv order).
-    CliRobot {
+    OwlmakeCli {
         command: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         args: Vec<String>,
@@ -1140,9 +1172,9 @@ impl OwlmakeSpec {
                     id: i.id.clone(),
                     source: i.source.clone(),
                     output: i.output.clone(),
-                    steps: i.steps.iter().map(StepSpec::from_step).collect(),
+                    steps: i.steps.iter().map(StepEntry::from_step).collect(),
                     product: i.product.clone(),
-                    mirror_steps: i.mirror_steps.iter().map(StepSpec::from_step).collect(),
+                    mirror_steps: i.mirror_steps.iter().map(StepEntry::from_step).collect(),
                     mirror_inputs: i.mirror_inputs.clone(),
                 })
                 .collect(),
@@ -1183,7 +1215,7 @@ impl OwlmakeSpec {
             .imports
             .into_iter()
             .map(|i| {
-                let steps: Vec<Step> = i.steps.into_iter().map(StepSpec::into_step).collect();
+                let steps: Vec<Step> = i.steps.into_iter().map(StepEntry::into_step).collect();
                 // `source` as recorded in the plan is authoritative — that is what
                 // serializing it means. Ingest already resolves a `-base` product
                 // (the ontology's OWN axioms, without its import closure) to its
@@ -1204,7 +1236,7 @@ impl OwlmakeSpec {
                     cached: false,
                     gaps: Vec::new(),
                     product: i.product,
-                    mirror_steps: i.mirror_steps.into_iter().map(StepSpec::into_step).collect(),
+                    mirror_steps: i.mirror_steps.into_iter().map(StepEntry::into_step).collect(),
                     mirror_inputs: i.mirror_inputs,
                 };
                 let (cached, gaps) = crate::plan::gaps::import_state(dir, &plan, merged_cached);
@@ -1229,7 +1261,7 @@ impl OwlmakeSpec {
             .prerequisites
             .into_iter()
             .map(|a| {
-                let steps: Vec<Step> = a.steps.into_iter().map(StepSpec::into_step).collect();
+                let steps: Vec<Step> = a.steps.into_iter().map(StepEntry::into_step).collect();
                 let gaps = steps.iter().flat_map(|s| s.gaps()).collect();
                 ArtefactPlan {
                     target: a.target,
@@ -1248,7 +1280,7 @@ impl OwlmakeSpec {
             .artefacts
             .into_iter()
             .map(|a| {
-                let steps: Vec<Step> = a.steps.into_iter().map(StepSpec::into_step).collect();
+                let steps: Vec<Step> = a.steps.into_iter().map(StepEntry::into_step).collect();
                 let gaps: Vec<String> = steps.iter().flat_map(|s| s.gaps()).collect();
                 ArtefactPlan {
                     target: a.target,
@@ -1438,6 +1470,10 @@ impl StepSpec {
             // An Op or a Partial both serialize by their operation; partial-ness
             // (the coverage gaps) is re-derived on load from the op's options.
             Step::Op(op) | Step::Partial { op, .. } => Self::from_op(op),
+            // `may_fail` is a field of the step's own mapping, so it is written by
+            // [`StepEntry`] — the only thing that builds one of these — and what
+            // remains here is the operation it applies to.
+            Step::MayFail(inner) => Self::from_step(inner),
             Step::Boundary { input } => StepSpec::Boundary { input: input.clone() },
             // `Inert` never reaches a plan (the planner drops it); mapped for
             // exhaustiveness only.
@@ -1454,12 +1490,12 @@ impl StepSpec {
 
             Step::Branch { condition, then_steps, else_steps } => StepSpec::Branch {
                 r#if: ConditionSpec::from_condition(condition),
-                then_steps: then_steps.iter().map(StepSpec::from_step).collect(),
-                else_steps: else_steps.iter().map(StepSpec::from_step).collect(),
+                then_steps: then_steps.iter().map(StepEntry::from_step).collect(),
+                else_steps: else_steps.iter().map(StepEntry::from_step).collect(),
             },
-            Step::UnknownRobot(c) => StepSpec::UnsupportedRobot { command: c.clone() },
-            Step::CliRobot { name, args } => {
-                StepSpec::CliRobot { command: name.clone(), args: args.clone() }
+            Step::UnsupportedSubcommand(c) => StepSpec::UnsupportedSubcommand { command: c.clone() },
+            Step::OwlmakeCli { name, args } => {
+                StepSpec::OwlmakeCli { command: name.clone(), args: args.clone() }
             }
 
             // The release-runner marker is resolved away by `rewrite_oort` before
@@ -2001,11 +2037,11 @@ impl StepSpec {
 
             StepSpec::Branch { r#if, then_steps, else_steps } => Step::Branch {
                 condition: r#if.into_condition(),
-                then_steps: then_steps.into_iter().map(StepSpec::into_step).collect(),
-                else_steps: else_steps.into_iter().map(StepSpec::into_step).collect(),
+                then_steps: then_steps.into_iter().map(StepEntry::into_step).collect(),
+                else_steps: else_steps.into_iter().map(StepEntry::into_step).collect(),
             },
-            StepSpec::UnsupportedRobot { command } => Step::UnknownRobot(command),
-            StepSpec::CliRobot { command, args } => Step::CliRobot { name: command, args },
+            StepSpec::UnsupportedSubcommand { command } => Step::UnsupportedSubcommand(command),
+            StepSpec::OwlmakeCli { command, args } => Step::OwlmakeCli { name: command, args },
 
             StepSpec::Oort { input, outdir, reasoner, simple, relaxed, asserted } => {
                 Step::Oort(crate::plan::step::OortSpec {
@@ -2385,7 +2421,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.1.0";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.2.0";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -2529,6 +2565,40 @@ pub fn save(spec: &OwlmakeSpec, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `may_fail` is a field of the step, beside its `op` — not a wrapper around
+    /// it — and it survives a round trip through the plan file.
+    #[test]
+    fn may_fail_is_written_beside_the_op_it_applies_to() {
+        let step = Step::MayFail(Box::new(Step::Op(crate::plan::step::Op::Query {
+            updates: vec![],
+            selects: vec![("q.sparql".into(), "out.tsv".into())],
+            constructs: vec![],
+            format: None,
+            use_graphs: false,
+            tdb: false,
+        })));
+
+        let yaml = serde_yaml::to_string(&StepEntry::from_step(&step)).unwrap();
+        assert!(yaml.contains("op: query"), "the operation is still named: {yaml}");
+        assert!(yaml.contains("may_fail: true"), "the tolerance is a field: {yaml}");
+
+        let back: StepEntry = serde_yaml::from_str(&yaml).unwrap();
+        assert!(
+            matches!(back.into_step(), Step::MayFail(inner)
+                if matches!(*inner, Step::Op(crate::plan::step::Op::Query { .. }))),
+            "a plan that says may_fail reads back as a step that may fail"
+        );
+    }
+
+    /// An ordinary step writes no `may_fail` at all — the flag is the exception,
+    /// so every other step in a plan is unchanged by its existence.
+    #[test]
+    fn an_ordinary_step_writes_no_may_fail() {
+        let step = Step::Op(crate::plan::step::Op::Relax { include_subclass_of: false });
+        let yaml = serde_yaml::to_string(&StepEntry::from_step(&step)).unwrap();
+        assert!(!yaml.contains("may_fail"), "unexpected flag: {yaml}");
+    }
 
     /// A rule naming both `X` and `X.tmp.obo` must rebase each exactly once.
     /// MONDO's `mondo.obo` recipe is the case: a sequence of `String::replace`
@@ -2755,7 +2825,19 @@ mod format_floor_tests {
         // written before it loads unchanged and one written with it is ignored by
         // a build that does not know it — only the frozen version comes back.
         // That is a format an older owlmake can still execute, so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "1666186e12be8423";
+        //
+        // `may_fail` arrives as an optional field on every step, flattened beside
+        // the `op` it applies to — the first setting that belongs to a step rather
+        // than to an operation, which is why it is a field of `StepEntry` and not
+        // of each op in turn. `owlmake-cli` and `unsupported-subcommand` are what
+        // the two subcommand steps are called: a step naming the tool it runs —
+        // `jq`, `sssom` — says which tool, and these two run owlmake's own CLI.
+        //
+        // The floor moves to 0.2.0 for both. A 0.1.0 build reading a 0.2.0 plan
+        // does not fail on `may_fail`, it IGNORES it, and runs a step the plan
+        // says may fail as one that may not — a silent change of what the build
+        // does, which is the case the floor exists to refuse.
+        const PLAN_SCHEMA_DIGEST: &str = "3c513a746b8e615b";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

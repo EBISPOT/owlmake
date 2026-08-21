@@ -512,7 +512,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     // as `edit_file` and `catalog_file` are, so it is carried as written.
     let version_file = make.version_file.borrow().clone();
 
-    Ok(Plan {
+    let mut plan = Plan {
         // What the repo itself states. A repo running the image's own tool names
         // its ODK release and nothing else; one shipping its own names the tool.
         emulate_odk_version: odk_declared_version(&repo.root, make),
@@ -590,7 +590,30 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         component_gaps,
         prerequisites,
         artefacts,
-    })
+    };
+    drop_unspelled_robot_launcher(&mut plan);
+    Ok(plan)
+}
+
+/// Drop the recorded `ROBOT` launcher when no step in the plan spells it.
+///
+/// The launcher travels with a plan so that a step which IS a command line can
+/// have owlmake put in its place at the command position. A plan whose ontology
+/// commands are all ops has no such step, and carrying the launcher there would
+/// have the plan name a program the build never runs — and name a path the
+/// repository need not contain.
+///
+/// Decided against the plan's own serialized form, so no step can be missed:
+/// whatever container a step sits in, the launcher is kept if the plan says it
+/// anywhere, and kept if the question cannot be answered at all.
+fn drop_unspelled_robot_launcher(plan: &mut Plan) {
+    let Some(launcher) = plan.variables.remove("ROBOT") else { return };
+    let spelled = serde_yaml::to_string(&crate::spec::OwlmakeSpec::from_plan(plan))
+        .map(|text| text.contains(&launcher))
+        .unwrap_or(true);
+    if spelled {
+        plan.variables.insert("ROBOT".to_string(), launcher);
+    }
 }
 
 /// Turn one Makefile rule into an [`ArtefactPlan`]: expand the automatic
@@ -767,12 +790,12 @@ fn plan_rule(
     // EFO's `IMP=false PAT=false`, inherited from the ODK and referenced nowhere
     // in its Makefile — cannot.
     let all_make = !steps.is_empty()
-        && steps.iter().all(|s| matches!(s, Step::CliRobot { name, .. } if name == "make"));
+        && steps.iter().all(|s| matches!(s, Step::OwlmakeCli { name, .. } if name == "make"));
     if all_make {
         let mut targets = Vec::new();
         let mut flattenable = true;
         for s in &steps {
-            let Step::CliRobot { args, .. } = s else { continue };
+            let Step::OwlmakeCli { args, .. } = s else { continue };
             for a in args {
                 match a.split_once('=') {
                     Some((name, _)) => {
@@ -1660,7 +1683,7 @@ fn dosdp_merge_steps(
     pattern_dir: &str,
     ontbase: &str,
     version: &str,
-) -> Vec<crate::spec::StepSpec> {
+) -> Vec<crate::spec::StepEntry> {
     use crate::plan::step::{AnnotateSpec, Op, Step};
     let recorded = make.and_then(|m| {
         let rule = m.rules.get(&format!("{pattern_dir}/definitions.owl"))?;
@@ -1700,7 +1723,7 @@ fn dosdp_merge_steps(
             })),
         ]
     });
-    steps.iter().map(crate::spec::StepSpec::from_step).collect()
+    steps.iter().map(crate::spec::StepEntry::from_step).collect()
 }
 
 /// The pattern-generator options a repo's own `generate` rule passes, read off
