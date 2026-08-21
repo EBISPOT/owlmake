@@ -1718,6 +1718,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A robot line that opens over `--input-iri` names a remote input, and the
+    /// plan carries it: the local `--input` scan skips anything beginning `http`,
+    /// so an IRI is the separate answer. A rule with no prerequisites has no
+    /// other input, and a query over the previous release is exactly that shape.
+    #[test]
+    fn a_remote_input_is_an_input() {
+        let iri = "https://github.com/EBISPOT/efo/releases/download/current/efo.owl";
+        let line = format!("robot query --input-iri {iri} --select q.sparql out.tmp");
+        assert_eq!(super::super::planner::first_robot_iri_input(&line, "robot"), Some(iri.into()));
+        assert_eq!(
+            super::super::planner::first_robot_iri_input(
+                &format!("robot query --input-iri={iri} --select q.sparql out.tmp"),
+                "robot"
+            ),
+            Some(iri.into())
+        );
+        // A local input is not an IRI input, and vice versa: the two answers are
+        // used differently, one as `$<` and one as a pipeline boundary.
+        assert_eq!(
+            super::super::planner::first_robot_iri_input("robot query -i build/efo.owl", "robot"),
+            None
+        );
+        assert_eq!(super::super::planner::first_robot_input(&line, "robot"), None);
+    }
+
     /// `mint` takes its ID policy from the single `*-idranges.owl` beside the
     /// edit file, and the PLAN has to name it: when it did not, execution globbed
     /// for one and globbed the wrong directory, so EFO's `allocate-definitive-ids`

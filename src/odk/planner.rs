@@ -396,7 +396,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     // `patterns/definitions.owl`, `patterns/pattern.owl` and the per-pattern
     // `data/*/*.ofn` in as intermediates, and a planned recipe for them competes
     // with the DOSDP engine that `PatternsMode` drives.
-    let mut native_patterns = native_pattern_targets(make);
+    let mut native_patterns = native_pattern_targets(make, &repo.dir);
     native_patterns.extend(native_import_targets(make, &imports, merged_import.as_deref()));
     let artefacts: Vec<ArtefactPlan> =
         artefacts.into_iter().filter(|a| !native_patterns.contains(&a.target)).collect();
@@ -715,6 +715,16 @@ fn plan_rule(
         if command_lines > 0 && !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
             if let Some(opens_with) = first_robot_input(&expanded, robot_prefix) {
                 line_steps.insert(0, Step::Boundary { input: Some(opens_with) });
+            }
+        }
+        // A line that opens over a REMOTE ontology is a boundary on ANY line,
+        // including the first: an IRI cannot become the rule's `$<`, which is
+        // resolved to a path, so the boundary is how the plan names it.
+        if !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
+            if let Some(iri) = first_robot_iri_input(&expanded, robot_prefix) {
+                if !matches!(line_steps.first(), Some(Step::Boundary { .. })) {
+                    line_steps.insert(0, Step::Boundary { input: Some(iri) });
+                }
             }
         }
         // A `mint` line that names no `--id-ranges` takes the single
@@ -1126,11 +1136,7 @@ fn refresh_groups(
     prerequisites: &[ArtefactPlan],
 ) -> Vec<crate::plan::RefreshGroup> {
     use crate::plan::{Freshness, RefreshGroup};
-    let mirrordir = {
-        let d = make.expand("$(MIRRORDIR)");
-        let d = d.trim().to_string();
-        if d.is_empty() { "mirror".to_string() } else { d }
-    };
+    let mirrordir = mirror_dir(make);
 
     // Every import owlmake can actually re-fetch, at the path it fetches into.
     //
@@ -1817,11 +1823,7 @@ pub(crate) fn native_import_targets(
 /// Does `target`'s rule read `$(MIRRORDIR)/merged.owl`? — see
 /// `native_import_targets`.
 fn reads_merged_mirror(make: &super::makefile::MakeModel, target: &str) -> bool {
-    let mirrordir = {
-        let d = make.expand("$(MIRRORDIR)");
-        let d = d.trim().to_string();
-        if d.is_empty() { "mirror".to_string() } else { d }
-    };
+    let mirrordir = mirror_dir(make);
     let merged = format!("{mirrordir}/merged.owl");
     for name in [target.to_string(), format!("imports/{}", Path::new(target).file_name().and_then(|s| s.to_str()).unwrap_or(target))] {
         if let Some((rule, _)) = make.rule_for(&name) {
@@ -1831,6 +1833,20 @@ fn reads_merged_mirror(make: &super::makefile::MakeModel, target: &str) -> bool 
         }
     }
     false
+}
+
+/// The repo's mirror directory, spelled ONE way.
+///
+/// `./mirror` and `mirror` name the same directory, and the plan has to settle on
+/// one: writing a path rebases it to the plan file's directory and reading rebases
+/// it back, so an un-normalised `MIRRORDIR` gives a repo two names for one target —
+/// one from the build configuration, one from the committed plan. A target has a
+/// single name whichever the build reads.
+fn mirror_dir(make: &super::makefile::MakeModel) -> String {
+    let d = make.expand("$(MIRRORDIR)");
+    let d = d.trim();
+    let d = d.strip_prefix("./").unwrap_or(d).trim_end_matches('/');
+    if d.is_empty() { "mirror".to_string() } else { d.to_string() }
 }
 
 /// The mirror targets the executor serves natively, in the plan's own spelling.
@@ -1849,11 +1865,7 @@ pub(crate) fn native_mirror_targets(
     make: &super::makefile::MakeModel,
     imports: &[ImportPlan],
 ) -> std::collections::HashSet<String> {
-    let mirrordir = {
-        let d = make.expand("$(MIRRORDIR)");
-        let d = d.trim().to_string();
-        if d.is_empty() { "mirror".to_string() } else { d }
-    };
+    let mirrordir = mirror_dir(make);
     imports
         .iter()
         .flat_map(|i| [format!("mirror-{}", i.id), format!("{mirrordir}/{}.owl", i.id)])
@@ -1871,6 +1883,7 @@ pub(crate) fn native_mirror_targets(
 /// (`../patterns/…`) while the plan records them repo-relative (`src/patterns/…`).
 pub(crate) fn native_pattern_targets(
     make: &super::makefile::MakeModel,
+    ontology_dir: &std::path::Path,
 ) -> std::collections::HashSet<String> {
     let dir = |var: &str, dflt: &str| {
         let d = make.expand(var);
@@ -1879,6 +1892,12 @@ pub(crate) fn native_pattern_targets(
     };
     let patterndir = dir("$(PATTERNDIR)", "../patterns");
     let tmpdir = dir("$(TMPDIR)", "tmp");
+    // A repo with no pattern directory runs no DOSDP pipeline and claims none of
+    // its targets: every path the plan names is a file the build can produce, and
+    // `--list-targets` offers only what is buildable.
+    if !ontology_dir.join(&patterndir).is_dir() {
+        return Default::default();
+    }
     let mut out: std::collections::HashSet<String> = Default::default();
     let mut add = |t: String| {
         if let Some(rest) = t.strip_prefix("../") {
@@ -1962,7 +1981,7 @@ fn plan_prerequisites(
     // the native path pins them, replayed rules do not.
     let mut native: HashSet<String> = native_mirror_targets(make, imports);
 
-    native.extend(native_pattern_targets(make));
+    native.extend(native_pattern_targets(make, &repo.dir));
     native.extend(native_import_targets(make, imports, merged_import));
 
     // Post-order DFS: a target is pushed only after everything it needs.
@@ -2616,13 +2635,44 @@ fn is_robot_line(cmd: &str, robot_prefix: &str) -> bool {
     })
 }
 
+/// The REMOTE ontology a robot line opens over (`--input-iri` / `-I`).
+///
+/// Kept apart from [`first_robot_input`] because the two answers are used
+/// differently: a file input becomes the rule's `$<` and is resolved to a path,
+/// an IRI cannot be and instead opens the line's pipeline as a boundary.
+///
+/// Recording it is what puts the fetch in the plan: a rule with no prerequisites
+/// has no other input, so the line's own IRI is the only thing that says what the
+/// pipeline opens over.
+pub(super) fn first_robot_iri_input(cmd: &str, robot_prefix: &str) -> Option<String> {
+    for seg in cmd.split(['|', ';', '&']) {
+        let toks = robot::tokenize(seg);
+        if toks.is_empty() || !robot::is_robot(&toks, robot_prefix) {
+            continue;
+        }
+        let mut it = toks.iter();
+        while let Some(t) = it.next() {
+            let v = match t.as_str() {
+                "-I" | "--input-iri" => it.next().cloned(),
+                _ => t.strip_prefix("--input-iri=").map(str::to_string),
+            };
+            let Some(v) = v else { continue };
+            if v.starts_with("http://") || v.starts_with("https://") {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
 /// The file the first `robot` invocation on this recipe line reads (`-i`/`--input`),
 /// which is what opens the pipeline for the rule it belongs to.
 ///
 /// Only a robot command counts — `sed -i` is an in-place edit, not an input — and
 /// only a path: a `--input` naming an http(s) IRI loads over the network, and is
-/// not a file the executor can thread a model from.
-fn first_robot_input(cmd: &str, robot_prefix: &str) -> Option<String> {
+/// not a file the executor can thread a model from. That case is
+/// [`first_robot_iri_input`].
+pub(super) fn first_robot_input(cmd: &str, robot_prefix: &str) -> Option<String> {
     for seg in cmd.split(['|', ';', '&']) {
         let toks = robot::tokenize(seg);
         // `is_robot` indexes `toks[0]`, and splitting on `&` yields empty segments

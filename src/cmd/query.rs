@@ -1142,7 +1142,15 @@ fn parse_rdf_format(name: &str) -> RdfFormat {
 }
 
 /// Render a query table in the requested result format.
+///
+/// A SELECT that binds nothing renders as an EMPTY file — no header row. The
+/// header describes a table, and there is no table; a report of "no results" is
+/// an empty file. An ASK is unaffected, having no header and always an answer,
+/// and so is the JSON table, whose object carries its own column list.
 fn render_table(table: &crate::sparql::QueryTable, fmt: ResultFormat) -> String {
+    if table.rows.is_empty() && matches!(fmt, ResultFormat::Csv | ResultFormat::Tsv) {
+        return String::new();
+    }
     match fmt {
         ResultFormat::Csv => table.render(true),
         ResultFormat::Tsv => table.render(false),
@@ -2201,5 +2209,27 @@ mod tests {
             select: false,
         };
         assert_eq!(render_table(&t, ResultFormat::Txt), "true\n");
+    }
+
+    /// A SELECT that binds nothing renders as an empty file, not a lone header,
+    /// in tsv and csv alike. A bound row still carries its header.
+    #[test]
+    fn an_empty_solution_set_writes_nothing() {
+        let t = QueryTable {
+            columns: vec!["term".into(), "term_label".into()],
+            rows: Vec::new(),
+            tsv_rows: Vec::new(),
+            select: true,
+        };
+        assert_eq!(render_table(&t, ResultFormat::Tsv), "");
+        assert_eq!(render_table(&t, ResultFormat::Csv), "");
+        // A bound row still carries its header.
+        let t2 = QueryTable {
+            columns: vec!["term".into()],
+            rows: vec![vec!["<http://example.org/a>".into()]],
+            tsv_rows: Vec::new(),
+            select: true,
+        };
+        assert!(render_table(&t2, ResultFormat::Tsv).starts_with("?term"));
     }
 }

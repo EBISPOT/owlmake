@@ -3757,6 +3757,15 @@ fn run_artefact(
             Step::Boundary { input } => {
                 crate::io::reset_anon_counter();
                 match input.as_deref() {
+                    // A boundary whose input is an IRI is fetched, exactly as the
+                    // prerequisite loop does. Both loops walk the same step list,
+                    // so a case handled in one and missed in the other is a
+                    // run-time failure on whichever repo has a recipe of that
+                    // shape — `--input-iri` on an artefact's own pipeline.
+                    Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
+                        model = crate::io::load_iri(first, None)?;
+                        threaded_from = None;
+                    }
                     Some(first) => {
                         let p = resolve_repo_file(repo, first, work).with_context(|| {
                             format!("invocation input `{first}` of `{}` does not exist", a.target)
@@ -5689,7 +5698,13 @@ fn apply_op(
                     update: updates.iter().map(|u| rp(u)).collect(),
                     output: None,
                     output_dir: None,
-                    format: format.clone().unwrap_or_else(|| "csv".into()),
+                    // A recipe that names no `--format` leaves the choice to the
+                    // OUTPUT PATH: an empty format is "not given", and resolution
+                    // falls through to the output's extension. A recipe whose
+                    // whole query step is `query --select $*.sparql $@` therefore
+                    // writes TSV to a `.tsv` and CSV to a `.csv`. An extension that
+                    // is not a result-format name — `$@.tmp` — resolves to CSV.
+                    format: format.clone().unwrap_or_default(),
                     use_graphs: None,
                     tdb: Some(*tdb),
                     keep_tdb_mappings: None,
@@ -5964,9 +5979,13 @@ fn drop_imports(model: crate::model::Model) -> crate::model::Model {
 }
 
 /// Remove every axiom present in `other` from `model` (`unmerge`).
+///
+/// Defers to [`crate::cmd::unmerge::subtract`] so a plan step and `om unmerge`
+/// cannot drift apart: this was a second implementation, and it both subtracted
+/// the base's own ontology identity and matched on the bare component.
 fn unmerge_model(model: crate::model::Model, other: &crate::model::Model) -> crate::model::Model {
-    let rm: std::collections::BTreeSet<_> = other.ont.iter().map(|ac| ac.component.clone()).collect();
-    crate::cmd::select::retain(model, |c| !rm.contains(c))
+    let rm: std::collections::HashSet<_> = other.ont.iter().cloned().collect();
+    crate::cmd::unmerge::subtract(model, &rm).0
 }
 
 /// Merge a file's axioms into `model` (skipping the file's own ontology

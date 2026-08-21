@@ -1669,6 +1669,50 @@ fn render_gci_equivalent(a: &CE<RcStr>, b: &CE<RcStr>, g: &Genids) -> String {
     insert_before_close(&render_ce(host, 4, g), &edge_to("owl:equivalentClass", other, g))
 }
 
+/// An ANNOTATED `EquivalentClasses(anon, anon)` general axiom, reified.
+///
+/// The unannotated form renders the pair as one inline block, which has nowhere
+/// to carry an axiom annotation; reifying gives the annotation a home. Reified
+/// exactly as the disjoint and subclass GCIs are: the base triple makes the
+/// target appear twice — as the `owl:equivalentClass` object and as
+/// `owl:annotatedTarget` — so it is a shared node (`rdf:nodeID`) defined once
+/// after the `owl:Axiom`, while the source appears once inline inside
+/// `annotatedSource`.
+fn render_gci_equivalent_annotated(
+    members: &[CE<RcStr>],
+    shared: &std::collections::HashMap<String, std::collections::HashMap<String, u64>>,
+    anns: &[(String, AnnotationValue<RcStr>)],
+    prefixes: &[(String, String)],
+) -> String {
+    let mut ops: Vec<&CE<RcStr>> = members.iter().collect();
+    ops.sort_by(|a, b| crate::io::owlfunc::cmp_ce(a, b));
+    let (src, tgt) = (ops[0], ops[1]);
+    let gid = shared
+        .get("__general__")
+        .and_then(|m| m.get(&crate::io::genid::ce_sig(tgt)))
+        .map(|g| format!("genid{g}"))
+        .unwrap_or_default();
+    let no_g = Genids::new();
+    let src_block = insert_before_close(
+        &render_ce(src, 12, &no_g),
+        &format!("                <owl:equivalentClass rdf:nodeID=\"{gid}\"/>\n"),
+    );
+    let mut s = String::from("    <owl:Axiom>\n");
+    s.push_str("        <owl:annotatedSource>\n");
+    s.push_str(&src_block);
+    s.push_str("        </owl:annotatedSource>\n");
+    s.push_str(&format!("        <owl:annotatedProperty rdf:resource=\"{EQUIV_PROP}\"/>\n"));
+    s.push_str(&format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"));
+    let mut ns: Vec<&(String, AnnotationValue<RcStr>)> = anns.iter().collect();
+    ns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
+    for (p, av) in ns {
+        s.push_str(&render_ann(p, av, prefixes));
+    }
+    s.push_str("    </owl:Axiom>\n");
+    s.push_str(&inject_nodeid(&render_ce(tgt, 4, &no_g), &gid));
+    s
+}
+
 /// A general `DisjointClasses(a, b)` with an anonymous member: rendered on the
 /// member whose expression sorts first, with an `owl:disjointWith` edge to the other.
 fn render_gci_disjoint(a: &CE<RcStr>, b: &CE<RcStr>, g: &Genids) -> String {
@@ -2543,9 +2587,16 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         equiv_class.entry(a.0.as_ref().to_string()).or_default().push((eq.0[1].clone(), anns));
                     } else if let CE::Class(b) = &eq.0[1] {
                         equiv_class.entry(b.0.as_ref().to_string()).or_default().push((eq.0[0].clone(), anns));
-                    } else {
+                    } else if ac.ann.is_empty() {
                         // Both anonymous: a general axiom, with no entity to host it.
                         gci_blocks.push((ac, render_gci_equivalent(&eq.0[0], &eq.0[1], &no_g)));
+                    } else {
+                        // …and an ANNOTATED one reifies, which is the only form
+                        // with somewhere to put the annotation.
+                        gci_blocks.push((
+                            ac,
+                            render_gci_equivalent_annotated(&eq.0, shared_genids, &anns, &prefixes),
+                        ));
                     }
                 }
             }
@@ -3735,17 +3786,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         write_entity(w, elem, iri, &body, &after)?;
         write_root_blocks(w, iri, &root_blocks)?;
     }
-    // owl:Thing is a built-in class: when it carries annotations but no explicit
-    // declaration it renders at the end of the Classes section (its IRI sorts
-    // last) as an `rdf:Description` entity block — not in the catch-all.
+    // owl:Thing is a built-in class, and an UNDECLARED entity carrying only
+    // annotations belongs in the trailing catch-all like any other: a bare
+    // `rdf:Description` among the Annotations, with no per-entity banner. Only a
+    // DECLARED owl:Thing is a class like any other, and then its annotations
+    // ride on the class block instead.
     const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
-    if !classes.iter().any(|c| c == OWL_THING) {
-        if let Some(anns) = ann_assertions.get(OWL_THING) {
-            let (body, after) = annotation_body(OWL_THING, Some(anns), prefixes);
-            let after = order_reifs_by_genid(&after, reif_genids.get(OWL_THING));
-            write_entity(w, "rdf:Description", OWL_THING, &body, &after)?;
-        }
-    }
 
     // Individuals: named ones (with per-entity comments), then the anonymous
     // individuals, rendered as bare `rdf:Description` blocks after them.
@@ -3933,9 +3979,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let mut untyped: Vec<&String> = ann_assertions
         .keys()
         .filter(|k| {
+            // owl:Thing is excluded only when the document DECLARES it, in which
+            // case it is a class like any other and its annotations ride on the
+            // class block. Undeclared, it belongs here.
             (punned.contains(k.as_str()) || !typed.contains(k))
                 && Some(k.as_str()) != ont_iri.as_deref()
-                && k.as_str() != OWL_THING
+                && !(k.as_str() == OWL_THING && classes.iter().any(|c| c == OWL_THING))
         })
         .collect();
     untyped.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
