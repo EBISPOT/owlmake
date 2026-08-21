@@ -19,6 +19,29 @@ use crate::io::Format;
 use crate::sparql::{query_prefixes, QueryOutput, QueryTable, Queryable};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Drop the format prefixes the rebuilt document has no use for, keeping the
+/// names of those it still refers to.
+///
+/// An update rebuilds the document from its triples, so a prefix nothing refers to
+/// does not come back: `subsets/mondo-clingen.owl` loses the `doap` and `protege`
+/// it inherited from `mondo-base.owl`, neither of which names anything. A
+/// namespace something DOES refer to is a different matter — the document named
+/// that namespace, and the name it gave is the one the rebuilt document carries,
+/// so `upheno.owl`'s `dcterms` stays `dcterms` rather than being renamed from its
+/// namespace.
+fn retain_used_format_prefixes(model: &mut crate::model::Model) {
+    if model.rdf_prefixes.is_empty() {
+        return;
+    }
+    let mut used: Vec<String> = Vec::new();
+    for ac in model.ont.iter() {
+        used.extend(crate::sig::signature(&ac.component));
+    }
+    model
+        .rdf_prefixes
+        .retain(|(_, ns)| used.iter().any(|iri| iri.starts_with(ns.as_str())));
+}
+
 /// Whether `--update`'s round trip keeps the document format's prefixes.
 ///
 /// An update rebuilds the document from its triples, so a prefix no triple uses
@@ -1909,7 +1932,7 @@ pub fn step(
         // preceding `filter`, which builds a new ontology and clears the map for
         // its own reasons. `mondo-simple.owl` runs both, in that order.
         if !update_keeps_prefixes() {
-            out.format_prefixes_cleared = true;
+            retain_used_format_prefixes(&mut out);
         }
         // Restore the ontology's identity. A round-trip through triples loses the
         // distinction between the ontology's `owl:versionIRI` and an ordinary
