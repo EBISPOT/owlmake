@@ -181,6 +181,7 @@ fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
     let type_id = out.intern(RDF_TYPE);
     let mut ns: std::collections::HashMap<String, String> = Default::default();
     let mut stack: Vec<Frame> = Vec::new();
+    let mut blank_no = 0usize;
     let expand = |ns: &std::collections::HashMap<String, String>, qname: &str| -> Option<String> {
         let (pre, local) = qname.split_once(':')?;
         ns.get(pre).map(|base| format!("{base}{local}"))
@@ -223,7 +224,18 @@ fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
             // blank node, which names no subject but still fills a slot.
             let subject = match tag_attr(tag, "rdf:about") {
                 Some(iri) => out.intern(&iri),
-                None => NO_SUBJECT,
+                // A blank node: named for where the document introduces it, so the
+                // same document always gives the same one the same name.
+                None => {
+                    let name = match tag_attr(tag, "rdf:nodeID") {
+                        Some(id) => format!("_:{id}"),
+                        None => {
+                            blank_no += 1;
+                            format!("_:n{blank_no}")
+                        }
+                    };
+                    out.intern(&name)
+                }
             };
             // The element's own name types it, unless it is `rdf:Description`.
             if name != "rdf:Description" {
@@ -232,8 +244,9 @@ fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
                     out.push(o, subject, type_id);
                 }
             }
-            // Nested inside a property element, it is that property's object.
-            if subject != NO_SUBJECT && stack.len() >= 2 {
+            // Nested inside a property element, it is that property's object — but
+            // only a NAMED object is indexed here.
+            if !is_blank_name(out.name(subject)) && stack.len() >= 2 {
                 if let (Frame::Prop(p), Frame::Node(s)) =
                     (&stack[stack.len() - 1], &stack[stack.len() - 2])
                 {
@@ -357,8 +370,10 @@ pub struct Queryable {
     object_order: ObjectOrder,
 }
 
-/// The subject id standing for a blank node.
-const NO_SUBJECT: u32 = u32::MAX;
+/// Whether an interned name stands for a blank node rather than an IRI.
+fn is_blank_name(name: &str) -> bool {
+    name.starts_with("_:")
+}
 
 /// The document's triples that have a NAMED object, grouped by that object and
 /// kept in the order the document states them.
@@ -368,8 +383,10 @@ const NO_SUBJECT: u32 = u32::MAX;
 /// follows the order the triples went in. The store answers by value and cannot
 /// recover that order, so it is recorded here at load.
 ///
-/// Nodes are interned. A blank-node subject is `NO_SUBJECT`: its label is minted
-/// fresh by the parser and is not reproducible, but the triple still fills a slot.
+/// Nodes are interned. A blank-node subject keeps its own identity here — two
+/// axioms annotating the same thing state two different triples — but its label is
+/// minted fresh by the parser and is not reproducible, so it fills a slot without
+/// naming a subject.
 #[derive(Default)]
 struct ObjectOrder {
     names: Vec<String>,
@@ -648,17 +665,39 @@ impl Queryable {
     /// hash: it holds its place in the bunch but names no subject.
     pub fn object_subjects(&self, object: &str, predicate: &str) -> Option<Vec<String>> {
         use crate::sparql::jena_order as jo;
-        let bunch = self.object_order.bunch(object)?;
+        let recorded = self.object_order.bunch(object)?;
+        // The graph holds each triple once. A document that states the same triple
+        // twice adds it once, so the bunch is one shorter for it — which is the
+        // difference between a flat array and a hash table at the boundary, and a
+        // different order either side of it.
+        let mut seen: std::collections::HashSet<(u32, u32)> = Default::default();
+        let mut bunch: Vec<(u32, u32)> = Vec::with_capacity(recorded.len());
+        for t in recorded {
+            if seen.insert(*t) {
+                bunch.push(*t);
+            }
+        }
+        if std::env::var("OM_BUNCH_DEBUG").ok().as_deref() == Some(object) {
+            eprintln!(
+                "[bunch] {object}: {} triples ({} stated), in the order recorded",
+                bunch.len(),
+                recorded.len()
+            );
+            for (k, (s, p)) in bunch.iter().enumerate() {
+                eprintln!(
+                    "  {k}\t{}\t{}",
+                    self.object_order.name(*s),
+                    self.object_order.name(*p)
+                );
+            }
+        }
         let oh = jo::node_hash(object);
         let hashes: Vec<Option<i32>> = bunch
             .iter()
             .map(|(s, p)| {
-                (*s != NO_SUBJECT).then(|| {
-                    jo::triple_hash(
-                        jo::node_hash(self.object_order.name(*s)),
-                        jo::node_hash(self.object_order.name(*p)),
-                        oh,
-                    )
+                let sn = self.object_order.name(*s);
+                (!is_blank_name(sn)).then(|| {
+                    jo::triple_hash(jo::node_hash(sn), jo::node_hash(self.object_order.name(*p)), oh)
                 })
             })
             .collect();
