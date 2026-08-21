@@ -2360,3 +2360,75 @@ fn an_ofn_cache_keeps_its_state_in_a_companion() {
         "the companion should name the bytes it describes:\n{companion}"
     );
 }
+
+/// A `SELECT` with no `ORDER BY` still has an order: the one the graph answers the
+/// pattern in. An arbitrary-length path drives it — the rows walk out from the
+/// path's object — and a `FILTER (?p IN (…))` is answered one alternative at a
+/// time, so the rows come out grouped by alternative in the order the list names
+/// them. `NOT IN` enumerates nothing and leaves the order alone.
+#[test]
+fn a_path_and_an_in_list_fix_the_row_order() {
+    let inp = tmp("alp.ofn");
+    let mut o = String::from(
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://x.org/o>\n\
+         Declaration(Class(<http://x.org/ROOT>))\n\
+         AnnotationAssertion(rdfs:label <http://x.org/ROOT> \"root\")\n",
+    );
+    // A chain, so a walk from the root has only one order it can produce.
+    for i in 0..6 {
+        let me = format!("http://x.org/C{i}");
+        let parent = if i == 0 { "http://x.org/ROOT".to_string() } else { format!("http://x.org/C{}", i - 1) };
+        o.push_str(&format!("Declaration(Class(<{me}>))\n"));
+        o.push_str(&format!("SubClassOf(<{me}> <{parent}>)\n"));
+        o.push_str(&format!("AnnotationAssertion(rdfs:label <{me}> \"l{i}\")\n"));
+        o.push_str(&format!(
+            "AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <{me}> \"s{i}\")\n"
+        ));
+    }
+    o.push_str(")\n");
+    std::fs::write(&inp, o).unwrap();
+
+    let q = tmp("alp.sparql");
+    std::fs::write(
+        &q,
+        "prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\
+         prefix oio: <http://www.geneontology.org/formats/oboInOwl#>\n\
+         SELECT ?s ?p ?l WHERE { ?s rdfs:subClassOf* <http://x.org/ROOT> . ?s ?p ?l .\n\
+         FILTER ( ?p IN (rdfs:label, oio:hasExactSynonym)) }\n",
+    )
+    .unwrap();
+    let out = tmp("alp.csv");
+    assert!(bin().args(["query", "-f", "csv", "-i"]).arg(&inp).args(["--query"]).arg(&q).arg(&out)
+        .status().unwrap().success());
+    let csv = std::fs::read_to_string(&out).unwrap();
+    let preds: Vec<&str> = csv.lines().skip(1).map(|l| l.split(',').nth(1).unwrap()).collect();
+    let labels = preds.iter().filter(|p| p.ends_with("#label")).count();
+    // Grouped by alternative, in the order the list names them: every label first.
+    assert_eq!(labels, 7, "one label per class:\n{csv}");
+    assert!(
+        preds[..labels].iter().all(|p| p.ends_with("#label"))
+            && preds[labels..].iter().all(|p| p.ends_with("hasExactSynonym")),
+        "rows group by the IN list's order:\n{csv}"
+    );
+    // The walk starts at the path's object and descends the chain.
+    let subs: Vec<&str> = csv.lines().skip(1).take(labels).map(|l| l.split(',').next().unwrap()).collect();
+    assert_eq!(subs[0], "http://x.org/ROOT", "the walk starts at the object:\n{csv}");
+    assert_eq!(subs[1], "http://x.org/C0", "then its own reachers:\n{csv}");
+
+    // `NOT IN` names no alternatives to answer one after another.
+    let qn = tmp("alp-not.sparql");
+    std::fs::write(
+        &qn,
+        "prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\
+         prefix oio: <http://www.geneontology.org/formats/oboInOwl#>\n\
+         SELECT ?s ?p ?l WHERE { ?s rdfs:subClassOf* <http://x.org/ROOT> . ?s ?p ?l .\n\
+         FILTER ( ?p NOT IN (oio:hasExactSynonym)) }\n",
+    )
+    .unwrap();
+    let outn = tmp("alp-not.csv");
+    assert!(bin().args(["query", "-f", "csv", "-i"]).arg(&inp).args(["--query"]).arg(&qn).arg(&outn)
+        .status().unwrap().success());
+    let csvn = std::fs::read_to_string(&outn).unwrap();
+    assert!(!csvn.contains("hasExactSynonym"), "NOT IN excludes:\n{csvn}");
+}

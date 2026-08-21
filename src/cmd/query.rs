@@ -496,16 +496,34 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
     let patterns = main_patterns(sparql);
     // The pattern with the most bound terms drives the loop, and `?v a <T>` is the
     // shape whose bunch the document order is recorded for.
-    let Some((i, var, obj)) = patterns.iter().enumerate().find_map(|(i, (s, p, o))| {
+    // A pattern that binds a variable against a BOUND object fixes the order the
+    // graph answers in, and so drives the rows. `?v a <T>` does that directly and is
+    // preferred wherever it appears; an arbitrary-length path `?v <p>* <T>` does it
+    // by walking back from the object, and drives the order when there is no type
+    // pattern to prefer.
+    let typed = patterns.iter().enumerate().find_map(|(i, (s, p, o))| {
         let v = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
         (expand(p).as_deref() == Some(RDF_TYPE) && !is_var(o))
             .then(|| (i, v.to_string(), expand(o)))
             .and_then(|(i, v, o)| o.map(|o| (i, v, o)))
-    }) else {
-        if dbg {
-            eprintln!("[scan] no `?v a <T>` pattern to drive");
+    });
+    let path = patterns.iter().enumerate().find_map(|(i, (s, p, o))| {
+        let v = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        let pred = p.strip_suffix('*')?;
+        if is_var(o) {
+            return None;
         }
-        return false;
+        Some((i, v.to_string(), expand(o)?, expand(pred)?))
+    });
+    let (i, var, obj, path_pred) = match (typed, path) {
+        (Some((i, v, o)), _) => (i, v, o, None),
+        (None, Some((i, v, o, pred))) => (i, v, o, Some(pred)),
+        (None, None) => {
+            if dbg {
+                eprintln!("[scan] no `?v a <T>` or `?v <p>* <T>` pattern to drive");
+            }
+            return false;
+        }
     };
     let Some(col) = table.columns.iter().position(|c| *c == var) else {
         if dbg {
@@ -513,19 +531,19 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
         }
         return false;
     };
-    let Some(seq) = q.typed_in_order(&obj) else {
-        if dbg {
-            eprintln!("[scan] no document order for {obj}");
-        }
-        return false;
-    };
+    // A path driver also takes the OPTIONAL groups' patterns: when the main block
+    // holds nothing but the path itself, they are what ranks a subject's rows.
+    let optionals = if path_pred.is_some() { optional_patterns(sparql) } else { Vec::new() };
     let inner: Vec<InnerPattern> = patterns
         .iter()
         .enumerate()
-        .filter(|(j, (s, _, _))| {
-            *j != i && s.strip_prefix('?').or_else(|| s.strip_prefix('$')) == Some(var.as_str())
+        .filter(|(j, _)| *j != i)
+        .map(|(_, t)| t)
+        .chain(optionals.iter())
+        .filter(|(s, _, _)| {
+            s.strip_prefix('?').or_else(|| s.strip_prefix('$')) == Some(var.as_str())
         })
-        .filter_map(|(_, (_, p, o))| {
+        .filter_map(|(_, p, o)| {
             Some(InnerPattern {
                 predicate: expand(p),
                 predicate_col: col_of(p),
@@ -533,24 +551,50 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
             })
         })
         .collect();
-    if dbg {
-        eprintln!("[scan] var={var} obj={obj} typed={} inner={}", seq.len(), inner.len());
-    }
-    if inner.is_empty() {
+    // A type pattern needs a second pattern to rank a subject's rows against each
+    // other; a path already fixes the order of the subjects themselves, so it
+    // orders the rows on its own — which is what an `OPTIONAL` query leaves it to
+    // do, the optional patterns being no part of the main block.
+    if inner.is_empty() && path_pred.is_none() {
         return false;
     }
-    let p = jo::node_hash(RDF_TYPE);
-    let o = jo::node_hash(&obj);
-    let hashes: Vec<Option<i32>> = seq
-        .iter()
-        .map(|s| s.as_ref().map(|s| jo::triple_hash(jo::node_hash(s), p, o)))
-        .collect();
-    let order = jo::bunch_order(&hashes);
-    let mut outer: std::collections::HashMap<&str, usize> = Default::default();
-    for (k, &i) in order.iter().enumerate() {
-        if let Some(s) = &seq[i] {
-            outer.entry(s.as_str()).or_insert(k);
+    // The order the driving pattern binds `var` in: for a type pattern, the bunch
+    // of that type's triples; for a path, the walk back from its object.
+    let outer: std::collections::HashMap<String, usize> = match &path_pred {
+        None => {
+            let Some(seq) = q.typed_in_order(&obj) else {
+                if dbg {
+                    eprintln!("[scan] no document order for {obj}");
+                }
+                return false;
+            };
+            let p = jo::node_hash(RDF_TYPE);
+            let o = jo::node_hash(&obj);
+            let hashes: Vec<Option<i32>> = seq
+                .iter()
+                .map(|s| s.as_ref().map(|s| jo::triple_hash(jo::node_hash(s), p, o)))
+                .collect();
+            let mut m: std::collections::HashMap<String, usize> = Default::default();
+            for (k, &i) in jo::bunch_order(&hashes).iter().enumerate() {
+                if let Some(s) = &seq[i] {
+                    m.entry(s.clone()).or_insert(k);
+                }
+            }
+            m
         }
+        Some(pred) => {
+            let seq = q.path_order(&obj, pred);
+            if seq.len() <= 1 {
+                if dbg {
+                    eprintln!("[scan] path {pred}* from {obj} reaches nothing");
+                }
+                return false;
+            }
+            seq.into_iter().enumerate().map(|(k, s)| (s, k)).collect()
+        }
+    };
+    if dbg {
+        eprintln!("[scan] var={var} obj={obj} outer={} inner={}", outer.len(), inner.len());
     }
     // The inner rank of every row of one subject, worked out once per subject.
     let mut ranks: Vec<usize> = vec![usize::MAX; table.rows.len()];
@@ -613,6 +657,25 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
     true
 }
 
+/// `?v IN (…)` as the variable and the raw parenthesised list.
+///
+/// `?v NOT IN (…)` is not this: it excludes rather than enumerates, so it names no
+/// alternatives to answer one after another and is left to the filter.
+fn in_list(body: &str) -> Option<(&str, &str)> {
+    let open = body.find('(')?;
+    let (head, rest) = body.split_at(open);
+    let mut head = head.split_whitespace();
+    let v = head.next()?;
+    if !(v.starts_with('?') || v.starts_with('$')) {
+        return None;
+    }
+    if !head.next()?.eq_ignore_ascii_case("IN") || head.next().is_some() {
+        return None;
+    }
+    let list = rest.trim_end().strip_prefix('(')?.strip_suffix(')')?;
+    Some((v, list))
+}
+
 /// A `FILTER (?v = <A> || ?v = <B> || …)` over one variable, as the column it
 /// binds and the terms in the order the disjunction lists them.
 ///
@@ -655,12 +718,26 @@ fn filter_disjunction(sparql: &str, columns: &[String]) -> Option<(usize, Vec<St
             continue;
         }
         let body = &sparql[open + 1..close];
-        if !body.contains("||") || !body.contains('=') {
-            continue;
-        }
         let mut var: Option<&str> = None;
         let mut terms = Vec::new();
         let mut ok = true;
+        // `?v IN (<A>, <B>, …)` and `?v = <A> || ?v = <B> || …` state the same
+        // disjunction and are answered the same way — one alternative after
+        // another — so both spellings fold into the pattern here.
+        if let Some((v, list)) = in_list(body) {
+            var = Some(v);
+            for t in list.split(',') {
+                match expand(t.trim()) {
+                    Some(iri) => terms.push(iri),
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+        } else if !body.contains("||") || !body.contains('=') {
+            continue;
+        } else {
         for alt in body.split("||") {
             let Some((l, r)) = alt.split_once('=') else {
                 ok = false;
@@ -687,6 +764,7 @@ fn filter_disjunction(sparql: &str, columns: &[String]) -> Option<(usize, Vec<St
                 }
             }
         }
+        }
         if !ok || terms.len() < 2 {
             continue;
         }
@@ -705,6 +783,53 @@ fn filter_disjunction(sparql: &str, columns: &[String]) -> Option<(usize, Vec<St
 /// pattern block that opens one is not one this reproduces.
 fn main_patterns(sparql: &str) -> Vec<(String, String, String)> {
     let Some(block) = where_block(sparql) else { return Vec::new() };
+    patterns_in(&block)
+}
+
+/// The triple patterns an `OPTIONAL { … }` group states, in the order written.
+///
+/// They are no part of the main block, but they still bind the driving variable's
+/// rows against each other, so they rank a subject's rows the same way a second
+/// main pattern would. A group naming a blank node is skipped: it binds nothing
+/// this can rank by.
+fn optional_patterns(sparql: &str) -> Vec<(String, String, String)> {
+    let upper = sparql.to_ascii_uppercase();
+    let mut out = Vec::new();
+    let mut from = 0usize;
+    while let Some(rel) = upper[from..].find("OPTIONAL") {
+        let at = from + rel;
+        from = at + 8;
+        let Some(open) = sparql[at..].find('{').map(|o| o + at) else { continue };
+        let mut depth = 0usize;
+        let mut close = open;
+        for (k, c) in sparql[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + k;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if close <= open {
+            continue;
+        }
+        let body = &sparql[open + 1..close];
+        if body.contains('[') {
+            continue;
+        }
+        out.extend(patterns_in(&format!("{body} .")));
+        from = close;
+    }
+    out
+}
+
+/// The triple patterns of one group, in the order written.
+fn patterns_in(block: &str) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     let mut terms: Vec<String> = Vec::new();
     let mut subject = String::new();
@@ -1067,6 +1192,49 @@ fn finish_table(
                 // A plain SELECT has no order of its own: the rows come out in the
                 // order the graph answers the pattern in.
                 apply_jena_scan_order(table, q, sparql);
+            }
+        }
+    }
+    renumber_blank_nodes(table);
+}
+
+/// Name every blank node the result mentions for the position it first appears at.
+///
+/// A blank node has no name of its own — the one the store holds is an artefact of
+/// how the document was read. What reaches the file is the order the rows mention
+/// it in, so a result that returns a blank node says the same thing every time it
+/// is run, whatever the store called it.
+fn renumber_blank_nodes(table: &mut QueryTable) {
+    if !table.select {
+        return;
+    }
+    let mut names: std::collections::HashMap<String, String> = Default::default();
+    let mut next = 0usize;
+    for r in 0..table.rows.len() {
+        for c in 0..table.rows[r].len() {
+            let Some(label) = table.rows[r][c].strip_prefix("_:").map(str::to_string) else {
+                continue;
+            };
+            if label.is_empty() {
+                continue;
+            }
+            let name = names
+                .entry(label)
+                .or_insert_with(|| {
+                    let n = format!("_:b{next}");
+                    next += 1;
+                    n
+                })
+                .clone();
+            table.rows[r][c] = name;
+        }
+        if let Some(tsv) = table.tsv_rows.get_mut(r) {
+            for cell in tsv.iter_mut() {
+                if let Some(label) = cell.strip_prefix("_:") {
+                    if let Some(n) = names.get(label) {
+                        *cell = n.clone();
+                    }
+                }
             }
         }
     }

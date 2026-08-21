@@ -125,6 +125,145 @@ fn literal_value_hash(value: &str, datatype: &str, has_lang: bool) -> Option<i32
 /// states it too, and is recorded as `None` because its label is not
 /// reproducible. Node elements sit at even nesting depth and property elements at
 /// odd, which the writer's four-space indentation makes readable directly.
+/// The value of `key="…"` on a start tag, with XML entities resolved.
+fn tag_attr(tag: &str, key: &str) -> Option<String> {
+    let mut from = 0usize;
+    while let Some(rel) = tag[from..].find(key) {
+        let at = from + rel;
+        from = at + key.len();
+        // The name must stand alone: `rdf:about` must not match `rdf:aboutEach`,
+        // and it must start an attribute rather than end another one.
+        let before_ok = at == 0 || tag[..at].ends_with([' ', '\t', '\n', '\r']);
+        let rest = &tag[at + key.len()..];
+        let rest = rest.trim_start();
+        if !before_ok || !rest.starts_with('=') {
+            continue;
+        }
+        let rest = rest[1..].trim_start();
+        let quote = rest.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            continue;
+        }
+        let val = &rest[1..];
+        let end = val.find(quote)?;
+        return Some(unescape_xml(&val[..end]));
+    }
+    None
+}
+
+/// The five XML entities, which is all an IRI or a prefix declaration can carry.
+fn unescape_xml(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// Every triple with a named object, in document order, grouped by object.
+///
+/// Striping again: node elements sit at odd depth and property elements at even,
+/// so a property element's subject is the node element one level above it. That
+/// enclosing node is tracked per level — a restriction nested inside a class
+/// introduces its own blank subject, and the class's own properties resume under
+/// the class once it closes.
+fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
+    const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    enum Frame {
+        Node(u32),
+        Prop(u32),
+    }
+    let text = String::from_utf8_lossy(rdf);
+    let mut out = ObjectOrder::default();
+    let type_id = out.intern(RDF_TYPE);
+    let mut ns: std::collections::HashMap<String, String> = Default::default();
+    let mut stack: Vec<Frame> = Vec::new();
+    let expand = |ns: &std::collections::HashMap<String, String>, qname: &str| -> Option<String> {
+        let (pre, local) = qname.split_once(':')?;
+        ns.get(pre).map(|base| format!("{base}{local}"))
+    };
+    let mut i = 0usize;
+    while let Some(rel) = text[i..].find('<') {
+        let open = i + rel;
+        let Some(rel_end) = text[open..].find('>') else { break };
+        let close = open + rel_end;
+        let tag = &text[open + 1..close];
+        i = close + 1;
+        if tag.starts_with('?') || tag.starts_with('!') {
+            continue;
+        }
+        if tag.starts_with('/') {
+            stack.pop();
+            continue;
+        }
+        let empty = tag.ends_with('/');
+        let name = tag.split([' ', '\t', '\n', '\r', '/']).next().unwrap_or("");
+        let element_depth = stack.len();
+        if element_depth == 0 {
+            for part in tag.split_whitespace() {
+                if let Some(rest) = part.strip_prefix("xmlns:") {
+                    if let Some((pre, val)) = rest.split_once("=\"") {
+                        if let Some(val) = val.split('"').next() {
+                            ns.insert(pre.to_string(), unescape_xml(val));
+                        }
+                    }
+                }
+            }
+            if !empty {
+                // A placeholder, so the document's own children sit at odd depth.
+                stack.push(Frame::Prop(type_id));
+            }
+            continue;
+        }
+        if element_depth % 2 == 1 {
+            // A node element. Its `rdf:about` is its subject; without one it is a
+            // blank node, which names no subject but still fills a slot.
+            let subject = match tag_attr(tag, "rdf:about") {
+                Some(iri) => out.intern(&iri),
+                None => NO_SUBJECT,
+            };
+            // The element's own name types it, unless it is `rdf:Description`.
+            if name != "rdf:Description" {
+                if let Some(t) = expand(&ns, name) {
+                    let o = out.intern(&t);
+                    out.push(o, subject, type_id);
+                }
+            }
+            // Nested inside a property element, it is that property's object.
+            if subject != NO_SUBJECT && stack.len() >= 2 {
+                if let (Frame::Prop(p), Frame::Node(s)) =
+                    (&stack[stack.len() - 1], &stack[stack.len() - 2])
+                {
+                    out.push(subject, *s, *p);
+                }
+            }
+            if !empty {
+                stack.push(Frame::Node(subject));
+            }
+        } else {
+            // A property element. `rdf:resource` is the whole triple; anything else
+            // is a literal or a nested node, and a literal has no named object.
+            let pred = match expand(&ns, name) {
+                Some(p) => out.intern(&p),
+                None => out.intern(name),
+            };
+            if let Some(r) = tag_attr(tag, "rdf:resource") {
+                if let Some(Frame::Node(s)) = stack.last() {
+                    let o = out.intern(&r);
+                    out.push(o, *s, pred);
+                }
+            }
+            if !empty {
+                stack.push(Frame::Prop(pred));
+            }
+        }
+    }
+    out
+}
+
 fn scan_type_order(rdf: &[u8]) -> std::collections::HashMap<String, Vec<Option<String>>> {
     let text = String::from_utf8_lossy(rdf);
     let mut out: std::collections::HashMap<String, Vec<Option<String>>> =
@@ -213,6 +352,55 @@ pub struct Queryable {
     /// in. Nothing else recovers that order: the store answers by value, not by
     /// position.
     type_order: std::collections::HashMap<String, Vec<Option<String>>>,
+    /// Every triple with a NAMED object, grouped by that object, in the order the
+    /// document states them — what a pattern with a bound object is answered from.
+    object_order: ObjectOrder,
+}
+
+/// The subject id standing for a blank node.
+const NO_SUBJECT: u32 = u32::MAX;
+
+/// The document's triples that have a NAMED object, grouped by that object and
+/// kept in the order the document states them.
+///
+/// The graph answers `(?, p, o)` from the object index: every triple with `o` as
+/// its object sits in one bunch, and the bunch is read back in slot order, which
+/// follows the order the triples went in. The store answers by value and cannot
+/// recover that order, so it is recorded here at load.
+///
+/// Nodes are interned. A blank-node subject is `NO_SUBJECT`: its label is minted
+/// fresh by the parser and is not reproducible, but the triple still fills a slot.
+#[derive(Default)]
+struct ObjectOrder {
+    names: Vec<String>,
+    ids: std::collections::HashMap<String, u32>,
+    /// object id -> (subject id, predicate id), in document order
+    bunches: std::collections::HashMap<u32, Vec<(u32, u32)>>,
+}
+
+impl ObjectOrder {
+    fn intern(&mut self, s: &str) -> u32 {
+        if let Some(id) = self.ids.get(s) {
+            return *id;
+        }
+        let id = self.names.len() as u32;
+        self.names.push(s.to_string());
+        self.ids.insert(s.to_string(), id);
+        id
+    }
+
+    fn name(&self, id: u32) -> &str {
+        &self.names[id as usize]
+    }
+
+    fn push(&mut self, object: u32, subject: u32, predicate: u32) {
+        self.bunches.entry(object).or_default().push((subject, predicate));
+    }
+
+    fn bunch(&self, object: &str) -> Option<&[(u32, u32)]> {
+        let id = self.ids.get(object)?;
+        self.bunches.get(id).map(|v| v.as_slice())
+    }
 }
 
 impl Queryable {
@@ -270,7 +458,11 @@ impl Queryable {
                     .map_err(|e| anyhow!("loading ontology triples: {e}"))?;
             }
         }
-        let q = Queryable { store, type_order: scan_type_order(&rdf) };
+        let q = Queryable {
+            store,
+            type_order: scan_type_order(&rdf),
+            object_order: scan_object_order(&rdf),
+        };
         q.drop_synthesised_types(model)?;
         Ok(q)
     }
@@ -449,6 +641,58 @@ impl Queryable {
     /// See [`Queryable::type_order`].
     pub fn typed_in_order(&self, type_iri: &str) -> Option<&[Option<String>]> {
         self.type_order.get(type_iri).map(|v| v.as_slice())
+    }
+
+    /// The subjects of `(?, predicate, object)`, in the order the graph answers
+    /// that pattern. A triple whose subject is a blank node has no reproducible
+    /// hash: it holds its place in the bunch but names no subject.
+    pub fn object_subjects(&self, object: &str, predicate: &str) -> Option<Vec<String>> {
+        use crate::sparql::jena_order as jo;
+        let bunch = self.object_order.bunch(object)?;
+        let oh = jo::node_hash(object);
+        let hashes: Vec<Option<i32>> = bunch
+            .iter()
+            .map(|(s, p)| {
+                (*s != NO_SUBJECT).then(|| {
+                    jo::triple_hash(
+                        jo::node_hash(self.object_order.name(*s)),
+                        jo::node_hash(self.object_order.name(*p)),
+                        oh,
+                    )
+                })
+            })
+            .collect();
+        Some(
+            jo::bunch_order(&hashes)
+                .into_iter()
+                .filter(|&i| self.object_order.name(bunch[i].1) == predicate)
+                .map(|i| self.object_order.name(bunch[i].0).to_string())
+                .collect(),
+        )
+    }
+
+    /// The nodes an arbitrary-length path `?v <pred>* <root>` binds, in the order
+    /// it binds them.
+    ///
+    /// The path is walked backwards from `root`: a node is emitted when it is
+    /// first reached, and each of its own reachers is then walked in turn, depth
+    /// first — so a node always precedes everything that only it reaches.
+    pub fn path_order(&self, root: &str, predicate: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        let mut stack = vec![root.to_string()];
+        while let Some(node) = stack.pop() {
+            if !seen.insert(node.clone()) {
+                continue;
+            }
+            out.push(node.clone());
+            if let Some(reachers) = self.object_subjects(&node, predicate) {
+                for r in reachers.into_iter().rev() {
+                    stack.push(r);
+                }
+            }
+        }
+        out
     }
 
     pub fn subject_bunch(&self, subject: &str) -> Option<Vec<(String, String, Option<i32>)>> {
