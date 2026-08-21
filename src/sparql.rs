@@ -2120,7 +2120,7 @@ SELECT ?entity ?property ?value WHERE {
                   <http://x/2> <http://x/p> \"c\" .\n" as &[u8],
             )
             .unwrap();
-        let q = Queryable { store, type_order: Default::default() };
+        let q = Queryable { store, type_order: Default::default(), object_order: Default::default() };
         let sparql = "SELECT ?s (COUNT(?o) AS ?n) WHERE { ?s <http://x/p> ?o } \
                       GROUP BY ?s HAVING (?n > 1)";
         assert_eq!(q.count(sparql).unwrap(), 1);
