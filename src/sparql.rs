@@ -475,6 +475,9 @@ impl Queryable {
                     .map_err(|e| anyhow!("loading ontology triples: {e}"))?;
             }
         }
+        if let Some(path) = std::env::var_os("OM_SCAN_DUMP") {
+            let _ = std::fs::write(path, &rdf);
+        }
         let q = Queryable {
             store,
             type_order: scan_type_order(&rdf),
