@@ -2327,12 +2327,19 @@ struct SubjData {
     shorthand: Option<String>,
     is_metadata_tag: bool,
     is_class_level: bool,
-    // (predicate-obo, value, is_iri, datatype-curie, anns)
-    // (predicate-obo, value, is_iri, datatype-curie, anns, predicate IRI — kept
-    // so two clauses that tie on predicate AND value can be ordered by their
-    // axioms' bucket)
-    property_values:
-        Vec<(String, String, bool, Option<String>, BTreeSet<Annotation<RcStr>>, String)>,
+    // (predicate-obo, printed value, is_iri, datatype-curie, anns, predicate IRI,
+    // value IRI). Both IRIs are kept because the axiom hash that orders clauses
+    // tying on predicate AND value is over FULL IRIs, not the CURIEs the clause
+    // prints — two values that share a CURIE prefix hash nothing alike.
+    property_values: Vec<(
+        String,
+        String,
+        bool,
+        Option<String>,
+        BTreeSet<Annotation<RcStr>>,
+        String,
+        String,
+    )>,
     // (parent, anns, extra `{gci_*}` qualifiers from a General Class Inclusion,
     // source SubClassOf axiom's hash, which breaks ties between equal clauses)
     is_a: Vec<(String, BTreeSet<Annotation<RcStr>>, Vec<(String, String)>, i32)>,
@@ -2342,7 +2349,7 @@ struct SubjData {
     // (`relationship:` in a [Term] vs `property_value:` in a [Typedef]) depends on
     // the subject's stanza type, which is only known at write time. (predicate-obo,
     // value, anns)
-    rel_or_pv: Vec<(String, String, BTreeSet<Annotation<RcStr>>, String)>,
+    rel_or_pv: Vec<(String, String, BTreeSet<Annotation<RcStr>>, String, String)>,
     // each line's tokens, plus any clause qualifiers (a cardinality bound)
     intersection_of: Vec<(Vec<String>, Vec<(String, String)>, BTreeSet<Annotation<RcStr>>)>,
     union_of: Vec<String>,
@@ -4088,20 +4095,20 @@ fn record_annotation(
                 // clause here is harmless there and correct everywhere else.
                 IAO_OBSOLESCENCE_REASON => {
                     e.obsolescence_reason = Some(val.clone());
-                    let pv_val = match &ann.av {
-                        AnnotationValue::IRI(i) => ctx.curie(i.as_ref()),
-                        _ => val,
+                    let (pv_val, val_iri) = match &ann.av {
+                        AnnotationValue::IRI(i) => (ctx.curie(i.as_ref()), i.as_ref().to_string()),
+                        _ => (val, String::new()),
                     };
-                    e.property_values.push((ctx.id(prop), pv_val, is_iri, dt, axanns.clone(), prop.to_string()));
+                    e.property_values.push((ctx.id(prop), pv_val, is_iri, dt, axanns.clone(), prop.to_string(), val_iri));
                 }
                 // The OBO macro tags are Typedef-only; on anything else they stay
                 // ordinary property_values.
                 IAO_EXPAND_EXPRESSION_TO => e.expand_expression_to.push((val, axanns.clone())),
                 IAO_EXPAND_ASSERTION_TO => e.expand_assertion_to.push((val, axanns.clone())),
                 _ if is_iri && ctx.metadata_tags.contains(prop) => {
-                    let val = match &ann.av {
-                        AnnotationValue::IRI(i) => ctx.curie(i.as_ref()),
-                        _ => val,
+                    let (val, val_iri) = match &ann.av {
+                        AnnotationValue::IRI(i) => (ctx.curie(i.as_ref()), i.as_ref().to_string()),
+                        _ => (val, String::new()),
                     };
                     // An annotation assertion with an IRI value on a [Term] is a
                     // `relationship:` iff the property is a metadata tag (it
@@ -4111,17 +4118,17 @@ fn record_annotation(
                     // write time, so defer the routing. Note: a shorthand alone does
                     // NOT qualify — `rdfs:seeAlso` has a `seeAlso` shorthand but no
                     // `is_metadata_tag`, so it stays a `property_value:`.
-                    e.rel_or_pv.push((ctx.id(prop), val, axanns.clone(), prop.to_string()));
+                    e.rel_or_pv.push((ctx.id(prop), val, axanns.clone(), prop.to_string(), val_iri));
                 }
                 _ => {
                     // Everything else is an OBO `property_value:`. An IRI value is a
                     // plain CURIE, never a shorthand (`seeAlso UBPROP:0000113`, not
                     // `seeAlso dental_formula`).
-                    let val = match &ann.av {
-                        AnnotationValue::IRI(i) => ctx.curie(i.as_ref()),
-                        _ => val,
+                    let (val, val_iri) = match &ann.av {
+                        AnnotationValue::IRI(i) => (ctx.curie(i.as_ref()), i.as_ref().to_string()),
+                        _ => (val, String::new()),
                     };
-                    e.property_values.push((ctx.id(prop), val, is_iri, dt, axanns.clone(), prop.to_string()));
+                    e.property_values.push((ctx.id(prop), val, is_iri, dt, axanns.clone(), prop.to_string(), val_iri));
                 }
             },
         },
@@ -5502,7 +5509,8 @@ fn write_stanza<W: Write>(
                     is_iri: bool,
                     dt: &Option<String>,
                     anns: &BTreeSet<Annotation<RcStr>>,
-                    prop_iri: &str| {
+                    prop_iri: &str,
+                    val_iri: &str| {
         let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
         let quals = quals_with_xrefs(&dbxrefs, &quals);
         let line = if is_iri {
@@ -5523,11 +5531,14 @@ fn write_stanza<W: Write>(
         // `xsd:decimal` — and hashing them as if they were plain puts three clauses
         // that differ only in a qualifier in the wrong order.
         let dt_iri = dt.as_deref().map(expand_datatype);
+        // An IRI value hashes as its FULL IRI; `val` is only the CURIE the clause
+        // prints, and hashing that puts every IRI-valued clause in the wrong bucket.
+        let hash_val = if is_iri { val_iri } else { val.as_str() };
         let bucket = owlapi_aa_bucket(
             owlapi_aa_axiom_hash_full(
                 iri,
                 prop_iri,
-                val,
+                hash_val,
                 dt_iri.as_deref(),
                 None,
                 is_iri,
@@ -5538,7 +5549,7 @@ fn write_stanza<W: Write>(
         if std::env::var_os("OM_PV_DEBUG").is_some() {
             eprintln!(
                 "[pv]\t{iri}\tcap={aa_cap}\tbucket={bucket}\thash={}\tcoll={coll}\tdt={:?}\t{line}",
-                owlapi_aa_axiom_hash_full(iri, prop_iri, val, dt_iri.as_deref(), None, is_iri, coll),
+                owlapi_aa_axiom_hash_full(iri, prop_iri, hash_val, dt_iri.as_deref(), None, is_iri, coll),
                 dt_iri
             );
         }
@@ -5557,8 +5568,8 @@ fn write_stanza<W: Write>(
     let mut property_values: Vec<(String, String)> = sd
         .property_values
         .iter()
-        .map(|(pred, val, is_iri, dt, anns, prop_iri)| {
-            pv_entry(pred, val, *is_iri, dt, anns, prop_iri)
+        .map(|(pred, val, is_iri, dt, anns, prop_iri, val_iri)| {
+            pv_entry(pred, val, *is_iri, dt, anns, prop_iri, val_iri)
         })
         .collect();
 
@@ -5626,7 +5637,7 @@ fn write_stanza<W: Write>(
             sd.relationships.clone();
         // These come from annotation assertions, not `SubClassOf`, so they carry no
         // subclass-axiom bucket; 0 is a stable placeholder (they do not tie on value).
-        for (pred, val, anns, _) in &sd.rel_or_pv {
+        for (pred, val, anns, _, _) in &sd.rel_or_pv {
             all_rels.push((pred.clone(), val.clone(), anns.clone(), Vec::new(), 0));
         }
         // As with `is_a`, there is one `relationship:` clause per axiom — an
@@ -5657,8 +5668,8 @@ fn write_stanza<W: Write>(
     } else {
         // In a [Typedef], the deferred shorthand-IRI annotations are `property_value:`s
         // — the same clause as any other, so they take the same key.
-        for (pred, val, anns, prop_iri) in &sd.rel_or_pv {
-            property_values.push(pv_entry(pred, val, true, &None, anns, prop_iri));
+        for (pred, val, anns, prop_iri, val_iri) in &sd.rel_or_pv {
+            property_values.push(pv_entry(pred, val, true, &None, anns, prop_iri, val_iri));
         }
         write_sorted(writer, "property_value", property_values)?;
         write_sorted(writer, "domain", sd.domain.iter().map(|(d, anns)| {
