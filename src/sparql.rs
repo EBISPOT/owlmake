@@ -2159,7 +2159,7 @@ SELECT ?entity ?property ?value WHERE {
                   <http://x/2> <http://x/p> \"c\" .\n" as &[u8],
             )
             .unwrap();
-        let q = Queryable { store, type_order: Default::default() };
+        let q = Queryable { store, type_order: Default::default(), object_order: Default::default() };
         let sparql = "SELECT ?s (COUNT(?o) AS ?n) WHERE { ?s <http://x/p> ?o } \
                       GROUP BY ?s HAVING (?n > 1)";
         assert_eq!(q.count(sparql).unwrap(), 1);
@@ -2360,5 +2360,55 @@ mod regex_class_tests {
     fn untouched_when_no_shorthand() {
         let q = r#"SELECT ?s WHERE { FILTER REGEX(?v, "^MONDO:[0-9]+$") }"#;
         assert_eq!(javaify_regex_classes(q), q);
+    }
+}
+
+#[cfg(test)]
+mod object_order_tests {
+    use super::*;
+
+    /// The graph holds each triple once, so a document that states one twice
+    /// contributes one. It matters at the ten-triple boundary: a bunch of nine is a
+    /// flat array read last-added-first, one of ten is a hash table read slot by
+    /// slot, and the two orders have nothing to do with each other.
+    #[test]
+    fn a_triple_stated_twice_fills_one_slot() {
+        let rdf = br#"<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:ex="http://x.org/">
+  <owl:Class rdf:about="http://x.org/A">
+    <rdfs:subClassOf rdf:resource="http://x.org/T"/>
+    <ex:rel rdf:resource="http://x.org/T"/>
+    <ex:rel rdf:resource="http://x.org/T"/>
+  </owl:Class>
+  <owl:Class rdf:about="http://x.org/B">
+    <rdfs:subClassOf rdf:resource="http://x.org/T"/>
+  </owl:Class>
+  <owl:Axiom>
+    <owl:annotatedSource rdf:resource="http://x.org/T"/>
+  </owl:Axiom>
+  <owl:Axiom>
+    <owl:annotatedSource rdf:resource="http://x.org/T"/>
+  </owl:Axiom>
+</rdf:RDF>
+"#;
+        let order = scan_object_order(rdf);
+        let bunch = order.bunch("http://x.org/T").expect("T is an object");
+        // Six triples are STATED against T; `ex:rel` twice is one triple.
+        assert_eq!(bunch.len(), 6, "the scan records what the document states");
+        let mut seen = std::collections::HashSet::new();
+        let distinct = bunch.iter().filter(|t| seen.insert(**t)).count();
+        assert_eq!(distinct, 5, "one of the six is a repeat of another");
+        // The two axioms are DIFFERENT blank nodes: collapsing them would lose a
+        // triple the graph really holds.
+        let blanks: Vec<&str> = bunch
+            .iter()
+            .map(|(s, _)| order.name(*s))
+            .filter(|n| is_blank_name(n))
+            .collect();
+        assert_eq!(blanks.len(), 2, "two axioms, two blank subjects");
+        assert_ne!(blanks[0], blanks[1], "each blank node keeps its own identity");
     }
 }
