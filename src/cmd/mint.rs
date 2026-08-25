@@ -171,68 +171,6 @@ fn source_import_order(input: Option<&std::path::Path>) -> Vec<String> {
     order
 }
 
-/// Collect `entity IRI → rdfs:label` across the input's whole import closure, for
-/// the functional-syntax banner comments. Best-effort: a load failure (offline,
-/// missing catalog, no input when piped) yields an empty map and banners fall
-/// back to the CURIE, so this never fails the command.
-fn closure_labels(input: Option<&std::path::Path>, common: &crate::cmd::CommonArgs) -> std::collections::HashMap<String, String> {
-    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component, Literal};
-
-    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-    let mut labels = std::collections::HashMap::new();
-    // `take_or_load` merges the import closure (via the catalog), which is exactly
-    // the label set the banners need; only the labels are read, then it is
-    // discarded.
-    let merged = match crate::cmd::take_or_load(None, input, common) {
-        Ok(m) => m,
-        Err(_) => return labels,
-    };
-    for ac in merged.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                if let (AnnotationSubject::IRI(subj), AnnotationValue::Literal(lit)) =
-                    (&aa.subject, &aa.ann.av)
-                {
-                    let text = match lit {
-                        Literal::Simple { literal }
-                        | Literal::Language { literal, .. }
-                        | Literal::Datatype { literal, .. } => literal.clone(),
-                    };
-                    labels.entry(subj.as_ref().to_string()).or_insert(text);
-                }
-            }
-        }
-    }
-    labels
-/// The signature of the import closure ALONE — the entities an imported
-/// ontology declares on the root's behalf, keyed as [`crate::build::closure_declared_entities`]
-/// keys them. Resolved from a scratch document carrying only the root's
-/// `Import(...)`s, so the root's own signature never leaks in: an entity the edit
-/// file references but nothing imports must still get its stub. Best-effort — an
-/// unresolvable closure yields an empty set, and every undeclared entity is then
-/// stubbed.
-fn closure_declared(
-    root: &Model,
-    input: Option<&std::path::Path>,
-    common: &crate::cmd::CommonArgs,
-) -> std::collections::HashSet<String> {
-    use horned_owl::model::{Component, MutableOntology};
-
-    let mut imports_only = Model::new();
-    for ac in root.ont.iter() {
-        if matches!(ac.component, Component::Import(_)) {
-            imports_only.ont.insert(ac.clone());
-        }
-    }
-    if !imports_only.ont.iter().any(|ac| matches!(ac.component, Component::Import(_))) {
-        return std::collections::HashSet::new();
-    }
-    match common.apply_catalog(&mut imports_only, input) {
-        Ok(()) => crate::build::closure_declared_entities(&imports_only),
-        Err(_) => std::collections::HashSet::new(),
-    }
-}
-
 /// Resolve `(low, high)` inclusive for the requested named range.
 fn range_bounds(args: &Args) -> Result<(i64, i64)> {
     let path = match &args.id_ranges {
