@@ -47,6 +47,8 @@ struct OntologyUpdate {
     side: String,
     label: bool,
     existence: bool,
+    /// Record the ontology as that side's source (`<side>_source`).
+    source: bool,
 }
 
 fn parse_update_spec(spec: &str) -> OntologyUpdate {
@@ -60,12 +62,14 @@ fn parse_update_spec(spec: &str) -> OntologyUpdate {
         side: "subject".into(),
         label: false,
         existence: false,
+        source: false,
     };
     for opt in opts.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         match opt {
             "subject" | "object" => u.side = opt.to_string(),
             "label" => u.label = true,
             "existence" => u.existence = true,
+            "source" => u.source = true,
             _ => {}
         }
     }
@@ -127,6 +131,20 @@ fn apply_ontology_update(set: &mut MappingSet, u: &OntologyUpdate) -> Result<()>
         kept.push(m);
     }
     set.mappings = kept;
+    // `source` names the ontology the side was refreshed from, as set-level
+    // metadata: every record on that side comes from the one ontology, so it is
+    // the ontology's own IRI and not a per-row value.
+    if u.source {
+        if let Some(iri) = model.ont.iter().find_map(|ac| match &ac.component {
+            horned_owl::model::Component::OntologyID(id) => {
+                id.iri.as_ref().map(|i| i.as_ref().to_string())
+            }
+            _ => None,
+        }) {
+            set.metadata
+                .insert(format!("{}_source", u.side), serde_yaml::Value::String(iri));
+        }
+    }
     set.recompute_columns();
     Ok(())
 }
@@ -276,18 +294,6 @@ fn run(args: &[String]) -> Result<i32> {
     // Apply the rule pipeline.
     transform::apply(&mut set, &o.rules, o.include_all);
 
-    // `mapping_cardinality` is DERIVED from which mappings a set contains and
-    // which way round they face, so a value carried in from an input describes
-    // some earlier set rather than this one. This command never derives it, and
-    // stale is worse than absent, so it is cleared whatever the pipeline did —
-    // with no rules at all as much as after an `invert()`. It goes from the
-    // RECORDS: writing condenses first, and condensing rebuilds the column list
-    // from what the records still hold, so clearing the column list alone would
-    // do nothing.
-    for m in &mut set.mappings {
-        m.remove("mapping_cardinality");
-    }
-    set.recompute_columns();
 
     // …then the ontology updates. AFTER the rules, because UBERON's
     // `object==UBERON:* -> invert()` has to have moved UBERON onto the subject
@@ -299,6 +305,17 @@ fn run(args: &[String]) -> Result<i32> {
     // Keep only prefixes still used by surviving mappings, so the output curie
     // map declares exactly what the result references and no more.
     set.prune_curie_map();
+    set.recompute_columns();
+    // `sssom-cli` writes no `mapping_cardinality`, whatever the input carried and
+    // whatever this run did to the set: feeding it a table straight from
+    // `sssom:xref-extract --drop-duplicates` — which DOES write the column — gives
+    // the same records back with the column gone, under no rules and no updates.
+    // So it is unconditional here, and it is the RECORDS that are cleared rather
+    // than the column list: the write condenses first, and condensation rebuilds
+    // the columns from the records that still hold a value.
+    for m in &mut set.mappings {
+        m.remove("mapping_cardinality");
+    }
     set.recompute_columns();
 
     // The SSSOM-Java header style — a bare `#`, schema slot order — because this

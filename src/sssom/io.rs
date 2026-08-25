@@ -737,9 +737,9 @@ pub fn parse_obographs_json(text: &str, external_meta: Option<&str>) -> Result<M
     let mut push = |ms: &mut MappingSet, subject: &str, predicate: &str, object: &str| {
         let mut row: Mapping = BTreeMap::new();
         row.insert("mapping_justification".into(), MAPPING_JUSTIFICATION_UNSPECIFIED.to_string());
-        let s = converter.compress(subject);
-        let p = converter.compress(predicate);
-        let o = converter.compress(object);
+        let s = converter.safe_compress(subject);
+        let p = converter.safe_compress(predicate);
+        let o = converter.safe_compress(object);
         if let Some(s) = &s {
             row.insert("subject_id".into(), s.clone());
         }

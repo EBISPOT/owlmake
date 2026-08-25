@@ -551,6 +551,13 @@ pub struct BranchSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum StepSpec {
+    /// The start of a new tool invocation: the model is re-established from this
+    /// invocation's own `input` (or from nothing when it names none), never
+    /// carried over from the previous command line.
+    Boundary {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
+    },
     /// Merge `--input` files (and their import closures) into the ontology.
     Merge {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -559,11 +566,6 @@ pub enum StepSpec {
         /// declarations and a read-only reasoning closure.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         collapse_import_closure: Option<bool>,
-        /// Whether this merge starts the pipeline: its model is its inputs alone,
-        /// not those inputs merged into what came before. A recipe's second and
-        /// later command lines each open a new invocation.
-        #[serde(default, skip_serializing_if = "is_false")]
-        restart: bool,
     },
     /// Remove a second ontology's axioms from the current one.
     Unmerge {
@@ -750,6 +752,12 @@ pub enum StepSpec {
         synonym_decls: bool,
         #[serde(default)]
         add_source: bool,
+    },
+    /// A prefix binding stated by the launcher, before any subcommand; it binds
+    /// for the whole chain and the written document declares it.
+    AddPrefix {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        prefixes: Vec<String>,
     },
     /// Generate axioms from template tables — TSV/CSV carrying a row of template
     /// strings over a table of terms — and merge them in.
@@ -1326,7 +1334,12 @@ impl OwlmakeSpec {
 /// The substitution runs over the SERIALIZED plan rather than over a list of
 /// fields, so a step or an option added later is covered without anyone
 /// remembering to add it here.
-pub fn bind_version(plan: &Plan, version: &str, dir: &Path) -> Result<Plan> {
+pub fn bind_version(
+    plan: &Plan,
+    version: &str,
+    today: Option<&str>,
+    dir: &Path,
+) -> Result<Plan> {
     let spec = OwlmakeSpec::from_plan(plan);
     let mut value = serde_json::to_value(&spec)
         .context("internal: a plan did not serialize while binding its release version")?;
@@ -1335,7 +1348,15 @@ pub fn bind_version(plan: &Plan, version: &str, dir: &Path) -> Result<Plan> {
     // [`crate::plan::VERSION_TODAY`], which is the day the build runs whatever
     // version the run stamps — uPheno's pattern ontology names both, one in its
     // version IRI and the other in the artefacts around it.
-    substitute(&mut value, crate::plan::VERSION_TODAY, &crate::plan::today());
+    //
+    // It is a RUN INPUT, so it comes from the run when the run named one and from
+    // the clock only when it did not. Reading the clock unconditionally ignored
+    // `TODAY=` for every string built from `{today}` while honouring it for every
+    // string built from `{version}`: MONDO's mondo.owl took the wall-clock date in
+    // its versionIRI, one line of a 254 MB file, on a build that passed
+    // TODAY=2026-08-19 across midnight.
+    let today = today.map(str::to_string).unwrap_or_else(crate::plan::today);
+    substitute(&mut value, crate::plan::VERSION_TODAY, &today);
     let mut bound: OwlmakeSpec = serde_json::from_value(value)
         .context("internal: a plan did not read back while binding its release version")?;
     bound.version = version.to_string();
@@ -1406,6 +1427,7 @@ impl StepSpec {
             // An Op or a Partial both serialize by their operation; partial-ness
             // (the coverage gaps) is re-derived on load from the op's options.
             Step::Op(op) | Step::Partial { op, .. } => Self::from_op(op),
+            Step::Boundary { input } => StepSpec::Boundary { input: input.clone() },
             // `Inert` never reaches a plan (the planner drops it); mapped for
             // exhaustiveness only.
             Step::Inert(c) => StepSpec::Shell { command: c.clone(), requires: vec![] },
@@ -1522,10 +1544,9 @@ impl StepSpec {
 
     fn from_op(op: &Op) -> Self {
         match op {
-            Op::Merge { inputs, collapse_import_closure, restart } => StepSpec::Merge {
+            Op::Merge { inputs, collapse_import_closure } => StepSpec::Merge {
                 inputs: inputs.clone(),
                 collapse_import_closure: *collapse_import_closure,
-                restart: *restart,
             },
             Op::Unmerge { second_input } => StepSpec::Unmerge { second_input: second_input.clone() },
             Op::Reason {
@@ -1643,6 +1664,7 @@ impl StepSpec {
                 id_range_name: id_range_name.clone(),
                 id_ranges: id_ranges.clone(),
             },
+            Op::AddPrefix { prefixes } => StepSpec::AddPrefix { prefixes: prefixes.clone() },
             Op::Normalize { base_iris, subset_decls, synonym_decls, add_source } => StepSpec::Normalize {
                 base_iris: base_iris.clone(),
                 subset_decls: *subset_decls,
@@ -1734,8 +1756,9 @@ impl StepSpec {
 
     pub(crate) fn into_step(self) -> Step {
         match self {
-            StepSpec::Merge { inputs, collapse_import_closure, restart } => {
-                Step::Op(Op::Merge { inputs, collapse_import_closure, restart })
+            StepSpec::Boundary { input } => Step::Boundary { input },
+            StepSpec::Merge { inputs, collapse_import_closure } => {
+                Step::Op(Op::Merge { inputs, collapse_import_closure })
             }
             StepSpec::Unmerge { second_input } => Step::Op(Op::Unmerge { second_input }),
             StepSpec::Reason {
@@ -1839,6 +1862,7 @@ impl StepSpec {
             StepSpec::Mint { temp_id_prefix, id_range_name, id_ranges } => {
                 Step::Op(Op::Mint { temp_id_prefix, id_range_name, id_ranges })
             }
+            StepSpec::AddPrefix { prefixes } => Step::Op(Op::AddPrefix { prefixes }),
             StepSpec::Normalize { base_iris, subset_decls, synonym_decls, add_source } => {
                 Step::Op(Op::Normalize { base_iris, subset_decls, synonym_decls, add_source })
             }
@@ -2564,7 +2588,6 @@ mod tests {
             steps: vec![Step::Op(Op::Merge {
                 inputs: vec!["tiny-edit.owl".into()],
                 collapse_import_closure: None,
-                restart: false,
             })],
             gaps: vec![],
             missing_rule: false,
@@ -2704,7 +2727,13 @@ mod format_floor_tests {
         // inside a 1.6.1 image) states the TOOL and no release. Recording both is
         // refused unless they agree, because a plan saying two things about one
         // behaviour cannot be obeyed.
-        const PLAN_SCHEMA_DIGEST: &str = "9121386e4ac36bd1";
+        //
+        // `add-prefix` joins them: the launcher's own `--prefix`/`--add-prefix`,
+        // which binds for a whole chain and which nothing else in the plan carried.
+        // A plan written before the step existed still loads and still describes
+        // the build it described — the step is simply absent — so
+        // PLAN_FORMAT_MIN_VERSION stays put here too.
+        const PLAN_SCHEMA_DIGEST: &str = "49c83905a95a7f85";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -2756,7 +2785,6 @@ mod round_trip_tests {
                 steps: vec![Step::Op(Op::Merge {
                     inputs: vec!["tiny-edit.ofn".into()],
                     collapse_import_closure: None,
-                    restart: false,
                 })],
                 gaps: vec![],
                 missing_rule: false,

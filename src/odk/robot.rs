@@ -595,7 +595,7 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
         match t.as_str() {
             "--merge-imports-closure" | "--merge-import-closure" => {
                 // Resolve and inline the import closure (then drop the imports).
-                steps.push(Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None, restart: false }));
+                steps.push(Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None }));
             }
             "--merge-axiom-annotations" => {
                 steps.push(Step::Op(Op::Repair {
@@ -812,6 +812,32 @@ fn parse_robot_chain(toks: &[String], robot_prefix: &str) -> Vec<Step> {
     // Skip the launcher prefix: drop tokens until the first subcommand.
     let mut i = launcher_len(toks, robot_prefix);
     let mut steps = Vec::new();
+    // …but not its PREFIX BINDINGS. A `--prefix`/`--add-prefix` stated before any
+    // subcommand binds for the whole chain, and the document written at the end
+    // declares it whether or not an axiom uses it. Dropping it with the rest of
+    // the launcher left CL's `components/hra_subset.owl` — built by
+    // `robot --add-prefix "obo: …" annotate …` — without its `xmlns:obo`.
+    {
+        let mut launcher: Vec<String> = tokenize(robot_prefix);
+        launcher.extend(toks[..i].iter().cloned());
+        let mut prefixes: Vec<String> = Vec::new();
+        let mut k = 0;
+        while k < launcher.len() {
+            if launcher[k] == "--prefix" || launcher[k] == "--add-prefix" {
+                if let Some(v) = launcher.get(k + 1) {
+                    if !prefixes.iter().any(|p| p == v) {
+                        prefixes.push(v.clone());
+                    }
+                }
+                k += 2;
+                continue;
+            }
+            k += 1;
+        }
+        if !prefixes.is_empty() {
+            steps.push(Step::Op(Op::AddPrefix { prefixes }));
+        }
+    }
     while i < toks.len() {
         let name = toks[i].clone();
         i += 1;
@@ -1197,9 +1223,6 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
                 .chain(all2("--input-iri", "-I"))
                 .collect(),
             collapse_import_closure: boolv("--collapse-import-closure"),
-            // Set by the planner for a merge that opens a recipe's second or
-            // later command line; one line's parse cannot see where it sits.
-            restart: false,
         }),
         // As with `merge`, `-I/--input-iri` names an input: CL subtracts the taxon
         // disjointness axioms with `unmerge -I <url>`, and reading only `-i` left

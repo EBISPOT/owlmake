@@ -88,6 +88,7 @@ pub mod manchester_parse;
 pub mod genid;
 pub mod obo;
 pub mod obograph;
+pub mod ofncache;
 pub mod owlfunc;
 pub mod owlrdf;
 pub mod turtle;
@@ -195,7 +196,11 @@ pub fn load(path: &Path) -> Result<Model> {
         Err(_) => sniff(&bytes)
             .with_context(|| format!("cannot determine ontology format of {}", path.display()))?,
     };
-    parse_bytes(bytes, fmt, &display_name(path)).with_context(|| format!("parsing {}", path.display()))
+    IN_PATH.with(|c| *c.borrow_mut() = Some(path.to_path_buf()));
+    let r = parse_bytes(bytes, fmt, &display_name(path))
+        .with_context(|| format!("parsing {}", path.display()));
+    IN_PATH.with(|c| *c.borrow_mut() = None);
+    r
 }
 
 /// A short label for a path used in progress lines — the file name alone (the
@@ -253,13 +258,21 @@ fn parse_bytes(bytes: Vec<u8>, fmt: Format, name: &str) -> Result<Model> {
     result
 }
 
-/// Refine an extension-derived format using content when the extension is
-/// ambiguous between RDF/XML and a text syntax.
+/// The format a file's bytes are read as: what the content says where that is
+/// unambiguous, and what the extension says where it is not.
+///
+/// A build writes files whose name and content disagree, because a recipe names
+/// its output for the target it is on the way to rather than for the syntax it
+/// holds. ECTO's `tmp/ecto-main.obo` is `git show <the edit file> > $@` — an
+/// `.obo` name over functional syntax — and reading it with the OBO parser lost
+/// the whole root ontology, leaving the artefact with its import closure and none
+/// of its own terms. The same rule covers `-o $@.owl && mv $@.owl $@`, where a
+/// `.obo` target holds RDF/XML.
+///
+/// `sniff` answers only when the leading bytes settle it, so an extension is
+/// overridden by evidence and never by a guess.
 fn disambiguate(ext_fmt: Format, bytes: &[u8]) -> Format {
-    match ext_fmt {
-        Format::RdfXml => sniff(bytes).unwrap_or(Format::RdfXml),
-        other => other,
-    }
+    sniff(bytes).unwrap_or(ext_fmt)
 }
 
 /// Load an ontology from `path`, optionally forcing the parser format
@@ -269,8 +282,11 @@ pub fn load_with(path: &Path, format: Option<&str>) -> Result<Model> {
         Some(name) => {
             let fmt = Format::from_name(name)?;
             let bytes = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
-            parse_bytes(bytes, fmt, &display_name(path))
-                .with_context(|| format!("parsing {}", path.display()))
+            IN_PATH.with(|c| *c.borrow_mut() = Some(path.to_path_buf()));
+            let r = parse_bytes(bytes, fmt, &display_name(path))
+                .with_context(|| format!("parsing {}", path.display()));
+            IN_PATH.with(|c| *c.borrow_mut() = None);
+            r
         }
         None => load(path),
     }
@@ -2009,10 +2025,24 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // round trip through the OFN cache would look like an ordinary 6-prefix
             // document and the RDF/XML writer would rebuild an xmlns block the
             // artefact must not carry.
-            let prefixes_cleared = text.lines().any(|l| l.trim_end() == "#prefixes-cleared");
-            let rdf_prefixes = parse_prefix_comment("#rdfxmlns ");
-            let explicit_prefixes = parse_prefix_comment("#explicit-prefixes ");
-            let idspaces = parse_prefix_comment("#idspaces ");
+            let mut prefixes_cleared = text.lines().any(|l| l.trim_end() == "#prefixes-cleared");
+            let mut rdf_prefixes = parse_prefix_comment("#rdfxmlns ");
+            let mut explicit_prefixes = parse_prefix_comment("#explicit-prefixes ");
+            let mut idspaces = parse_prefix_comment("#idspaces ");
+            let mut shared_anon = shared_anon;
+            let mut owl_shared_owners = owl_shared_owners;
+            // The companion, where this document has one that describes exactly
+            // these bytes. It supersedes the inline form, which is still read so
+            // that a `.ofn` written by an older binary — or by a build already in
+            // flight — keeps working.
+            if let Some(mk) = in_path().and_then(|p| ofncache::read(&p, text.as_bytes())) {
+                prefixes_cleared = mk.prefixes_cleared;
+                rdf_prefixes = mk.rdf_prefixes;
+                explicit_prefixes = mk.explicit_prefixes;
+                idspaces = mk.idspaces;
+                shared_anon = mk.anonshare.into_iter().collect();
+                owl_shared_owners = mk.sharedowner.into_iter().collect();
+            }
             let text: String =
                 if rdf_prefixes.is_empty()
                     && explicit_prefixes.is_empty()
@@ -2263,9 +2293,21 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
     // RDF/XML written to one always gets the full-fidelity bytes — there is no
     // build in which a file should differ from the artefact shape a release
     // carries.
+    PENDING_MARKERS.with(|c| *c.borrow_mut() = None);
     write_to_with(model, &mut pw, fmt, RdfXmlWriter::Owlapi)
         .with_context(|| format!("writing {}", path.display()))?;
     pw.finish().with_context(|| format!("writing {}", path.display()))?;
+    // The companion, once the bytes it describes are on disk. Its fingerprint is
+    // over those bytes, so anything that rewrites this path afterwards — another
+    // owlmake step, ROBOT, a shell redirect — withdraws it automatically.
+    if let Some(mk) = PENDING_MARKERS.with(|c| c.borrow_mut().take()) {
+        match std::fs::read(path) {
+            Ok(bytes) => ofncache::write(path, &bytes, &mk),
+            // Unreadable straight after writing it: no companion, so the next
+            // read of this file misses the cache rather than trusting a guess.
+            Err(_) => {}
+        }
+    }
     Ok(())
 }
 
@@ -2447,90 +2489,29 @@ fn write_to_with<W: Write>(
             // directly; without this, a pipeline hop through OFN (e.g. mondo-base.owl
             // fed by reasoned.owl.ofn) loses them. The reader strips this line before
             // parsing, so horned never sees it and nothing downstream is affected.
-            if model.format_prefixes_cleared && ofn_cache() {
-                write!(writer, "#prefixes-cleared\n")
-                    .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
-            }
-            if !model.rdf_prefixes.is_empty() && ofn_cache() {
-                let joined: Vec<String> = model
-                    .rdf_prefixes
-                    .iter()
-                    .filter(|(p, ns)| !p.is_empty() && !p.contains(' ') && !ns.contains(' '))
-                    .map(|(p, ns)| format!("{p}={ns}"))
-                    .collect();
-                if !joined.is_empty() {
-                    write!(writer, "#rdfxmlns {}\n", joined.join(" "))
-                        .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
-                }
-            }
-            // Carry the shared-blank-node identity of the RDF/XML this cache stands
-            // in for. OFN has no way to express that two anonymous expressions were
-            // ONE node, and the `rdf:nodeID`-vs-inline choice depends on exactly
-            // that, so without this the numbering pass downstream cannot reproduce it.
-            // Precedence: an explicit `shared_anon` wins, else whatever the RDF/XML
-            // write this cache stands in for recorded on the model.
-            let shared_anon = if model.shared_anon.is_empty() {
-                model.rdf_shared_anon.clone()
-            } else {
-                model.shared_anon.clone()
-            };
-            for (owner, sigs) in shared_anon.iter().filter(|_| ofn_cache()) {
-                if owner.contains(' ') || sigs.is_empty() {
-                    continue;
-                }
-                let mut v: Vec<String> = sigs.iter().map(|h| format!("{h:x}")).collect();
-                v.sort();
-                write!(writer, "#anonshare {owner} {}\n", v.join(" "))
-                    .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
-            }
-            // Carry the source's blank-node SHARING evidence too. `#anonshare` holds
-            // structure hashes; this holds the `(class, property, filler)` keys the
-            // RDF scan derived from repeated `rdf:nodeID`s. Without it a pipeline
-            // that hops through the OFN cache loses the only record of which
-            // anonymous expressions were ONE node, and every annotated axiom starts
-            // taking a node of its own.
-            for (owner, keys) in model.owl_shared_owners.iter().filter(|_| ofn_cache()) {
-                if owner.contains(' ') || keys.is_empty() {
-                    continue;
-                }
-                let mut v: Vec<String> =
-                    keys.iter().map(|k| k.replace('\u{1}', "\u{2}")).collect();
-                v.sort();
-                if v.iter().any(|k| k.contains(' ')) {
-                    continue;
-                }
-                write!(writer, "#sharedowner {owner} {}\n", v.join(" "))
-                    .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
-            }
-            // Likewise carry the explicitly-provided (`--add-prefixes`) prefixes, so
-            // a downstream OBO write from this OFN emits their idspaces (one per
-            // explicit prefix, whether or not it is used).
-            if !model.explicit_prefixes.is_empty() && ofn_cache() {
-                let joined: Vec<String> = model
-                    .explicit_prefixes
-                    .iter()
-                    .filter(|(p, ns)| !p.is_empty() && !p.contains(' ') && !ns.contains(' '))
-                    .map(|(p, ns)| format!("{p}={ns}"))
-                    .collect();
-                if !joined.is_empty() {
-                    write!(writer, "#explicit-prefixes {}\n", joined.join(" "))
-                        .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
-                }
-            }
-            // And the document's declared idspaces — for an OBO-sourced pipeline this
-            // is the prefix set owlrdf falls back to when there is no input xmlns
-            // (`rdf_prefixes` empty), so it must survive the OFN cache too.
-            if !model.idspaces.is_empty() && ofn_cache() {
-                let joined: Vec<String> = model
-                    .idspaces
-                    .iter()
-                    .filter(|(p, ns)| !p.is_empty() && !p.contains(' ') && !ns.contains(' '))
-                    .map(|(p, ns)| format!("{p}={ns}"))
-                    .collect();
-                if !joined.is_empty() {
-                    write!(writer, "#idspaces {}\n", joined.join(" "))
-                        .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
-                }
+            // The cache state this document stands in for does NOT go into the
+            // document. It is collected here and put in a companion file by
+            // `save_as`, which has the path and the finished bytes: a repo's own
+            // declared intermediates live in `tmp/` next to owlmake's caches, and
+            // a `#…` line in one of those is a byte the reference never writes.
+            if ofn_cache() {
+                let mut mk = ofncache::Markers {
+                    prefixes_cleared: model.format_prefixes_cleared,
+                    rdf_prefixes: model.rdf_prefixes.clone(),
+                    explicit_prefixes: model.explicit_prefixes.clone(),
+                    idspaces: model.idspaces.clone(),
+                    ..Default::default()
+                };
+                // Precedence: an explicit `shared_anon` wins, else whatever the
+                // RDF/XML write this cache stands in for recorded on the model.
+                let shared_anon = if model.shared_anon.is_empty() {
+                    model.rdf_shared_anon.clone()
+                } else {
+                    model.shared_anon.clone()
+                };
+                mk.anonshare = shared_anon.into_iter().collect();
+                mk.sharedowner = model.owl_shared_owners.clone().into_iter().collect();
+                PENDING_MARKERS.with(|c| *c.borrow_mut() = Some(mk));
             }
             let cm = take_cm(model);
             // Which class this document's untyped literals take, which decides where
@@ -2750,6 +2731,28 @@ thread_local! {
     /// The file currently being written, for `OM_MODEL_DEBUG` (see
     /// [`crate::io::owlrdf::save`]). Set by [`save_as`].
     static OUT_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+thread_local! {
+    /// The cache state the Functional writer collected for the document it is
+    /// writing, waiting for [`save_as`] to put it in the companion file. The
+    /// writer streams to a generic sink and has no path; the companion needs
+    /// one, and needs the finished bytes to fingerprint.
+    static PENDING_MARKERS: std::cell::RefCell<Option<ofncache::Markers>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// The file currently being READ, so the Functional reader can look for its
+    /// companion. Set by [`parse_bytes`]; empty for input that has no path of
+    /// its own (an IRI, a pipe).
+    static IN_PATH: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The path of the document being read, when it has one.
+fn in_path() -> Option<std::path::PathBuf> {
+    IN_PATH.with(|c| c.borrow().clone())
 }
 
 /// The name of the file being written, for diagnostics.

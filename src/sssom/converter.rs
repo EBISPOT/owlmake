@@ -194,6 +194,35 @@ impl Converter {
         Some(format!("{prefix}:{}", &uri[len..]))
     }
 
+    /// The CURIE for `id`, which may be given as a URI **or** as a CURIE.
+    ///
+    /// A URI compresses. A string that is already a CURIE is STANDARDISED: its
+    /// prefix is looked up among the canonical prefixes and their synonyms and
+    /// replaced by the canonical one, so `OMIM:610799` becomes `omim:610799` and
+    /// `Wikipedia:Foo` becomes `wikipedia.en:Foo`. A prefix the map does not know
+    /// yields `None`, and the caller drops the record.
+    ///
+    /// Both forms occur in one document. OBO Graphs JSON gives a node's
+    /// `meta.xrefs` as CURIEs and its edges and `basicPropertyValues` as full
+    /// URIs, so a compressor that took URIs alone silently discarded every
+    /// xref-derived mapping — on MONDO, all 142,731 of them.
+    pub fn safe_compress(&self, id: &str) -> Option<String> {
+        if let Some(curie) = self.compress(id) {
+            return Some(curie);
+        }
+        // Not a URI under this map. Treat it as a CURIE and standardise the
+        // prefix. A URI that no prefix covers is not rescued by this: `://`
+        // never appears in a CURIE's prefix.
+        let (prefix, local) = id.split_once(':')?;
+        if prefix.is_empty() || local.starts_with("//") {
+            return None;
+        }
+        let canonical = self.records.iter().find(|r| {
+            r.prefix == prefix || r.prefix_synonyms.iter().any(|s| s == prefix)
+        })?;
+        Some(format!("{}:{local}", canonical.prefix))
+    }
+
     /// The URI prefix `prefix` is declared with — what the written `curie_map`
     /// carries for it.
     pub fn uri_prefix(&self, prefix: &str) -> Option<&str> {

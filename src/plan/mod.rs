@@ -369,6 +369,48 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Whether `target` names a file on disk, as opposed to being a phony name
+    /// that only guarantees its recipe ran.
+    ///
+    /// ONE answer, consulted everywhere, because this question was being answered
+    /// independently in eight places with eight different predicates — which is
+    /// why fixing it at one site kept failing to reach the others. Two defects
+    /// came straight out of that: a `.PHONY` target materialised as a real 580 KB
+    /// file by a write path that never asked, and a target reporting success while
+    /// producing nothing because a different path waived the post-condition.
+    ///
+    /// BOTH sources are needed and neither alone is right:
+    ///
+    /// * the declared `phony` list is authoritative where it speaks — the repo
+    ///   said so — but it carries only the names a repo declared LITERALLY, so it
+    ///   never covers a pattern rule's expansions. MONDO's
+    ///   `report-base-query-obsoletioncandidates-withcomment` is one: its recipe
+    ///   writes `reports/report-base-$*.tsv` and nothing named after the target is
+    ///   ever created, yet it appears in no `.PHONY` line.
+    /// * so shape decides the rest: a name with no directory component and no
+    ///   extension cannot be a filename. Anything that does look like a path must
+    ///   appear, because a rule that silently produced nothing is a real failure.
+    ///
+    /// Replacing the shape test with the phony list would trade one silent wrong
+    /// answer for another — ECTO did exactly that and broke `sparql_test`, which
+    /// is phony in every practical sense and declared `.PHONY` nowhere, so the
+    /// guard demanded a file it never writes. EFO declares only three `.PHONY`
+    /// targets out of a 139-target surface; the list is only ever as complete as
+    /// the build configuration bothered to be.
+    ///
+    /// This answers only whether a MISSING file is a failure. It is deliberately
+    /// not the test for whether to WRITE one: a bare name can still be a real file
+    /// target whose recipe ends `-o $@`, and skipping that write destroys output.
+    /// See the declared-phony-only check in `run_artefact`.
+    pub fn names_a_file(&self, target: &str) -> bool {
+        if self.is_phony(target) {
+            return false;
+        }
+        let t = std::path::Path::new(target);
+        let bare = t.parent().is_none_or(|p| p.as_os_str().is_empty()) && t.extension().is_none();
+        !bare
+    }
+
     /// Whether `target` is declared `.PHONY`.
     ///
     /// A phony target names no file. It is always out of date however old a file

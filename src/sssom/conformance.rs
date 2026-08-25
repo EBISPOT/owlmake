@@ -598,8 +598,9 @@ mod tests {
         ms.mappings[0].insert("predicate_type".into(), "owl object property".into());
         // Uses predicate_type (1.1) without declaring the version.
         assert!(validate(&ms).iter().any(|e| e.contains("1.1")));
-        // Declaring the version is the only thing that settles it: a writer never
-        // adds the declaration on the set's behalf.
+        // Declaring the version settles it. `enforce_version` will NOT, because
+        // `predicate_type` has no column: what the set holds uses 1.1, what the
+        // table would say does not, and the writer speaks for the table.
         ms.metadata.insert("sssom_version".into(), serde_yaml::Value::String("1.1".into()));
         assert!(!validate(&ms).iter().any(|e| e.contains("1.1 features")));
 

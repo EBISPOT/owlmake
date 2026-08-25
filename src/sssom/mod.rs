@@ -87,11 +87,13 @@ pub const SLOT_ORDER: &[&str] = &[
 /// `condense` lifts it, which is why the value is dropped from the COLUMN set
 /// and never from the record.
 ///
-/// Whether a slot reaches the table is a property of this writer; whether a
-/// COMMAND wants it is that command's own. `mapping_cardinality` is a column
-/// here — xref extraction writes it — and the mapping-set transformer clears it
-/// from the records it is about to write, because a cardinality it did not
-/// derive describes a set that no longer exists.
+/// `mapping_cardinality` is NOT among them, though `sssom-cli` never writes one.
+/// That is the COMMAND's behaviour and not the slot's: `sssom:xref-extract
+/// --drop-duplicates` writes the column, and feeding its output straight back
+/// through `sssom-cli` takes the column away again. So the slot has a column
+/// here, and `sssom-cli` clears it from the records it is about to write,
+/// because a cardinality it did not derive describes a set that no longer
+/// exists.
 ///
 /// Columns the schema does not describe at all are extensions, and those are
 /// kept, appended after these in the order the extension rules give.
@@ -621,6 +623,23 @@ impl MappingSet {
         self.recompute_columns();
     }
 
+    /// Declare `sssom_version` when the set AS WRITTEN uses 1.1 features.
+    ///
+    /// The question the writer asks is not the one [`Self::infer_version`]
+    /// answers. That reports what the data uses, which is what validation needs;
+    /// this reports what the serialized table uses. The two part company because
+    /// no 1.1 slot has a mapping-level column: a record may carry a
+    /// `reviewer_agreement`, but nothing in the written table does, so declaring
+    /// the table 1.1 on its account describes bytes that were never emitted.
+    pub fn enforce_version(&mut self) {
+        if conformance::written_version(self) == conformance::SSSOM_VERSION_1_1 {
+            self.metadata.insert(
+                "sssom_version".to_string(),
+                serde_yaml::Value::String(conformance::SSSOM_VERSION_1_1.to_string()),
+            );
+        }
+    }
+
     /// The effective prefix map: built-ins overlaid by the declared `curie_map`.
     pub fn effective_prefixes(&self) -> BTreeMap<String, String> {
         let mut m: BTreeMap<String, String> =
@@ -889,13 +908,16 @@ mod tests {
         // record_id was added in 1.1, and the DATA now uses it.
         ms.mappings[0].insert("record_id".into(), "urn:x:1".into());
         assert_eq!(ms.infer_version(), "1.1");
-        // Which is a fact about the data, not an instruction to the writer: a set
-        // is written at the version it DECLARES, and one that declares none stays
-        // undeclared however many 1.1 slots it carries.
-        let before = ms.metadata.clone();
-        let tsv = crate::sssom::io::write_table(&ms, '\t', false, false).expect("writes");
-        assert!(!tsv.contains("sssom_version"), "{tsv}");
-        assert_eq!(ms.metadata, before);
+        // The written table does not. No 1.1 slot has a mapping-level column, so
+        // serializing this set emits nothing that needs 1.1, and it must not
+        // claim a version its bytes do not use.
+        ms.enforce_version();
+        assert!(!ms.metadata.contains_key("sssom_version"));
+        // A set-level 1.1 slot IS written, and that one does claim it.
+        ms.metadata
+            .insert("mapping_set_confidence".into(), serde_yaml::Value::String("0.9".into()));
+        ms.enforce_version();
+        assert_eq!(value_to_cell(&ms.metadata["sssom_version"]), "1.1");
     }
 
     #[test]

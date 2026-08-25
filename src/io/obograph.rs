@@ -20,7 +20,7 @@ use horned_owl::ontology::set::SetOntology;
 use serde::{Deserialize, Serialize};
 
 use crate::io::obo::{expand_id, ncname_suffix_index};
-use crate::model::{default_prefixes, Model};
+use crate::model::{default_prefixes, Model, XSD_BOOLEAN};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Whether per-element axiom annotations (an xref's / synonym's / definition's /
@@ -786,7 +786,12 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
                         e.subsets.push(if val_is_iri { v } else { format!("\"{v}\"") });
                     }
                 } else if prop == OWL_DEPRECATED {
-                    if matches!(val_lit.as_deref(), Some("true")) {
+                    // A TYPED boolean marks deprecation. An untyped `"true"` is a
+                    // string that happens to spell it and marks nothing, so the
+                    // datatype is the test rather than the lexical form.
+                    if matches!(val_lit.as_deref(), Some("true"))
+                        && val_datatype == XSD_BOOLEAN
+                    {
                         e.deprecated = true;
                     }
                 } else if prop == format!("{OIO}id") {

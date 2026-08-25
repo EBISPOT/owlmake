@@ -250,6 +250,33 @@ fn collapse_inverse_pairs(model: &mut Model) {
 pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
     let source = ontology_iri(other);
 
+    // A merge keeps the PRIMARY's identity — but where there is no primary
+    // identity to keep, the first input merged in supplies it. `merge -i a -i b`
+    // is still a's ontology; a merge that starts from nothing is the ontology it
+    // merged.
+    //
+    // A rule whose recipe names its own inputs has no `$<` to open from, so the
+    // pipeline starts empty: ECTO's `tmp/ecto-base-release.owl` is
+    // `merge -I <the published base> remove … -o $@`, and dropping the secondary's
+    // identity there left the artefact with no `owl:Ontology` at all and an
+    // `xml:base` of the OWL namespace.
+    // Its header comes with it: the identity, and the ontology annotations that
+    // belong to that identity — title, licence, `versionInfo`. Keeping the IRI and
+    // dropping the annotations would describe the ontology it merged under a
+    // header stripped of everything the ontology says about itself.
+    let primary_has_identity =
+        merged.ont.iter().any(|c| matches!(c.component, Component::OntologyID(_)));
+    if !primary_has_identity {
+        for component in other.ont.iter() {
+            if matches!(
+                component.component,
+                Component::OntologyID(_) | Component::DocIRI(_) | Component::OntologyAnnotation(_)
+            ) {
+                merged.ont.insert(component.clone());
+            }
+        }
+    }
+
     for component in other.ont.iter() {
         match &component.component {
             // Never carry secondary identity/imports (single-identity result).

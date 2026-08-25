@@ -170,6 +170,39 @@ pub fn take_or_load(piped: Option<Model>, input: Option<&Path>, common: &CommonA
 /// `kgcl:mint … convert`, where no import document is read at all and only the
 /// root is serialised, so the edit file keeps its import declarations instead of
 /// being flattened into its whole closure.
+/// The signature of the import closure ALONE — the entities an imported
+/// ontology declares on the root's behalf, keyed as
+/// [`crate::build::closure_declared_entities`] keys them. Resolved from a scratch
+/// document carrying only the root's `Import(...)`s, so the root's own signature
+/// never leaks in: an entity the document references but nothing imports must
+/// still get its stub. Best-effort — an unresolvable closure yields an empty set,
+/// and every undeclared entity is then stubbed.
+pub(crate) fn closure_declared_signature(
+    root: &Model,
+    input: Option<&Path>,
+    common: &CommonArgs,
+) -> std::collections::HashSet<String> {
+    use horned_owl::model::MutableOntology;
+
+    let mut imports_only = Model::new();
+    for ac in root.ont.iter() {
+        if matches!(ac.component, horned_owl::model::Component::Import(_)) {
+            imports_only.ont.insert(ac.clone());
+        }
+    }
+    if !imports_only
+        .ont
+        .iter()
+        .any(|ac| matches!(ac.component, horned_owl::model::Component::Import(_)))
+    {
+        return std::collections::HashSet::new();
+    }
+    match common.apply_catalog(&mut imports_only, input) {
+        Ok(()) => crate::build::closure_declared_entities(&imports_only),
+        Err(_) => std::collections::HashSet::new(),
+    }
+}
+
 pub fn take_or_load_no_imports(
     piped: Option<Model>,
     input: Option<&Path>,
@@ -186,6 +219,20 @@ pub fn take_or_load_no_imports(
         let path = input
             .context("missing input: provide --input/--input-iri or pipe from a previous command")?;
         io::load_with(path, fmt)
+    }
+}
+
+/// Collect `entity IRI → rdfs:label` across the input's whole import closure, for
+/// the functional-syntax banner comments. Best-effort: a load failure (offline,
+/// missing catalog, no input when piped) yields an empty map and banners fall
+/// back to the CURIE, so this never fails the command.
+pub(crate) fn closure_labels(input: Option<&std::path::Path>, common: &crate::cmd::CommonArgs) -> std::collections::HashMap<String, String> {
+    // `take_or_load` merges the import closure (via the catalog), which is exactly
+    // the label set the banners need; only the labels are read, then it is
+    // discarded.
+    match take_or_load(None, input, common) {
+        Ok(m) => rdfs_labels(&m),
+        Err(_) => std::collections::HashMap::new(),
     }
 }
 
@@ -304,6 +351,14 @@ pub(crate) fn resolve_import_closure(
     let opts = crate::cmd::merge::MergeOptions::default();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: Vec<String> = imports_of(model);
+    // Say that this ran, and with how many imports, BEFORE resolving any. The
+    // per-import lines below are printed only when there is something to print,
+    // so their absence would otherwise be ambiguous between "this path resolves
+    // no closure" and "this path was never asked to" — and a reader cannot tell
+    // which. Silence must not be the answer to a question the flag was asked.
+    if std::env::var("OM_IMPORT_DEBUG").is_ok() {
+        eprintln!("[import] resolving closure: {} direct import(s)", queue.len());
+    }
     let mut merged_any = false;
     while let Some(iri) = queue.pop() {
         if !seen.insert(iri.clone()) {
@@ -423,8 +478,91 @@ pub(crate) fn resolve_import_closure(
         for ac in decls {
             model.ont.remove(&ac);
         }
+        // A functional-syntax banner names its entity `# Class: <IRI> (label)`,
+        // and the label is the one anywhere in the closure — an edit file that
+        // only DECLARES a class still banners it with the label its imported
+        // pattern module asserts. The closure is inlined right now and is dropped
+        // again on save, so this is the one moment the whole label set is in hand.
+        if model.banner_labels.is_empty() {
+            model.banner_labels = rdfs_labels(model);
+        }
     }
     Ok(())
+}
+
+/// Every `entity IRI → rdfs:label` the model asserts, for the functional-syntax
+/// banner comments.
+///
+/// An entity may carry several labels, and which one it is named by is decided
+/// by the iteration order of its own annotation-assertion set — by the axioms'
+/// hashes, that is, not by document order and not by the values. `oboInOwl:hasDbXref`
+/// carries both "database_cross_reference" and "has cross-reference", and picking
+/// the wrong one is a one-line difference in every artefact that banners it.
+///
+/// Deciding it by anything else is not merely wrong but UNSTABLE: an arbitrary
+/// tie-break follows the model's insertion history, so a change with nothing to
+/// do with labels can silently flip a previously-identical artefact either way.
+///
+/// The set is the SUBJECT's own, and its table is sized by how many annotation
+/// assertions that subject carries — measured: giving `hasDbXref` twenty further
+/// annotations, touching neither label, moves the table from 16 slots to 32 and
+/// changes which label wins.
+///
+/// Where two labels land in the SAME slot this cannot settle it, and neither can
+/// anything else, because there is no stable answer to match. Two runs of the
+/// reference over one unchanged tree, minutes apart, write
+/// `imports/merged_import.owl` with `database_cross_reference` and then with
+/// `has cross-reference`, the two 41 MB documents otherwise byte-identical. Both
+/// values have been seen twice. A Java bucket holds its members in insertion
+/// order, and the pipeline does not add its axioms in a fixed one.
+///
+/// So this is reference non-determinism, measured, and belongs beside a SELECT
+/// whose row order differs between runs. owlmake is deterministic here and
+/// always writes the same value; whether that value matches is a coin toss per
+/// run, and no amount of reproducing insertion order would change that.
+pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, String> {
+    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component, Literal};
+
+    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+    // Candidate labels per subject, each with the hash of the axiom carrying it,
+    // and the size of the set that axiom lives in.
+    let mut cands: std::collections::HashMap<String, Vec<(i32, String)>> = Default::default();
+    let mut subject_ann_count: std::collections::HashMap<String, usize> = Default::default();
+    for ac in model.ont.iter() {
+        let Component::AnnotationAssertion(aa) = &ac.component else { continue };
+        let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
+        let subj = subj.as_ref().to_string();
+        *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
+        if aa.ann.ap.0.as_ref() != RDFS_LABEL {
+            continue;
+        }
+        let AnnotationValue::Literal(lit) = &aa.ann.av else { continue };
+        let text = match lit {
+            Literal::Simple { literal }
+            | Literal::Language { literal, .. }
+            | Literal::Datatype { literal, .. } => literal.clone(),
+        };
+        let h = crate::owlapi_hash::annotation_assertion_hash(
+            &subj,
+            aa.ann.ap.0.as_ref(),
+            &aa.ann.av,
+            &ac.ann,
+        );
+        cands.entry(subj).or_default().push((h, text));
+    }
+    cands
+        .into_iter()
+        .map(|(subj, c)| {
+            let text = if c.len() == 1 {
+                c[0].1.clone()
+            } else {
+                let hashes: Vec<i32> = c.iter().map(|(h, _)| *h).collect();
+                let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
+                c[crate::owlapi_hash::hashset_order_of(&hashes, total)[0]].1.clone()
+            };
+            (subj, text)
+        })
+        .collect()
 }
 
 /// Resolve the `owl:imports` closure with no catalog named on the command line.

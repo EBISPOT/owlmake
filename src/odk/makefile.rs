@@ -164,6 +164,29 @@ impl MakeModel {
     /// decision, taken from `refresh_groups` (see `crate::plan::RefreshGroup`).
     pub const WORKFLOW_FLAGS: [&'static str; 5] = ["MIR", "IMP", "PAT", "COMP", "IMP_LARGE"];
 
+    /// The release version, under whatever name the configuration gives it.
+    ///
+    /// It is a run input, so like a workflow flag it must not reach the parse.
+    /// The configuration binds `TODAY ?= $(shell date …)`, and `?=` leaves an
+    /// existing binding alone — so a value seeded here survives the parse and is
+    /// expanded into every rule target built from it, freezing one release date
+    /// into the plan: on MONDO, `sources/$(TODAY)/doid.owl` becomes
+    /// `sources/2026-08-19/doid.owl` in 113 places. The plan then describes one
+    /// date and no other, and a run under any other date is told its plan is
+    /// stale — an instruction a repo with no build configuration cannot follow.
+    ///
+    /// Left out of the parse, `bind_release_version` resolves the version to
+    /// [`VERSION_REF`] afterwards and the plan carries one field the run reads.
+    ///
+    /// [`VERSION_REF`]: crate::plan::VERSION_REF
+    pub const RELEASE_VERSION_VARS: [&'static str; 2] = ["TODAY", "VERSION"];
+
+    /// Whether a command-line variable is a run input rather than configuration,
+    /// and so must not be bound while the configuration is parsed.
+    fn is_run_input(name: &str) -> bool {
+        Self::WORKFLOW_FLAGS.contains(&name) || Self::RELEASE_VERSION_VARS.contains(&name)
+    }
+
     /// Resolve `$(VERSION)` to a REFERENCE, and record what it defaults to.
     ///
     /// Called once the whole configuration is parsed (the override file may
@@ -223,7 +246,7 @@ impl MakeModel {
         // not in the list above, so it keeps whatever value the configuration
         // gives it unless this resolution asked for another — which is how the
         // recipe of a branch the plan did not take is read.
-        for (k, v) in flags.iter().filter(|(k, _)| !Self::WORKFLOW_FLAGS.contains(k)) {
+        for (k, v) in flags.iter().filter(|(k, _)| !Self::is_run_input(k)) {
             m.vars.insert(k.to_string(), v.to_string());
             m.command_line_vars.insert(k.to_string());
         }
@@ -244,10 +267,12 @@ impl MakeModel {
         // `$(wildcard ../patterns/data/default/*.tsv)`.
         m.base_dir = path.parent().map(|d| d.to_path_buf());
         for (k, v) in overrides {
-            // A workflow flag on the command line does NOT reach the parse: it
-            // would change which rules exist, and the plan is a function of the
-            // repo, not of the invocation. It is honoured at BUILD time instead.
-            if Self::WORKFLOW_FLAGS.contains(&k.as_str()) {
+            // A run input on the command line does NOT reach the parse: a
+            // workflow flag would change which rules exist, and the release
+            // version would be frozen into every path built from it. The plan is
+            // a function of the repo, not of the invocation; both are honoured at
+            // BUILD time instead.
+            if Self::is_run_input(&k) {
                 continue;
             }
             m.vars.insert(k.clone(), v.clone());
@@ -1166,16 +1191,30 @@ fn parse_eq_operands(s: &str) -> Option<(String, String)> {
 }
 
 fn strip_comment(line: &str) -> String {
-    // A '#' starts a comment unless escaped. Only non-recipe lines are stripped
-    // — every call site passes an assignment, rule or directive line — so a
-    // recipe line keeps any '#' it carries and hands it to the command intact.
+    // A '#' starts a comment unless an ODD number of backslashes precedes it, and
+    // recognising that escape CONSUMES one of them: the value of
+    // `SL_PREFIXES="PREFIX owl: <http://www.w3.org/2002/07/owl\#>"` holds `owl#`,
+    // and a query built from it is what reaches the SPARQL endpoint — `owl\#` is
+    // not an IRI.
+    //
+    // Only non-recipe lines are stripped — every call site passes an assignment,
+    // rule or directive line — so a recipe line keeps any '#' it carries and hands
+    // it to the command intact.
     let mut out = String::new();
-    let mut prev_backslash = false;
+    let mut backslashes = 0usize;
     for c in line.chars() {
-        if c == '#' && !prev_backslash {
-            break;
+        if c == '#' {
+            if backslashes % 2 == 0 {
+                break;
+            }
+            // Odd run: this '#' is literal. One backslash pays for the escape; any
+            // others stand, so `\\\#` keeps a backslash and the '#'.
+            out.pop();
+            out.push('#');
+            backslashes = 0;
+            continue;
         }
-        prev_backslash = c == '\\';
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
         out.push(c);
     }
     out

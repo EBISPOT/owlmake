@@ -337,7 +337,17 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
     }
 
     // prefix → predicate map from treat-xrefs-as-* plus --map-prefix-to-predicate.
-    let mut pred_map = treat_xrefs_predicates(&model);
+    //
+    // `--ignore-treat-xrefs` drops the ontology's own `treat-xrefs-as-*` tags, so
+    // only the prefixes named on the command line yield mappings. That is how a
+    // caller extracts one ontology's cross-references to a single target: ZFA
+    // declares `treat-xrefs-as-equivalent` for TAO, CARO and VSAO, and asking for
+    // `CL` alone means the other three prefixes contribute nothing.
+    let mut pred_map = if opts.has("ignore-treat-xrefs") {
+        std::collections::BTreeMap::new()
+    } else {
+        treat_xrefs_predicates(&model)
+    };
     for spec in opts.many("map_pred") {
         let mut it = spec.split_whitespace();
         if let (Some(p), Some(pred)) = (it.next(), it.next()) {

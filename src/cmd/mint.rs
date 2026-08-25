@@ -73,7 +73,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // closure: the closure is loaded for its labels, but only the root is
     // serialised. Best-effort: if the closure can't be loaded, banners fall back to
     // the entity CURIE.
-    let banner_labels = closure_labels(args.input.as_deref(), &args.common);
+    let banner_labels = crate::cmd::closure_labels(args.input.as_deref(), &args.common);
     // …and so is the set of entities the closure declares. The RDF/XML renderer
     // gives every signature entity a section, materialising a bare
     // `<owl:Class rdf:about="…"/>` stub for one nothing declares — unless an
@@ -83,7 +83,8 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // that neither the imports nor the edit file declares still gets its stub.
     // Only when this command owns the load: piped into a build pipeline there is
     // no `-i` to resolve a closure from, and the executor has already supplied it.
-    let declared = closure_declared(&model, args.input.as_deref(), &args.common);
+    let declared =
+        crate::cmd::closure_declared_signature(&model, args.input.as_deref(), &args.common);
     if !declared.is_empty() {
         model.closure_declared = declared;
     }
@@ -203,8 +204,6 @@ fn closure_labels(input: Option<&std::path::Path>, common: &crate::cmd::CommonAr
         }
     }
     labels
-}
-
 /// The signature of the import closure ALONE — the entities an imported
 /// ontology declares on the root's behalf, keyed as [`crate::build::closure_declared_entities`]
 /// keys them. Resolved from a scratch document carrying only the root's

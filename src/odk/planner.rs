@@ -676,11 +676,31 @@ fn plan_rule(
             stdout_file = robot::chain_stdout_file(&expanded, robot_prefix);
         }
         let mut line_steps = recorded_steps(&expanded, robot_prefix);
-        if command_lines > 0 {
-            if let Some(Step::Op(Op::Merge { inputs, restart, .. })) = line_steps.first_mut() {
-                if !inputs.is_empty() {
-                    *restart = true;
-                }
+        // A later line that is ITSELF a robot invocation naming its OWN input opens
+        // a new pipeline over that input: a separate process shares nothing with
+        // the last but files. Recording the boundary only for a line that happens
+        // to open with `merge --input` left every other opening op reading
+        // whatever the previous line had in memory — a CONSTRUCT's whole source
+        // ontology in place of the construct, or a query run against the wrong
+        // file entirely.
+        //
+        // Both conditions are load-bearing, and each was learnt from a build that
+        // came out wrong without it:
+        //
+        //  * a NON-robot line is a separate process too, but it neither takes nor
+        //    leaves an in-memory ontology, so the model in hand must SURVIVE it.
+        //    MONDO's `filtered.obo` is two `perl -ne …` filters and then a robot
+        //    invocation; resetting at the perl lines discarded the model the rest
+        //    of the recipe works on, growing four release artefacts by ~17 MB and
+        //    failing two outright. A shell line that rewrites the target on disk is
+        //    already handled downstream, by re-reading what it staged.
+        //  * a robot line naming NO input of its own continues from what it was
+        //    given, so it is not a boundary either. Every case that motivated this
+        //    — uPheno's bridge, OBA's PATO construct, EFO's legal_diseases — names
+        //    its input explicitly.
+        if command_lines > 0 && !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
+            if let Some(opens_with) = first_robot_input(&expanded, robot_prefix) {
+                line_steps.insert(0, Step::Boundary { input: Some(opens_with) });
             }
         }
         if !line_steps.is_empty() {
@@ -689,6 +709,13 @@ fn plan_rule(
         steps.extend(line_steps);
     }
     let mut input = recipe_input.or(prereq_input);
+    // A recipe whose ontology input is the target itself writes that file in an
+    // earlier step of the same recipe — `git show master:… > $@` ahead of
+    // `merge -i $@ reason -o $@.owl`. The rule PRODUCES its input, so recording it
+    // as one asks execution to build the target in order to build the target.
+    if input.as_deref() == Some(target) {
+        input = None;
+    }
     drop_target_round_trip(&mut steps, target);
     // A recipe that is nothing but recursive make is an aggregate wearing a
     // disguise: `feature_diff: make reports/a.txt -B; make reports/b.txt -B` says
@@ -2149,7 +2176,7 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
         // drop redundant subclass axioms. Relaxed/simple then remove equivalence
         // axioms; simple additionally keeps only native ID-space classes.
         let mut steps = vec![
-            Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None, restart: false }),
+            Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None }),
             Step::Op(Op::Relax { include_subclass_of: false }),
             Step::Op(Op::Reason {
                 reasoner: Some(reasoner),
@@ -2257,7 +2284,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         create_new_ontology_with_annotations: None,
         exclude_duplicate_axioms: None,
     };
-    let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None, restart: false };
+    let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None };
     let ann = |art: &str| {
         Op::Annotate(AnnotateSpec {
             ontology_iri: Some(format!("{ontbase}/{art}")),
@@ -2887,8 +2914,12 @@ fn kept_after_build(make: &MakeModel, path: &str) -> bool {
     if make.rules.values().any(|r| names(&r.prereqs) || names(&r.order_only)) {
         return true;
     }
-    // `.PRECIOUS` keeps what it covers, whether it names a file or a pattern.
-    make.rules.get(".PRECIOUS").is_some_and(|r| {
+    // `.PRECIOUS` and `.SECONDARY` both keep what they cover, whether they name a
+    // file or a pattern. `.SECONDARY` is the one that says "these are
+    // intermediates, but do not delete them", so a build configuration that
+    // declares it is asking for exactly the file the sweep would remove.
+    [".PRECIOUS", ".SECONDARY"].iter().any(|special| {
+    make.rules.get(*special).is_some_and(|r| {
         r.prereqs.iter().any(|p| {
             make.expand(p).split_whitespace().any(|t| {
                 super::makefile::match_pattern(t, path).is_some()
@@ -2897,6 +2928,7 @@ fn kept_after_build(make: &MakeModel, path: &str) -> bool {
                         .is_some_and(|(_, base)| super::makefile::match_pattern(t, base).is_some())
             })
         })
+    })
     })
 }
 
