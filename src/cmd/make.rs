@@ -284,17 +284,12 @@ fn mirror_target_id(plan: &Plan, target: &str) -> Option<String> {
     plan.imports.iter().any(|i| i.id == id).then_some(id)
 }
 
-/// Whether `target` names one of the DOSDP products the pattern stage writes —
-/// `definitions.owl` (the plan's `dosdp.output`) or the `pattern.owl` beside it.
+/// Whether `target` names one of the DOSDP products the pattern stage writes.
+/// The one answer is `pattern_product_targets`: whatever that enumeration names,
+/// this predicate accepts, so a product a caller can list is always one a caller
+/// can ask for.
 fn is_pattern_product(plan: &Plan, target: &str) -> bool {
-    let Some(d) = plan.dosdp.as_ref() else { return false };
-    if target == d.output {
-        return true;
-    }
-    std::path::Path::new(&d.output)
-        .parent()
-        .map(|p| p.join("pattern.owl"))
-        .is_some_and(|p| p.to_string_lossy() == target)
+    pattern_product_targets(plan).iter().any(|t| t == target)
 }
 
 /// Whether `target` names one of the plan's release artefacts (by filename,
