@@ -319,6 +319,39 @@ pub(crate) fn http_get(url: &str) -> Result<Vec<u8>> {
     http_get_dated(url).map(|(b, _)| b)
 }
 
+/// The forward proxy the environment configures for `url`, if any: the
+/// conventional `https_proxy` / `http_proxy` variables (either case), chosen by
+/// the URL's scheme. Transport only — a proxied fetch returns the same bytes a
+/// direct one would, it just reaches the network through the host the
+/// environment names.
+#[cfg(not(target_arch = "wasm32"))]
+fn env_proxy_for(url: &str) -> Option<ureq::Proxy> {
+    let names: [&str; 2] = if url.starts_with("http://") {
+        ["http_proxy", "HTTP_PROXY"]
+    } else {
+        ["https_proxy", "HTTPS_PROXY"]
+    };
+    let val = names.iter().find_map(|n| std::env::var(n).ok().filter(|v| !v.is_empty()))?;
+    ureq::Proxy::new(val).ok()
+}
+
+/// A ureq agent with the standard timeouts and the environment's proxy for
+/// `url`. Every fetch owlmake makes goes through here.
+#[cfg(not(target_arch = "wasm32"))]
+fn http_agent(url: &str) -> ureq::Agent {
+    // A READ timeout, not just a connect one. ureq waits forever by default,
+    // so a mirror fetch that stalls mid-body hangs the whole build with nothing
+    // on stdout, one idle socket open and no CPU. The caller's retry turns a
+    // stall into another attempt rather than a failure.
+    let mut b = ureq::builder()
+        .timeout_connect(std::time::Duration::from_secs(60))
+        .timeout_read(std::time::Duration::from_secs(300));
+    if let Some(p) = env_proxy_for(url) {
+        b = b.proxy(p);
+    }
+    b.build()
+}
+
 /// [`http_get`], also returning the response's `Last-Modified` header verbatim.
 ///
 /// A downloaded file's MTIME is load-bearing in a timestamp-driven build: the
@@ -339,14 +372,7 @@ pub(crate) fn http_get_dated(url: &str) -> Result<(Vec<u8>, Option<String>)> {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_secs(1u64 << (attempt - 1)));
         }
-        // A READ timeout, not just a connect one. ureq waits forever by default,
-        // so a mirror fetch that stalls mid-body hangs the whole build with nothing
-        // on stdout, one idle socket open and no CPU. The retry above turns a stall
-        // into another attempt rather than a failure.
-        let agent = ureq::builder()
-            .timeout_connect(std::time::Duration::from_secs(60))
-            .timeout_read(std::time::Duration::from_secs(300))
-            .build();
+        let agent = http_agent(url);
         match agent.get(url).call() {
             Ok(resp) => {
                 let last_modified = resp.header("Last-Modified").map(str::to_string);
@@ -378,10 +404,7 @@ pub(crate) fn http_get_body_any_status(url: &str) -> Result<Vec<u8>> {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_secs(1u64 << (attempt - 1)));
         }
-        let agent = ureq::builder()
-            .timeout_connect(std::time::Duration::from_secs(60))
-            .timeout_read(std::time::Duration::from_secs(300))
-            .build();
+        let agent = http_agent(url);
         let resp = match agent.get(url).call() {
             Ok(resp) => Some(resp),
             Err(ureq::Error::Status(code, resp)) if !(500..600).contains(&code) => Some(resp),
@@ -427,7 +450,7 @@ pub(crate) fn http_get(url: &str) -> Result<Vec<u8>> {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn http_post_json(url: &str, bearer: Option<&str>, body: &[u8]) -> Result<(u16, Vec<u8>)> {
     use std::io::Read as _;
-    let mut req = ureq::post(url).set("Content-Type", "application/json");
+    let mut req = http_agent(url).post(url).set("Content-Type", "application/json");
     if let Some(token) = bearer {
         req = req.set("Authorization", &format!("Bearer {token}"));
     }

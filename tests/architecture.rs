@@ -112,6 +112,13 @@ fn no_new_environment_variables_decide_output() {
         "OWLMAKE_TIMESTAMPS",
         "OWLMAKE_STACK_GIB",
         "COLUMNS",
+        // Transport plumbing: a proxied fetch returns the same bytes a direct
+        // one would, it just reaches the network through the host the
+        // environment names. What is PRODUCED is unchanged.
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
         // span/axiom tracing in remove/filter
         "OM_SPAN_LOG",
         // Traces which classes each subset closure round pulls in, and the

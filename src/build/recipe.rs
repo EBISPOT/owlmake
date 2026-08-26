@@ -962,6 +962,9 @@ const CHILD_ENV_ALLOWED: &[&str] = &[
     "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE",
     "TERM", "NO_COLOR", "OWLMAKE_COLOR", "COLUMNS",
     "OWLMAKE_PROGRESS", "OWLMAKE_TIMING", "OWLMAKE_TIMESTAMPS",
+    // Transport plumbing for a child's own fetches: a proxied fetch returns
+    // the same bytes a direct one would.
+    "http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY",
     "SYSTEMROOT", "USERPROFILE", "APPDATA", // Windows needs these to spawn
 ];
 
