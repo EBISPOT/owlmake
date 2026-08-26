@@ -493,6 +493,102 @@ pub fn hashset_order(hashes: &[i32]) -> Vec<usize> {
     hashset_order_of(hashes, hashes.len())
 }
 
+/// `OWLOntologyID.hashCode()` for an ontology named by `iri` and carrying no
+/// version IRI: `17 + 37 * (0x598df91c + iriHash)` — the inner term is the
+/// guava `Optional.Present` wrapper's hash around the IRI's own.
+pub fn ontology_id_hash(iri: &str) -> i32 {
+    17i32.wrapping_add(37i32.wrapping_mul(0x598d_f91c_i32.wrapping_add(iri_hash(iri))))
+}
+
+/// The table capacity a `java.util.concurrent.ConcurrentHashMap` ends at after
+/// `n` insertions: 16 slots, doubling whenever the count REACHES the 0.75
+/// threshold — one insertion earlier than `java.util.HashSet`, whose growth
+/// [`java_hashset_capacity`] models.
+fn java_chm_capacity(n: usize) -> usize {
+    let mut cap = 16usize;
+    while n >= cap * 3 / 4 {
+        cap *= 2;
+    }
+    cap
+}
+
+/// The order in which a functional-syntax label lookup visits the ontologies of
+/// a loaded import closure, deciding which document's `rdfs:label` banners an
+/// entity when several assert one.
+///
+/// The lookup walks the ontology MANAGER's set — a `java.util.HashSet` copied
+/// out of the manager's registration map (a `ConcurrentHashMap`) — and, for
+/// each ontology, that ontology's own imports closure as a `TreeSet` ordered by
+/// `OntologyID.toString()`. The first ontology visited that asserts a label for
+/// the entity names it. Three orders therefore compose:
+///
+///   1. registration order — the root first, then each import as it is loaded,
+///      depth-first in declaration order (`creation`);
+///   2. the `ConcurrentHashMap` values order — ascending table bin over the
+///      ontology-ID hashes, registration order within a bin;
+///   3. the `HashSet` iteration — ascending bin under ITS capacity, map-values
+///      order within a bin.
+///
+/// The composite walks (3); a named import contributes itself, and the root —
+/// whose closure is the whole set — flushes everything not yet visited in
+/// `TreeSet` order. `OntologyID.toString()` wraps the IRI as
+/// `OntologyID(OntologyIRI(<iri>) VersionIRI(<null>))`, so an ontology sorts
+/// AFTER the ontologies whose IRIs extend its own (`>` follows `/`), which
+/// places a typical root behind its imports.
+///
+/// `iris` are the ontology IRIs in registration order (root first); `direct[i]`
+/// are the indices each document imports, in declaration order. Returns visit
+/// order as indices into `iris`. Verified against ROBOT 1.9.7 (OWLAPI 4.5.29)
+/// over the 24-ontology EFO closure: 276 pairwise label probes reproduce all
+/// 24 positions.
+pub fn ontology_visit_order(iris: &[String], direct: &[Vec<usize>]) -> Vec<usize> {
+    let n = iris.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let spread: Vec<u32> = iris
+        .iter()
+        .map(|iri| {
+            let h = ontology_id_hash(iri) as u32;
+            h ^ (h >> 16)
+        })
+        .collect();
+
+    let chm_mask = java_chm_capacity(n) as u32 - 1;
+    let mut map_order: Vec<usize> = (0..n).collect();
+    map_order.sort_by_key(|&i| spread[i] & chm_mask);
+
+    let hs_mask = java_hashset_capacity(n) as u32 - 1;
+    let mut set_order = map_order;
+    set_order.sort_by_key(|&i| spread[i] & hs_mask);
+
+    // Reflexive transitive closure per ontology, then each in TreeSet order.
+    let tree_key = |i: usize| format!("OntologyID(OntologyIRI(<{}>) VersionIRI(<null>))", iris[i]);
+    let mut visited = vec![false; n];
+    let mut out = Vec::with_capacity(n);
+    for &i in &set_order {
+        let mut closure = Vec::new();
+        let mut seen = vec![false; n];
+        let mut stack = vec![i];
+        while let Some(j) = stack.pop() {
+            if seen[j] {
+                continue;
+            }
+            seen[j] = true;
+            closure.push(j);
+            stack.extend(direct[j].iter().copied());
+        }
+        closure.sort_by_key(|&j| tree_key(j));
+        for j in closure {
+            if !visited[j] {
+                visited[j] = true;
+                out.push(j);
+            }
+        }
+    }
+    out
+}
+
 /// The iteration order of a reasoner NODE's member classes: a size-derived
 /// table (capacity for `⌊n/0.75⌋+1`, no 16-slot floor) over the classes'
 /// content hashes, with same-bucket ties resolved by the DEFAULT-sized table
@@ -611,5 +707,78 @@ mod tests {
         assert_eq!(order[0], 2, "CL_4030101 first (bucket 0)");
         assert_eq!(order[1], 0, "CL_0002438 second (bucket 1)");
         assert_eq!(order[4], 1, "CL_4030100 last (bucket 9)");
+    }
+
+    /// Ground truth: ROBOT 1.9.7 (OWLAPI 4.5.29) over EFO's 24-ontology
+    /// closure — 276 pairwise-labelled probe classes, whose functional-syntax
+    /// banners read out the full visit order. The prefix is HashSet iteration
+    /// up to the root; the tail is the root's TreeSet closure flush, with the
+    /// root itself last (its `OntologyID(…)` string sorts after every IRI that
+    /// extends its own).
+    #[test]
+    fn ontology_visit_order_matches_owlapi() {
+        let base = "http://www.ebi.ac.uk/efo";
+        let names = [
+            "components/anatomagram_kidney.owl",
+            "components/anatomagram_liver.owl",
+            "components/anatomagram_lung.owl",
+            "components/anatomagram_pancreas.owl",
+            "components/anatomagram_placenta.owl",
+            "components/efo_equivalent_class_axioms.owl",
+            "components/gwas_import.owl",
+            "components/import_replaced_by.owl",
+            "components/subclasses.owl",
+            "imports/chebi_import.owl",
+            "imports/cl_import.owl",
+            "imports/ecto_import.owl",
+            "imports/fbbi_import.owl",
+            "imports/fbbt_import.owl",
+            "imports/go_import.owl",
+            "imports/gsso_import.owl",
+            "imports/hancestro_import.owl",
+            "imports/hp_import.owl",
+            "imports/mondo_import.owl",
+            "imports/oba_import.owl",
+            "imports/obi_import.owl",
+            "imports/pr_import.owl",
+            "imports/uberon_import.owl",
+        ];
+        let mut iris = vec![base.to_string()];
+        iris.extend(names.iter().map(|n| format!("{base}/{n}")));
+        let mut direct = vec![(1..iris.len()).collect::<Vec<_>>()];
+        direct.extend(std::iter::repeat_with(Vec::new).take(names.len()));
+
+        let order = ontology_visit_order(&iris, &direct);
+        let got: Vec<&str> = order
+            .iter()
+            .map(|&i| if i == 0 { "ROOT" } else { names[i - 1] })
+            .collect();
+        let want = [
+            "imports/uberon_import.owl",
+            "imports/gsso_import.owl",
+            "components/anatomagram_kidney.owl",
+            "components/anatomagram_lung.owl",
+            "imports/cl_import.owl",
+            "components/anatomagram_pancreas.owl",
+            "imports/fbbi_import.owl",
+            "imports/chebi_import.owl",
+            "components/efo_equivalent_class_axioms.owl",
+            "components/anatomagram_liver.owl",
+            "components/anatomagram_placenta.owl",
+            "components/gwas_import.owl",
+            "components/import_replaced_by.owl",
+            "components/subclasses.owl",
+            "imports/ecto_import.owl",
+            "imports/fbbt_import.owl",
+            "imports/go_import.owl",
+            "imports/hancestro_import.owl",
+            "imports/hp_import.owl",
+            "imports/mondo_import.owl",
+            "imports/oba_import.owl",
+            "imports/obi_import.owl",
+            "imports/pr_import.owl",
+            "ROOT",
+        ];
+        assert_eq!(got, want);
     }
 }

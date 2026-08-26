@@ -3710,7 +3710,7 @@ fn run_artefact(
             // where the read pushed it numbers the artefact's OWN nodes from after
             // a whole closure that is not in it.
             let mark = crate::io::anon_counter();
-            m.banner_labels = closure_banner_labels(&m, &repo.dir, catalog);
+            m.banner_labels = closure_banner_labels(&m, Some(&input), &repo.dir, catalog);
             crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
@@ -3920,8 +3920,14 @@ fn run_artefact(
             // and an entity the root only REFERENCES is labelled by the ontology
             // that declares it. `oba-edit.obo` gives `OBA:0000003` no `name:` at
             // all — the label is in the `patterns/definitions.owl` it imports — so
-            // without the closure every such section falls back to the IRI.
-            model.banner_labels = closure_labels(cl);
+            // without the closure every such section falls back to the IRI. The
+            // documents are read separately and composed by their visit order,
+            // like every banner-label map; the label reads spend no blank-node
+            // ids (see the same guard where the pipeline input's labels load).
+            let mark = crate::io::anon_counter();
+            let labels = closure_banner_labels(&model, None, &repo.dir, catalog);
+            crate::io::set_anon_counter(mark);
+            model.banner_labels = labels;
         }
         withdraw_materialised_declarations(&mut model);
     }
@@ -4654,37 +4660,6 @@ pub(crate) fn annotation_property_namespaces(model: &crate::model::Model) -> Vec
 /// in `filtered.owl`/`reasoned.owl`, and from there into `tmp/simple_seed.txt`
 /// (whose query asks for `?cls a owl:AnnotationProperty`), which keeps axioms
 /// `filter` must drop from `mondo-simple.owl`.
-/// `entity IRI → rdfs:label` across a resolved import closure, for the banner
-/// comment a functional document heads each entity's section with.
-///
-/// The FIRST label an entity carries wins, which is how a subject with several
-/// is settled everywhere else here.
-fn closure_labels(
-    model: &crate::model::Model,
-) -> std::collections::HashMap<String, String> {
-    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component, Literal};
-    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-    let mut labels = std::collections::HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() != RDFS_LABEL {
-                continue;
-            }
-            if let (AnnotationSubject::IRI(subj), AnnotationValue::Literal(lit)) =
-                (&aa.subject, &aa.ann.av)
-            {
-                let text = match lit {
-                    Literal::Simple { literal }
-                    | Literal::Language { literal, .. }
-                    | Literal::Datatype { literal, .. } => literal.clone(),
-                };
-                labels.entry(subj.as_ref().to_string()).or_insert(text);
-            }
-        }
-    }
-    labels
-}
-
 pub(crate) fn closure_declared_entities(
     model: &crate::model::Model,
 ) -> std::collections::HashSet<String> {
@@ -5928,23 +5903,67 @@ fn writes_functional_syntax(steps: &[Step]) -> bool {
     })
 }
 
-/// The banner label set for a document with an import closure: the labels its own
-/// axioms assert together with those its closure asserts, decided between by the
-/// one rule (`cmd::rdfs_labels`). Best-effort — a closure that cannot be read
-/// leaves the document's own labels, and banners fall back to the entity IRI.
+/// The banner label set for a document with an import closure: each document's
+/// own labels, composed by the documents' visit order
+/// (`owlapi_hash::ontology_visit_order`) — which document asserts a label
+/// decides which one banners the entity. Best-effort — a document that cannot
+/// be read is skipped, and banners fall back to the entity IRI.
 fn closure_banner_labels(
     model: &crate::model::Model,
+    input: Option<&Path>,
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
 ) -> std::collections::HashMap<String, String> {
-    let mut scratch = model.clone();
-    let mut seen = std::collections::HashSet::new();
-    if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
-        for f in &files {
-            let _ = merge_file_into(&mut scratch, f);
+    let root_imports = crate::cmd::imports_of(model);
+    let declared = input
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| import_iris(&t))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| {
+            let mut v = root_imports.clone();
+            v.sort();
+            v
+        });
+    let mut docs = crate::cmd::ClosureDocs::root(model, declared);
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut queue: Vec<String> = root_imports;
+    let mut seen_iris: std::collections::HashSet<String> = queue.iter().cloned().collect();
+    while let Some(iri) = queue.pop() {
+        // The plan's catalog map is the answer, as everywhere in the build —
+        // no sibling-directory probing. An IRI the catalog does not map is
+        // fetched (the same rule `import_closure_of_model` applies), but here a
+        // failure only costs the labels that document would have contributed.
+        let path = match catalog.get(&iri).cloned() {
+            Some(p) => p,
+            None => match fetch_import_iri(&iri, dir) {
+                Ok(p) => p,
+                Err(_) => continue,
+            },
+        };
+        let key = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if !seen.insert(key.clone()) {
+            docs.alias(&iri, &key);
+            continue;
         }
+        let Ok(doc) = crate::io::load(&path) else { continue };
+        let nested = crate::cmd::imports_of(&doc);
+        for n in &nested {
+            if seen_iris.insert(n.clone()) {
+                queue.push(n.clone());
+            }
+        }
+        let direct = std::fs::read_to_string(&path)
+            .ok()
+            .map(|t| import_iris(&t))
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                let mut v = nested;
+                v.sort();
+                v
+            });
+        docs.add(&iri, &doc, direct, Some(key));
     }
-    crate::cmd::rdfs_labels(&scratch)
+    docs.compose()
 }
 
 fn import_closure_of_model(
@@ -6614,20 +6633,23 @@ fn import_closure(
     Ok(out)
 }
 
-/// Extract import IRIs from OBO (`import:`) or OWL/OFN (`owl:imports`/`Import(...)`).
-fn import_iris(text: &str) -> Vec<String> {
+/// Extract import IRIs from OBO (`import:`) or OWL/OFN (`owl:imports`/`Import(...)`),
+/// in document order.
+pub(crate) fn import_iris(text: &str) -> Vec<String> {
+    const RDFXML: &str = "owl:imports rdf:resource=\"";
+    const OFN: &str = "Import(<";
     let mut v = Vec::new();
     for line in text.lines() {
         let t = line.trim();
         if let Some(rest) = t.strip_prefix("import:") {
             v.push(rest.trim().to_string());
-        } else if let Some(i) = t.find("owl:imports rdf:resource=\"") {
-            let s = &t[i + 25..];
+        } else if let Some(i) = t.find(RDFXML) {
+            let s = &t[i + RDFXML.len()..];
             if let Some(e) = s.find('"') {
                 v.push(s[..e].to_string());
             }
-        } else if let Some(i) = t.find("Import(<") {
-            let s = &t[i + 8..];
+        } else if let Some(i) = t.find(OFN) {
+            let s = &t[i + OFN.len()..];
             if let Some(e) = s.find('>') {
                 v.push(s[..e].to_string());
             }

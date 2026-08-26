@@ -231,6 +231,7 @@ pub(crate) fn closure_labels(input: Option<&std::path::Path>, common: &crate::cm
     // the label set the banners need; only the labels are read, then it is
     // discarded.
     match take_or_load(None, input, common) {
+        Ok(m) if !m.banner_labels.is_empty() => m.banner_labels,
         Ok(m) => rdfs_labels(&m),
         Err(_) => std::collections::HashMap::new(),
     }
@@ -336,21 +337,32 @@ pub(crate) fn merge_import_closure(
         .or_else(|| input.and_then(|p| p.parent().map(Path::to_path_buf)))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    resolve_import_closure(model, &map, &base)
+    resolve_import_closure(model, &map, &base, input)
 }
 
 /// Resolve and inline the `owl:imports` transitive closure using `map` (a
 /// catalog mapping, possibly empty) with a `default_local` fallback under `base`.
 /// Inlined imports are dropped so the result is self-contained. Used by both the
-/// `--catalog` path and `merge`'s implicit closure following.
+/// `--catalog` path and `merge`'s implicit closure following. `input` is the
+/// root document's own path, read (when given) for the order its `owl:imports`
+/// are declared in — one input to the banner-label precedence.
 pub(crate) fn resolve_import_closure(
     model: &mut Model,
     map: &std::collections::BTreeMap<String, std::path::PathBuf>,
     base: &Path,
+    input: Option<&Path>,
 ) -> Result<()> {
     let opts = crate::cmd::merge::MergeOptions::default();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: Vec<String> = imports_of(model);
+    // Which document asserts a label decides which one banners an entity, so
+    // the documents' label sets are collected separately here, before each one
+    // is merged away into the root.
+    let mut docs = if queue.is_empty() {
+        None
+    } else {
+        Some(ClosureDocs::root(model, declared_import_order(input, &queue)))
+    };
     // Say that this ran, and with how many imports, BEFORE resolving any. The
     // per-import lines below are printed only when there is something to print,
     // so their absence would otherwise be ambiguous between "this path resolves
@@ -371,11 +383,16 @@ pub(crate) fn resolve_import_closure(
         // document would be merged twice and charge its allocation total to the
         // base twice, numbering every anonymous individual downstream from too far
         // along.
+        let mut canonical: Option<std::path::PathBuf> = None;
         if let Some(p) = path.as_deref() {
             let key = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
             if !seen.insert(format!("\u{1}path\u{1}{}", key.display())) {
+                if let Some(d) = docs.as_mut() {
+                    d.alias(&iri, &key);
+                }
                 continue;
             }
+            canonical = Some(key);
         }
         let (imported, source) = match path {
             Some(path) => {
@@ -412,6 +429,11 @@ pub(crate) fn resolve_import_closure(
             if !seen.contains(&nested) {
                 queue.push(nested);
             }
+        }
+        if let Some(d) = docs.as_mut() {
+            let direct =
+                declared_import_order(canonical.as_deref(), &imports_of(&imported));
+            d.add(&iri, &imported, direct, canonical);
         }
         if std::env::var("OM_IMPORT_DEBUG").is_ok() {
             eprintln!(
@@ -481,13 +503,133 @@ pub(crate) fn resolve_import_closure(
         // A functional-syntax banner names its entity `# Class: <IRI> (label)`,
         // and the label is the one anywhere in the closure — an edit file that
         // only DECLARES a class still banners it with the label its imported
-        // pattern module asserts. The closure is inlined right now and is dropped
-        // again on save, so this is the one moment the whole label set is in hand.
+        // pattern module asserts. The closure was inlined right now and is
+        // dropped again on save, so this is the one moment the label sets were
+        // in hand per document; compose them by the documents' precedence.
         if model.banner_labels.is_empty() {
-            model.banner_labels = rdfs_labels(model);
+            model.banner_labels =
+                docs.as_ref().map(ClosureDocs::compose).unwrap_or_else(|| rdfs_labels(model));
         }
     }
     Ok(())
+}
+
+/// A root document's `owl:imports`, in the order the document declares them.
+/// Read from the document text when its path is known; otherwise the IRIs are
+/// sorted, so the answer is at least deterministic.
+fn declared_import_order(input: Option<&Path>, iris: &[String]) -> Vec<String> {
+    if let Some(text) = input.and_then(|p| std::fs::read_to_string(p).ok()) {
+        let declared = crate::build::import_iris(&text);
+        if !declared.is_empty() {
+            return declared;
+        }
+    }
+    let mut v = iris.to_vec();
+    v.sort();
+    v
+}
+
+/// The per-document label sets of a resolved import closure, kept apart while
+/// the closure loads — the only moment the documents exist separately — and
+/// composed into the banner-label map once the whole closure is in hand.
+pub(crate) struct ClosureDocs {
+    /// Per document: its ontology IRI, its own `subject → label` pick, and its
+    /// `owl:imports` in declaration order. Index 0 is the root.
+    docs: Vec<(String, std::collections::HashMap<String, String>, Vec<String>)>,
+    /// Import IRI / declared ontology IRI → index into `docs`.
+    by_iri: std::collections::HashMap<String, usize>,
+    /// Canonical document path → index, for a second import IRI naming a
+    /// document already loaded.
+    by_path: std::collections::HashMap<std::path::PathBuf, usize>,
+}
+
+impl ClosureDocs {
+    /// Start from the root document, with its imports in declaration order.
+    pub(crate) fn root(model: &Model, direct: Vec<String>) -> Self {
+        let iri = crate::cmd::merge::ontology_iri(model).unwrap_or_default();
+        let mut by_iri = std::collections::HashMap::new();
+        if !iri.is_empty() {
+            by_iri.insert(iri.clone(), 0);
+        }
+        ClosureDocs {
+            docs: vec![(iri, rdfs_labels(model), direct)],
+            by_iri,
+            by_path: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Record one loaded import document, before it is merged away.
+    pub(crate) fn add(
+        &mut self,
+        import_iri: &str,
+        doc: &Model,
+        direct: Vec<String>,
+        path: Option<std::path::PathBuf>,
+    ) {
+        let iri = crate::cmd::merge::ontology_iri(doc)
+            .unwrap_or_else(|| import_iri.to_string());
+        let idx = self.docs.len();
+        self.docs.push((iri.clone(), rdfs_labels(doc), direct));
+        self.by_iri.insert(import_iri.to_string(), idx);
+        self.by_iri.entry(iri).or_insert(idx);
+        if let Some(p) = path {
+            self.by_path.insert(p, idx);
+        }
+    }
+
+    /// A second import IRI resolved to a document already loaded: point the
+    /// IRI at that document.
+    pub(crate) fn alias(&mut self, import_iri: &str, path: &Path) {
+        if let Some(&idx) = self.by_path.get(path) {
+            self.by_iri.entry(import_iri.to_string()).or_insert(idx);
+        }
+    }
+
+    /// The banner-label map: each document's labels merged in the documents'
+    /// visit order ([`crate::owlapi_hash::ontology_visit_order`]), first
+    /// assertion per subject wins. The order the visit is computed over is
+    /// registration order — the root first, then each import depth-first in
+    /// declaration order, which is the order the documents load.
+    pub(crate) fn compose(&self) -> std::collections::HashMap<String, String> {
+        let n = self.docs.len();
+        let edges: Vec<Vec<usize>> = self
+            .docs
+            .iter()
+            .map(|(_, _, direct)| {
+                direct.iter().filter_map(|i| self.by_iri.get(i).copied()).collect()
+            })
+            .collect();
+        let mut reg = Vec::with_capacity(n);
+        let mut seen = vec![false; n];
+        let mut stack = vec![0usize];
+        while let Some(i) = stack.pop() {
+            if seen[i] {
+                continue;
+            }
+            seen[i] = true;
+            reg.push(i);
+            for &c in edges[i].iter().rev() {
+                stack.push(c);
+            }
+        }
+        for i in 0..n {
+            if !seen[i] {
+                reg.push(i);
+            }
+        }
+        let pos: std::collections::HashMap<usize, usize> =
+            reg.iter().enumerate().map(|(k, &i)| (i, k)).collect();
+        let iris: Vec<String> = reg.iter().map(|&i| self.docs[i].0.clone()).collect();
+        let direct: Vec<Vec<usize>> =
+            reg.iter().map(|&i| edges[i].iter().map(|j| pos[j]).collect()).collect();
+        let mut out = std::collections::HashMap::new();
+        for k in crate::owlapi_hash::ontology_visit_order(&iris, &direct) {
+            for (subj, label) in &self.docs[reg[k]].1 {
+                out.entry(subj.clone()).or_insert_with(|| label.clone());
+            }
+        }
+        out
+    }
 }
 
 /// Every `entity IRI → rdfs:label` the model asserts, for the functional-syntax
@@ -593,7 +735,7 @@ pub(crate) fn resolve_imports_auto(
         .and_then(|c| c.parent().map(Path::to_path_buf))
         .or_else(|| input.and_then(|p| p.parent().map(Path::to_path_buf)))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    resolve_import_closure(model, &map, &base)
+    resolve_import_closure(model, &map, &base, input)
 }
 
 /// An on-disk dataset [`materialize_tdb`] wrote, and exactly which of its paths
@@ -676,7 +818,7 @@ pub(crate) fn cleanup_tdb(tdb: Option<Tdb>, keep: bool) {
 }
 
 /// Collect the `owl:imports` IRIs declared by `model`.
-fn imports_of(model: &Model) -> Vec<String> {
+pub(crate) fn imports_of(model: &Model) -> Vec<String> {
     model
         .ont
         .iter()
