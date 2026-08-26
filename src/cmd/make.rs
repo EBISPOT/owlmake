@@ -723,11 +723,14 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // points that mean "rebuild the imports" would otherwise overrule it.
     let imports_pinned = matches!(make_vars.imports, Some(ImportsMode::Cached))
         || args.keep.iter().any(|g| g == "imports");
+    let mirrors_pinned =
+        make_vars.mir == Some(false) || args.keep.iter().any(|g| g == "mirrors");
     let run_opts = ExecOpts {
         imports_mode,
         patterns_mode,
         refresh_mirrors,
         imports_pinned,
+        mirrors_pinned,
         kept_groups,
         output_dir: output_dir.clone(),
         run_env: make_vars.env.clone(),
@@ -844,6 +847,7 @@ pub fn prepare_release(a: &TargetArgs) -> Result<()> {
         refresh_mirrors: true,
         // `--imports cached` on this command IS the caller pinning them.
         imports_pinned: matches!(imports_mode, ImportsMode::Cached),
+        mirrors_pinned: false,
         // This command takes no switches, so every group does what the plan says.
         kept_groups: default_kept_groups(&plan),
         output_dir,
@@ -912,6 +916,7 @@ fn default_exec_opts(repo: &OdkRepo) -> ExecOpts {
         // These commands take no flags, so the caller has pinned nothing: an
         // `all-imports`/`refresh-imports` entry point still means "rebuild".
         imports_pinned: false,
+        mirrors_pinned: false,
         kept_groups: Vec::new(),
         output_dir: repo.dir.clone(),
         run_env: Vec::new(),

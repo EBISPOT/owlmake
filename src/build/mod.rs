@@ -60,6 +60,11 @@ pub struct Repo<'a> {
     /// into rebuilding `mirror/merged.owl` from mirrors a release build never
     /// downloads.
     pub refresh_imports: bool,
+    /// The mirrors / imports group was pinned EXPLICITLY this run (`MIR=false`,
+    /// `IMP=false`, `--keep`). See [`ExecOpts::mirrors_pinned`]: it decides what
+    /// a pin means for a file that is absent.
+    pub mirrors_pinned: bool,
+    pub imports_pinned: bool,
     /// ODK `PAT`. FALSE means the DOSDP products are the committed ones, and the
     /// import seed's pattern half is extracted from `definitions.owl` rather than
     /// from the per-pattern term files — a different derivation, not a skipped
@@ -109,6 +114,8 @@ impl<'a> Repo<'a> {
             always_make: false,
             refresh_mirrors: true,
             refresh_imports: true,
+            mirrors_pinned: false,
+            imports_pinned: false,
             regenerate_patterns: true,
             kept_groups: Vec::new(),
             built: &repo.built,
@@ -128,6 +135,8 @@ impl<'a> Repo<'a> {
             always_make: opts.always_make,
             refresh_mirrors: opts.refresh_mirrors,
             refresh_imports: matches!(opts.imports_mode, ImportsMode::Fresh),
+            mirrors_pinned: opts.mirrors_pinned,
+            imports_pinned: opts.imports_pinned,
             regenerate_patterns: opts.patterns_mode == PatternsMode::Regenerate,
             kept_groups: plan
                 .refresh_groups
@@ -227,10 +236,10 @@ fn is_mirror_target(repo: &Repo, target: &str) -> bool {
 /// message about a pinned file has to say.
 fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
     if !repo.refresh_mirrors && is_mirror_target(repo, target) {
-        return Some(Pin { flag: "MIR".into(), group: "mirrors".into() });
+        return Some(Pin { flag: "MIR".into(), group: "mirrors".into(), explicit: repo.mirrors_pinned });
     }
     if !repo.refresh_imports && is_import_target(repo, target) {
-        return Some(Pin { flag: "IMP".into(), group: "imports".into() });
+        return Some(Pin { flag: "IMP".into(), group: "imports".into(), explicit: repo.imports_pinned });
     }
     // A group of a repository's own invention is a plain list of targets, so
     // membership is the whole test. Compared by filename as well as by path,
@@ -244,7 +253,10 @@ fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
     repo.kept_groups
         .iter()
         .find(|g| g.targets.iter().any(|t| same(t)))
-        .map(|g| Pin { flag: g.flag.clone(), group: g.name.clone() })
+        // A repo-invented group reaches `kept_groups` through one resolution for
+        // the run, so default and explicit are not distinguished here; treated
+        // as explicit, which keeps the strict answer for its absent files.
+        .map(|g| Pin { flag: g.flag.clone(), group: g.name.clone(), explicit: true })
 }
 
 /// Why a target is pinned: the switch that turned its rules off, and the group
@@ -252,6 +264,8 @@ fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
 struct Pin {
     flag: String,
     group: String,
+    /// Stated by the caller for THIS run, as against the group's default.
+    explicit: bool,
 }
 
 impl std::fmt::Display for Pin {
@@ -305,7 +319,20 @@ fn mirror_import_for<'p>(repo: &Repo<'p>, path: &str) -> Option<&'p crate::plan:
         let d = repo.var("MIRRORDIR");
         if d.is_empty() { "mirror".to_string() } else { d.to_string() }
     };
-    repo.plan.imports.iter().find(|i| path == format!("{dir}/{}.owl", i.id))
+    // Compared as PATHS, with a leading `./` normalized away — `components()`
+    // alone keeps that one. The recorded `$(MIRRORDIR)` is the configuration's
+    // own spelling — EFO writes `./mirror` — while a rule's prerequisite says
+    // `mirror/mondo.owl`, and only as paths do the two meet.
+    use std::path::Component;
+    let parts = |p: &str| {
+        std::path::Path::new(p)
+            .components()
+            .filter(|c| !matches!(c, Component::CurDir))
+            .map(|c| c.as_os_str().to_os_string())
+            .collect::<Vec<_>>()
+    };
+    let want = parts(path);
+    repo.plan.imports.iter().find(|i| parts(&format!("{dir}/{}.owl", i.id)) == want)
 }
 
 /// Whether a path names one of the DOSDP products owlmake writes natively
@@ -374,6 +401,14 @@ pub struct ExecOpts {
     /// module rules are not defined. Forcing the rebuild regardless re-mirrored
     /// every upstream and overwrote the committed merged import.
     pub imports_pinned: bool,
+    /// The run pinned the MIRRORS group explicitly (`MIR=false`, `--keep
+    /// mirrors`), as against the plan's `default: keep`. The two pins hold
+    /// different promises for a file that is ABSENT: an explicit pin was stated
+    /// about this run and an absent file under it is an error, while a group
+    /// default pins the content of files that exist — a target nothing ever
+    /// committed (EFO gitignores `imports/mondo_import.owl` and its mirror) has
+    /// no content to pin, and every fresh clone must build it once.
+    pub mirrors_pinned: bool,
     /// The plan's OTHER refresh groups that this run keeps, by name — everything
     /// beyond `mirrors`/`imports`/`patterns`, whose own fields above carry them.
     /// A kept group's targets are not in play: their rules exist only under the
@@ -625,7 +660,12 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // `ifeq ($(strip $(MIR)),true)`; unpinned, every `MIR=false` build
         // shipped a fresh fetch of a mapping set the reference left committed.
         // A pinned file that is absent is an error naming the switch.
-        let pinned = pinned_by(repo, &a.target);
+        let pinned = pinned_by(repo, &a.target).filter(|p| {
+            // A DEFAULT pin holds only for a file that exists — see
+            // `run_target_recipe_inner`, which decides the same question for a
+            // recipe target. An explicit pin holds either way.
+            p.explicit || repo.dir.join(&a.target).is_file()
+        });
         if let Some(switch) = pinned {
             if repo.dir.join(&a.target).is_file() {
                 status!("make: `{}` pinned ({switch})", a.target);
@@ -1587,7 +1627,11 @@ fn run_target_recipe_inner(
     // instead is a silent substitution of a different input (P5), and it is how a
     // `MIR=false` run came to overwrite pinned copies with today's upstream.
     if let Some(pin) = pinned_by(repo, target) {
-        if !repo.dir.join(target).exists() {
+        if repo.dir.join(target).exists() {
+            status!("make: `{target}` pinned ({pin})");
+            return Ok(());
+        }
+        if pin.explicit {
             bail!(
                 "`{target}` is pinned by {pin} but is not present. \
                  Under {pin} the rules that build it do not exist, so there is nothing to \
@@ -1596,8 +1640,16 @@ fn run_target_recipe_inner(
                 pin.group,
             );
         }
-        status!("make: `{target}` pinned ({pin})");
-        return Ok(());
+        // Kept only by the group's DEFAULT, and absent. The default pins the
+        // content of a file that exists; a target nothing committed (EFO
+        // gitignores `imports/mondo_import.owl`) has no content to pin, and
+        // refusing it would leave every fresh clone — CI first among them —
+        // unable to build at all. Said out loud, so the run reads as what it
+        // did; an explicit `{flag}=false` still refuses above.
+        status!(
+            "make: `{target}` is kept by default ({pin}) but absent — building it this once",
+            pin = pin
+        );
     }
 
     // An AGGREGATE target — prerequisites plus nothing but bookkeeping (EFO's
@@ -2806,13 +2858,20 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
     // nothing. A pinned input that is absent is an error, not a licence to go and
     // get a different one (P5).
     if !refresh {
-        bail!(
-            "mirror `{}` is pinned by MIR=false but {} is not present. \
-             Under MIR=false the mirror rules do not exist, so there is nothing to fetch it \
-             with — re-run with MIR=true (or `--rebuild mirrors`) to download it",
-            imp.id,
-            dest.display()
-        );
+        if repo.mirrors_pinned {
+            bail!(
+                "mirror `{}` is pinned by MIR=false but {} is not present. \
+                 Under MIR=false the mirror rules do not exist, so there is nothing to fetch it \
+                 with — re-run with MIR=true (or `--rebuild mirrors`) to download it",
+                imp.id,
+                dest.display()
+            );
+        }
+        // Kept by the group's default and absent: there is no pinned copy to
+        // build against, so the fetch is the only way any consumer proceeds.
+        // The explicit `MIR=false` above still refuses — that pin was stated
+        // about this run (P5) — and the fetch announces itself.
+        status!("make: mirror `{}` is kept by default but absent — fetching it this once", imp.id);
     }
     if !repo.built.borrow_mut().insert(once) && dest.exists() {
         return Ok(dest);
@@ -3551,7 +3610,11 @@ fn run_artefact(
             // `git show … > $@`, then `merge -i $@`). Nothing has built it yet
             // because nothing was supposed to.
             let self_input = i == a.target;
-            if names_ontology && !self_input && repo.target(i).is_some() {
+            // A mirror is as buildable as a planned target — `resolve_input`
+            // fetches it — so reaching here with one means that fetch FAILED,
+            // and carrying on from an empty model would bury the failure.
+            let buildable = repo.target(i).is_some() || mirror_import_for(repo, i).is_some();
+            if names_ontology && !self_input && buildable {
                 bail!(
                     "input `{i}` of `{}` was not built — its rule failed or was skipped, \
                      so there is nothing to build `{}` from",
@@ -6211,6 +6274,13 @@ fn resolve_input(
                 return Ok(tmp_ofn);
             }
         }
+    }
+    // A mirror carries no plan rule of its own — the import's `source` and
+    // `mirror_steps` ARE the mirror — so it resolves through the mirror
+    // machinery, which fetches an absent one or refuses under an explicit
+    // `MIR=false`, exactly as it does for the import pipeline.
+    if let Some(imp) = mirror_import_for(repo, inp) {
+        return ensure_mirror(repo, imp, repo.refresh_mirrors);
     }
     bail!(
         "could not resolve pipeline input `{inp}` (no file in {} or {}, and no buildable rule)",
