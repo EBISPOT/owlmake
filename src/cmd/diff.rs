@@ -299,9 +299,11 @@ fn render_markdown(
     d: &diff::Diff,
 ) -> anyhow::Result<String> {
     // The markdown renderer ALWAYS resolves labels, over both ontologies,
-    // independent of `--labels`.
-    let mut labels = label_map(left)?;
-    for (k, v) in label_map(right)? {
+    // independent of `--labels`. Where the two sides disagree — an entity
+    // relabelled between the releases being compared — the RIGHT side's label
+    // names it, frame headers included.
+    let mut labels = label_map(right)?;
+    for (k, v) in label_map(left)? {
         labels.entry(k).or_insert(v);
     }
 
@@ -426,7 +428,7 @@ fn sort_key(ac: &AnnotatedComponent<RcStr>) -> String {
 /// bullet in the committed reports.
 fn markdown_for_axiom(ac: &AnnotatedComponent<RcStr>, labels: &HashMap<String, String>) -> String {
     let body = render_axiom_md(&ac.component, labels);
-    let inner: Vec<String> = ac
+    let mut inner: Vec<String> = ac
         .ann
         .iter()
         .map(|a| {
@@ -437,7 +439,56 @@ fn markdown_for_axiom(ac: &AnnotatedComponent<RcStr>, labels: &HashMap<String, S
             )
         })
         .collect();
+    scala_hashset_order(&mut inner);
     format!("- {body} \n{}", inner.join("\n"))
+}
+
+/// Order rendered annotation bullets the way a Scala 2.13 `mutable.HashSet` of
+/// their strings iterates: the set a mapped collection builds. Each string hashes
+/// with Java's `String.hashCode`, improved by folding the high bits into the low
+/// (`h ^ (h >>> 16)`); the table starts at 16 slots and doubles as the 12th,
+/// 24th, … element arrives; iteration walks the slots in order, and a slot's
+/// chain keeps its nodes sorted by improved hash (equal hashes in insertion
+/// order). Growth splits each chain without reordering it, so the final order is
+/// exactly (slot under the final mask, improved hash, insertion index).
+fn scala_hashset_order(items: &mut [String]) {
+    fn java_string_hash(s: &str) -> i32 {
+        s.encode_utf16().fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(c as i32))
+    }
+    fn improve(h: i32) -> i32 {
+        (h as u32 ^ ((h as u32) >> 16)) as i32
+    }
+    let n = items.len();
+    let mut len: u32 = 16;
+    let mut threshold = 12; // 0.75 * 16
+    for i in 0..n {
+        if i + 1 >= threshold {
+            len *= 2;
+            threshold = (len as f64 * 0.75) as usize;
+        }
+    }
+    let mask = len - 1;
+    let mut keyed: Vec<(u32, i32, usize, String)> = items
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let h = improve(java_string_hash(s));
+            ((h as u32) & mask, h, i, s.clone())
+        })
+        .collect();
+    keyed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    for (dst, (_, _, _, s)) in items.iter_mut().zip(keyed) {
+        *dst = s;
+    }
+}
+
+/// N-ary class-axiom operands in rendering order (ascending structural order).
+fn sorted_ces(
+    ops: &[horned_owl::model::ClassExpression<RcStr>],
+) -> Vec<&horned_owl::model::ClassExpression<RcStr>> {
+    let mut v: Vec<_> = ops.iter().collect();
+    v.sort_by(|a, b| crate::io::owlfunc::cmp_ce(a, b));
+    v
 }
 
 /// The frame a component belongs to, keyed by the axiom's subject.
@@ -652,11 +703,30 @@ fn render_axiom_md(c: &Component<RcStr>, labels: &HashMap<String, String>) -> St
         DeclareNamedIndividual(d) => format!("Individual: {}", md_iri(d.0 .0.as_ref(), labels)),
         DeclareDatatype(d) => format!("Datatype: {}", md_iri(d.0 .0.as_ref(), labels)),
         SubClassOf(a) => format!("{} SubClassOf {}", ce(&a.sub), ce(&a.sup)),
+        // A two-member equivalence or disjointness is written infix over its
+        // operands in expression order; a longer one takes the section keyword
+        // and a comma list, in the same order.
         EquivalentClasses(a) => {
-            a.0.iter().map(ce).collect::<Vec<_>>().join(" EquivalentTo ")
+            let ops = sorted_ces(&a.0);
+            if ops.len() == 2 {
+                format!("{} EquivalentTo {}", ce(ops[0]), ce(ops[1]))
+            } else {
+                format!(
+                    "EquivalentClasses: {}",
+                    ops.iter().map(|x| ce(x)).collect::<Vec<_>>().join(", ")
+                )
+            }
         }
         DisjointClasses(a) => {
-            format!("DisjointClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
+            let ops = sorted_ces(&a.0);
+            if ops.len() == 2 {
+                format!("{} DisjointWith {}", ce(ops[0]), ce(ops[1]))
+            } else {
+                format!(
+                    "DisjointClasses: {}",
+                    ops.iter().map(|x| ce(x)).collect::<Vec<_>>().join(", ")
+                )
+            }
         }
         AnnotationAssertion(a) => format!(
             "{} {} {}",
@@ -763,12 +833,14 @@ fn render_ce_md(
         CE::ObjectUnionOf(v) => {
             v.iter().map(|x| bracket_operand_md(x, labels)).collect::<Vec<_>>().join(" or ")
         }
-        CE::ObjectComplementOf(b) => format!("not {}", rec(b)),
+        // A complement is always parenthesized: the complement expression is
+        // itself anonymous, whatever its operand is.
+        CE::ObjectComplementOf(b) => format!("not ({})", rec(b)),
         CE::ObjectSomeValuesFrom { ope, bce } => {
-            format!("{} some {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} some {}", render_ope_md(ope, labels), quantified_filler_md(bce, labels))
         }
         CE::ObjectAllValuesFrom { ope, bce } => {
-            format!("{} only {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} only {}", render_ope_md(ope, labels), quantified_filler_md(bce, labels))
         }
         CE::ObjectHasValue { ope, i } => format!(
             "{} value {}",
@@ -776,13 +848,13 @@ fn render_ce_md(
             render_individual_md(i, labels)
         ),
         CE::ObjectMinCardinality { n, ope, bce } => {
-            format!("{} min {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} min {n} {}", render_ope_md(ope, labels), quantified_filler_md(bce, labels))
         }
         CE::ObjectMaxCardinality { n, ope, bce } => {
-            format!("{} max {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} max {n} {}", render_ope_md(ope, labels), quantified_filler_md(bce, labels))
         }
         CE::ObjectExactCardinality { n, ope, bce } => {
-            format!("{} exactly {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} exactly {n} {}", render_ope_md(ope, labels), quantified_filler_md(bce, labels))
         }
         CE::ObjectHasSelf(ope) => format!("{} Self", render_ope_md(ope, labels)),
         CE::ObjectOneOf(v) => format!(
@@ -799,6 +871,20 @@ fn render_ce_md(
             format!("{} value {}", md_iri(dp.0.as_ref(), labels), render_literal_md(l, labels))
         }
         other => format!("{other:?}"),
+    }
+}
+
+
+/// A quantified restriction's filler: a named class stands bare, an anonymous
+/// expression is parenthesized.
+fn quantified_filler_md(
+    bce: &horned_owl::model::ClassExpression<RcStr>,
+    labels: &HashMap<String, String>,
+) -> String {
+    use horned_owl::model::ClassExpression as CE;
+    match bce {
+        CE::Class(_) => render_ce_md(bce, labels),
+        _ => format!("({})", render_ce_md(bce, labels)),
     }
 }
 
@@ -835,6 +921,273 @@ fn render_annval_md(
     }
 }
 
+
+/// Escape a literal's text the way the reference diff writes it: the HTML 4
+/// entity set — `&`, `<`, `>`, `"` and every character with a named HTML 4
+/// entity (ISO-8859-1 and the extended punctuation/Greek set); everything else
+/// passes through.
+fn escape_html4(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("&quot;"),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+        '\u{a0}' => out.push_str("&nbsp;"),
+        '\u{a1}' => out.push_str("&iexcl;"),
+        '\u{a2}' => out.push_str("&cent;"),
+        '\u{a3}' => out.push_str("&pound;"),
+        '\u{a4}' => out.push_str("&curren;"),
+        '\u{a5}' => out.push_str("&yen;"),
+        '\u{a6}' => out.push_str("&brvbar;"),
+        '\u{a7}' => out.push_str("&sect;"),
+        '\u{a8}' => out.push_str("&uml;"),
+        '\u{a9}' => out.push_str("&copy;"),
+        '\u{aa}' => out.push_str("&ordf;"),
+        '\u{ab}' => out.push_str("&laquo;"),
+        '\u{ac}' => out.push_str("&not;"),
+        '\u{ad}' => out.push_str("&shy;"),
+        '\u{ae}' => out.push_str("&reg;"),
+        '\u{af}' => out.push_str("&macr;"),
+        '\u{b0}' => out.push_str("&deg;"),
+        '\u{b1}' => out.push_str("&plusmn;"),
+        '\u{b2}' => out.push_str("&sup2;"),
+        '\u{b3}' => out.push_str("&sup3;"),
+        '\u{b4}' => out.push_str("&acute;"),
+        '\u{b5}' => out.push_str("&micro;"),
+        '\u{b6}' => out.push_str("&para;"),
+        '\u{b7}' => out.push_str("&middot;"),
+        '\u{b8}' => out.push_str("&cedil;"),
+        '\u{b9}' => out.push_str("&sup1;"),
+        '\u{ba}' => out.push_str("&ordm;"),
+        '\u{bb}' => out.push_str("&raquo;"),
+        '\u{bc}' => out.push_str("&frac14;"),
+        '\u{bd}' => out.push_str("&frac12;"),
+        '\u{be}' => out.push_str("&frac34;"),
+        '\u{bf}' => out.push_str("&iquest;"),
+        '\u{c0}' => out.push_str("&Agrave;"),
+        '\u{c1}' => out.push_str("&Aacute;"),
+        '\u{c2}' => out.push_str("&Acirc;"),
+        '\u{c3}' => out.push_str("&Atilde;"),
+        '\u{c4}' => out.push_str("&Auml;"),
+        '\u{c5}' => out.push_str("&Aring;"),
+        '\u{c6}' => out.push_str("&AElig;"),
+        '\u{c7}' => out.push_str("&Ccedil;"),
+        '\u{c8}' => out.push_str("&Egrave;"),
+        '\u{c9}' => out.push_str("&Eacute;"),
+        '\u{ca}' => out.push_str("&Ecirc;"),
+        '\u{cb}' => out.push_str("&Euml;"),
+        '\u{cc}' => out.push_str("&Igrave;"),
+        '\u{cd}' => out.push_str("&Iacute;"),
+        '\u{ce}' => out.push_str("&Icirc;"),
+        '\u{cf}' => out.push_str("&Iuml;"),
+        '\u{d0}' => out.push_str("&ETH;"),
+        '\u{d1}' => out.push_str("&Ntilde;"),
+        '\u{d2}' => out.push_str("&Ograve;"),
+        '\u{d3}' => out.push_str("&Oacute;"),
+        '\u{d4}' => out.push_str("&Ocirc;"),
+        '\u{d5}' => out.push_str("&Otilde;"),
+        '\u{d6}' => out.push_str("&Ouml;"),
+        '\u{d7}' => out.push_str("&times;"),
+        '\u{d8}' => out.push_str("&Oslash;"),
+        '\u{d9}' => out.push_str("&Ugrave;"),
+        '\u{da}' => out.push_str("&Uacute;"),
+        '\u{db}' => out.push_str("&Ucirc;"),
+        '\u{dc}' => out.push_str("&Uuml;"),
+        '\u{dd}' => out.push_str("&Yacute;"),
+        '\u{de}' => out.push_str("&THORN;"),
+        '\u{df}' => out.push_str("&szlig;"),
+        '\u{e0}' => out.push_str("&agrave;"),
+        '\u{e1}' => out.push_str("&aacute;"),
+        '\u{e2}' => out.push_str("&acirc;"),
+        '\u{e3}' => out.push_str("&atilde;"),
+        '\u{e4}' => out.push_str("&auml;"),
+        '\u{e5}' => out.push_str("&aring;"),
+        '\u{e6}' => out.push_str("&aelig;"),
+        '\u{e7}' => out.push_str("&ccedil;"),
+        '\u{e8}' => out.push_str("&egrave;"),
+        '\u{e9}' => out.push_str("&eacute;"),
+        '\u{ea}' => out.push_str("&ecirc;"),
+        '\u{eb}' => out.push_str("&euml;"),
+        '\u{ec}' => out.push_str("&igrave;"),
+        '\u{ed}' => out.push_str("&iacute;"),
+        '\u{ee}' => out.push_str("&icirc;"),
+        '\u{ef}' => out.push_str("&iuml;"),
+        '\u{f0}' => out.push_str("&eth;"),
+        '\u{f1}' => out.push_str("&ntilde;"),
+        '\u{f2}' => out.push_str("&ograve;"),
+        '\u{f3}' => out.push_str("&oacute;"),
+        '\u{f4}' => out.push_str("&ocirc;"),
+        '\u{f5}' => out.push_str("&otilde;"),
+        '\u{f6}' => out.push_str("&ouml;"),
+        '\u{f7}' => out.push_str("&divide;"),
+        '\u{f8}' => out.push_str("&oslash;"),
+        '\u{f9}' => out.push_str("&ugrave;"),
+        '\u{fa}' => out.push_str("&uacute;"),
+        '\u{fb}' => out.push_str("&ucirc;"),
+        '\u{fc}' => out.push_str("&uuml;"),
+        '\u{fd}' => out.push_str("&yacute;"),
+        '\u{fe}' => out.push_str("&thorn;"),
+        '\u{ff}' => out.push_str("&yuml;"),
+        '\u{192}' => out.push_str("&fnof;"),
+        '\u{391}' => out.push_str("&Alpha;"),
+        '\u{392}' => out.push_str("&Beta;"),
+        '\u{393}' => out.push_str("&Gamma;"),
+        '\u{394}' => out.push_str("&Delta;"),
+        '\u{395}' => out.push_str("&Epsilon;"),
+        '\u{396}' => out.push_str("&Zeta;"),
+        '\u{397}' => out.push_str("&Eta;"),
+        '\u{398}' => out.push_str("&Theta;"),
+        '\u{399}' => out.push_str("&Iota;"),
+        '\u{39a}' => out.push_str("&Kappa;"),
+        '\u{39b}' => out.push_str("&Lambda;"),
+        '\u{39c}' => out.push_str("&Mu;"),
+        '\u{39d}' => out.push_str("&Nu;"),
+        '\u{39e}' => out.push_str("&Xi;"),
+        '\u{39f}' => out.push_str("&Omicron;"),
+        '\u{3a0}' => out.push_str("&Pi;"),
+        '\u{3a1}' => out.push_str("&Rho;"),
+        '\u{3a3}' => out.push_str("&Sigma;"),
+        '\u{3a4}' => out.push_str("&Tau;"),
+        '\u{3a5}' => out.push_str("&Upsilon;"),
+        '\u{3a6}' => out.push_str("&Phi;"),
+        '\u{3a7}' => out.push_str("&Chi;"),
+        '\u{3a8}' => out.push_str("&Psi;"),
+        '\u{3a9}' => out.push_str("&Omega;"),
+        '\u{3b1}' => out.push_str("&alpha;"),
+        '\u{3b2}' => out.push_str("&beta;"),
+        '\u{3b3}' => out.push_str("&gamma;"),
+        '\u{3b4}' => out.push_str("&delta;"),
+        '\u{3b5}' => out.push_str("&epsilon;"),
+        '\u{3b6}' => out.push_str("&zeta;"),
+        '\u{3b7}' => out.push_str("&eta;"),
+        '\u{3b8}' => out.push_str("&theta;"),
+        '\u{3b9}' => out.push_str("&iota;"),
+        '\u{3ba}' => out.push_str("&kappa;"),
+        '\u{3bb}' => out.push_str("&lambda;"),
+        '\u{3bc}' => out.push_str("&mu;"),
+        '\u{3bd}' => out.push_str("&nu;"),
+        '\u{3be}' => out.push_str("&xi;"),
+        '\u{3bf}' => out.push_str("&omicron;"),
+        '\u{3c0}' => out.push_str("&pi;"),
+        '\u{3c1}' => out.push_str("&rho;"),
+        '\u{3c2}' => out.push_str("&sigmaf;"),
+        '\u{3c3}' => out.push_str("&sigma;"),
+        '\u{3c4}' => out.push_str("&tau;"),
+        '\u{3c5}' => out.push_str("&upsilon;"),
+        '\u{3c6}' => out.push_str("&phi;"),
+        '\u{3c7}' => out.push_str("&chi;"),
+        '\u{3c8}' => out.push_str("&psi;"),
+        '\u{3c9}' => out.push_str("&omega;"),
+        '\u{3d1}' => out.push_str("&thetasym;"),
+        '\u{3d2}' => out.push_str("&upsih;"),
+        '\u{3d6}' => out.push_str("&piv;"),
+        '\u{2022}' => out.push_str("&bull;"),
+        '\u{2026}' => out.push_str("&hellip;"),
+        '\u{2032}' => out.push_str("&prime;"),
+        '\u{2033}' => out.push_str("&Prime;"),
+        '\u{203e}' => out.push_str("&oline;"),
+        '\u{2044}' => out.push_str("&frasl;"),
+        '\u{2118}' => out.push_str("&weierp;"),
+        '\u{2111}' => out.push_str("&image;"),
+        '\u{211c}' => out.push_str("&real;"),
+        '\u{2122}' => out.push_str("&trade;"),
+        '\u{2135}' => out.push_str("&alefsym;"),
+        '\u{2190}' => out.push_str("&larr;"),
+        '\u{2191}' => out.push_str("&uarr;"),
+        '\u{2192}' => out.push_str("&rarr;"),
+        '\u{2193}' => out.push_str("&darr;"),
+        '\u{2194}' => out.push_str("&harr;"),
+        '\u{21b5}' => out.push_str("&crarr;"),
+        '\u{21d0}' => out.push_str("&lArr;"),
+        '\u{21d1}' => out.push_str("&uArr;"),
+        '\u{21d2}' => out.push_str("&rArr;"),
+        '\u{21d3}' => out.push_str("&dArr;"),
+        '\u{21d4}' => out.push_str("&hArr;"),
+        '\u{2200}' => out.push_str("&forall;"),
+        '\u{2202}' => out.push_str("&part;"),
+        '\u{2203}' => out.push_str("&exist;"),
+        '\u{2205}' => out.push_str("&empty;"),
+        '\u{2207}' => out.push_str("&nabla;"),
+        '\u{2208}' => out.push_str("&isin;"),
+        '\u{2209}' => out.push_str("&notin;"),
+        '\u{220b}' => out.push_str("&ni;"),
+        '\u{220f}' => out.push_str("&prod;"),
+        '\u{2211}' => out.push_str("&sum;"),
+        '\u{2212}' => out.push_str("&minus;"),
+        '\u{2217}' => out.push_str("&lowast;"),
+        '\u{221a}' => out.push_str("&radic;"),
+        '\u{221d}' => out.push_str("&prop;"),
+        '\u{221e}' => out.push_str("&infin;"),
+        '\u{2220}' => out.push_str("&ang;"),
+        '\u{2227}' => out.push_str("&and;"),
+        '\u{2228}' => out.push_str("&or;"),
+        '\u{2229}' => out.push_str("&cap;"),
+        '\u{222a}' => out.push_str("&cup;"),
+        '\u{222b}' => out.push_str("&int;"),
+        '\u{2234}' => out.push_str("&there4;"),
+        '\u{223c}' => out.push_str("&sim;"),
+        '\u{2245}' => out.push_str("&cong;"),
+        '\u{2248}' => out.push_str("&asymp;"),
+        '\u{2260}' => out.push_str("&ne;"),
+        '\u{2261}' => out.push_str("&equiv;"),
+        '\u{2264}' => out.push_str("&le;"),
+        '\u{2265}' => out.push_str("&ge;"),
+        '\u{2282}' => out.push_str("&sub;"),
+        '\u{2283}' => out.push_str("&sup;"),
+        '\u{2284}' => out.push_str("&nsub;"),
+        '\u{2286}' => out.push_str("&sube;"),
+        '\u{2287}' => out.push_str("&supe;"),
+        '\u{2295}' => out.push_str("&oplus;"),
+        '\u{2297}' => out.push_str("&otimes;"),
+        '\u{22a5}' => out.push_str("&perp;"),
+        '\u{22c5}' => out.push_str("&sdot;"),
+        '\u{2308}' => out.push_str("&lceil;"),
+        '\u{2309}' => out.push_str("&rceil;"),
+        '\u{230a}' => out.push_str("&lfloor;"),
+        '\u{230b}' => out.push_str("&rfloor;"),
+        '\u{2329}' => out.push_str("&lang;"),
+        '\u{232a}' => out.push_str("&rang;"),
+        '\u{25ca}' => out.push_str("&loz;"),
+        '\u{2660}' => out.push_str("&spades;"),
+        '\u{2663}' => out.push_str("&clubs;"),
+        '\u{2665}' => out.push_str("&hearts;"),
+        '\u{2666}' => out.push_str("&diams;"),
+        '\u{152}' => out.push_str("&OElig;"),
+        '\u{153}' => out.push_str("&oelig;"),
+        '\u{160}' => out.push_str("&Scaron;"),
+        '\u{161}' => out.push_str("&scaron;"),
+        '\u{178}' => out.push_str("&Yuml;"),
+        '\u{2c6}' => out.push_str("&circ;"),
+        '\u{2dc}' => out.push_str("&tilde;"),
+        '\u{2002}' => out.push_str("&ensp;"),
+        '\u{2003}' => out.push_str("&emsp;"),
+        '\u{2009}' => out.push_str("&thinsp;"),
+        '\u{200c}' => out.push_str("&zwnj;"),
+        '\u{200d}' => out.push_str("&zwj;"),
+        '\u{200e}' => out.push_str("&lrm;"),
+        '\u{200f}' => out.push_str("&rlm;"),
+        '\u{2013}' => out.push_str("&ndash;"),
+        '\u{2014}' => out.push_str("&mdash;"),
+        '\u{2018}' => out.push_str("&lsquo;"),
+        '\u{2019}' => out.push_str("&rsquo;"),
+        '\u{201a}' => out.push_str("&sbquo;"),
+        '\u{201c}' => out.push_str("&ldquo;"),
+        '\u{201d}' => out.push_str("&rdquo;"),
+        '\u{201e}' => out.push_str("&bdquo;"),
+        '\u{2020}' => out.push_str("&dagger;"),
+        '\u{2021}' => out.push_str("&Dagger;"),
+        '\u{2030}' => out.push_str("&permil;"),
+        '\u{2039}' => out.push_str("&lsaquo;"),
+        '\u{203a}' => out.push_str("&rsaquo;"),
+        '\u{20ac}' => out.push_str("&euro;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// `"lex"`, `"lex"@lang`, or `"lex"^^[short](datatype)` — the datatype is itself
 /// a markdown link, e.g. `"2026-06-08"^^[string](http://www.w3.org/2001/XMLSchema#string)`.
 fn render_literal_md(
@@ -843,11 +1196,17 @@ fn render_literal_md(
 ) -> String {
     use horned_owl::model::Literal;
     match l {
-        Literal::Simple { literal } => format!("{:?}", literal),
-        Literal::Language { literal, lang } => format!("{:?}@{lang}", literal),
-        Literal::Datatype { literal, datatype_iri } => {
-            format!("{:?}^^{}", literal, md_iri(datatype_iri.as_ref(), labels))
-        }
+        Literal::Simple { literal } => format!("\"{}\"", escape_html4(literal)),
+        Literal::Language { literal, lang } => format!("\"{}\"@{lang}", escape_html4(literal)),
+        Literal::Datatype { literal, datatype_iri } => match datatype_iri.as_ref() {
+            // Numeric and boolean literals are written bare; a float carries an
+            // `f` suffix. Everything else is quoted with its datatype linked.
+            "http://www.w3.org/2001/XMLSchema#decimal"
+            | "http://www.w3.org/2001/XMLSchema#integer"
+            | "http://www.w3.org/2001/XMLSchema#boolean" => literal.to_string(),
+            "http://www.w3.org/2001/XMLSchema#float" => format!("{literal}f"),
+            _ => format!("\"{}\"^^{}", escape_html4(literal), md_iri(datatype_iri.as_ref(), labels)),
+        },
     }
 }
 
