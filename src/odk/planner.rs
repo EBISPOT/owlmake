@@ -2125,6 +2125,136 @@ fn plan_prerequisites(
             &mut budget,
         );
     }
+
+    // …and every pattern rule, instantiated at the stems its prerequisites
+    // admit. A pattern rule offers a FAMILY of named targets (`dump_<id>`,
+    // `<id>_terms_in_src`), and an instance is buildable whenever its
+    // substituted prerequisites can be produced — so the plan names those
+    // instances, or the whole family is unrunnable from the plan alone. Stems
+    // are discovered by matching each rule's `%`-bearing prerequisites against
+    // the repo's files and the mirrors the plan itself fetches; an instance is
+    // recorded only when every prerequisite resolves — an existing file, a
+    // plan-fetched mirror, or a target some rule can build, recursively. A
+    // pattern rule with no `%`-bearing prerequisite is skipped: its stem
+    // universe is unbounded, so there is no set of instances to name.
+    {
+        use std::collections::BTreeSet;
+        let mirror_names: HashSet<String> =
+            imports.iter().map(|i| format!("mirror/{}.owl", i.id)).collect();
+        let mut candidates: BTreeSet<String> = BTreeSet::new();
+        for r in &make.pattern_rules {
+            for tp in &r.targets {
+                if !tp.contains('%') {
+                    continue;
+                }
+                for w in expanded_prereqs(repo, r, Some("%"), tp) {
+                    if !w.contains('%') {
+                        continue;
+                    }
+                    candidates.extend(glob_stems(&repo.dir, &w));
+                    for m in &mirror_names {
+                        if let Some(stem) = super::makefile::match_pattern(&w, m) {
+                            candidates.insert(stem);
+                        }
+                    }
+                }
+            }
+        }
+        fn satisfiable(
+            repo: &OdkRepo,
+            make: &super::makefile::MakeModel,
+            mirrors: &HashSet<String>,
+            target: &str,
+            depth: usize,
+            budget: &mut usize,
+        ) -> bool {
+            if *budget == 0 || depth == 0 {
+                return false;
+            }
+            *budget -= 1;
+            if mirrors.contains(target) || repo.dir.join(target).exists() {
+                return true;
+            }
+            let Some((rule, stem)) = make.rule_for(target) else { return false };
+            expanded_prereqs(repo, rule, stem.as_deref(), target)
+                .iter()
+                .all(|p| satisfiable(repo, make, mirrors, p, depth - 1, budget))
+        }
+        let mut instances: BTreeSet<String> = BTreeSet::new();
+        for r in &make.pattern_rules {
+            for tp in &r.targets {
+                if !tp.contains('%') {
+                    continue;
+                }
+                let wild = expanded_prereqs(repo, r, Some("%"), tp)
+                    .iter()
+                    .any(|p| p.contains('%'));
+                if !wild {
+                    continue;
+                }
+                for stem in &candidates {
+                    let concrete = tp.replace('%', stem);
+                    if make.rules.contains_key(&concrete)
+                        || planned.contains(&concrete)
+                        || is_artefact.contains(concrete.as_str())
+                        || native.contains(&concrete)
+                    {
+                        continue;
+                    }
+                    let Some((rule, rstem)) = make.rule_for(&concrete) else { continue };
+                    let mut fuel = 512usize;
+                    let ok = expanded_prereqs(repo, rule, rstem.as_deref(), &concrete)
+                        .iter()
+                        .all(|p| satisfiable(repo, make, &mirror_names, p, 12, &mut fuel));
+                    if ok {
+                        instances.insert(concrete);
+                    }
+                }
+            }
+        }
+        for t in instances {
+            visit(
+                repo,
+                make,
+                robot_prefix,
+                &t,
+                64,
+                &is_artefact,
+                &native,
+                &mut planned,
+                &mut out,
+                &mut budget,
+            );
+        }
+    }
+    out
+}
+
+/// The stems under which a `%`-bearing path pattern matches an existing file:
+/// the pattern's directory is scanned and each entry matching the prefix and
+/// suffix around the `%` yields its stem. A pattern whose `%` would have to
+/// span a directory separator matches nothing.
+fn glob_stems(dir: &Path, pattern: &str) -> Vec<String> {
+    let Some((pre, suf)) = pattern.split_once('%') else { return Vec::new() };
+    if suf.contains('/') {
+        return Vec::new();
+    }
+    let cut = pre.rfind('/').map(|i| i + 1).unwrap_or(0);
+    let scan = dir.join(&pre[..cut]);
+    let name_pre = &pre[cut..];
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(scan) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.len() > name_pre.len() + suf.len()
+                && name.starts_with(name_pre)
+                && name.ends_with(suf)
+            {
+                out.push(name[name_pre.len()..name.len() - suf.len()].to_string());
+            }
+        }
+    }
+    out.sort();
     out
 }
 
