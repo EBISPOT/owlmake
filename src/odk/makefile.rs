@@ -784,6 +784,18 @@ impl MakeModel {
         }
     }
 
+    /// Whether a concrete file name is spelled out in the build configuration —
+    /// as an explicit rule's target, or among any explicit rule's prerequisites
+    /// (order-only included). A name reached only through pattern-rule
+    /// instantiation is not mentioned, which is what makes the file an
+    /// intermediate of its chain.
+    pub fn mentioned_explicitly(&self, name: &str) -> bool {
+        self.rules.contains_key(name)
+            || self.rules.values().any(|r| {
+                r.prereqs.iter().chain(r.order_only.iter()).any(|p| p == name)
+            })
+    }
+
     /// Look up the effective rule for a concrete target: explicit first, then
     /// the last matching pattern rule.
     pub fn rule_for<'a>(&'a self, target: &str) -> Option<(&'a Rule, Option<String>)> {

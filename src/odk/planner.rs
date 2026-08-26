@@ -378,6 +378,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
                     gaps: vec![],
                     missing_rule: true,
                     stdout_file: None,
+                    intermediate: false,
                     branches: vec![],
                 });
             }
@@ -846,6 +847,12 @@ fn plan_rule(
         stdout_file,
         // Filled in once every target is known, by `attach_branches`.
         branches: Vec::new(),
+        // A pattern-rule instantiation whose concrete name the configuration
+        // never spells is an intermediate of its chain (a phony name is a
+        // recipe, not a file, and takes no part in that rule).
+        intermediate: stem.is_some()
+            && !make.phony.contains(target)
+            && !make.mentioned_explicitly(target),
     })
 }
 
@@ -2399,6 +2406,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         gaps: vec![],
         missing_rule: false,
         stdout_file: None,
+        intermediate: false,
         // A repo with no build configuration has no conditionals to branch on.
         branches: Vec::new(),
     });
@@ -2424,6 +2432,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         gaps: vec![],
         missing_rule: false,
         stdout_file: None,
+        intermediate: false,
         // A repo with no build configuration has no conditionals to branch on.
         branches: Vec::new(),
     });
@@ -2443,6 +2452,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             gaps: vec![],
             missing_rule: false,
             stdout_file: None,
+            intermediate: false,
             branches: Vec::new(),
         });
     }

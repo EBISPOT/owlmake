@@ -84,6 +84,8 @@ pub struct Repo<'a> {
     /// A target naming one of these as a prerequisite cannot be up to date,
     /// however old the file sharing its name is.
     pub failed: &'a std::cell::RefCell<std::collections::HashSet<String>>,
+    /// This run's `--assume-new` files (see [`ExecOpts::assume_new`]).
+    pub assume_new: Vec<String>,
     /// Where release artefacts are written — the repo root for an ODK layout.
     ///
     /// The ODK builds each artefact IN `src/ontology` and copies it to the root
@@ -113,6 +115,7 @@ impl<'a> Repo<'a> {
             kept_groups: Vec::new(),
             built: &repo.built,
             failed: &repo.failed,
+            assume_new: Vec::new(),
             output_dir: repo.root.clone(),
         }
     }
@@ -137,6 +140,7 @@ impl<'a> Repo<'a> {
                 .collect(),
             built: &repo.built,
             failed: &repo.failed,
+            assume_new: opts.assume_new.clone(),
             output_dir: opts.output_dir.clone(),
         }
     }
@@ -285,6 +289,123 @@ fn is_import_target(repo: &Repo, target: &str) -> bool {
             .any(|g| g.targets.iter().any(|t| same(t)))
 }
 
+/// Run a file operation with the build's view of where artefacts live.
+///
+/// Release artefacts are written to the output directory as they are built, so
+/// a copy whose recipe path names the build directory (`rsync -R ecto.owl …`
+/// from `src/ontology`) may find its source only at the published location. A
+/// source that is absent at its recipe path but is a plan target published to
+/// the output directory is read from there — and when that published file IS
+/// the copy's destination, the copy is already complete and does nothing.
+fn run_file_op(repo: &Repo, op: &recipe::FileOp) -> Result<()> {
+    use recipe::FileOp;
+    if let FileOp::Copy { src, dst, recursive, relative } = op {
+        let mut remaining: Vec<String> = Vec::new();
+        for s in src {
+            if repo.dir.join(s).exists() {
+                remaining.push(s.clone());
+                continue;
+            }
+            let Some(published) = repo.target_file(s).filter(|p| p.is_file()) else {
+                // Not published either: keep it for the plain run, whose error
+                // names the missing file.
+                remaining.push(s.clone());
+                continue;
+            };
+            let d = repo.dir.join(dst);
+            let dest = if *relative {
+                d.join(s)
+            } else if d.is_dir() {
+                d.join(Path::new(s).file_name().unwrap_or_default())
+            } else {
+                d.clone()
+            };
+            if dest.exists() && published.canonicalize().ok() == dest.canonicalize().ok() {
+                continue;
+            }
+            if let Some(par) = dest.parent() {
+                std::fs::create_dir_all(par)?;
+            }
+            std::fs::copy(&published, &dest).with_context(|| {
+                format!("cp {} {}", published.display(), dest.display())
+            })?;
+        }
+        if remaining.is_empty() {
+            return Ok(());
+        }
+        return FileOp::Copy {
+            src: remaining,
+            dst: dst.clone(),
+            recursive: *recursive,
+            relative: *relative,
+        }
+        .run(&repo.dir);
+    }
+    op.run(&repo.dir)
+}
+
+/// Whether a missing prerequisite is an INTERMEDIATE the requesting target does
+/// not need built.
+///
+/// A file only a pattern-rule chain names (`ArtefactPlan::intermediate`) is not
+/// created just because it is absent: the chain runs only when the target that
+/// needs it is out of date with respect to the intermediate's own
+/// prerequisites. ECTO's component stamps are the shape —
+/// `components/<x>.owl: tmp/stamp-component-<x>.owl`, with the stamp made by
+/// `touch` from nothing: a build whose components are present must create no
+/// stamps, and building one first would put it newer than its component and run
+/// the component recipe off the back of a file the build itself invented.
+/// `-B` overrides this like every other up-to-date rule.
+fn skip_missing_intermediate(repo: &Repo, target: &str, need: &str) -> bool {
+    if repo.always_make {
+        return false;
+    }
+    let Some(na) = repo.target(need) else { return false };
+    if !na.intermediate || repo.dir.join(need).exists() {
+        return false;
+    }
+    let Some(tm) = repo
+        .target_file(target)
+        .filter(|p| p.is_file())
+        .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+    else {
+        return false;
+    };
+    // Is the target out of date against the intermediate's own prerequisites?
+    // Walked transitively through further missing intermediates; anything
+    // unresolvable builds the chain rather than silently skipping it.
+    fn out_of_date(
+        repo: &Repo,
+        tm: std::time::SystemTime,
+        a: &crate::plan::ArtefactPlan,
+        depth: usize,
+    ) -> bool {
+        if depth == 0 {
+            return true;
+        }
+        for p in a.needs.iter().filter(|n| !a.order_only.contains(n)) {
+            match std::fs::metadata(repo.dir.join(p)).and_then(|m| m.modified()) {
+                Ok(m) => {
+                    if m > tm {
+                        return true;
+                    }
+                }
+                Err(_) => match repo.target(p) {
+                    Some(pa) if pa.intermediate => {
+                        if out_of_date(repo, tm, pa, depth - 1) {
+                            return true;
+                        }
+                    }
+                    Some(_) => return true,
+                    None => {}
+                },
+            }
+        }
+        false
+    }
+    !out_of_date(repo, tm, na, 8)
+}
+
 /// The up-to-date test: does `target` exist and is no prerequisite newer?
 ///
 /// A prerequisite that is absent cannot make the target stale — it is not newer
@@ -390,6 +511,9 @@ pub struct ExecOpts {
     /// `purl.obolibrary.org/obo/upheno/metazoa.owl`, whose `releases/latest`
     /// asset is gone, so without this one dead URL costs the other 24 products.
     pub keep_going: bool,
+    /// `-W`/`--assume-new`: files to treat as just modified. A target depending
+    /// on one runs its recipe; the file itself is neither rebuilt nor touched.
+    pub assume_new: Vec<String>,
 }
 
 /// Build the plan. The ingested repo supplies its directories and nothing else —
@@ -1552,6 +1676,21 @@ fn same_target(a: &str, b: &str, dir_rel: &str) -> bool {
     a == format!("{dir_rel}/{b}") || b == format!("{dir_rel}/{a}")
 }
 
+/// Whether this run `--assume-new`s the file `name` names (either spelling —
+/// plan-relative or build-directory-relative).
+fn assumed_new(repo: &Repo, name: &str) -> bool {
+    if repo.assume_new.is_empty() {
+        return false;
+    }
+    let dir_rel = repo
+        .dir
+        .strip_prefix(&repo.root)
+        .ok()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    repo.assume_new.iter().any(|w| same_target(w, name, &dir_rel))
+}
+
 fn run_target_recipe_inner(
     repo: &Repo,
     target: &str,
@@ -1632,6 +1771,14 @@ fn run_target_recipe_inner(
         if repo.target(pre).is_none() {
             continue;
         }
+        // An `--assume-new` file is treated as just modified: dependents run,
+        // and the file itself is neither rebuilt nor touched.
+        if assumed_new(repo, pre) {
+            continue;
+        }
+        if skip_missing_intermediate(repo, target, pre) {
+            continue;
+        }
         if !aggregate {
             run_target_recipe_inner(repo, pre, seen)?;
             continue;
@@ -1660,6 +1807,28 @@ fn run_target_recipe_inner(
             names.join(", ")
         );
     }
+    // A prerequisite that neither exists nor has a rule refuses the target
+    // BEFORE its recipe runs — running it anyway would litter the recipe's
+    // redirect and staging files on a build that can only fail. ECTO's
+    // `old_modules/%.omn` needs `syns.json`, which is absent and has no rule:
+    // the target fails here, with the missing file named, and writes nothing.
+    for pre in &a.needs {
+        if pre == "all_robot_plugins" || pre.ends_with(".jar") {
+            continue;
+        }
+        if repo.dir.join(pre).exists()
+            || repo.target(pre).is_some()
+            || repo.plan.is_phony(pre)
+            || recipe::is_served_image_asset(pre)
+            || assumed_new(repo, pre)
+            || is_native_pattern_product(repo, pre)
+            || mirror_import_for(repo, pre).is_some()
+        {
+            continue;
+        }
+        bail!("no rule to make target `{pre}`, needed by `{target}`");
+    }
+
     // Patterns are native, so their products carry no plan rule — but a target
     // that NEEDS one still has to find it there. `execute_plan` runs the pattern
     // stage up front; a single-target invocation (`om make tmp/seed.txt`) does
@@ -1717,7 +1886,7 @@ fn run_target_recipe_inner(
     if !a.steps.is_empty() && !forced && !repo.plan.is_phony(target) {
         if let Some(out) = repo.target_file(target).filter(|p| p.is_file()) {
             let out_mtime = std::fs::metadata(&out).and_then(|m| m.modified()).ok();
-            let newer = a.needs.iter().any(|pre| {
+            let newer = a.needs.iter().any(|pre| assumed_new(repo, pre)) || a.needs.iter().any(|pre| {
                 let p = repo.target_file(pre).unwrap_or_else(|| repo.dir.join(pre));
                 match (std::fs::metadata(&p).and_then(|m| m.modified()).ok(), out_mtime) {
                     (Some(pm), Some(om)) => pm > om,
@@ -2248,6 +2417,9 @@ fn run_cli_robot_step(
         "check-rdfxml",
         "validate-id-ranges",
         "validate-patterns",
+        // A sub-make runs targets for their side effects; it threads no model
+        // and takes no `--input`/`--output` of its own.
+        "make",
     ];
     let terminal = TERMINAL_COMMANDS.contains(&name)
         || args.iter().any(|a| a == "-o" || a == "--output");
@@ -2315,7 +2487,9 @@ fn run_cli_robot_step(
         });
         i += 1;
     }
-    if !saw_input {
+    // A sub-make reads no ontology at all — handing it the chain file would be
+    // an argument it does not take.
+    if !saw_input && name != "make" {
         argv.push("--input".to_string());
         argv.push(arg_path(&piped_in));
     }
@@ -2661,11 +2835,11 @@ fn run_steps(
             // the repository root; falling off the end of this match would drop
             // it, and the build would produce every artefact and ship none of them.
             Step::File(op) if !op.is_side_effect() && !names_target(op, target) => {
-                op.run(&repo.dir)?;
+                run_file_op(repo, op)?;
             }
             Step::File(op) => {
                 if op.is_side_effect() {
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                 } else if let Some(dst) =
                     staged_target(repo, op, target).filter(|_| staged_by_shell || !writes_model_after)
                 {
@@ -2685,7 +2859,7 @@ fn run_steps(
                     // of the recipe operates on. A closing `mv $@.tmp $@` over a
                     // temp file the pipeline never wrote still falls through to the
                     // final write.
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                     // Re-read only where a later op will operate on it. The
                     // re-read exists to hand the REST of the recipe what is now on
                     // disk; with nothing left to hand it to, a target whose
@@ -2709,6 +2883,12 @@ fn run_steps(
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;
+            }
+            // A recorded subcommand owlmake cannot run fails by NAME, not as an
+            // "internal" error: the plan says exactly which command the recipe
+            // wanted, and that is the message the failure has to carry.
+            Step::UnsupportedSubcommand(name) => {
+                bail!("unsupported ontology subcommand `{name}`: this step has no owlmake implementation")
             }
             other => bail!("internal: uncovered step reached executor: {}", other.label()),
         }
@@ -2887,7 +3067,7 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     let mut rest = imp.mirror_steps.as_slice();
     let mut fetched: Option<PathBuf> = None;
     while let Some(Step::File(op)) = rest.first() {
-        op.run(&repo.dir)?;
+        run_file_op(repo, op)?;
         if let FileOp::Fetch { dst, .. } = op {
             fetched = Some(repo.dir.join(dst));
         }
@@ -2900,7 +3080,7 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     if rest.iter().all(|s| matches!(s, Step::Shell { .. } | Step::File(_))) {
         for step in rest {
             match step {
-                Step::File(op) => op.run(&repo.dir)?,
+                Step::File(op) => run_file_op(repo, op)?,
                 s => run_shell_step(repo, s)?,
             }
         }
@@ -2971,7 +3151,7 @@ fn run_custom_mirror(repo: &Repo, id: &str, recorded: &[Step]) -> Result<()> {
             match step {
                 Step::Shell { command: _, .. } | Step::File(_) => {
                     if let Step::File(op) = step {
-                        op.run(&repo.dir)?;
+                        run_file_op(repo, op)?;
                     }
                 }
                 s => run_shell_step(repo, s)?,
@@ -3551,7 +3731,9 @@ fn run_artefact(
             // `git show … > $@`, then `merge -i $@`). Nothing has built it yet
             // because nothing was supposed to.
             let self_input = i == a.target;
-            if names_ontology && !self_input && repo.target(i).is_some() {
+            let not_built_this_run =
+                assumed_new(repo, i) || skip_missing_intermediate(repo, &a.target, i);
+            if names_ontology && !self_input && !not_built_this_run && repo.target(i).is_some() {
                 bail!(
                     "input `{i}` of `{}` was not built — its rule failed or was skipped, \
                      so there is nothing to build `{}` from",
@@ -3611,10 +3793,20 @@ fn run_artefact(
             .steps
             .iter()
             .any(|s| !matches!(s, Step::File(_) | Step::Inert(_)));
-        let model = match &input_path {
+        let mut model = match &input_path {
             Some(p) if input_is_ontology && needs_model => crate::io::load(p)?,
             _ => crate::model::Model::new(),
         };
+        // Same closure-label rule as the artefact path: a functional write
+        // banners each entity with the label it carries ANYWHERE in the closure
+        // (`normalize_src` re-serialises the edit file, whose pattern classes
+        // are labelled only by the imported definitions module). The read spends
+        // no blank-node ids — see the artefact path.
+        if model.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+            let mark = crate::io::anon_counter();
+            model.banner_labels = closure_banner_labels(&model, &repo.dir, catalog);
+            crate::io::set_anon_counter(mark);
+        }
         // Named the way `Op::Merge` will name it, so `merge -i $<` recognises the
         // file the model already holds however either side spelled the token.
         let threaded_from = input_path
@@ -3811,14 +4003,14 @@ fn run_artefact(
             Step::Inert(_) => continue,
             Step::File(op) => {
                 if op.is_side_effect() {
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                 } else if let Some(dst) =
                     staged_target(repo, op, Some(&a.target)).filter(|_| staged_by_shell)
                 {
                     // See `staged_target`: a mid-recipe `mv $@.tmp $@` over a file
                     // a shell step really produced is not bookkeeping — the rest of
                     // the recipe reads it.
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                     if crate::io::Format::from_path(Path::new(&dst)).is_ok() {
                         model = crate::io::load(&repo.dir.join(&dst))
                             .with_context(|| format!("re-reading {dst} after a staged move"))?;
@@ -3883,6 +4075,9 @@ fn run_artefact(
                 model_on_disk = false;
                 staged_by_shell = true;
                 continue;
+            }
+            Step::UnsupportedSubcommand(name) => {
+                bail!("unsupported ontology subcommand `{name}`: this step has no owlmake implementation")
             }
             _ => bail!("internal: uncovered step reached executor: {}", step.label()),
         };
@@ -4360,6 +4555,12 @@ fn ensure_prerequisite(
     // the release must not carry. Building the tsv first makes it newer, so the
     // translation is regenerated every run.
     for need in &p.needs {
+        if assumed_new(repo, need) {
+            continue;
+        }
+        if skip_missing_intermediate(repo, target, need) {
+            continue;
+        }
         ensure_prerequisite(repo, need, by_target, done, catalog, work, opts)?;
     }
     if repo.target_file(target).is_some()
@@ -4400,6 +4601,9 @@ fn prereq_is_newer(
         return false;
     };
     for need in p.needs.iter().map(String::as_str).chain(p.input.as_deref()) {
+        if assumed_new(repo, need) {
+            return true;
+        }
         // A release artefact is written to the OUTPUT dir, not the ontology dir,
         // so look in both — `mondo-base.owl` lives at the repo root by the time
         // this report's turn comes.
@@ -4434,6 +4638,25 @@ fn build_prerequisite(
     work: &Path,
     output_dir: &Path,
 ) -> Result<()> {
+    // The same refusal as the recipe path: a prerequisite that neither exists
+    // nor has a rule fails the target BEFORE its recipe runs, so a doomed
+    // recipe's redirect and staging files are never created.
+    for pre in &p.needs {
+        if pre == "all_robot_plugins" || pre.ends_with(".jar") {
+            continue;
+        }
+        if repo.dir.join(pre).exists()
+            || repo.target(pre).is_some()
+            || repo.plan.is_phony(pre)
+            || recipe::is_served_image_asset(pre)
+            || assumed_new(repo, pre)
+            || is_native_pattern_product(repo, pre)
+            || mirror_import_for(repo, pre).is_some()
+        {
+            continue;
+        }
+        bail!("no rule to make target `{pre}`, needed by `{}`", p.target);
+    }
     eprintln!("odk:   building prerequisite {}", p.target);
     // A target's directory is not created for it, and recipes usually don't
     // create it either — they rely on some earlier rule having made it. That
@@ -5939,9 +6162,23 @@ fn closure_banner_labels(
 ) -> std::collections::HashMap<String, String> {
     let mut scratch = model.clone();
     let mut seen = std::collections::HashSet::new();
-    if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
-        for f in &files {
-            let _ = merge_file_into(&mut scratch, f);
+    match import_closure_of_model(model, dir, catalog, &mut seen) {
+        Ok(files) => {
+            if std::env::var("OM_IMPORT_DEBUG").is_ok() {
+                eprintln!("[banner] closure: {} file(s): {files:?}", files.len());
+            }
+            for f in &files {
+                if let Err(e) = merge_file_into(&mut scratch, f) {
+                    if std::env::var("OM_IMPORT_DEBUG").is_ok() {
+                        eprintln!("[banner] merge {} failed: {e:#}", f.display());
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            if std::env::var("OM_IMPORT_DEBUG").is_ok() {
+                eprintln!("[banner] closure resolution failed: {e:#}");
+            }
         }
     }
     crate::cmd::rdfs_labels(&scratch)
@@ -6178,6 +6415,12 @@ fn resolve_input(
         );
     }
     if let Some(planned) = repo.target(inp) {
+        // An `--assume-new` input is treated as just modified and is never
+        // rebuilt; a pattern-chain intermediate the target does not need stays
+        // uncreated. Either way the recipe runs without the file.
+        if assumed_new(repo, inp) || skip_missing_intermediate(repo, target, inp) {
+            bail!("input `{inp}` is not built for this run (assume-new or unneeded intermediate)");
+        }
         let pure_convert = planned
             .steps
             .iter()
@@ -6660,6 +6903,7 @@ mod aggregate_tests {
             gaps: vec![],
             missing_rule: false,
             stdout_file: None,
+            intermediate: false,
             branches: vec![],
         }
     }

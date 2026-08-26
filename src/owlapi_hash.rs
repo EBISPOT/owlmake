@@ -117,7 +117,7 @@ fn ncname_suffix_index(s: &str) -> Option<usize> {
     index
 }
 
-fn iri_split(iri: &str) -> (&str, &str) {
+pub(crate) fn iri_split(iri: &str) -> (&str, &str) {
     match ncname_suffix_index(iri) {
         Some(i) => (&iri[..i], &iri[i..]),
         None => (iri, ""),

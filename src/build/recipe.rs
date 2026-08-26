@@ -31,12 +31,16 @@ use crate::odk::robot::{self, ShellSep};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FileOp {
-    /// `cp [-r] SRC... DST`
+    /// `cp [-r] SRC... DST`, or `rsync -R SRC... DST` (`relative`: each source's
+    /// own relative path is recreated under the destination, `a/b.owl` landing at
+    /// `DST/a/b.owl` rather than `DST/b.owl`).
     Copy {
         src: Vec<String>,
         dst: String,
         #[serde(default)]
         recursive: bool,
+        #[serde(default)]
+        relative: bool,
     },
     /// `mv SRC... DST`
     Move { src: Vec<String>, dst: String },
@@ -173,10 +177,40 @@ impl FileOp {
                 }
                 let dst = operands.pop().unwrap();
                 if base == "cp" {
-                    Some(FileOp::Copy { src: operands, dst, recursive })
+                    Some(FileOp::Copy { src: operands, dst, recursive, relative: false })
                 } else {
                     Some(FileOp::Move { src: operands, dst })
                 }
+            }
+            "rsync" => {
+                let mut recursive = false;
+                let mut relative = false;
+                let mut operands = Vec::new();
+                for a in rest {
+                    match a.as_str() {
+                        "-R" | "--relative" => relative = true,
+                        "-r" | "--recursive" | "-a" | "--archive" => recursive = true,
+                        // Combined short flags: model only the letters above plus
+                        // the inert verbosity/permission ones.
+                        s if s.starts_with('-') && !s.starts_with("--") && s.len() > 1 => {
+                            for c in s[1..].chars() {
+                                match c {
+                                    'R' => relative = true,
+                                    'r' | 'a' => recursive = true,
+                                    'v' | 'p' | 't' | 'q' => {}
+                                    _ => return None,
+                                }
+                            }
+                        }
+                        s if s.starts_with('-') => return None,
+                        _ => operands.push(a.clone()),
+                    }
+                }
+                if operands.len() < 2 {
+                    return None;
+                }
+                let dst = operands.pop().unwrap();
+                Some(FileOp::Copy { src: operands, dst, recursive, relative })
             }
             "rm" => {
                 let mut recursive = false;
@@ -339,8 +373,14 @@ impl FileOp {
     /// A short human-readable label for the plan view.
     pub fn label(&self) -> String {
         match self {
-            FileOp::Copy { src, dst, recursive } => {
-                format!("cp{} {} → {dst}", if *recursive { " -r" } else { "" }, src.join(" "))
+            FileOp::Copy { src, dst, recursive, relative } => {
+                let flag = match (recursive, relative) {
+                    (true, true) => " -rR",
+                    (true, false) => " -r",
+                    (false, true) => " -R",
+                    (false, false) => "",
+                };
+                format!("cp{flag} {} → {dst}", src.join(" "))
             }
             FileOp::Move { src, dst } => format!("mv {} → {dst}", src.join(" ")),
             FileOp::Remove { paths, .. } => format!("rm {}", paths.join(" ")),
@@ -453,7 +493,7 @@ impl FileOp {
                     t.write(&p(dst))?;
                 }
             }
-            FileOp::Copy { src, dst, recursive } => {
+            FileOp::Copy { src, dst, recursive, relative } => {
                 let dst = p(dst);
                 for s in src {
                     // A `cp` whose source is an image asset reads owlmake's bytes.
@@ -461,7 +501,15 @@ impl FileOp {
                     if *recursive && from.is_dir() {
                         copy_dir_recursive(&from, &dst.join(from.file_name().unwrap_or_default()))?;
                     } else {
-                        let target = if dst.is_dir() {
+                        // Relative mode recreates each source's own relative path
+                        // under the destination.
+                        let target = if *relative {
+                            let t = dst.join(s);
+                            if let Some(par) = t.parent() {
+                                std::fs::create_dir_all(par)?;
+                            }
+                            t
+                        } else if dst.is_dir() {
                             dst.join(from.file_name().context("cp source has no file name")?)
                         } else {
                             dst.clone()
