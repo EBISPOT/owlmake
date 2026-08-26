@@ -1830,6 +1830,12 @@ pub fn step(
         crate::io::write_to_ref(&model, &mut rdf, Format::RdfXml)?;
         let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
         load_preserving_literals(&store, &rdf)?;
+        // The serialization the store was loaded from materialises a type triple
+        // for every entity the ontology references without declaring, and the
+        // reparse below would turn each into a Declaration axiom the model never
+        // held. Drop them before the updates run, so a type triple an update
+        // itself inserts is kept.
+        crate::sparql::drop_synthesised_types(&store, &model)?;
         for upath in &args.update {
             let sparql = std::fs::read_to_string(upath)?;
             store

@@ -463,77 +463,8 @@ impl Queryable {
             type_order: scan_type_order(&rdf),
             object_order: scan_object_order(&rdf),
         };
-        q.drop_synthesised_types(model)?;
+        drop_synthesised_types(&q.store, model)?;
         Ok(q)
-    }
-
-    /// Remove the writer's synthesised `rdf:type` triples for entities the model
-    /// does not itself declare, when the ontology has imports — see `from_model`.
-    fn drop_synthesised_types(&self, model: &Model) -> Result<()> {
-        use horned_owl::model::Component;
-        use std::collections::HashSet;
-        if !model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_))) {
-            return Ok(());
-        }
-        // EVERY entity the model does not declare itself, not just the ones whose
-        // sole appearance is a property chain. Whether an entity is missing a type
-        // is a question about the whole IMPORT CLOSURE — so for an ontology with
-        // imports nothing referenced from the closure gets a type triple, however
-        // it is referenced.
-        //
-        // The criterion is DECLAREDNESS, not where the entity appears: the subject
-        // of a synthesised type triple that the model carries no `Declare*` for is
-        // dropped however else it occurs, including as the subject of axioms of
-        // its own. Beyond the property-chain pair that catches 14 in MONDO's
-        // `reasoned.owl` — `IAO_0000231`, `IAO_0000233`, `IAO_0000589`,
-        // `IAO_0000700`, `IAO_0006012`, four `RO_*`, three `dc:*`,
-        // `dcterms:license`, `foaf:homepage` — entities used there only as a
-        // predicate, with their declarations in the closure. A seed carrying them
-        // keeps annotation assertions `filter` must drop, and `mondo-simple.owl`
-        // differs by exactly those.
-        let mut declared: HashSet<String> = HashSet::new();
-        for ac in model.ont.iter() {
-            let iri = match &ac.component {
-                Component::DeclareClass(d) => d.0 .0.as_ref().to_string(),
-                Component::DeclareObjectProperty(d) => d.0 .0.as_ref().to_string(),
-                Component::DeclareDataProperty(d) => d.0 .0.as_ref().to_string(),
-                Component::DeclareAnnotationProperty(d) => d.0 .0.as_ref().to_string(),
-                Component::DeclareNamedIndividual(d) => d.0 .0.as_ref().to_string(),
-                Component::DeclareDatatype(d) => d.0 .0.as_ref().to_string(),
-                _ => continue,
-            };
-            declared.insert(iri);
-        }
-        const TYPES: [&str; 6] = [
-            "http://www.w3.org/2002/07/owl#Class",
-            "http://www.w3.org/2002/07/owl#ObjectProperty",
-            "http://www.w3.org/2002/07/owl#DatatypeProperty",
-            "http://www.w3.org/2002/07/owl#AnnotationProperty",
-            "http://www.w3.org/2002/07/owl#NamedIndividual",
-            "http://www.w3.org/2000/01/rdf-schema#Datatype",
-        ];
-        let mut doomed = Vec::new();
-        for t in TYPES {
-            let obj = oxigraph::model::NamedNode::new(t)
-                .map_err(|e| anyhow!("bad type IRI {t}: {e}"))?;
-            for q in self.store.quads_for_pattern(
-                None,
-                Some(oxigraph::model::vocab::rdf::TYPE),
-                Some((&obj).into()),
-                None,
-            ) {
-                let q = q.map_err(|e| anyhow!("scanning type triples: {e}"))?;
-                if let oxigraph::model::Subject::NamedNode(n) = &q.subject {
-                    if !declared.contains(n.as_str()) {
-                        doomed.push(q);
-                    }
-                }
-            }
-        }
-        for q in doomed {
-            self.store.remove(&q).map_err(|e| anyhow!("removing type triple: {e}"))?;
-        }
-        Ok(())
     }
 
     /// Execute a SPARQL query, returning a tabular rendering. ASK returns one
@@ -871,6 +802,76 @@ pub(crate) fn query_prefixes(sparql: &str) -> Vec<(String, String)> {
         })
         .collect()
 }
+
+/// Remove the writer's synthesised `rdf:type` triples for entities the model
+/// does not itself declare, when the ontology has imports — see `from_model`.
+pub(crate) fn drop_synthesised_types(store: &Store, model: &Model) -> Result<()> {
+    use horned_owl::model::Component;
+    use std::collections::HashSet;
+    if !model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_))) {
+        return Ok(());
+    }
+    // EVERY entity the model does not declare itself, not just the ones whose
+    // sole appearance is a property chain. Whether an entity is missing a type
+    // is a question about the whole IMPORT CLOSURE — so for an ontology with
+    // imports nothing referenced from the closure gets a type triple, however
+    // it is referenced.
+    //
+    // The criterion is DECLAREDNESS, not where the entity appears: the subject
+    // of a synthesised type triple that the model carries no `Declare*` for is
+    // dropped however else it occurs, including as the subject of axioms of
+    // its own. Beyond the property-chain pair that catches 14 in MONDO's
+    // `reasoned.owl` — `IAO_0000231`, `IAO_0000233`, `IAO_0000589`,
+    // `IAO_0000700`, `IAO_0006012`, four `RO_*`, three `dc:*`,
+    // `dcterms:license`, `foaf:homepage` — entities used there only as a
+    // predicate, with their declarations in the closure. A seed carrying them
+    // keeps annotation assertions `filter` must drop, and `mondo-simple.owl`
+    // differs by exactly those.
+    let mut declared: HashSet<String> = HashSet::new();
+    for ac in model.ont.iter() {
+        let iri = match &ac.component {
+            Component::DeclareClass(d) => d.0 .0.as_ref().to_string(),
+            Component::DeclareObjectProperty(d) => d.0 .0.as_ref().to_string(),
+            Component::DeclareDataProperty(d) => d.0 .0.as_ref().to_string(),
+            Component::DeclareAnnotationProperty(d) => d.0 .0.as_ref().to_string(),
+            Component::DeclareNamedIndividual(d) => d.0 .0.as_ref().to_string(),
+            Component::DeclareDatatype(d) => d.0 .0.as_ref().to_string(),
+            _ => continue,
+        };
+        declared.insert(iri);
+    }
+    const TYPES: [&str; 6] = [
+        "http://www.w3.org/2002/07/owl#Class",
+        "http://www.w3.org/2002/07/owl#ObjectProperty",
+        "http://www.w3.org/2002/07/owl#DatatypeProperty",
+        "http://www.w3.org/2002/07/owl#AnnotationProperty",
+        "http://www.w3.org/2002/07/owl#NamedIndividual",
+        "http://www.w3.org/2000/01/rdf-schema#Datatype",
+    ];
+    let mut doomed = Vec::new();
+    for t in TYPES {
+        let obj = oxigraph::model::NamedNode::new(t)
+            .map_err(|e| anyhow!("bad type IRI {t}: {e}"))?;
+        for q in store.quads_for_pattern(
+            None,
+            Some(oxigraph::model::vocab::rdf::TYPE),
+            Some((&obj).into()),
+            None,
+        ) {
+            let q = q.map_err(|e| anyhow!("scanning type triples: {e}"))?;
+            if let oxigraph::model::Subject::NamedNode(n) = &q.subject {
+                if !declared.contains(n.as_str()) {
+                    doomed.push(q);
+                }
+            }
+        }
+    }
+    for q in doomed {
+        store.remove(&q).map_err(|e| anyhow!("removing type triple: {e}"))?;
+    }
+    Ok(())
+}
+
 
 fn term_to_string(t: &Term) -> String {
     match t {
