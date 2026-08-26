@@ -1248,21 +1248,7 @@ fn ogrep_finds_terms_and_their_referrers() {
 }
 
 /// A rule whose recipe merges its own `$<` must produce exactly what `om merge -i`
-/// on that file produces.
-///
-/// The build loads `$<` to start the chain and then reaches the merge op with
-/// `$<` still listed as an input, so the file must not be read a second time.
-/// Axioms and prefixes would survive a double read (both go into sets) but the
-/// blank-node accounting would not: a secondary input contributes its allocation
-/// count to the target's `anon_alloc_base`, so a re-read `$<` adds its own
-/// allocations to its own base and every anonymous individual is numbered — and
-/// therefore ordered — from the wrong origin. Where imports allocate blank nodes
-/// before the edit file's own body is parsed, as they do in EFO, the base is
-/// inflated by the edit file's own allocation count and every anonymous block in
-/// the release is renumbered and reordered.
-///
-/// Equality against the command is the assertion because it needs no hardcoded
-/// ordering: the two routes read the same files and must agree.
+/// on that file produces, and the resulting RDF/XML must be a fixed point.
 #[test]
 fn a_rule_merging_its_own_input_reads_it_once() {
     let root = tmp("merge_self");
@@ -1271,12 +1257,8 @@ fn a_rule_merging_its_own_input_reads_it_once() {
     std::fs::create_dir_all(&ont).unwrap();
     std::fs::create_dir_all(root.join(".git")).unwrap();
 
-    // An import whose anonymous restrictions move the blank-node counter before
-    // the edit file's own body is parsed. Without it every base is 0 and a double
-    // read is invisible — and THREE restrictions, not two, because the fixture only
-    // discriminates if the two bases disagree: with four blocks at base 3 the
-    // order is 3,2,1,0 and at the double-counted base 7 it is 1,3,2,0, whereas
-    // bases 2 and 6 both give 3,2,1,0 and a double read would slip through.
+    // An import with anonymous restrictions exercises the blank-node accounting
+    // around the edit file's own bare anonymous individuals.
     std::fs::write(
         ont.join("imp.owl"),
         r#"<?xml version="1.0"?>
@@ -1402,11 +1384,29 @@ fn a_rule_merging_its_own_input_reads_it_once() {
         "`merge -i $<` in a rule ordered the anonymous individuals differently from \
          `om merge -i` on the same file"
     );
-    // …and not simply in the order they were written, which every base agrees on.
-    assert_ne!(
-        built,
-        order(&std::fs::read_to_string(ont.join("foo-edit.owl")).unwrap()),
-        "fixture is inert: source order already answers, so a wrong base cannot show"
+    // The emitted order must be a fixed point. ROBOT hashes the transient blank-node
+    // ids assigned during each parse, so converting its own output applies the same
+    // permutation again and can cycle forever. owlmake promises deterministic bytes;
+    // a document it has canonicalised once must therefore stay byte-identical when
+    // it is read and written again.
+    let direct_second = root.join("direct-second.owl");
+    let out = bin()
+        .arg("convert")
+        .arg("-i")
+        .arg(&direct)
+        .arg("-o")
+        .arg(&direct_second)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "second conversion failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&direct).unwrap(),
+        std::fs::read(&direct_second).unwrap(),
+        "RDF/XML output changed when owlmake converted its own output"
     );
 
     let _ = std::fs::remove_dir_all(&root);

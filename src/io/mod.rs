@@ -1308,25 +1308,17 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
     (std::borrow::Cow::Owned(out), labels)
 }
 
-/// The verbatim anonymous-individual blocks, in the order a released RDF/XML file
-/// carries them.
+/// The verbatim anonymous-individual blocks, in canonical byte order.
 ///
-/// That order is neither document order nor label order. An anonymous individual is
-/// RE-NUMBERED when the section is rendered, and the renumbering visits them in
-/// hash order of their PARSE-TIME `_:genid<N>` label: buckets ascending, document
-/// order within a bucket. Reproducing it is what keeps a re-serialized file from
-/// reshuffling a section whose content has not changed, so a release diff shows
-/// real edits and nothing else.
+/// OWLAPI orders these blocks by a hash of their transient parse-time blank-node
+/// ids. That is not a canonical order: writing the document changes which block
+/// receives each id on the next parse, so another conversion applies the same
+/// permutation again. EFO 3.93 demonstrates a two-state cycle under ROBOT 1.9.7.
 ///
-/// `N` is `anon_alloc_base` (everything the import closure consumed first) plus
-/// the block's own document-relative position, over the counter seed below. EFO's
-/// edit file puts its fourteen obsolescence records at 2148125419… .
-///
-/// The bucket mask is the hash table's capacity, which owlmake does NOT model: for
-/// fourteen entries the answer is the same at every capacity from 256 up, and a
-/// document with few enough anonymous individuals to sit below that has too few
-/// for the mask to separate them differently. `HASH_CAPACITY` is therefore fixed
-/// well above any real count.
+/// owlmake instead sorts on the only stable identity available here: the verbatim
+/// block bytes. This deliberately differs from ROBOT for documents with multiple
+/// bare anonymous individuals, but makes an RDF/XML write a fixed point. Equal
+/// blocks need no secondary key because swapping equal bytes cannot change output.
 ///
 /// A block that is an OWL CONSTRUCT rather than an individual is dropped, not
 /// ordered: an `owl:inverseOf` renders inline within its property frame and a
@@ -1334,42 +1326,17 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
 /// model. The input scan sees only `<rdf:Description>` and mis-collects them.
 pub(crate) fn anon_individual_order(
     blocks: &[AnonBlock],
-    base: u64,
-    capacity: u64,
-    imports_end: u64,
+    _base: u64,
+    _capacity: u64,
+    _imports_end: u64,
 ) -> Vec<&String> {
-    /// The fallback when the document's own capacity is not known — a non-RDF/XML
-    /// source, or a model assembled rather than parsed. Taken larger than any real
-    /// anonymous-individual count so the mask at least never splits a small set.
-    const HASH_CAPACITY: u64 = 1 << 20;
-    let capacity = if capacity == 0 { HASH_CAPACITY } else { capacity };
-    /// Blank-node ids run upwards from 2^31, so the first one allocated is
-    /// `_:genid2147483648`. The seed is part of the hashed STRING, so it cannot
-    /// be dropped as a common offset.
-    const COUNTER_SEED: u64 = 2_147_483_648;
     // The type is named as an IRI in an `rdf:resource`, not as an element, so it
     // is matched on the local name alone.
     let is_construct =
         |t: &str| t.contains("owl:inverseOf") || t.contains("NegativePropertyAssertion");
     let mut kept: Vec<&AnonBlock> =
         blocks.iter().filter(|b| !is_construct(&b.text)).collect();
-    if std::env::var("OM_ANON_DEBUG").is_ok() {
-        eprintln!("[anon] base={base} capacity={capacity} blocks={}", kept.len());
-        for b in &kept {
-            let bb = if b.offset > imports_end { base } else { 0 };
-            eprintln!("[anon]   alloc={} id=_:genid{}", b.alloc, COUNTER_SEED + bb + b.alloc);
-        }
-    }
-    // A stable sort by bucket leaves same-bucket blocks in document order, which
-    // is the insertion order within a bucket.
-    // A block the document allocates BEFORE its `owl:imports` is numbered without
-    // the closure — an import is loaded when its triple streams past, so a header at
-    // the bottom of the file charges nothing to what precedes it. For one document
-    // written both ways, header first gives base 3 and header last gives base 0.
-    let base_for = |b: &AnonBlock| if b.offset > imports_end { base } else { 0 };
-    kept.sort_by_key(|b| {
-        java_hash_bucket(&format!("_:genid{}", COUNTER_SEED + base_for(b) + b.alloc), capacity)
-    });
+    kept.sort_by(|a, b| a.text.cmp(&b.text));
     kept.into_iter().map(|b| &b.text).collect()
 }
 
@@ -1388,17 +1355,6 @@ pub(crate) fn hash_map_capacity(n: u64) -> u64 {
         cap <<= 1;
     }
     cap
-}
-
-/// The bucket a string key falls in: the 31-multiplier hash over its UTF-16 code
-/// units, spread by `h ^ (h >> 16)` across the 32-bit value, masked to the table
-/// size.
-fn java_hash_bucket(key: &str, capacity: u64) -> u64 {
-    let mut h: u32 = 0;
-    for c in key.encode_utf16() {
-        h = h.wrapping_mul(31).wrapping_add(c as u32);
-    }
-    ((h ^ (h >> 16)) as u64) & (capacity - 1)
 }
 
 /// The byte offset of every blank node an RDF/XML document allocates, in document

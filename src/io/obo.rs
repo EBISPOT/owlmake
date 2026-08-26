@@ -4726,16 +4726,17 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
         let lo = *sorted.first().unwrap();
         let tied: Vec<usize> = (0..buckets.len()).filter(|&i| buckets[i] == lo).collect();
         if tied.len() > 1 {
-            // Colliding assertions chain in the order they were read, and the head
-            // of the chain is the name. The source document's order is the record
-            // of that; `RO_0002314`'s two labels collide in bucket 14 of a 16-slot
-            // table and the comment takes "characteristic of part of", written
-            // first, over "inheres in part of".
+            // Colliding assertions chain in the order they were read, and the
+            // display name is overwritten as the chain is walked. The source
+            // document's order is the record of that; `RO_0002314`'s two labels
+            // collide in bucket 14 of a 16-slot table and EFO 3.93's comments take
+            // "inheres in part of", written second, over "characteristic of part
+            // of".
             if let Some(order) = ctx.label_order.get(subj_iri) {
                 let first = tied
                     .iter()
                     .copied()
-                    .min_by_key(|&i| {
+                    .max_by_key(|&i| {
                         order
                             .iter()
                             .position(|v| *v == sd.label_axioms[i].0)
