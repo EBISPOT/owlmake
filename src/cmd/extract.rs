@@ -185,6 +185,12 @@ pub fn step(
     // that the module can be consumed WITHOUT that import.
     result.detach_import_closure();
 
+    // Its banner labels are its own too. The source's label map must not carry
+    // over: an entity that reached the module without its `rdfs:label` axiom
+    // (a synonym-type property pulled in only by an axiom annotation, say) is
+    // bannered by its IRI, exactly as the module's own content dictates.
+    result.banner_labels.clear();
+
     crate::cmd::maybe_save(&mut result, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(result))
 }
