@@ -291,7 +291,8 @@ fn every_step_variant_reaches_both_dispatch_loops() {
         let pat = format!("Step::{v}");
         // `Op` is matched as `Step::Op(op)`; the shell-shaped variants are routed
         // through the `is_shell_step` guard rather than by name.
-        let shell_routed = ["Shell", "Fallback", "Jq", "Sssom", "Oort", "CliRobot", "UnknownRobot"];
+        let shell_routed =
+            ["Shell", "Fallback", "Jq", "Sssom", "Oort", "OwlmakeCli", "UnsupportedSubcommand"];
         let in_prereq = prereq_loop.contains(&pat)
             || (shell_routed.contains(&v.as_str()) && prereq_loop.contains("is_shell_step"));
         let in_artefact = artefact_loop.contains(&pat)
