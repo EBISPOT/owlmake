@@ -1544,6 +1544,26 @@ impl Genids {
                     self.translate_annotations(&ac.ann);
                 }
             }
+            // An equivalence between two inverse expressions is its own anonymous
+            // block after the frame of the property the first inverse names:
+            // `_:a owl:inverseOf P . _:a owl:equivalentProperty _:b . _:b
+            // owl:inverseOf Q` — two nodes, subject then object, in the axiom's
+            // member order. A named pair renders inside the first property's
+            // frame and takes no node.
+            Component::EquivalentObjectProperties(ax) => {
+                if ax.0.len() == 2 {
+                    if let (OPE::InverseObjectProperty(_), OPE::InverseObjectProperty(_)) =
+                        (&ax.0[0], &ax.0[1])
+                    {
+                        self.fresh();
+                        self.fresh();
+                    }
+                }
+                if !ac.ann.is_empty() {
+                    self.fresh();
+                    self.translate_annotations(&ac.ann);
+                }
+            }
             // Property characteristics / inverse / declarations: named-only, so
             // only a reification node when annotated.
             _ => {
@@ -1759,6 +1779,13 @@ fn owner_iri(c: &Component<RcStr>) -> Option<String> {
         Component::DisjointDataProperties(ax) => {
             ax.0.iter().map(|p| p.0.as_ref().to_string()).min()
         }
+        // A pair equivalence renders off the FIRST member: inside its frame when
+        // named, as an anonymous two-node block after the frame of the property
+        // its inverse names — either way that property's walk numbers it.
+        Component::EquivalentObjectProperties(ax) if ax.0.len() == 2 => match &ax.0[0] {
+            OPE::ObjectProperty(a) => Some(a.0.as_ref().to_string()),
+            OPE::InverseObjectProperty(a) => Some(a.0.as_ref().to_string()),
+        },
         Component::DatatypeDefinition(ax) => Some(ax.kind.0.as_ref().to_string()),
         // A class assertion is rendered inside the individual's own block, so it
         // is numbered there. An ANONYMOUS type is a blank node: CL's brain-atlas
