@@ -322,6 +322,42 @@ fn explain_finds_justification() {
     let _ = std::fs::remove_file(&ont);
 }
 
+#[test]
+fn explain_unsatisfiability_justification_is_minimal() {
+    // :A is unsatisfiable through exactly three axioms. The rest of the ontology
+    // is a decoy: a redundant second route to :C and axioms about unrelated
+    // classes. A justification that carries any of them is not minimal, and a
+    // search that cannot cut them away is the search that never terminates on a
+    // real merge.
+    let ont = tmp("unsat-minimal.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:A :D)\n\
+         DisjointClasses(:B :D)\n\
+         SubClassOf(:B :C)\n\
+         SubClassOf(:A :C)\n\
+         SubClassOf(:E :F)\n\
+         SubClassOf(:F :G)\n\
+         )\n",
+    )
+    .unwrap();
+
+    let out = bin()
+        .args(["explain", "-i"])
+        .arg(&ont)
+        .args(["-M", "unsatisfiability", "--unsatisfiable", "http://example.org/A"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "explain failed: {}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Justification 1 (3 axioms)"), "expected a minimal 3-axiom justification:\n{text}");
+    assert!(!text.contains("example.org/E"), "unrelated axioms must not appear:\n{text}");
+    let _ = std::fs::remove_file(&ont);
+}
+
 /// A small ontology exercised by the command-integration test below.
 const PIPELINE_ONT: &str = "Prefix(:=<http://example.org/>)\n\
     Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\

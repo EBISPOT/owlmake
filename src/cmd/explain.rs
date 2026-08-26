@@ -1,11 +1,18 @@
 //! `explain` — find a justification: a minimal set of axioms that entails a
 //! subsumption.
 //!
-//! Strategy: extract the ⊥-module for the query signature (small, and
-//! guaranteed to contain every justification), then black-box minimize — drop
-//! axioms whose removal preserves the entailment until none can be removed. When
-//! `--max > 1`, multiple distinct justifications are enumerated with Reiter's
-//! hitting-set tree.
+//! Strategy: extract the ⊥-module for the query signature (guaranteed to
+//! contain every justification), then find one justification black-box in two
+//! phases — EXPAND a signature-connected subset outward from the entailment's
+//! own terms until it entails, then CONTRACT it by removing windows of axioms,
+//! halving the window on failure, down to single axioms. Both phases only ever
+//! ask the reasoner "does this subset entail?", so they are exact for any
+//! monotone entailment; what they buy is the number of asks — a justification
+//! lives in a small syntactic neighbourhood of its entailment, so expansion
+//! classifies a few small subsets instead of the whole module, and windowed
+//! contraction needs O(j·log n) tests where the one-axiom-at-a-time scan needs
+//! O(n). When `--max > 1`, multiple distinct justifications are enumerated with
+//! Reiter's hitting-set tree.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -303,7 +310,12 @@ fn explain_one(
     let module = extract::extract(model, &seed, Method::Bot);
 
     // Candidate logical axioms (exclude declarations/annotations/metadata) and
-    // the fixed non-logical support.
+    // the fixed support carried into every entailment test. The reasoner reads
+    // declarations (a declared class is classified even when no logical axiom
+    // mentions it) and nothing else non-logical, so the support is the
+    // declarations alone — annotations are the bulk of a module and would be
+    // copied into every one of the many test ontologies for no effect on any
+    // answer.
     let candidates: Vec<AnnotatedComponent<RcStr>> = module
         .ont
         .iter()
@@ -313,7 +325,7 @@ fn explain_one(
     let support: Vec<AnnotatedComponent<RcStr>> = module
         .ont
         .iter()
-        .filter(|ac| !is_logical(&ac.component))
+        .filter(|ac| is_declaration(&ac.component))
         .cloned()
         .collect();
 
@@ -355,6 +367,10 @@ fn compute_justifications(
     let all: IndexSet = (0..candidates.len()).collect();
     let mut found: Vec<IndexSet> = Vec::new();
 
+    // Each candidate's signature, computed once: expansion is a walk over these.
+    let sigs: Vec<HashSet<String>> =
+        candidates.iter().map(|ac| crate::sig::signature(&ac.component)).collect();
+
     // Worklist of "removed axiom" sets to explore (hitting-set tree nodes).
     let mut queue: std::collections::VecDeque<IndexSet> = std::collections::VecDeque::new();
     let mut seen_paths: HashSet<IndexSet> = HashSet::new();
@@ -370,8 +386,8 @@ fn compute_justifications(
         if !entails_idx(&working, candidates, support, module, sub, sup) {
             continue; // entailment already broken on this branch
         }
-        // Minimize to a justification within the working set.
-        let just = minimize(&working, candidates, support, module, sub, sup);
+        // Find one justification within the working set.
+        let just = find_justification(&working, &sigs, candidates, support, module, sub, sup);
         let just_set: IndexSet = just.iter().copied().collect();
         if !found.contains(&just_set) {
             found.push(just_set.clone());
@@ -395,26 +411,68 @@ fn compute_justifications(
         .collect()
 }
 
-/// Black-box contraction: shrink `working` (indices) to a minimal subset that
-/// still entails `sub ⊑ sup`.
-fn minimize(
+/// Find one justification within `working` (which is known to entail
+/// `sub ⊑ sup`): a subset from which no axiom can be dropped. Under a monotone
+/// entailment that is the same thing as having no entailing proper subset at
+/// all, so the result is a true justification however it was reached.
+fn find_justification(
     working: &[usize],
+    sigs: &[HashSet<String>],
     candidates: &[AnnotatedComponent<RcStr>],
     support: &[AnnotatedComponent<RcStr>],
     module: &Model,
     sub: &str,
     sup: &str,
 ) -> Vec<usize> {
-    let mut just: Vec<usize> = working.to_vec();
-    let mut i = 0;
-    while i < just.len() {
-        let mut trial = just.clone();
-        trial.remove(i);
-        if entails_idx(&trial, candidates, support, module, sub, sup) {
-            just.remove(i); // redundant — drop permanently
-        } else {
-            i += 1; // needed — keep
+    // EXPANSION. Grow a subset outward from the entailment's own terms, one
+    // signature-connection layer at a time, stopping at the first layer that
+    // entails. The justification search then runs over that small entailing
+    // neighbourhood instead of the whole working set; if connectivity never
+    // yields entailment, the whole working set is the fallback.
+    let mut sig: HashSet<String> = [sub.to_string(), sup.to_string()].into_iter().collect();
+    let mut selected: Vec<usize> = Vec::new();
+    let mut remaining: Vec<usize> = working.to_vec();
+    let mut just: Option<Vec<usize>> = None;
+    loop {
+        let (layer, rest): (Vec<usize>, Vec<usize>) = remaining
+            .into_iter()
+            .partition(|&i| sigs[i].iter().any(|s| sig.contains(s)));
+        remaining = rest;
+        if layer.is_empty() {
+            break;
         }
+        for &i in &layer {
+            sig.extend(sigs[i].iter().cloned());
+        }
+        selected.extend(layer);
+        if entails_idx(&selected, candidates, support, module, sub, sup) {
+            just = Some(selected);
+            break;
+        }
+    }
+    let mut just = just.unwrap_or_else(|| working.to_vec());
+
+    // CONTRACTION. Remove windows of axioms at once, halving the window each
+    // round; the final single-axiom round leaves a set from which nothing can
+    // be dropped. An axiom that survives a test never needs re-testing: a
+    // shrinking set entails less, so what was needed stays needed.
+    let mut window = (just.len() / 2).max(1);
+    loop {
+        let mut i = 0;
+        while i < just.len() {
+            let end = (i + window).min(just.len());
+            let trial: Vec<usize> =
+                just[..i].iter().chain(just[end..].iter()).copied().collect();
+            if entails_idx(&trial, candidates, support, module, sub, sup) {
+                just = trial; // the whole window was redundant; stay at i
+            } else {
+                i = end;
+            }
+        }
+        if window == 1 {
+            break;
+        }
+        window = (window / 2).max(1);
     }
     just
 }
@@ -430,6 +488,20 @@ fn entails_idx(
 ) -> bool {
     let axioms: Vec<AnnotatedComponent<RcStr>> = idx.iter().map(|&i| candidates[i].clone()).collect();
     entails(&axioms, support, module, sub, sup)
+}
+
+/// The entity declarations — the one non-logical component kind the reasoner
+/// reads, and so the only support an entailment test needs.
+fn is_declaration(c: &Component<RcStr>) -> bool {
+    matches!(
+        c,
+        Component::DeclareClass(_)
+            | Component::DeclareObjectProperty(_)
+            | Component::DeclareDataProperty(_)
+            | Component::DeclareAnnotationProperty(_)
+            | Component::DeclareNamedIndividual(_)
+            | Component::DeclareDatatype(_)
+    )
 }
 
 fn is_logical(c: &Component<RcStr>) -> bool {
