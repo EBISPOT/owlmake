@@ -1716,8 +1716,19 @@ fn run_target_recipe_inner(
     // that NEEDS one still has to find it there. `execute_plan` runs the pattern
     // stage up front; a single-target invocation (`om make tmp/seed.txt`) does
     // not, and would build a seed missing all 317 pattern terms. Run it on
-    // demand, once per run (`repo.built`).
-    if a.needs.iter().any(|n| is_native_pattern_product(repo, n) && !repo.dir.join(n).exists()) {
+    // demand, once per run (`repo.built`). A product the plan DOES carry a rule
+    // for is that rule's to build, not the pattern stage's.
+    let ruled = |n: &str| {
+        repo.plan
+            .artefacts
+            .iter()
+            .chain(repo.plan.prerequisites.iter())
+            .any(|a| a.target == n && !a.missing_rule)
+    };
+    if a.needs
+        .iter()
+        .any(|n| is_native_pattern_product(repo, n) && !ruled(n) && !repo.dir.join(n).exists())
+    {
         if repo.built.borrow_mut().insert("\u{1}patterns".to_string()) {
             if repo.regenerate_patterns {
                 regenerate_patterns_planned(repo, repo.plan)
@@ -2287,6 +2298,10 @@ fn run_cli_robot_step(
     // --queries … -O $(REPORTDIR)`, and `-O` does not match the scan, so
     // `--output <tmp>` would be appended to a command that has no such option and
     // clap would exit 2 — the QC check could not run at all.
+    // `explain` is NOT terminal: the model it hands the next command is the
+    // ontology of its justification axioms (empty when nothing needed
+    // explaining), so the chain file it writes through the appended `--output`
+    // is exactly that ontology and the pass-through would be wrong.
     const TERMINAL_COMMANDS: &[&str] = &[
         "report",
         "verify",
@@ -2295,7 +2310,6 @@ fn run_cli_robot_step(
         "diff",
         "export",
         "export-prefixes",
-        "explain",
         "mirror",
         "check-rdfxml",
         "validate-id-ranges",
@@ -2755,6 +2769,9 @@ fn run_steps(
                 }
             }
             Step::Inert(_) => {} // no observable effect; never reaches a plan
+            Step::UnsupportedSubcommand(name) => {
+                bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
+            }
             s if is_shell_step(s) => {
                 model = run_shell_step_in_pipeline(
                     repo, s, model, target, work, model_on_disk, pipeline_input,
@@ -3947,6 +3964,9 @@ fn run_artefact(
                 staged_by_shell = true;
                 continue;
             }
+            Step::UnsupportedSubcommand(name) => {
+                bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
+            }
             _ => bail!("internal: uncovered step reached executor: {}", step.label()),
         };
         // Use the import closure only when the model still carries uncollapsed
@@ -3987,6 +4007,20 @@ fn run_artefact(
             model.banner_labels = closure_labels(cl);
         }
         withdraw_materialised_declarations(&mut model);
+    }
+    // An OBO document comments every clause target that has a label — and a
+    // target the root only references (a GO process in a `relationship:`, a
+    // BFO class in an `is_a:`) is labelled by the ontology that declares it.
+    // MONDO's `filtered.obo` keeps its four imports, so its 34,000 clause
+    // comments come from the closure.
+    if a.target.ends_with(".obo") && model_has_imports(&model) {
+        if !closure_loaded {
+            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure_loaded = true;
+        }
+        if let Some(cl) = &closure {
+            model.banner_labels = closure_labels(cl);
+        }
     }
 
     // Every referenced entity is declared: an annotation property a merged non-OBO
@@ -4067,6 +4101,13 @@ fn run_artefact(
     //     write and destroy the output rather than merely fail to check for it.
     if repo.plan.is_phony(&a.target) {
         return surface_produced(repo, &a.target, &a.steps, work, out);
+    }
+    // A side-effect-only rule writes the files its steps name and nothing at
+    // the target path: no target file exists afterwards, the rule is simply
+    // always out of date, and materialising the pipeline model here would
+    // create an artefact the build never meant to produce.
+    if a.side_effect_only {
+        return Ok(());
     }
     let write_res = match explicit_fmt.or_else(|| crate::io::Format::from_path(out).ok()) {
         Some(f) => crate::io::save_as(&mut model, out, f),
@@ -4891,19 +4932,87 @@ fn reason_with_closure(
     reasoner: &str,
     opts: &cmd::reason::ReasonOptions,
 ) -> Result<crate::model::Model> {
-    use horned_owl::model::MutableOntology;
-    // Reason over root + the import closure, then assert the newly-inferred axioms
-    // into the root only (the imported axioms re-enter verbatim at the later
+    use horned_owl::model::{Component, MutableOntology};
+    // Reason over root + the import closure, then assert the inferred axioms
+    // into the root only (the imported axioms re-enter verbatim at a later
     // collapsing merge). NB: `-X` does NOT drop inferred axioms about imported
     // classes at this point — MONDO's `reasoned.owl` keeps inferred
-    // `CHEBI ⊑ BFO_…` and the like — so every newly-inferred axiom is added.
+    // `CHEBI ⊑ BFO_…` and the like.
+    //
+    // What counts as "inferred" follows `--exclude-duplicate-axioms`: with it,
+    // an axiom the union already asserts is a duplicate and stays out; without
+    // it, every generated inference lands in the root even when the closure
+    // asserts the same axiom — MONDO's `mondo-tags-reasoned.owl` carries
+    // 18,000 `hgnc ⊑ SO_0000704` edges re-asserted from its uncollapsed
+    // imports exactly that way.
     let union = union_with_closure(&root, closure);
-    let before: std::collections::HashSet<_> = union.ont.iter().cloned().collect();
-    let reasoned = cmd::reason::reason_with(union, reasoner, opts)?;
     let mut out = root;
-    for ac in reasoned.ont.iter() {
-        if !before.contains(ac) {
-            out.ont.insert(ac.clone());
+    if opts.exclude_duplicate_axioms {
+        let before: std::collections::HashSet<_> = union.ont.iter().cloned().collect();
+        let reasoned = cmd::reason::reason_with(union, reasoner, opts)?;
+        for ac in reasoned.ont.iter() {
+            if !before.contains(ac) {
+                out.ont.insert(ac.clone());
+            }
+        }
+    } else {
+        let mut iopts = opts.clone();
+        iopts.create_new_ontology = true;
+        iopts.create_new_ontology_with_annotations = false;
+        let inferred = cmd::reason::reason_with(union, reasoner, &iopts)?;
+        for ac in inferred.ont.iter() {
+            if matches!(
+                ac.component,
+                Component::SubClassOf(_)
+                    | Component::EquivalentClasses(_)
+                    | Component::ClassAssertion(_)
+            ) {
+                out.ont.insert(ac.clone());
+            }
+        }
+        // The redundant-subclass sweep runs against the merged result, and the
+        // inferred model carries exactly the direct pairs it needs: an
+        // un-annotated asserted `C ⊑ X` that is not a proper direct super goes,
+        // the same rule the non-closure path applies to its own merge.
+        if opts.remove_redundant_subclass_axioms {
+            use horned_owl::model::ClassExpression as CE;
+            let mut direct_set: std::collections::HashSet<(String, String)> = Default::default();
+            for ac in inferred.ont.iter() {
+                if let Component::SubClassOf(sc) = &ac.component {
+                    if let (CE::Class(c), CE::Class(x)) = (&sc.sub, &sc.sup) {
+                        direct_set
+                            .insert((c.0.as_ref().to_string(), x.0.as_ref().to_string()));
+                    }
+                }
+            }
+            const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+            const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+            let doomed: Vec<_> = out
+                .ont
+                .iter()
+                .filter(|ac| {
+                    if !ac.ann.is_empty() {
+                        return false;
+                    }
+                    match &ac.component {
+                        Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
+                            (CE::Class(c), CE::Class(x)) => {
+                                let (c, x) = (c.0.as_ref(), x.0.as_ref());
+                                let proper = direct_set
+                                    .contains(&(c.to_string(), x.to_string()))
+                                    && !direct_set.contains(&(x.to_string(), c.to_string()));
+                                x != OWL_THING && x != OWL_NOTHING && !proper
+                            }
+                            _ => false,
+                        },
+                        _ => false,
+                    }
+                })
+                .cloned()
+                .collect();
+            for ac in doomed {
+                out.ont.remove(&ac);
+            }
         }
     }
     Ok(out)
@@ -4923,6 +5032,10 @@ fn reduce_with_closure(
     let reduced = cmd::reduce::reduce_with_opts(&union, false, false, include_subproperties);
     let mut out = empty_model();
     out.prefixes = root.prefixes.clone();
+    // The root's document state — blank-node sharing recorded by relax above
+    // all — describes axioms that survive into `out`; rebuilding from an empty
+    // model without it makes every relax-shared node render as two copies.
+    out.carry_meta_from(&root);
     for ac in reduced.ont.iter() {
         if root_set.contains(ac) {
             out.ont.insert(ac.clone());
@@ -4953,6 +5066,7 @@ fn strip_external_subject_axioms(
     };
     let mut out = empty_model();
     out.prefixes = model.prefixes.clone();
+    out.carry_meta_from(&model);
     for ac in model.ont.iter() {
         if !fully_external(&ac.component) {
             out.ont.insert(ac.clone());
@@ -5155,6 +5269,16 @@ fn write_step_output(
         }
         withdraw_materialised_declarations(model);
     }
+    // An OBO write comments every clause target that has a label, and a target
+    // the root only references is labelled by the ontology that declares it —
+    // the closure's labels fill the map exactly as they do for a target's own
+    // closing write.
+    if matches!(fmt, Some(crate::io::Format::Obo)) && model_has_imports(model) {
+        let catalog = load_catalog_planned(repo);
+        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+            model.banner_labels = closure_labels(&cl);
+        }
+    }
     match fmt {
         Some(f) => crate::io::save_as(model, &out, f),
         None => crate::io::save(model, &out),
@@ -5175,6 +5299,9 @@ fn apply_op(
     pipeline_input: Option<&Path>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
+    if std::env::var_os("OM_PIPE_DEBUG").is_some() {
+        eprintln!("[pipe] {:?} in: shared_anon={} owners", std::mem::discriminant(op), model.shared_anon.len());
+    }
     Ok(match op {
         Op::Merge { inputs, collapse_import_closure } => {
             let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -6729,6 +6856,7 @@ mod aggregate_tests {
             steps,
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
             branches: vec![],
         }

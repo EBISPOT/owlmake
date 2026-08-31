@@ -434,6 +434,7 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // `default_prefixes()` above is still the map used to EXPAND CURIEs
     // while parsing — it is just not the document's own declaration set.
     m.format_prefixes_cleared = true;
+    m.obo_source = true;
     // …but the document's own `idspace:` lines ARE its prefix declarations, and an
     // obo→obo trip has to give them back: consulting them only to expand CURIEs
     // during the parse (the thread-local above) and then dropping them would lose
@@ -1985,6 +1986,9 @@ struct Ctx {
     /// `! …` comments name.
     label_order: HashMap<String, Vec<String>>,
     used: std::cell::RefCell<BTreeSet<String>>,
+    /// `Model::owlapi_456` — this document quotes a `property_value:` literal
+    /// only when it must (see [`pv_literal_token`]).
+    owlapi_456: bool,
 }
 
 impl Ctx {
@@ -2003,6 +2007,12 @@ impl Ctx {
         let mut idspaces: Vec<(String, String)> =
             if !model.idspaces.is_empty() && model.explicit_prefixes.is_empty() {
                 model.idspaces.clone()
+        } else if model.obo_source && model.explicit_prefixes.is_empty() {
+            // An OBO document's only prefix declarations are its `idspace:`
+            // lines. With none declared (and none added on the command line),
+            // nothing shortens an id — the pipeline's own prefix map is not the
+            // document's.
+            Vec::new()
         } else {
             // No scanned prefix set (OBO→OBO, or an OWL/functional model whose prefix
             // map horned-owl surfaces directly): fall back to the declared prefixes,
@@ -2116,6 +2126,7 @@ impl Ctx {
             metadata_tags,
             label_order: model.owl_label_order.clone(),
             used: std::cell::RefCell::new(BTreeSet::new()),
+            owlapi_456: model.owlapi_456,
         }
     }
 
@@ -2786,6 +2797,18 @@ fn rewrite_logical_definition_view(
     }
 }
 
+/// The token a `property_value:` literal writes. A document written under the
+/// OWL API 4.5.6 profile ([`crate::model::Model::owlapi_456`]) quotes a
+/// literal only when it must — a value with no space that carries a `:` is
+/// written bare, verbatim. Every other document quotes every literal.
+fn pv_literal_token(val: &str, owlapi_456: bool) -> String {
+    if owlapi_456 && !val.contains(' ') && val.contains(':') {
+        val.to_string()
+    } else {
+        format!("\"{}\"", escape(val))
+    }
+}
+
 pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     let ctx = Ctx::new(model);
     let mut classes: BTreeSet<String> = BTreeSet::new();
@@ -2958,6 +2981,12 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             }
         }
     }
+    // A clause target with no stanza of its own — an entity declared and
+    // labelled by an import — is commented from the closure's labels. The
+    // document's own label wins where both exist.
+    for (iri, label) in &model.banner_labels {
+        labels.entry(ctx.id(iri)).or_insert_with(|| label.clone());
+    }
 
     // The body is buffered because the header's `idspace:` lines can only be
     // known once every clause has been rendered (see `Ctx`), and the header is
@@ -3089,9 +3118,11 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     syntypedefs.sort_by_key(|(id, d)| (fold(id), d.clone()));
     syntypedefs.dedup();
 
-    // Header, in OBO's header-tag order (format-version, data-version,
-    // import, subsetdef, synonymtypedef, idspace, remark, ontology,
-    // property_value) — the order released files such as CL's `cl.obo` carry.
+    // Header, in OBO's header-tag order (format-version 0, data-version 10,
+    // date 15, saved-by 20, auto-generated-by 25, subsetdef 35,
+    // synonymtypedef 40, default-namespace 45, idspace 50, treat-xrefs-* 55–70,
+    // remark 75, import 80, ontology 85, property_value 100, owl-axioms 110) —
+    // the order released files such as CL's `cl.obo` carry.
     // The default is 1.2, not 1.4: `format-version: 1.2` is what released OBO files
     // carry, so a model that reaches the writer with no
     // `oboInOwl:hasOBOFormatVersion` (one read from OWL, say) is stamped with that.
@@ -3114,9 +3145,6 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     emit_directive!("date");
     emit_directive!("saved-by");
     emit_directive!("auto-generated-by");
-    for imp in &imports {
-        writeln!(writer, "import: {imp}")?;
-    }
     for (id, descr) in &subsetdefs {
         writeln!(writer, "subsetdef: {id} \"{}\"", escape(descr))?;
     }
@@ -3205,6 +3233,10 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     for r in &remarks {
         writeln!(writer, "remark: {}", escape_unquoted(r))?;
     }
+    // `import:` sorts between `remark:` and `ontology:` in the header tag order.
+    for imp in &imports {
+        writeln!(writer, "import: {imp}")?;
+    }
     if let Some(iri) = &ont_iri {
         // The ontology id strips the OBO PURL base UNCONDITIONALLY and strips a
         // trailing `.owl` only when there is one. Requiring both would leave any
@@ -3231,7 +3263,11 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             // A literal `property_value` must carry a datatype — a bare quoted
             // value is misread as an IRI. Default to xsd:string.
             let dt_tok = dt.clone().unwrap_or_else(|| "xsd:string".into());
-            writeln!(writer, "property_value: {pred} \"{}\" {dt_tok}", escape(val))?;
+            writeln!(
+                writer,
+                "property_value: {pred} {} {dt_tok}",
+                pv_literal_token(val, model.owlapi_456)
+            )?;
         }
     }
     // `logical-definition-view-relation:` is written after the `property_value:`
@@ -5518,7 +5554,11 @@ fn write_stanza<W: Write>(
             format!("{pred} {val}{}", render_quals(&quals))
         } else {
             let dt_tok = dt.clone().unwrap_or_else(|| "xsd:string".into());
-            format!("{pred} \"{}\" {dt_tok}{}", escape(val), render_quals(&quals))
+            format!(
+                "{pred} {} {dt_tok}{}",
+                pv_literal_token(val, ctx.owlapi_456),
+                render_quals(&quals)
+            )
         };
         // Key on predicate + raw (unquoted) value, so a literal and an IRI value
         // of the same property interleave in value order. Two clauses with the

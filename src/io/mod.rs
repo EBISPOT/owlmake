@@ -90,8 +90,10 @@ pub mod obo;
 pub mod obograph;
 pub mod ofncache;
 pub mod owlfunc;
+pub mod owlapi_ttl;
 pub mod owlrdf;
 pub mod turtle;
+pub mod jena_ttl;
 
 /// A serialization format for OWL ontologies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1014,8 +1016,13 @@ fn scan_owl_anon_individual_blocks(bytes: &[u8]) -> Vec<AnonBlock> {
     let mut out: Vec<AnonBlock> = Vec::new();
     for (s, end) in top_level_anon_descriptions(&text) {
         let block = &text[s..end];
-        let renders_from_model = block.contains("owl:distinctMembers")
-            || block.contains("owl:members")
+        // Matched by local name, not by the `owl:` prefix: a document that
+        // binds the OWL namespace as its DEFAULT xmlns writes these elements
+        // unprefixed (`<distinctMembers>`), and a block missed here is written
+        // twice — once replayed verbatim, once rendered from its component.
+        let renders_from_model = block.contains("distinctMembers")
+            || block.contains(":members")
+            || block.contains("<members")
             || block.contains("http://www.w3.org/2003/11/swrl#");
         if !renders_from_model {
             // The block's own parse-time blank node is the allocation made AT its
@@ -2488,7 +2495,10 @@ fn write_to_with<W: Write>(
         Format::Obo => obo::save(model, &mut writer)?,
         Format::OboGraph => obograph::save(model, &mut writer)?,
         Format::Manchester => manchester::save(model, &mut writer)?,
-        Format::Turtle => turtle::save(model, &mut writer)?,
+        Format::Turtle => match owlapi_ttl::render(model) {
+            Some(bytes) => writer.write_all(&bytes)?,
+            None => turtle::save(model, &mut writer)?,
+        },
         Format::NTriples => {
             turtle::save_as(model, &mut writer, oxigraph::io::RdfFormat::NTriples)?
         }

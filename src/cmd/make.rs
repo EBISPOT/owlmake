@@ -282,7 +282,10 @@ fn classify(plan: &Plan, target: &str) -> Kind {
     // RULE — but they are release artefacts, and a target that cannot be named
     // cannot be asked for, so they are classified here: `om make
     // ../patterns/definitions.owl` runs the pattern stage that produces it.
-    if is_pattern_product(plan, target) {
+    // Only when the plan carries no rule for it, though: a repo may build its
+    // own `pattern.owl` beside the DOSDP output — MONDO reasons and reduces one
+    // from `pattern-with-imports.owl` — and that recorded recipe wins.
+    if is_pattern_product(plan, target) && !plan_target(plan, target) {
         return Kind::Patterns;
     }
     // The mirrors are the same shape as the pattern products: the executor builds
@@ -368,7 +371,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     let plan_format = spec::PlanFormat::parse(&args.plan_format)?;
     let plan_write = if args.regenerate { PlanWrite::Regenerate } else { PlanWrite::Check };
     let full_plan =
-        obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref(), make_vars.today.as_deref())?;
+        obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?;
     // The plan's recorded `emulate_robot_version` selects the two version-dependent byte
     // behaviours — whether OBO Graphs JSON nests axiom-annotation `meta`, and
     // whether a SPARQL update inherits the document's prefixes. Read from the
@@ -627,7 +630,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             full_plan
         } else {
             spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?,
                 &switches,
             )
         };
@@ -791,7 +794,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             build_plan(&repo, &full_plan, &run_opts, publish)
         } else {
             let plan = spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?,
                 &switches,
             );
             build_plan(&repo, &plan, &run_opts, publish)
@@ -834,7 +837,7 @@ pub fn prepare_release(a: &TargetArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
     // A release never rewrites the committed plan: `--regenerate` is a
     // deliberate, separate act, not something a build does on the way past.
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None)?;
+    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -865,7 +868,7 @@ pub fn prepare_release(a: &TargetArgs) -> Result<()> {
 /// `refresh-imports`: rebuild import modules from upstream (native).
 pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None)?;
+    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -876,7 +879,7 @@ pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
 /// `all-imports`: rebuild every individual import module from upstream.
 pub fn all_imports(a: &RepoArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None)?;
+    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -892,7 +895,7 @@ pub fn all_imports(a: &RepoArgs) -> Result<()> {
 /// nothing beyond the `om` binary itself.
 pub fn test(a: &RepoArgs) -> Result<()> {
     let repo = OdkRepo::load(&a.repo)?;
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None)?;
+    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None, None)?;
     let plan = {
         let switches = default_switches(&plan);
         spec::bind_switches(plan, &switches)
@@ -977,13 +980,14 @@ fn obtain_plan(
     write: PlanWrite,
     version: Option<&str>,
     today: Option<&str>,
+    clock: Option<&str>,
 ) -> Result<Plan> {
     let plan = if repo.spec.is_some() {
         repo.plan(&[])?
     } else {
         regen_plan(repo, format, write)?
     };
-    bind_run_version(repo, &plan, version, today)
+    bind_run_version(repo, &plan, version, today, clock)
 }
 
 /// The switch values an entry point that takes none resolves to: whatever the
@@ -1012,6 +1016,7 @@ fn bind_run_version(
     plan: &Plan,
     requested: Option<&str>,
     today: Option<&str>,
+    clock: Option<&str>,
 ) -> Result<Plan> {
     // A plan that names a version FILE is asking for the version the file holds
     // on the day of the build, not the one it held when the plan was written —
@@ -1029,7 +1034,7 @@ fn bind_run_version(
         Some(v) => v,
         None => crate::plan::release_version(&plan.version, requested),
     };
-    spec::bind_version(plan, &version, today, &repo.dir)
+    spec::bind_version(plan, &version, today, clock, &repo.dir)
 }
 
 /// Regenerate the plan (at the repo root) from the repo's build configuration and
@@ -1273,6 +1278,7 @@ struct MakeVars {
     /// about the date — so only `TODAY=` sets this, and a run that names neither
     /// falls back to the clock.
     today: Option<String>,
+    clock: Option<String>,
     /// Other `VAR=value` assignments, placed in each recipe's spawn environment
     /// (e.g. `ROBOT_ENV`, `ROBOT_JAVA_ARGS`) for any recipe target that reads them.
     env: Vec<(String, String)>,
@@ -1353,6 +1359,10 @@ fn apply_make_var(vars: &mut MakeVars, name: &str, value: &str) {
             }
             vars.env.push((name.to_string(), value.to_string()));
         }
+        // The calendar day for the recipes that read the clock itself rather
+        // than the release date. It defaults to the day the build runs; naming
+        // it makes such a build reproducible on any later day.
+        "CLOCK" => vars.clock = Some(value.trim().to_string()),
         // Anything else (ROBOT_ENV, ROBOT_JAVA_ARGS, …) is placed in the spawn
         // environment of the recipe targets that read it. owlmake's own steps read
         // none of these values themselves; they are carried through untouched so a

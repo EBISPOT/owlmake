@@ -165,10 +165,17 @@ impl ShortForm {
     /// string) is written as-is.
     fn cell(&self, value: &str) -> String {
         if value.starts_with("http://") || value.starts_with("https://") {
-            self.entity(value)
-        } else {
-            value.to_string()
+            return self.entity(value);
         }
+        // A bare value that names a declared prefix resolves to that prefix's
+        // namespace and renders as the contracted `prefix:` — a synonym reading
+        // exactly "MF" prints as "MF:" wherever MF: is declared.
+        for map in [&self.context, &self.document] {
+            if map.iter().any(|(prefix, _)| prefix == value) {
+                return format!("{value}:");
+            }
+        }
+        value.to_string()
     }
 
     /// The Subject column, which has two extra rules: the ontology IRI is kept in

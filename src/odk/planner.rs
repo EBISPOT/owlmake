@@ -377,6 +377,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
                     steps: vec![],
                     gaps: vec![],
                     missing_rule: true,
+                    side_effect_only: false,
                     stdout_file: None,
                     branches: vec![],
                 });
@@ -690,6 +691,11 @@ fn plan_rule(
     // `--input`, so a `merge` that leads such a line REPLACES the model rather
     // than adding to it.
     let mut command_lines = 0usize;
+    // Whether any recipe line names the target as something it writes: `$@`
+    // before expansion, or the target itself as a whole token after it. A
+    // recipe that never does produces only side files — see
+    // `ArtefactPlan::side_effect_only`.
+    let mut names_target = false;
     for line in &rule.recipe {
         // A recipe-time `$(eval VAR := VALUE)` assignment produces no command. It
         // is resolved HERE, at ingest, so the recorded step carries the real command
@@ -700,6 +706,12 @@ fn plan_rule(
             continue;
         }
         let expanded = make.expand_with(line, &autos);
+        if !names_target {
+            // `$@` may reach the expanded text through a variable's value, so
+            // the expanded line is checked for both spellings of the target.
+            names_target = line.contains("$@")
+                || expanded.split_whitespace().any(|t| t == target || t == "$@");
+        }
         // The pipeline opens with the first ROBOT invocation's own input. A line
         // that runs something else — `$(MAKE) …`, `sssom convert …` — threads no
         // model, so the scan continues past it; the first robot line that names
@@ -831,6 +843,18 @@ fn plan_rule(
         let normal = expanded_prereqs_opt(repo, rule, stem.as_deref(), target, false);
         all.into_iter().filter(|p| !normal.contains(p)).collect()
     };
+    // Only a recipe that THREADS A MODEL can be side-effect only in the sense
+    // the executor asks about: whether the pipeline's final model may be
+    // materialised at the target path. A rule of shell commands alone owns its
+    // own outputs however it names them (a script may write the target under a
+    // name the recipe never spells), and a grouping rule with no recipe has no
+    // sides at all.
+    let side_effect_only = !rule.recipe.is_empty()
+        && !names_target
+        && steps
+            .iter()
+            .any(|s| matches!(s, Step::Op(_) | Step::Partial { .. } | Step::OwlmakeCli { .. }))
+        && !crate::plan::gaps::recipe_outputs(&steps).iter().any(|o| o == target);
     Some(ArtefactPlan {
         target: target.to_string(),
         input,
@@ -843,6 +867,7 @@ fn plan_rule(
         steps,
         gaps,
         missing_rule: false,
+        side_effect_only,
         stdout_file,
         // Filled in once every target is known, by `attach_branches`.
         branches: Vec::new(),
@@ -1181,8 +1206,29 @@ fn refresh_groups(
         .iter()
         .map(|i| format!("{mirrordir}/{}.owl", i.id))
         .collect();
+    // A rule's own guard decides its group. The merged mirror is the case in
+    // point: its recipe is `if [ $(IMP) = true ] && [ $(MERGE_MIRRORS) = true ]`,
+    // so under `MIR=false IMP=true` it still rebuilds — from the pinned mirrors —
+    // and pinning it under MIR would refuse a build the reference performs.
+    // Grouped under MIR only when the rule actually tests MIR (in an `ifeq`
+    // frame or in the recipe itself); otherwise the imports sweep below picks it
+    // up as a target built from the mirrors.
+    let tests_mir = |name: &str| -> Option<bool> {
+        let makefile_name = name
+            .strip_prefix("src/ontology/")
+            .map(str::to_string)
+            .or_else(|| name.strip_prefix("src/").map(|rest| format!("../{rest}")));
+        let rule = [Some(name.to_string()), makefile_name]
+            .into_iter()
+            .flatten()
+            .find_map(|n| make.rule_for(&n));
+        rule.map(|(r, _)| {
+            r.guards.iter().any(|g| g == "MIR")
+                || r.recipe.iter().any(|l| l.contains("$(MIR)"))
+        })
+    };
     let merged_mirror = format!("{mirrordir}/merged.owl");
-    if make.rule_for(&merged_mirror).is_some() {
+    if tests_mir(&merged_mirror) == Some(true) {
         mirrors.push(merged_mirror);
     }
 
@@ -1200,7 +1246,11 @@ fn refresh_groups(
         let t = &a.target;
         let is_mirror = t.starts_with("mirror-")
             || Path::new(t).parent().is_some_and(|p| p == Path::new(&mirrordir));
-        if is_mirror && !mirrors.contains(t) {
+        // A mirror-path target whose rule exists but never tests MIR is not of
+        // this group, wherever it lives — its own guard says when it rebuilds. A
+        // target with no rule at all stays: there is nothing to rebuild it with,
+        // and the pin states that.
+        if is_mirror && tests_mir(t) != Some(false) && !mirrors.contains(t) {
             mirrors.push(t.clone());
         }
     }
@@ -2398,6 +2448,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         ],
         gaps: vec![],
         missing_rule: false,
+        side_effect_only: false,
         stdout_file: None,
         // A repo with no build configuration has no conditionals to branch on.
         branches: Vec::new(),
@@ -2423,6 +2474,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         ],
         gaps: vec![],
         missing_rule: false,
+        side_effect_only: false,
         stdout_file: None,
         // A repo with no build configuration has no conditionals to branch on.
         branches: Vec::new(),
@@ -2442,6 +2494,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![] })],
             gaps: vec![],
             missing_rule: false,
+        side_effect_only: false,
             stdout_file: None,
             branches: Vec::new(),
         });
@@ -3186,13 +3239,30 @@ fn resolve_seed_paths(make: &super::makefile::MakeModel, repo: &OdkRepo, steps: 
 /// Drop the round-trip a rule's own final `-o $@` implies: the pipeline's closing
 /// write already performs it, and materializing the target twice would send it
 /// through one serialization more than the recipe asks for.
+///
+/// Unless a LATER invocation reads the file back. A target-named write followed
+/// by a boundary over the same file is load-bearing (MONDO's
+/// `subsets/mondo-rare.owl` is `extract … --output $@ && robot annotate
+/// --input $@ …`): the write must happen where the recipe puts it, or the
+/// boundary has nothing to open.
 fn drop_target_round_trip(steps: &mut Vec<Step>, target: &str) {
     let name = std::path::Path::new(target).file_name().map(|s| s.to_os_string());
-    steps.retain(|s| match s {
-        Step::Op(robot::Op::RoundTrip { path, .. }) => {
-            std::path::Path::new(path).file_name().map(|s| s.to_os_string()) != name
-        }
-        _ => true,
+    let same_file = |p: &str| std::path::Path::new(p).file_name().map(|s| s.to_os_string()) == name;
+    let read_back_after: Vec<bool> = (0..steps.len())
+        .map(|i| {
+            steps[i + 1..].iter().any(|s| {
+                matches!(s, Step::Boundary { input: Some(f) } if same_file(f))
+            })
+        })
+        .collect();
+    let mut i = 0;
+    steps.retain(|s| {
+        let keep = match s {
+            Step::Op(robot::Op::RoundTrip { path, .. }) if same_file(path) => read_back_after[i],
+            _ => true,
+        };
+        i += 1;
+        keep
     });
 }
 

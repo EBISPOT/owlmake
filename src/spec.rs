@@ -470,6 +470,12 @@ pub struct ArtefactSpec {
     /// silently builds nothing instead of reporting "no rule found".
     #[serde(default, skip_serializing_if = "is_false")]
     pub missing_rule: bool,
+    /// The recipe writes only the side files its steps name, never the target
+    /// itself: no target file is created, and the executor must not
+    /// materialise the pipeline model at the target path — see
+    /// `ArtefactPlan::side_effect_only`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub side_effect_only: bool,
     /// Where the recipe sends its console output (`… reason > $@`). The steps
     /// name only the intermediates they write with `-o`, so for a check built out
     /// of what its tool prints this is the only field that names the target.
@@ -491,6 +497,7 @@ impl ArtefactSpec {
             order_only: a.order_only.clone(),
             steps: a.steps.iter().map(StepEntry::from_step).collect(),
             missing_rule: a.missing_rule,
+            side_effect_only: a.side_effect_only,
             stdout_file: a.stdout_file.clone(),
             branches: a
                 .branches
@@ -1271,6 +1278,7 @@ impl OwlmakeSpec {
                     steps,
                     gaps,
                     missing_rule: a.missing_rule,
+                    side_effect_only: a.side_effect_only,
                     stdout_file: a.stdout_file,
                     branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
                 }
@@ -1290,6 +1298,7 @@ impl OwlmakeSpec {
                     steps,
                     gaps,
                     missing_rule: a.missing_rule,
+                    side_effect_only: a.side_effect_only,
                     stdout_file: a.stdout_file,
                     branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
                 }
@@ -1377,6 +1386,7 @@ pub fn bind_version(
     plan: &Plan,
     version: &str,
     today: Option<&str>,
+    clock: Option<&str>,
     dir: &Path,
 ) -> Result<Plan> {
     let spec = OwlmakeSpec::from_plan(plan);
@@ -1396,10 +1406,11 @@ pub fn bind_version(
     // TODAY=2026-08-19 across midnight.
     let today = today.map(str::to_string).unwrap_or_else(crate::plan::today);
     substitute(&mut value, crate::plan::VERSION_TODAY, &today);
-    // …and the clock is the clock. A recipe that shells out to `date` gets the
-    // day the build runs whatever version it stamps, because that is what the
-    // recipe would have got.
-    substitute(&mut value, crate::plan::VERSION_CLOCK, &crate::plan::today());
+    // …and the clock is the clock, unless the run names it: a recipe that
+    // shells out to `date` gets the day the build runs whatever version it
+    // stamps, and `CLOCK=` reproduces such a build on any later day.
+    let clock = clock.map(str::to_string).unwrap_or_else(crate::plan::today);
+    substitute(&mut value, crate::plan::VERSION_CLOCK, &clock);
     let mut bound: OwlmakeSpec = serde_json::from_value(value)
         .context("internal: a plan did not read back while binding its release version")?;
     bound.version = version.to_string();
@@ -2785,6 +2796,7 @@ mod tests {
             })],
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
             branches: vec![],
         };
@@ -2800,6 +2812,7 @@ mod tests {
             })],
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
             branches: vec![],
         };
@@ -2950,7 +2963,7 @@ mod format_floor_tests {
         // does not fail on `may_fail`, it IGNORES it, and runs a step the plan
         // says may fail as one that may not — a silent change of what the build
         // does, which is the case the floor exists to refuse.
-        const PLAN_SCHEMA_DIGEST: &str = "3c513a746b8e615b";
+        const PLAN_SCHEMA_DIGEST: &str = "755dc2594349610b";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3006,6 +3019,7 @@ mod round_trip_tests {
                 })],
                 gaps: vec![],
                 missing_rule: false,
+                side_effect_only: false,
                 stdout_file: None,
                 branches: vec![crate::plan::Branch {
                     flag: "BRI".into(),

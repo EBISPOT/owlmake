@@ -86,6 +86,14 @@ fn no_new_environment_variables_decide_output() {
         "OM_GENID_MISSLOG",
         "OM_GENID_REIF",
         "OM_GENID_REUSED",
+        // Counter value at the start of each owning entity — per-entity spend,
+        // which localises a drift to the entity that over- or under-allocates.
+        "OM_GENID_STARTS",
+        // shared_anon population after relax records derived-super sharing.
+        "OM_RELAX_DEBUG",
+        // shared_anon arity entering each pipeline op — names the op that drops
+        // carried document state.
+        "OM_PIPE_DEBUG",
         "OM_GENID_REUSELOG",
         "OM_GENID_STARTS",
         "OM_GENID_TRACE",

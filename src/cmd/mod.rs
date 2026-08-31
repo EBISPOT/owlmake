@@ -278,38 +278,7 @@ pub fn maybe_save(model: &mut Model, output: Option<&Path>, format: Option<&str>
         // (`merge`, `extract`, `subset`) has called
         // `Model::detach_import_closure`, which empties both records, so nothing
         // below applies to it.
-        if !model.imported_components.is_empty() {
-            use horned_owl::model::MutableOntology;
-            let doomed: Vec<_> = model
-                .ont
-                .iter()
-                .filter(|ac| model.imported_components.contains(*ac))
-                .cloned()
-                .collect();
-            for ac in doomed {
-                model.ont.remove(&ac);
-            }
-        }
-        if !model.inlined_imports.is_empty() {
-            use horned_owl::model::{Component, MutableOntology};
-            let existing: std::collections::HashSet<String> = model
-                .ont
-                .iter()
-                .filter_map(|ac| match &ac.component {
-                    Component::Import(i) => Some(i.0.to_string()),
-                    _ => None,
-                })
-                .collect();
-            let iris: Vec<String> = model.inlined_imports.clone();
-            let new: Vec<horned_owl::model::Import<_>> = iris
-                .into_iter()
-                .filter(|iri| !existing.contains(iri))
-                .map(|iri| horned_owl::model::Import(model.build.iri(iri)))
-                .collect();
-            for imp in new {
-                model.ont.insert(imp);
-            }
-        }
+        restore_root_for_save(model);
         let fmt = resolve_format(format, out)?;
         if crate::progress::verbosity() >= 1 {
             status!("saving {}: {} axioms", out.display(), model.ont.iter().count());
@@ -317,6 +286,47 @@ pub fn maybe_save(model: &mut Model, output: Option<&Path>, format: Option<&str>
         io::save_as(model, out, fmt)?;
     }
     Ok(())
+}
+
+/// Undo closure inlining for a save that writes the ROOT ontology: the axioms
+/// the imports contributed come back out of the component set, and the
+/// `owl:imports` declarations that stand for them go back in. Every save of a
+/// closure-inlined model that is NOT itself a collapse (`merge`, `extract`,
+/// `subset` call [`Model::detach_import_closure`] instead) goes through this —
+/// [`maybe_save`], and the owltools emulation's own `-o` save.
+pub(crate) fn restore_root_for_save(model: &mut Model) {
+    if !model.imported_components.is_empty() {
+        use horned_owl::model::MutableOntology;
+        let doomed: Vec<_> = model
+            .ont
+            .iter()
+            .filter(|ac| model.imported_components.contains(*ac))
+            .cloned()
+            .collect();
+        for ac in doomed {
+            model.ont.remove(&ac);
+        }
+    }
+    if !model.inlined_imports.is_empty() {
+        use horned_owl::model::{Component, MutableOntology};
+        let existing: std::collections::HashSet<String> = model
+            .ont
+            .iter()
+            .filter_map(|ac| match &ac.component {
+                Component::Import(i) => Some(i.0.to_string()),
+                _ => None,
+            })
+            .collect();
+        let iris: Vec<String> = model.inlined_imports.clone();
+        let new: Vec<horned_owl::model::Import<_>> = iris
+            .into_iter()
+            .filter(|iri| !existing.contains(iri))
+            .map(|iri| horned_owl::model::Import(model.build.iri(iri)))
+            .collect();
+        for imp in new {
+            model.ont.insert(imp);
+        }
+    }
 }
 
 /// Resolve `model`'s `owl:imports` through the XML `catalog`, merge the whole
@@ -777,6 +787,8 @@ pub mod embeddings;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod map;
 pub mod fastobo_validator;
+pub mod runoak;
+pub mod runoak_diff;
 pub mod extract_strings;
 pub mod extract_upheno_relations;
 pub mod text_tagger;

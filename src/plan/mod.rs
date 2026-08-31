@@ -40,6 +40,13 @@ pub struct ArtefactPlan {
     pub gaps: Vec<String>,
     /// Set when no rule for the target was found.
     pub missing_rule: bool,
+    /// The recipe never names its own target as something it writes (`$@`
+    /// appears nowhere in it, nor the target path itself): it produces only the
+    /// side files its steps name, the target file is never created, and the
+    /// rule simply runs again next time it is asked for. The executor must not
+    /// materialise the threaded pipeline model at the target path — a real
+    /// file would appear that the build never meant to produce.
+    pub side_effect_only: bool,
     /// Where the recipe sends its console output. A check whose rule ends
     /// `… > $@` builds its target out of what the tool prints, so the file exists
     /// (empty, when nothing was printed) exactly if the recipe ran to the end.

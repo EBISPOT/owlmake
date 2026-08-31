@@ -125,8 +125,104 @@ pub fn materialize_with_opts(
     annotate: bool,
     create_new_ontology: bool,
 ) -> crate::model::Model {
-    let reasoner = Reasoner::classify(&model);
-    let relations = reasoner.materialize(props);
+    // Directness is a question the CLASS HIERARCHY answers, so it is computed
+    // in a synthetic space: one fresh named class per (property, filler) pair,
+    // equivalent to the restriction it stands for, classified together with the
+    // ontology. A restriction with anything between it and the class — another
+    // materialized property's restriction included, or a named class — is not
+    // direct, and only direct superclasses are asserted. The named direct
+    // subsumptions come from the same augmented hierarchy.
+    const AUX_NS: &str = "urn:owlmake:materialize#";
+    const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+    const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+    let mut classes: std::collections::BTreeSet<String> = Default::default();
+    let mut all_props: std::collections::BTreeSet<String> = Default::default();
+    for ac in model.ont.iter() {
+        for (k, iri) in crate::sig::typed_signature(&ac.component) {
+            if k == crate::sig::kind::CLASS {
+                classes.insert(iri);
+            } else if k == crate::sig::kind::OBJECT_PROPERTY {
+                all_props.insert(iri);
+            }
+        }
+    }
+    classes.remove(OWL_THING);
+    classes.remove(OWL_NOTHING);
+    let prop_list: Vec<String> = if props.is_empty() {
+        all_props.into_iter().collect()
+    } else {
+        let mut v: Vec<String> = props.iter().cloned().collect();
+        v.sort();
+        v
+    };
+    let (relations, named_subs) = {
+        let mut aux = model.clone();
+        let mut aux_map: std::collections::HashMap<String, (String, String)> = Default::default();
+        let mut n = 0usize;
+        for r in &prop_list {
+            for c in &classes {
+                let iri = format!("{AUX_NS}{n}");
+                n += 1;
+                aux.ont.insert(Component::EquivalentClasses(
+                    horned_owl::model::EquivalentClasses(vec![
+                        CE::Class(aux.build.class(iri.clone())),
+                        CE::ObjectSomeValuesFrom {
+                            ope: OPE::ObjectProperty(aux.build.object_property(r.clone())),
+                            bce: Box::new(CE::Class(aux.build.class(c.clone()))),
+                        },
+                    ]),
+                ));
+                aux_map.insert(iri, (r.clone(), c.clone()));
+            }
+        }
+        let reasoner = Reasoner::classify(&aux);
+        let direct = reasoner.direct_subsumptions();
+        let mutual: std::collections::HashSet<(&str, &str)> =
+            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let mut relations: Vec<(String, String, String)> = Vec::new();
+        let mut named_subs: Vec<(String, String)> = Vec::new();
+        for (sub, sup) in &direct {
+            if sub.starts_with(AUX_NS) {
+                continue;
+            }
+            match aux_map.get(sup) {
+                Some((r, d)) => {
+                    // An equivalent restriction is the class's own node, not a
+                    // superclass.
+                    if mutual.contains(&(sup.as_str(), sub.as_str())) {
+                        continue;
+                    }
+                    relations.push((sub.clone(), r.clone(), d.clone()));
+                }
+                None => named_subs.push((sub.clone(), sup.clone())),
+            }
+        }
+        relations.sort();
+        relations.dedup();
+        named_subs.sort();
+        named_subs.dedup();
+        (relations, named_subs)
+    };
+
+    // Restrictions the ontology asserts WITH axiom annotations: the reification
+    // points at a labeled node, and a materialized twin at the same owner
+    // shares that node instead of joining the cross-owner group.
+    let annotated_asserted: std::collections::HashSet<(String, String, String)> = model
+        .ont
+        .iter()
+        .filter(|ac| !ac.ann.is_empty())
+        .filter_map(|ac| {
+            let Component::SubClassOf(SubClassOf {
+                sub: CE::Class(c),
+                sup: CE::ObjectSomeValuesFrom { ope: OPE::ObjectProperty(p), bce },
+            }) = &ac.component
+            else {
+                return None;
+            };
+            let CE::Class(d) = bce.as_ref() else { return None };
+            Some((c.0.to_string(), p.0.to_string(), d.0.to_string()))
+        })
+        .collect();
 
     let infer_prop = model
         .build
@@ -197,7 +293,14 @@ pub fn materialize_with_opts(
                 next_group += 1;
                 v
             });
-            if annotate {
+            if annotate || annotated_asserted.contains(&(c.clone(), r.clone(), d.clone())) {
+                // A reification points at a labeled node, so the minted object
+                // renders as ONE `rdf:nodeID` across every class that received
+                // it: either the assertion itself is annotated, or an annotated
+                // sibling of this class's new twin adopts the node. A class
+                // whose annotated axiom predates this step (its twin was NOT
+                // inserted here) keeps its own node — the sibling share there
+                // stays per-class.
                 model.cross_shared.insert(format!("{c}\u{1}{r}\u{1}{d}"), g);
             } else {
                 let sig = crate::io::genid::ce_sig(&CE::ObjectSomeValuesFrom {
@@ -216,7 +319,7 @@ pub fn materialize_with_opts(
     // `reason` step could not assert, so add the direct named subsumptions that
     // are not already present.
     let mut named_added = 0usize;
-    for (sub, sup) in reasoner.direct_subsumptions() {
+    for (sub, sup) in named_subs {
         let comp = Component::SubClassOf(SubClassOf {
             sub: CE::Class(model.build.class(sub)),
             sup: CE::Class(model.build.class(sup)),

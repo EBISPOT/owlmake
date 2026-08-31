@@ -101,7 +101,7 @@ pub(crate) const BUNDLED: &[&str] = &[
     // Helper command words a recipe can spell inline. Nothing else on the machine
     // provides them, so owlmake serves each one from its own implementation.
     "dicer-cli", "check-rdfxml", "odk-info", "sha256sum", "fastobo-validator",
-    "simple_pattern_tester.py",
+    "simple_pattern_tester.py", "runoak",
     // The ontology SQL database (`semsql make <name>.db`).
     "semsql",
 ];
@@ -243,6 +243,14 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
     }
 
     let mut steps = Vec::new();
+    // Whether an earlier part of THIS command was itself a robot invocation. A
+    // later one that names its own `--input` opens a new pipeline over that
+    // file: a separate process shares nothing with the last but files, exactly
+    // as a later recipe LINE does. MONDO's chebi mirror is `convert -I …
+    // -o tmp.owl && remove -i tmp.owl …` on one line: the remove re-reads the
+    // file the convert wrote, and the re-read is what hands the document's
+    // declared xmlns block to the final writer.
+    let mut saw_robot_part = false;
     // `split_shell_seq` records the separator that FOLLOWS each part, so the one
     // that governs a part is its predecessor's. `&&` and `;`
     // need nothing recorded — steps already run in order and abort on failure — but
@@ -332,7 +340,14 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
             if toks.iter().any(|t| t.starts_with("sssom:")) {
                 steps.push(shell_step(sub.to_string()));
             } else {
-                steps.extend(parse_robot_chain(&toks, robot_prefix));
+                let mut chain = parse_robot_chain(&toks, robot_prefix);
+                if saw_robot_part && !chain.is_empty() {
+                    if let Some(input) = super::planner::first_robot_input(sub, robot_prefix) {
+                        chain.insert(0, Step::Boundary { input: Some(input) });
+                    }
+                }
+                saw_robot_part = true;
+                steps.extend(chain);
             }
         } else if toks[0] == "owltools" || toks[0].ends_with("/owltools") {
             steps.extend(parse_owltools(&toks, sub));
@@ -607,14 +622,12 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
     // …`, so the write is the whole point of the line and the `mv` that follows
     // has nothing to rename without it.
     let mut out_file: Option<String> = None;
-    let mut out_format: Option<String> = None;
     let mut i = 1;
     while i < toks.len() {
         let t = &toks[i];
         if t == "-o" {
             let mut j = i + 1;
             if toks.get(j).is_some_and(|f| f == "-f") {
-                out_format = toks.get(j + 1).cloned();
                 j += 2;
             }
             out_file = toks.get(j).cloned();
@@ -723,14 +736,13 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
     }
     if steps.is_empty() {
         match out_file {
-            // A pure format conversion: no operations, but it still WRITES the
-            // file its `-o` names, in the format its `-f` gives.
-            Some(output) => steps.push(Step::Op(Op::Convert {
-                format: out_format,
-                clean_obo: None,
-                output: Some(output),
-                add_prefixes: Vec::new(),
-            })),
+            // A pure load-and-save: no operations, but the line still WRITES the
+            // file its `-o` names, in the format its `-f` gives — through the
+            // owltools emulation, whose writers differ from `convert`'s (the
+            // inline-anonymous-node RDF/XML profile, and the property_value
+            // quoting of its OBO output). Replayed verbatim so the plan says
+            // exactly what runs.
+            Some(_) => return vec![shell_step(sub.to_string())],
             // Nothing to do and nothing to write — the line only reads.
             None => steps.push(Step::Inert(sub.to_string())),
         }
@@ -1292,7 +1304,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             include_subproperties: boolv("--include-subproperties").or_else(|| boolv("-s")),
         }),
         "materialize" => Step::Op(Op::Materialize {
-            properties: { let mut p = all("--property"); p.extend(all("-P")); p },
+            properties: { let mut p = all("--term"); p.extend(all("-t")); p },
             term_files: { let mut f = all("--term-file"); f.extend(all("-T")); f },
         }),
         "remove" => remove_step(RemoveSpec {

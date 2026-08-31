@@ -659,7 +659,12 @@ fn break_order_ties(rows: &mut [ReportRow], by_entity: bool) {
                     a.property.cmp(&b.property).then_with(|| a.value.cmp(&b.value))
                 });
             } else {
-                rows[i..j].sort_by(|a, b| a.subject.cmp(&b.subject));
+                // Equal subjects break the tie on the value, case-sensitively:
+                // two spellings that fold to one duplicate ("MGA1"/"Mga1")
+                // order uppercase first.
+                rows[i..j].sort_by(|a, b| {
+                    a.subject.cmp(&b.subject).then_with(|| a.value.cmp(&b.value))
+                });
             }
         }
         i = j;

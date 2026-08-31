@@ -285,8 +285,9 @@ pub struct TermMeta {
 }
 
 impl TermMeta {
-    /// Read an OBO document: every `[Term]` stanza contributes its `name:` as
-    /// `rdfs:label` and the quoted part of its `def:` as `IAO:0000115`.
+    /// Read an OBO document: every `[Term]` and `[Typedef]` stanza contributes
+    /// its `name:` as `rdfs:label` and the quoted part of its `def:` as
+    /// `IAO:0000115` — a property's label is as translatable as a class's.
     ///
     /// Obsolete terms are excluded from [`terms`](Self::terms), because a
     /// translation profile covers only live terms — including them puts hundreds
@@ -298,16 +299,42 @@ impl TermMeta {
         let mut out = TermMeta::default();
         let mut id: Option<String> = None;
         let mut in_term = false;
+        let mut is_typedef = false;
+        let mut rekeyed = false;
         let mut obsolete: std::collections::HashSet<String> = std::collections::HashSet::new();
         for line in text.lines() {
             let l = line.trim_end();
             if l.starts_with('[') {
-                in_term = l == "[Term]";
+                is_typedef = l == "[Typedef]";
+                in_term = l == "[Term]" || is_typedef;
                 id = None;
+                rekeyed = false;
                 continue;
             }
             if !in_term {
                 continue;
+            }
+            // A property's canonical id is its first `xref:` when it has one —
+            // `never_in_taxon` translates as `RO:0002161` — so the stanza's
+            // entry moves to that key the moment the xref appears.
+            if is_typedef && !rekeyed {
+                if let Some(v) = l.strip_prefix("xref: ") {
+                    rekeyed = true;
+                    if let Some(old) = id.take() {
+                        let v = v.trim().to_string();
+                        if let Some(k) = out.terms.iter().rposition(|t| *t == old) {
+                            out.terms[k] = v.clone();
+                        }
+                        if let Some(meta) = out.meta.remove(&old) {
+                            out.meta.insert(v.clone(), meta);
+                        }
+                        if obsolete.remove(&old) {
+                            obsolete.insert(v.clone());
+                        }
+                        id = Some(v);
+                    }
+                    continue;
+                }
             }
             if let Some(v) = l.strip_prefix("id: ") {
                 let v = v.trim().to_string();

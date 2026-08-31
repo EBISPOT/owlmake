@@ -515,12 +515,28 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
         }
         Some((i, v.to_string(), expand(o)?, expand(pred)?))
     });
-    let (i, var, obj, path_pred) = match (typed, path) {
-        (Some((i, v, o)), _) => (i, v, o, None),
-        (None, Some((i, v, o, pred))) => (i, v, o, Some(pred)),
-        (None, None) => {
+    // `?v <p> <O>` with both terms bound is answered from the object index too:
+    // the object's whole bunch in slot order, filtered to the pattern's
+    // predicate — `object_subjects` is that order. Preferred only when neither
+    // shape above appears.
+    let fixed = patterns.iter().enumerate().find_map(|(i, (s, p, o))| {
+        let v = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        if is_var(p) || is_var(o) || p.ends_with('*') {
+            return None;
+        }
+        let pe = expand(p)?;
+        if pe == RDF_TYPE {
+            return None;
+        }
+        Some((i, v.to_string(), expand(o)?, pe))
+    });
+    let (i, var, obj, path_pred, fixed_pred) = match (typed, path, fixed) {
+        (Some((i, v, o)), _, _) => (i, v, o, None, None),
+        (None, Some((i, v, o, pred)), _) => (i, v, o, Some(pred), None),
+        (None, None, Some((i, v, o, pred))) => (i, v, o, None, Some(pred)),
+        (None, None, None) => {
             if dbg {
-                eprintln!("[scan] no `?v a <T>` or `?v <p>* <T>` pattern to drive");
+                eprintln!("[scan] no `?v a <T>`, `?v <p>* <T>` or `?v <p> <O>` pattern to drive");
             }
             return false;
         }
@@ -531,9 +547,10 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
         }
         return false;
     };
-    // A path driver also takes the OPTIONAL groups' patterns: when the main block
-    // holds nothing but the path itself, they are what ranks a subject's rows.
-    let optionals = if path_pred.is_some() { optional_patterns(sparql) } else { Vec::new() };
+    // The OPTIONAL groups' patterns rank a subject's rows exactly as a second
+    // main pattern would — and when the main block holds nothing but the
+    // driving pattern itself, they are all that does.
+    let optionals = optional_patterns(sparql);
     let inner: Vec<InnerPattern> = patterns
         .iter()
         .enumerate()
@@ -551,16 +568,29 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
             })
         })
         .collect();
-    // A type pattern needs a second pattern to rank a subject's rows against each
-    // other; a path already fixes the order of the subjects themselves, so it
-    // orders the rows on its own — which is what an `OPTIONAL` query leaves it to
-    // do, the optional patterns being no part of the main block.
-    if inner.is_empty() && path_pred.is_none() {
-        return false;
-    }
+    // With no second pattern at all, the driving pattern still fixes the order
+    // of the subjects; a subject's own rows then keep the order they arrived in.
     // The order the driving pattern binds `var` in: for a type pattern, the bunch
     // of that type's triples; for a path, the walk back from its object.
-    let outer: std::collections::HashMap<String, usize> = match &path_pred {
+    let outer: std::collections::HashMap<String, usize> = if let Some(pred) = &fixed_pred {
+        let Some(seq) = q.object_subjects(&obj, pred) else {
+            if dbg {
+                eprintln!("[scan] no object bunch for {obj}");
+            }
+            return false;
+        };
+        if seq.len() <= 1 {
+            if dbg {
+                eprintln!("[scan] object bunch for {obj} holds nothing to order");
+            }
+            return false;
+        }
+        let mut m: std::collections::HashMap<String, usize> = Default::default();
+        for (k, s) in seq.into_iter().enumerate() {
+            m.entry(s).or_insert(k);
+        }
+        m
+    } else { match &path_pred {
         None => {
             let Some(seq) = q.typed_in_order(&obj) else {
                 if dbg {
@@ -592,7 +622,7 @@ fn apply_jena_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) ->
             }
             seq.into_iter().enumerate().map(|(k, s)| (s, k)).collect()
         }
-    };
+    }};
     if dbg {
         eprintln!("[scan] var={var} obj={obj} outer={} inner={}", outer.len(), inner.len());
     }
@@ -1199,11 +1229,115 @@ fn finish_table(
             } else if !grouped {
                 // A plain SELECT has no order of its own: the rows come out in the
                 // order the graph answers the pattern in.
-                apply_jena_scan_order(table, q, sparql);
+                if !apply_jena_scan_order(table, q, sparql) {
+                    apply_jena_path_distinct_order(table, q, sparql);
+                }
             }
         }
     }
     renumber_blank_nodes(table);
+}
+
+/// Order the rows of a `SELECT DISTINCT ?w` whose body binds a driving variable
+/// by a fully-bound pattern and reaches `?w` over `?v <p>* ?w`.
+///
+/// The graph answers the driving pattern from its object bunch, in slot order;
+/// each binding's path enumerates depth-first from it
+/// ([`Queryable::forward_path_order`]); and DISTINCT keeps each `?w` at its
+/// first appearance across that whole stream. Bindings a filter removed
+/// establish no appearance, so the driving values are restricted to the ones an
+/// unprojected run of the same body still binds.
+fn apply_jena_path_distinct_order(table: &mut QueryTable, q: &Queryable, sparql: &str) -> bool {
+    const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    if table.columns.len() != 1 || table.rows.len() < 2 {
+        return false;
+    }
+    if !sparql.to_ascii_uppercase().contains("DISTINCT") {
+        return false;
+    }
+    let prefixes = query_prefixes(sparql);
+    let expand = |t: &str| -> Option<String> {
+        if let Some(i) = t.strip_prefix('<').and_then(|x| x.strip_suffix('>')) {
+            return Some(i.to_string());
+        }
+        if t == "a" {
+            return Some(RDF_TYPE.to_string());
+        }
+        let (name, local) = t.split_once(':')?;
+        let (_, ns) = prefixes.iter().find(|(n, _)| n == name)?;
+        Some(format!("{ns}{local}"))
+    };
+    let is_var = |t: &str| t.starts_with('?') || t.starts_with('$');
+    let w = table.columns[0].clone();
+    let patterns = main_patterns(sparql);
+    // `?v <p>* ?w` with `?w` the projected variable.
+    let Some((v, path_pred)) = patterns.iter().find_map(|(s, p, o)| {
+        let sv = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        let pred = p.strip_suffix('*')?;
+        let ov = o.strip_prefix('?').or_else(|| o.strip_prefix('$'))?;
+        if ov != w || sv == w {
+            return None;
+        }
+        Some((sv.to_string(), expand(pred)?))
+    }) else {
+        return false;
+    };
+    // The driving pattern: `?v <pred> <obj>`, both terms bound.
+    let Some((dpred, dobj)) = patterns.iter().find_map(|(s, p, o)| {
+        let sv = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        if sv != v || is_var(p) || is_var(o) || p.ends_with('*') {
+            return None;
+        }
+        Some((expand(p)?, expand(o)?))
+    }) else {
+        return false;
+    };
+    let Some(outer) = q.object_subjects(&dobj, &dpred) else {
+        return false;
+    };
+    // The driving values that survive the body's filters, from an unprojected
+    // run of the same body.
+    let surviving: std::collections::HashSet<String> = {
+        let block = match where_block(sparql) {
+            Some(b) => b,
+            None => return false,
+        };
+        let prologue = {
+            let up = sparql.to_ascii_uppercase();
+            match up.find("SELECT") {
+                Some(at) => &sparql[..at],
+                None => return false,
+            }
+        };
+        let aux = format!("{prologue}SELECT * WHERE {block}");
+        let Ok(t) = q.query_table(&aux) else { return false };
+        let Some(vc) = t.columns.iter().position(|c| *c == v) else { return false };
+        t.rows.iter().filter_map(|r| r.get(vc).cloned()).collect()
+    };
+    let mut rank: std::collections::HashMap<String, usize> = Default::default();
+    let mut k = 0usize;
+    for start in outer {
+        if !surviving.contains(&start) {
+            continue;
+        }
+        for node in q.forward_path_order(&start, &path_pred) {
+            rank.entry(node).or_insert_with(|| {
+                let r = k;
+                k += 1;
+                r
+            });
+        }
+    }
+    if rank.is_empty() {
+        return false;
+    }
+    let mut idx: Vec<usize> = (0..table.rows.len()).collect();
+    idx.sort_by_key(|&i| {
+        let val = table.rows[i].first().map(String::as_str).unwrap_or("");
+        (rank.get(val).copied().unwrap_or(usize::MAX), i)
+    });
+    reorder_rows(table, &idx);
+    true
 }
 
 /// Name every blank node the result mentions for the position it first appears at.
@@ -1997,11 +2131,19 @@ pub fn step(
             .with_context(|| format!("reading query {}", pair[0].display()))?;
         // `--query` takes any query form: a CONSTRUCT writes RDF in `--format`,
         // not a solution table (MONDO's `mirror-hgnc` relies on this).
+        let rdf_fmt = resolve_rdf_format(explicit_fmt, Some(out));
         let output = q
-            .run_query(&sparql, resolve_rdf_format(explicit_fmt, Some(out)))
+            .run_query(&sparql, rdf_fmt)
             .with_context(|| format!("running query {}", pair[0].display()))?;
         match output {
-            QueryOutput::Graph(rdf) => std::fs::write(out, rdf)?,
+            QueryOutput::Graph(rdf) => {
+                let rdf = if rdf_fmt == RdfFormat::Turtle {
+                    construct_jena_ttl(&q, &sparql).unwrap_or(rdf)
+                } else {
+                    rdf
+                };
+                std::fs::write(out, rdf)?
+            }
             QueryOutput::Table(mut table) => {
                 finish_table(&mut table, &q, &sparql, tdb_order.as_ref());
                 let fmt = resolve_result_format(explicit_fmt, Some(out), &sparql);
@@ -2022,7 +2164,14 @@ pub fn step(
             .run_query(&sparql, rdf_fmt)
             .with_context(|| format!("running query {}", qpath.display()))?;
         let (rendered, ext) = match output {
-            QueryOutput::Graph(rdf) => (rdf, rdf_extension(rdf_fmt)),
+            QueryOutput::Graph(rdf) => {
+                let rdf = if rdf_fmt == RdfFormat::Turtle {
+                    construct_jena_ttl(&q, &sparql).unwrap_or(rdf)
+                } else {
+                    rdf
+                };
+                (rdf, rdf_extension(rdf_fmt))
+            }
             QueryOutput::Table(mut table) => {
                 finish_table(&mut table, &q, &sparql, tdb_order.as_ref());
                 (render_table(&table, table_fmt).into_bytes(), result_extension(table_fmt))
@@ -2048,9 +2197,15 @@ pub fn step(
         let sparql = std::fs::read_to_string(path)
             .with_context(|| format!("reading query {}", path.display()))?;
         let target = out.or(args.output.as_deref());
-        let rdf = q
-            .construct(&sparql, resolve_rdf_format(explicit_fmt, target))
+        let rdf_fmt = resolve_rdf_format(explicit_fmt, target);
+        let mut rdf = q
+            .construct(&sparql, rdf_fmt)
             .with_context(|| format!("running query {}", path.display()))?;
+        if rdf_fmt == RdfFormat::Turtle {
+            if let Some(pretty) = construct_jena_ttl(&q, &sparql) {
+                rdf = pretty;
+            }
+        }
         match target {
             Some(p) => std::fs::write(p, rdf)?,
             None => std::io::Write::write_all(&mut std::io::stdout(), &rdf)?,
@@ -2117,6 +2272,355 @@ pub fn step(
     crate::cmd::cleanup_tdb(tdb, args.keep_tdb_mappings.unwrap_or(false));
 
     Ok(Some(model))
+}
+
+/// The `CONSTRUCT { … }` template block, braces included.
+fn construct_block(sparql: &str) -> Option<&str> {
+    let at = sparql.to_ascii_uppercase().find("CONSTRUCT")?;
+    let open = sparql[at..].find('{')? + at;
+    let bytes = sparql.as_bytes();
+    let mut depth = 0usize;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&sparql[open..=i]);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The query rewritten to SELECT the solutions its template is instantiated
+/// over: the `CONSTRUCT { … }` block becomes `SELECT *`, everything else stays.
+fn construct_as_select(sparql: &str) -> Option<String> {
+    let at = sparql.to_ascii_uppercase().find("CONSTRUCT")?;
+    let block = construct_block(sparql)?;
+    let block_end = block.as_ptr() as usize - sparql.as_ptr() as usize + block.len();
+    Some(format!("{}SELECT *{}", &sparql[..at], &sparql[block_end..]))
+}
+
+/// The Turtle layout `--format ttl` gives a constructed graph: an aligned
+/// `@prefix` block, then one cluster per subject — subjects in the graph's own
+/// slot order, predicates grouped and column-aligned, `a` for `rdf:type`.
+/// `None` when the query or its result uses a shape this layout does not cover
+/// (a blank node, a template literal, no driving pattern), and the caller then
+/// keeps the line-per-triple serializer.
+fn construct_jena_ttl(q: &Queryable, sparql: &str) -> Option<Vec<u8>> {
+    use crate::io::jena_ttl::{write_pretty, Dialect, JNode, JenaGraph};
+    const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+    let dbg = std::env::var_os("OM_SCAN_DEBUG").is_some();
+    let prefixes = query_prefixes(sparql);
+    let expand = |t: &str| -> Option<String> {
+        if let Some(i) = t.strip_prefix('<').and_then(|x| x.strip_suffix('>')) {
+            return Some(i.to_string());
+        }
+        if t == "a" {
+            return Some(RDF_TYPE.to_string());
+        }
+        let (name, local) = t.split_once(':')?;
+        let (_, ns) = prefixes.iter().find(|(n, _)| n == name)?;
+        Some(format!("{ns}{local}"))
+    };
+    let is_var = |t: &str| t.starts_with('?') || t.starts_with('$');
+    let template = patterns_in(construct_block(sparql)?);
+    if dbg {
+        eprintln!("[construct-ttl] template={template:?}");
+    }
+    if template.is_empty() {
+        return None;
+    }
+    // Any literal or blank node in the template puts the graph outside this
+    // layout.
+    for (s, p, o) in &template {
+        for t in [s, p, o] {
+            if t.starts_with('"') || t.starts_with('_') || t.starts_with('[') {
+                return None;
+            }
+        }
+        if !is_var(o) && expand(o).is_none() {
+            return None;
+        }
+    }
+    // How solution groups are ranked. A query that sorts its solutions ranks
+    // groups by arrival: the solutions already carry the order the graph is
+    // built in. Otherwise a driving pattern's index order decides — the object
+    // index when a pattern fixes predicate and object, the predicate index when
+    // the first pattern fixes only its predicate. A driving bunch whose every
+    // triple is unplaceable (each has a blank node at an end) pins no order at
+    // all, and the arrival order stands in as the deterministic choice.
+    let sorted = sparql
+        .rfind('}')
+        .map(|at| sparql[at..].to_ascii_uppercase().contains("ORDER BY"))
+        .unwrap_or(false);
+    let patterns = main_patterns(sparql);
+    // The variable the groups form on: the template's first VARIABLE subject.
+    // A pattern that binds some OTHER variable — a reification join's axiom
+    // node — fixes no group order however bound it is.
+    let tvar: Option<String> = template
+        .iter()
+        .find(|(s, _, _)| is_var(s))
+        .map(|(s, _, _)| s.trim_start_matches(['?', '$']).to_string());
+    // Per driving-subject rank, per driving-pair rank; at most one is filled.
+    let mut rank: std::collections::HashMap<String, usize> = Default::default();
+    let mut pair_rank: std::collections::HashMap<(String, String), usize> = Default::default();
+    let (dvar, ovar): (String, Option<String>) = if sorted {
+        (String::new(), None)
+    } else if let Some((v, dpred, dobj)) = patterns.iter().find_map(|(s, p, o)| {
+        let v = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        if Some(v) != tvar.as_deref() || is_var(p) || is_var(o) || p.ends_with('*') {
+            return None;
+        }
+        Some((v.to_string(), expand(p)?, expand(o)?))
+    }) {
+        if dbg {
+            eprintln!("[construct-ttl] driving {v} {dpred} {dobj}");
+        }
+        for s in q.object_subjects(&dobj, &dpred)? {
+            let k = rank.len();
+            rank.entry(s).or_insert(k);
+        }
+        (v, None)
+    } else if let Some((v, path_seq)) = patterns.iter().find_map(|(s, p, o)| {
+        // `?v <p>* <O>`: the graph binds ?v by walking back from the bound
+        // object, and that walk is the group order.
+        let v = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        let pred = p.strip_suffix('*')?;
+        if Some(v) != tvar.as_deref() || is_var(o) {
+            return None;
+        }
+        // A path that walks nothing pins no order: fall through to the
+        // remaining drivers rather than pinning an empty one.
+        let seq = q.path_order(&expand(o)?, &expand(pred)?);
+        if seq.len() <= 1 {
+            return None;
+        }
+        Some((v.to_string(), seq))
+    }) {
+        if dbg {
+            eprintln!("[construct-ttl] driving {v} <p>* ({} nodes)", path_seq.len());
+        }
+        for s in path_seq {
+            let k = rank.len();
+            rank.entry(s).or_insert(k);
+        }
+        (v, None)
+    } else {
+        let (s, p, o) = patterns.first()?;
+        let v = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+        if is_var(p) || !is_var(o) {
+            return None;
+        }
+        let dpred = expand(p)?;
+        if dbg {
+            eprintln!("[construct-ttl] driving {v} {dpred} ?");
+        }
+        // The predicate index yields (subject, object) pairs, and a solution's
+        // place is its own pair's — a subject whose earlier triples all failed
+        // the query's filters enters the graph at its first SURVIVING pair, not
+        // at its first appearance. The solutions are therefore re-visited in
+        // pair order, and grouped by arrival.
+        let ovar = o.trim_start_matches(['?', '$']).to_string();
+        for pair in q.predicate_pairs(&dpred)? {
+            let k = pair_rank.len();
+            pair_rank.entry(pair).or_insert(k);
+        }
+        (v.to_string(), Some(ovar))
+    };
+    if dbg {
+        eprintln!(
+            "[construct-ttl] subject-ranks={} pair-ranks={}",
+            rank.len(),
+            pair_rank.len()
+        );
+    }
+    // Ranking by arrival groups on the template's subject variable: the driving
+    // variable may bind nodes the template never states.
+    let by_arrival = rank.is_empty() && pair_rank.is_empty();
+    let dvar = if by_arrival {
+        let s = &template.first()?.0;
+        if !is_var(s) {
+            return None;
+        }
+        s.trim_start_matches(['?', '$']).to_string()
+    } else {
+        dvar
+    };
+    let select = construct_as_select(sparql)?;
+    let (vars, rows) = match q.raw_solutions(&select) {
+        Ok(x) => x,
+        Err(e) => {
+            if dbg {
+                eprintln!("[construct-ttl] solutions: {e}");
+            }
+            return None;
+        }
+    };
+    let dcol = vars.iter().position(|v| *v == dvar)?;
+    // A pair-driven query's solutions are visited in their pairs' index order —
+    // a solution the index cannot place aborts the layout rather than inventing
+    // a position for it.
+    let visit: Vec<usize> = match &ovar {
+        Some(ovar) if !pair_rank.is_empty() => {
+            let ocol = vars.iter().position(|v| v == ovar)?;
+            let mut keyed: Vec<(usize, usize)> = Vec::with_capacity(rows.len());
+            for (r, row) in rows.iter().enumerate() {
+                use oxigraph::model::Term;
+                let (Some(Term::NamedNode(s)), Some(Term::NamedNode(o))) = (
+                    row.get(dcol).and_then(|t| t.as_ref()),
+                    row.get(ocol).and_then(|t| t.as_ref()),
+                ) else {
+                    return None;
+                };
+                let k = *pair_rank.get(&(s.as_str().to_string(), o.as_str().to_string()))?;
+                keyed.push((k, r));
+            }
+            keyed.sort_unstable();
+            keyed.into_iter().map(|(_, r)| r).collect()
+        }
+        _ => {
+            // Within one driving subject, the graph answers each further
+            // pattern on that subject from the subject's own bunch, in slot
+            // order — so a solution's place among its subject's is where the
+            // inner pattern's value sits in that bunch. One inner pattern
+            // `?dvar <p> ?x` is enough to rank on; with none, arrival stands.
+            let inner = patterns.iter().find_map(|(s, p, o)| {
+                let sv = s.strip_prefix('?').or_else(|| s.strip_prefix('$'))?;
+                if sv != dvar || is_var(p) || p.ends_with('*') || !is_var(o) {
+                    return None;
+                }
+                let iv = o.trim_start_matches(['?', '$']).to_string();
+                Some((expand(p)?, iv))
+            });
+            match inner {
+                Some((ipred, ivar)) if !rank.is_empty() => {
+                    use crate::sparql::jena_order as jo;
+                    let icol = vars.iter().position(|v| *v == ivar)?;
+                    let mut bunch_ranks: std::collections::HashMap<
+                        String,
+                        std::collections::HashMap<String, usize>,
+                    > = Default::default();
+                    let mut keyed: Vec<(usize, usize, usize)> = Vec::with_capacity(rows.len());
+                    for (r, row) in rows.iter().enumerate() {
+                        use oxigraph::model::Term;
+                        let Some(Term::NamedNode(s)) = row.get(dcol).and_then(|t| t.as_ref())
+                        else {
+                            return None;
+                        };
+                        let subj = s.as_str().to_string();
+                        let lex = match row.get(icol).and_then(|t| t.as_ref()) {
+                            Some(Term::NamedNode(n)) => n.as_str().to_string(),
+                            Some(Term::Literal(l)) => l.value().to_string(),
+                            _ => String::new(),
+                        };
+                        let ranks = match bunch_ranks.get(&subj) {
+                            Some(m) => m,
+                            None => {
+                                let mut m: std::collections::HashMap<String, usize> =
+                                    Default::default();
+                                if let Some(bunch) = q.subject_bunch(&subj) {
+                                    let sh = jo::node_hash(&subj);
+                                    let hashes: Vec<Option<i32>> = bunch
+                                        .iter()
+                                        .map(|(pred, _, oh)| {
+                                            oh.map(|oh| {
+                                                jo::triple_hash(sh, jo::node_hash(pred), oh)
+                                            })
+                                        })
+                                        .collect();
+                                    for (k, &i) in jo::bunch_order(&hashes).iter().enumerate() {
+                                        let (pred, lex, _) = &bunch[i];
+                                        if *pred == ipred {
+                                            m.entry(lex.clone()).or_insert(k);
+                                        }
+                                    }
+                                }
+                                bunch_ranks.entry(subj.clone()).or_insert(m)
+                            }
+                        };
+                        let outer = rank.get(&subj).copied().unwrap_or(usize::MAX);
+                        let ir = ranks.get(&lex).copied().unwrap_or(usize::MAX);
+                        keyed.push((outer, ir, r));
+                    }
+                    keyed.sort_unstable();
+                    keyed.into_iter().map(|(_, _, r)| r).collect()
+                }
+                _ => (0..rows.len()).collect(),
+            }
+        }
+    };
+    // Solutions grouped under the driving subject: groups in the object index's
+    // order when it places them, else in the order the visit reaches them.
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut group_of: std::collections::HashMap<String, usize> = Default::default();
+    for &r in &visit {
+        let Some(oxigraph::model::Term::NamedNode(n)) =
+            rows[r].get(dcol).and_then(|t| t.as_ref())
+        else {
+            return None;
+        };
+        let key = n.as_str();
+        let g = match group_of.get(key) {
+            Some(&g) => g,
+            None => {
+                let k = if rank.is_empty() { groups.len() } else { *rank.get(key)? };
+                groups.push((k, Vec::new()));
+                group_of.insert(key.to_string(), groups.len() - 1);
+                groups.len() - 1
+            }
+        };
+        groups[g].1.push(r);
+    }
+    groups.sort_by_key(|(k, _)| *k);
+    // Instantiate the template per solution, in that order. A triple with an
+    // unbound variable is skipped; a literal subject or predicate is skipped
+    // too, having nothing it could state.
+    let mut graph = JenaGraph::default();
+    let term_of = |t: &str, row: &[Option<oxigraph::model::Term>]| -> Option<Option<JNode>> {
+        use oxigraph::model::Term;
+        if is_var(t) {
+            let v = t.trim_start_matches(['?', '$']);
+            let col = vars.iter().position(|c| c == v)?;
+            return Some(match &row[col] {
+                Some(Term::NamedNode(n)) => Some(JNode::Iri(n.as_str().to_string())),
+                Some(Term::Literal(l)) => Some(JNode::Lit {
+                    lex: l.value().to_string(),
+                    lang: l.language().map(|s| s.to_string()),
+                    dt: (l.language().is_none() && l.datatype().as_str() != XSD_STRING)
+                        .then(|| l.datatype().as_str().to_string()),
+                }),
+                None => None,
+                _ => return None,
+            });
+        }
+        Some(Some(JNode::Iri(expand(t)?)))
+    };
+    for (_, group) in &groups {
+        for &r in group {
+            for (ts, tp, to) in &template {
+                let (s, p, o) = (
+                    term_of(ts, &rows[r])?,
+                    term_of(tp, &rows[r])?,
+                    term_of(to, &rows[r])?,
+                );
+                let (Some(s), Some(p), Some(o)) = (s, p, o) else { continue };
+                let (JNode::Iri(_), JNode::Iri(p)) = (&s, &p) else { continue };
+                let p = p.clone();
+                graph.add(s, &p, o);
+            }
+        }
+    }
+    if graph.is_empty() {
+        return None;
+    }
+    write_pretty(&graph, &prefixes, Dialect::Query)
 }
 
 #[cfg(test)]

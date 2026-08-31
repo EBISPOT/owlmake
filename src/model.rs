@@ -264,6 +264,14 @@ pub struct Model {
     /// `… filter reduce query --update … annotate`, so its output takes the
     /// `xsd:string` ordering.
     pub plain_literals_typed: bool,
+    /// RDF/XML write profile that renders every anonymous class expression
+    /// inline at each place it is referenced — an annotated axiom's
+    /// `owl:annotatedTarget` carries a full copy of the expression rather than a
+    /// reference, and no `rdf:nodeID` appears anywhere in the document — and
+    /// stamps the OWL API 4.5.6 banner. The owltools emulation
+    /// ([`crate::cmd::owltools_ops`]) saves under this profile; every other save
+    /// shares blank nodes between an annotated edge and its reification.
+    pub owlapi_456: bool,
     /// Declarations owlmake SYNTHESISED at read time rather than ones the source
     /// document states, keyed `kind\0IRI` (`class`, `op`, `ap`, …).
     ///
@@ -312,6 +320,12 @@ pub struct Model {
     /// xmlns was scanned", which makes the writer fall back to `idspaces` and then
     /// to the CURIE map — and the CURIE map still holds `doap`/`protege`.
     pub format_prefixes_cleared: bool,
+    /// Whether this model was read from an OBO document. An OBO document's only
+    /// prefix declarations are its `idspace:` lines, so the OBO writer must not
+    /// fall back to the pipeline's prefix map when re-serializing one — a
+    /// prefix the document never declared must not curie its ids or earn an
+    /// `idspace:` line.
+    pub obo_source: bool,
     /// `convert --clean-obo drop-untranslatable-axioms` was asked for, so
     /// the OBO writer emits no `owl-axioms:` header.
     ///
@@ -352,10 +366,12 @@ impl Model {
             anon_doc_order: Vec::new(),
             anon_imports_end: 0,
             plain_literals_typed: false,
+            owlapi_456: false,
             materialised_declarations: std::collections::HashSet::new(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             format_prefixes_cleared: false,
+            obo_source: false,
             obo_drop_untranslatable: false,
         }
     }
@@ -389,10 +405,12 @@ impl Model {
             anon_doc_order: Vec::new(),
             anon_imports_end: 0,
             plain_literals_typed: false,
+            owlapi_456: false,
             materialised_declarations: std::collections::HashSet::new(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             format_prefixes_cleared: false,
+            obo_source: false,
             obo_drop_untranslatable: false,
         }
     }
@@ -429,10 +447,12 @@ impl Model {
         self.anon_doc_order = other.anon_doc_order.clone();
         self.anon_imports_end = other.anon_imports_end;
         self.plain_literals_typed = other.plain_literals_typed;
+        self.owlapi_456 = other.owlapi_456;
         self.materialised_declarations = other.materialised_declarations.clone();
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
         self.format_prefixes_cleared = other.format_prefixes_cleared;
+        self.obo_source = other.obo_source;
         self.obo_drop_untranslatable = other.obo_drop_untranslatable;
     }
 
@@ -448,6 +468,13 @@ impl Model {
     pub fn detach_import_closure(&mut self) {
         self.inlined_imports.clear();
         self.imported_components.clear();
+        // The closure's declarations and annotation-property namespaces
+        // described a document that still imported; once the closure's axioms
+        // are the document's own, an entity the closure declared is declared
+        // HERE, and suppressing its stub or its annotations hides content the
+        // document now carries.
+        self.closure_declared.clear();
+        self.closure_ann_ns.clear();
     }
 
     /// Number of components (axioms + metadata) in the ontology.
@@ -496,6 +523,7 @@ impl Clone for Model {
         m.anon_doc_order = self.anon_doc_order.clone();
         m.anon_imports_end = self.anon_imports_end;
         m.plain_literals_typed = self.plain_literals_typed;
+        m.owlapi_456 = self.owlapi_456;
         m.materialised_declarations = self.materialised_declarations.clone();
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
