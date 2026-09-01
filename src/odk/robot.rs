@@ -106,12 +106,45 @@ pub(crate) const BUNDLED: &[&str] = &[
     "semsql",
 ];
 
+/// Split a line into command segments at `|`, `;` and `&` (any arity — an
+/// empty segment between the two bytes of `||`/`&&` carries no token and is
+/// skipped by the caller), ignoring separators inside single, double or
+/// backtick quotes: a quoted regex argument like `"(is_a|intersection_of):"`
+/// is part of its command, not a boundary between two.
+fn command_segments(line: &str) -> Vec<&str> {
+    let bytes = line.as_bytes();
+    let mut out = Vec::new();
+    let (mut start, mut quote) = (0usize, None::<u8>);
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                }
+            }
+            None => match b {
+                b'"' | b'\'' | b'`' => quote = Some(b),
+                // `&` after `>` or `<` duplicates a file descriptor (`2>&1`),
+                // which continues its command rather than starting a new one.
+                b'&' if i > 0 && matches!(bytes[i - 1], b'>' | b'<') => {}
+                b'|' | b';' | b'&' => {
+                    out.push(&line[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            },
+        }
+    }
+    out.push(&line[start..]);
+    out
+}
+
 /// Command words in `line` that owlmake cannot vouch for, deduplicated in first
 /// appearance order. Each pipeline/sequence segment contributes its own command
 /// word, so `git show x | robot convert` reports `git` and not `robot`.
 fn unvouched_tools(line: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for seg in line.split(['|', ';', '&']) {
+    for seg in command_segments(line) {
         let toks = tokenize(seg);
         let Some(word) = toks.iter().find(|t| !is_env_assignment(t)) else { continue };
         // `!` negates a command in POSIX sh (`! grep -q x file`), so it is trimmed
@@ -1980,5 +2013,23 @@ mod tests {
             matches!(steps.as_slice(), [Step::Shell { command, .. }] if command.ends_with("|| true")),
             "expected one tolerated shell command, got {steps:?}"
         );
+    }
+
+    #[test]
+    fn a_quoted_pipe_is_not_a_command_boundary() {
+        // A regex argument carrying `|` inside quotes stays with its command:
+        // the only tools this pipeline needs are the repo's own scripts.
+        let tools = unvouched_tools(
+            r#"scripts/obo-grep.pl --neg -r "(is_a|intersection_of|is_obsolete):" uberon.obo | scripts/obo-grep.pl -r Term - | scripts/obo-grep.pl --neg -r "id: UBERON:(0001062|0000000)" - > out.tmp && (egrep '^(id|name):' out.tmp > out || echo ok)"#,
+        );
+        assert_eq!(tools, vec!["obo-grep.pl".to_string()], "got {tools:?}");
+    }
+
+    #[test]
+    fn a_redirection_duplicator_is_not_a_command_boundary() {
+        let tools = unvouched_tools(
+            "((scripts/obo-map-ids.pl --use-consider a.obo a.obo) > /dev/null) 2>&1 > reports/out.txt",
+        );
+        assert_eq!(tools, vec!["obo-map-ids.pl".to_string()], "got {tools:?}");
     }
 }

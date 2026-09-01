@@ -2288,6 +2288,12 @@ impl KnownDirs {
 /// like `../scripts/`, present on every machine, where the probe answers the
 /// same everywhere.
 fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) -> Option<String> {
+    // An absolute path names the same file from every directory, so there is
+    // nothing to reinterpret: `> /dev/null` stays `/dev/null` wherever the
+    // command runs from.
+    if tok.starts_with('/') {
+        return None;
+    }
     let shaped = match mode {
         Rebase::Field => could_be_path(tok) || is_dot_path(tok),
         Rebase::FreeText => could_be_path(tok),
@@ -2745,6 +2751,13 @@ mod tests {
 
         // load: and straight back, so the round trip is the identity.
         assert_eq!(rebase_in_string(&saved, &base, &onto, Rebase::FreeText, &known), cmd);
+
+        // An absolute path is the same file from anywhere — never rewritten.
+        let devnull = "(cmd a.obo > /dev/null) 2>&1 > reports/out.txt";
+        assert_eq!(
+            rebase_in_string(devnull, &onto, &base, Rebase::FreeText, &known),
+            "(cmd src/ontology/a.obo > /dev/null) 2>&1 > src/ontology/reports/out.txt"
+        );
 
         // A quoted `sed` script is one word, not three path-shaped fragments.
         let sed = "sed -i 's/  */ /g' reports/mondo_release_diff.md";
