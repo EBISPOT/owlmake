@@ -513,7 +513,6 @@ fn filter_core(
         out.format_prefixes_cleared = true;
         out.owl_genid_refs = model.owl_genid_refs;
         out.owl_label_order = model.owl_label_order;
-        out.owl_reif_order = model.owl_reif_order;
         // `owl_anon_blocks` is NOT carried, for the reason `extract` does not
         // carry it: it is verbatim source text the writer replays
         // unconditionally, and a filter is a subset — so a block may describe an

@@ -165,11 +165,6 @@ pub struct Model {
     /// (rendered `rdf:nodeID="genidN"`, defined separately, reified) — the source
     /// document's blank-node numbering isn't reconstructible from horned's model.
     pub owl_genid_refs: std::collections::HashMap<String, Vec<String>>,
-    /// Per subject IRI, the ordered signatures of the `<owl:Axiom>` reifications in
-    /// the source document. Reifications come out in hash-set iteration order, which
-    /// horned's unordered model cannot reconstruct; the RDF/XML writer replays
-    /// this scanned order (the analog of [`owl_genid_refs`]).
-    pub owl_reif_order: std::collections::HashMap<String, Vec<String>>,
     /// Per subject IRI, the `rdfs:label` values in the order the source document
     /// carried them. Where two labels land in the same slot of the subject's
     /// assertion set, the one read first is the one the `! …` comments name.
@@ -355,7 +350,6 @@ impl Model {
             rdf_prefixes: Vec::new(),
             built_prefixes: Vec::new(),
             owl_genid_refs: std::collections::HashMap::new(),
-            owl_reif_order: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             closure_ann_ns: Vec::new(),
             closure_declared: std::collections::HashSet::new(),
@@ -394,7 +388,6 @@ impl Model {
             rdf_prefixes: Vec::new(),
             built_prefixes: Vec::new(),
             owl_genid_refs: std::collections::HashMap::new(),
-            owl_reif_order: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             closure_ann_ns: Vec::new(),
             closure_declared: std::collections::HashSet::new(),
@@ -436,7 +429,6 @@ impl Model {
         self.built_prefixes = other.built_prefixes.clone();
         self.explicit_prefixes = other.explicit_prefixes.clone();
         self.owl_genid_refs = other.owl_genid_refs.clone();
-        self.owl_reif_order = other.owl_reif_order.clone();
         self.owl_label_order = other.owl_label_order.clone();
         self.closure_ann_ns = other.closure_ann_ns.clone();
         self.closure_declared = other.closure_declared.clone();
@@ -512,7 +504,6 @@ impl Clone for Model {
         m.built_prefixes = self.built_prefixes.clone();
         m.explicit_prefixes = self.explicit_prefixes.clone();
         m.owl_genid_refs = self.owl_genid_refs.clone();
-        m.owl_reif_order = self.owl_reif_order.clone();
         m.owl_label_order = self.owl_label_order.clone();
         m.closure_ann_ns = self.closure_ann_ns.clone();
         m.closure_declared = self.closure_declared.clone();

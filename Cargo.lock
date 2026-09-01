@@ -1154,7 +1154,7 @@ checksum = "242402749acf71e6f32f5857598b7002c4058a4e3c3b22b4c7d51cab9aea754e"
 [[package]]
 name = "horned-catalog"
 version = "0.1.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=38010ad#38010ad76303cd4ebc7d59b0ee5e41d88b5a2add"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=f8315a0#f8315a0237f1319a973b65fedd7b931fbc227668"
 dependencies = [
  "quick-xml 0.37.5",
  "thiserror 1.0.69",
@@ -1163,7 +1163,7 @@ dependencies = [
 [[package]]
 name = "horned-owl"
 version = "1.4.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=38010ad#38010ad76303cd4ebc7d59b0ee5e41d88b5a2add"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=f8315a0#f8315a0237f1319a973b65fedd7b931fbc227668"
 dependencies = [
  "curie",
  "enum_meta",
@@ -1187,7 +1187,7 @@ dependencies = [
 [[package]]
 name = "horned-pretty-rdf"
 version = "2.0.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=38010ad#38010ad76303cd4ebc7d59b0ee5e41d88b5a2add"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=f8315a0#f8315a0237f1319a973b65fedd7b931fbc227668"
 dependencies = [
  "indexmap 1.9.3",
  "oxrdf",

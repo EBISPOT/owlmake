@@ -74,6 +74,10 @@ fn only_ingest_names_the_makefile_or_the_odk_yaml() {
 fn no_new_environment_variables_decide_output() {
     // Diagnostic only: they change what is PRINTED, never what is written.
     const ALLOWED: &[&str] = &[
+        // Banner-label resolution tracing: the input document's identity at
+        // write time and the consultation order of the closure's documents.
+        // Diagnostic only — stderr, no output bytes depend on it.
+        "OM_BANNER_DEBUG",
         // genid/reification tracing
         "OM_ANON_DEBUG",
         "OM_GENID_DEBUG",

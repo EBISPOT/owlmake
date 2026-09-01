@@ -903,7 +903,7 @@ fn scan_owl_body_genids(bytes: &[u8]) -> std::collections::HashMap<String, Vec<S
 /// A subject with two labels names one of them in the `! …` comments that
 /// reference it, and where the two land in the same slot of the assertion set the
 /// choice falls to the order they were read in. horned's model is unordered, so
-/// that order is scanned here (the analog of [`scan_owl_reif_order`]).
+/// that order is scanned here.
 fn scan_label_order(bytes: &[u8]) -> std::collections::HashMap<String, Vec<String>> {
     let text = String::from_utf8_lossy(bytes);
     let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
@@ -951,35 +951,6 @@ fn unescape_attr(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .replace("&amp;", "&")
-}
-
-/// Per subject IRI, the ordered [`crate::io::owlrdf::reif_signature`]s of the
-/// `<owl:Axiom>` reification blocks in the source RDF/XML — so the writer can
-/// replay the order the source carried them in, which is not reconstructible from
-/// horned's unordered model.
-fn scan_owl_reif_order(bytes: &[u8]) -> std::collections::HashMap<String, Vec<String>> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    let open = "    <owl:Axiom>\n";
-    let close = "    </owl:Axiom>\n";
-    let mut idx = 0usize;
-    while let Some(rel) = text[idx..].find(open) {
-        let s = idx + rel;
-        let Some(e_rel) = text[s..].find(close) else { break };
-        let end = s + e_rel + close.len();
-        let block = &text[s..end];
-        let src = "<owl:annotatedSource rdf:resource=\"";
-        if let Some(a) = block.find(src) {
-            let a = a + src.len();
-            if let Some(q) = block[a..].find('"') {
-                let subject = block[a..a + q].to_string();
-                let sig = crate::io::owlrdf::reif_signature(block);
-                out.entry(subject).or_default().push(sig);
-            }
-        }
-        idx = end;
-    }
-    out
 }
 
 /// The bare `<rdf:Description>` blocks (no `rdf:about`) an RDF/XML document carries
@@ -1878,9 +1849,8 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // through the writer that consumes them. Anything that made the scans
             // conditional would leave that writer with no record of the source on an
             // ordinary build.
-            let (owl_genid_refs, owl_reif_order, owl_anon_blocks, owl_label_order) = (
+            let (owl_genid_refs, owl_anon_blocks, owl_label_order) = (
                 scan_owl_body_genids(&buf),
-                scan_owl_reif_order(&buf),
                 scan_owl_anon_individual_blocks(&buf),
                 scan_label_order(&buf),
             );
@@ -1910,7 +1880,6 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             model.idspaces = idspaces;
             model.rdf_prefixes = rdf_prefixes;
             model.owl_genid_refs = owl_genid_refs;
-            model.owl_reif_order = owl_reif_order;
             model.owl_label_order = owl_label_order;
             model.owl_anon_blocks = owl_anon_blocks;
             let raw = String::from_utf8_lossy(&buf);

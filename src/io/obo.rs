@@ -4757,7 +4757,7 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
         // true insertion order of ALL the subject's assertions into the chain, which
         // an unordered model cannot reconstruct. Closing the last ~1,286 lines of
         // `mondo-international.obo` means recording per-subject label order at read
-        // time, the way `owl_reif_order` already records reification order.
+        // time, the way `owl_label_order` already records label order.
         // `OM_LABEL_DEBUG=1` prints ann_count / cap / buckets per subject.
         let lo = *sorted.first().unwrap();
         let tied: Vec<usize> = (0..buckets.len()).filter(|&i| buckets[i] == lo).collect();

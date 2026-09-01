@@ -615,7 +615,7 @@ pub(crate) const OWL_NS_BASE: &str = "http://www.w3.org/2002/07/owl";
 /// Done here, at the boundary, rather than at each of the ~140 places the writer
 /// emits a tag — and deliberately so. The writer keeps ONE internal spelling, which
 /// is also the spelling its own reification helpers (`reif_signature`,
-/// `order_reifs`, `nested_key`) scan for; renaming at emission would leave those
+/// `nested_key`) scan for; renaming at emission would leave those
 /// matching text that no longer exists, and they would fail silently.
 ///
 /// Safe as a textual pass because `<` occurs in well-formed XML only where a tag
@@ -892,10 +892,9 @@ fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
 
 /// A stable identity for an `<owl:Axiom>` reification block: its annotatedProperty
 /// plus a tag+value for its annotatedTarget. The SAME function reads both the
-/// reifications this renderer generates and the ones scanned from the source
-/// document, so a subject's reifications can be replayed in the source's order —
-/// the source document carries them in an arbitrary hash-set order that horned's
-/// model cannot reconstruct (the analog of the genid blank-node numbering).
+/// reifications this renderer generates and the blocks scanned from a source
+/// document, so a generated block can be matched to the source state recorded
+/// under its signature (the genid a block's nested nodes were numbered with).
 pub(crate) fn reif_signature(block: &str) -> String {
     let prop = between(block, "<owl:annotatedProperty rdf:resource=\"", "\"").unwrap_or("");
     let tsig = if let Some(v) = between(block, "<owl:annotatedTarget rdf:resource=\"", "\"") {
@@ -921,46 +920,6 @@ pub(crate) fn reif_signature(block: &str) -> String {
         String::new()
     };
     format!("{prop}\u{1}{tsig}")
-}
-
-/// Reorder a subject's concatenated `<owl:Axiom>` reification blocks to match the
-/// source document order in `order` (a list of [`reif_signature`]s). Blocks with a
-/// signature not found in `order` keep their position after the known ones; ties
-/// (same signature) preserve their incoming relative order.
-fn order_reifs(reifs: &str, order: Option<&Vec<String>>) -> String {
-    let Some(order) = order else { return reifs.to_string() };
-    if reifs.is_empty() {
-        return String::new();
-    }
-    // Split on the closing tag, keeping each `    <owl:Axiom>…</owl:Axiom>\n` block.
-    let marker = "    </owl:Axiom>\n";
-    let mut blocks: Vec<String> = Vec::new();
-    let mut rest = reifs;
-    while let Some(i) = rest.find(marker) {
-        let end = i + marker.len();
-        blocks.push(rest[..end].to_string());
-        rest = &rest[end..];
-    }
-    if !rest.is_empty() {
-        blocks.push(rest.to_string());
-    }
-    // A used-count map lets repeated signatures consume successive source slots.
-    let mut next_from: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut keyed: Vec<(usize, usize, String)> = Vec::with_capacity(blocks.len());
-    for (i, b) in blocks.into_iter().enumerate() {
-        let sig = reif_signature(&b);
-        let start = *next_from.get(&sig).unwrap_or(&0);
-        match order[start.min(order.len())..].iter().position(|s| *s == sig) {
-            Some(rel) => {
-                let p = start + rel;
-                next_from.insert(sig, p + 1);
-                keyed.push((p, i, b));
-            }
-            None => keyed.push((usize::MAX, i, b)),
-        }
-    }
-    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    keyed.into_iter().map(|(_, _, b)| b).collect()
 }
 
 /// Order reification `owl:Axiom` blocks as root anonymous nodes: they are emitted
@@ -2100,11 +2059,10 @@ fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<()> {
         let name = crate::io::out_name();
         if want.is_empty() || name.contains(&want) {
             eprintln!(
-                "model[{name}]: shared_anon={} owl_reif_order={} owl_genid_refs={} \
+                "model[{name}]: shared_anon={} owl_genid_refs={} \
 owl_anon_blocks={} closure_declared={} closure_ann_ns={} materialised_decls={} \
 idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared={} axioms={}",
                 model.shared_anon.len(),
-                model.owl_reif_order.len(),
                 model.owl_genid_refs.len(),
                 model.owl_anon_blocks.len(),
                 model.closure_declared.len(),

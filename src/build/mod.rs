@@ -3790,7 +3790,15 @@ fn run_artefact(
             // where the read pushed it numbers the artefact's OWN nodes from after
             // a whole closure that is not in it.
             let mark = crate::io::anon_counter();
-            m.banner_labels = closure_banner_labels(&m, &repo.dir, catalog);
+            // The document's identity at write time: the last version IRI a step
+            // of this pipeline sets, if any.
+            let write_version = a.steps.iter().rev().find_map(|s| match s {
+                Step::Op(Op::Annotate(sp))
+                | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
+                _ => None,
+            });
+            m.banner_labels =
+                closure_banner_labels(&m, &repo.dir, catalog, write_version.as_deref());
             crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
@@ -6118,23 +6126,66 @@ fn writes_functional_syntax(steps: &[Step]) -> bool {
     })
 }
 
-/// The banner label set for a document with an import closure: the labels its own
-/// axioms assert together with those its closure asserts, decided between by the
-/// one rule (`cmd::rdfs_labels`). Best-effort — a closure that cannot be read
-/// leaves the document's own labels, and banners fall back to the entity IRI.
+/// The banner label set for a document with an import closure. Each document —
+/// the pipeline input and every file its closure resolves to — settles its own
+/// candidates by the one per-document rule (`cmd::rdfs_labels`); between
+/// documents, the first one in `owlapi_hash::ontology_set_order` that labels a
+/// subject names it. The input document's identity is the one it will be
+/// WRITTEN under: `write_version_iri` (the version a later step of the same
+/// pipeline sets) overrides the version it was read with, so a banner pick
+/// tracks the run's release date. Best-effort — a closure file that cannot be
+/// read contributes nothing, and banners fall back to the entity IRI.
 fn closure_banner_labels(
     model: &crate::model::Model,
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
+    write_version_iri: Option<&str>,
 ) -> std::collections::HashMap<String, String> {
-    let mut scratch = model.clone();
+    let main_id = model_ontology_id(model);
+    let main_version = write_version_iri.map(str::to_string).or(main_id.1);
+    if std::env::var("OM_BANNER_DEBUG").is_ok() {
+        eprintln!("[banner] input document id={:?} write version={:?}", main_id.0, main_version);
+    }
+    let mut docs: Vec<(i32, std::collections::HashMap<String, String>)> = vec![(
+        crate::owlapi_hash::ontology_id_hash(main_id.0.as_deref(), main_version.as_deref()),
+        crate::cmd::rdfs_labels(model),
+    )];
     let mut seen = std::collections::HashSet::new();
     if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
         for f in &files {
-            let _ = merge_file_into(&mut scratch, f);
+            let Ok(m) = crate::io::load(f) else { continue };
+            let (iri, ver) = model_ontology_id(&m);
+            docs.push((
+                crate::owlapi_hash::ontology_id_hash(iri.as_deref(), ver.as_deref()),
+                crate::cmd::rdfs_labels(&m),
+            ));
         }
     }
-    crate::cmd::rdfs_labels(&scratch)
+    let hashes: Vec<i32> = docs.iter().map(|(h, _)| *h).collect();
+    let mut out = std::collections::HashMap::new();
+    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
+        if std::env::var("OM_BANNER_DEBUG").is_ok() {
+            eprintln!("[banner] doc#{i} id-hash={} labels={}", hashes[i], docs[i].1.len());
+        }
+        for (subj, label) in &docs[i].1 {
+            out.entry(subj.clone()).or_insert_with(|| label.clone());
+        }
+    }
+    out
+}
+
+/// The ontology IRI and version IRI a model's document identifies itself by.
+fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+    use horned_owl::model::Component;
+    for ac in model.ont.iter() {
+        if let Component::OntologyID(id) = &ac.component {
+            return (
+                id.iri.as_ref().map(|i| i.to_string()),
+                id.viri.as_ref().map(|v| v.to_string()),
+            );
+        }
+    }
+    (None, None)
 }
 
 fn import_closure_of_model(

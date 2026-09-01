@@ -493,6 +493,39 @@ pub fn hashset_order(hashes: &[i32]) -> Vec<usize> {
     hashset_order_of(hashes, hashes.len())
 }
 
+/// The hash of an ontology's identity: `17 + 37·present(iri) [+ 37·present(version)]`,
+/// where `present(x)` wraps an IRI hash the way an occupied optional does
+/// (`0x598df91c + hash`). A document with no ontology IRI contributes the bare
+/// seed, so anonymous documents tie and keep their input order.
+pub fn ontology_id_hash(iri: Option<&str>, version: Option<&str>) -> i32 {
+    const PRESENT: i32 = 0x598df91cu32 as i32;
+    let mut h: i32 = 17;
+    if let Some(i) = iri {
+        h = h.wrapping_add(37i32.wrapping_mul(PRESENT.wrapping_add(iri_hash(i))));
+    }
+    if let Some(v) = version {
+        h = h.wrapping_add(37i32.wrapping_mul(PRESENT.wrapping_add(iri_hash(v))));
+    }
+    h
+}
+
+/// The order a set of loaded documents is consulted in when a banner label is
+/// looked up across all of them: a default-sized table over the documents'
+/// [`ontology_id_hash`]es, same-bucket ties separated by the doubled and
+/// re-doubled tables, and finally input order. The pipeline input document sits
+/// wherever its identity hashes — a version IRI carrying the release date moves
+/// it, so the pick an entity's banner gets is a function of the run's date.
+pub fn ontology_set_order(hashes: &[i32]) -> Vec<usize> {
+    let base = java_hashset_capacity(hashes.len()) as u32;
+    let mut idx: Vec<usize> = (0..hashes.len()).collect();
+    idx.sort_by_key(|&i| {
+        let h = hashes[i] as u32;
+        let s = h ^ (h >> 16);
+        (s & (base - 1), s & (base * 2 - 1), s & (base * 4 - 1))
+    });
+    idx
+}
+
 /// The iteration order of a reasoner NODE's member classes: a size-derived
 /// table (capacity for `⌊n/0.75⌋+1`, no 16-slot floor) over the classes'
 /// content hashes, with same-bucket ties resolved by the DEFAULT-sized table
