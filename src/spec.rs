@@ -470,6 +470,12 @@ pub struct ArtefactSpec {
     /// silently builds nothing instead of reporting "no rule found".
     #[serde(default, skip_serializing_if = "is_false")]
     pub missing_rule: bool,
+    /// The recipe writes only the side files its steps name, never the target
+    /// itself: no target file is created, and the executor must not
+    /// materialise the pipeline model at the target path — see
+    /// `ArtefactPlan::side_effect_only`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub side_effect_only: bool,
     /// Where the recipe sends its console output (`… reason > $@`). The steps
     /// name only the intermediates they write with `-o`, so for a check built out
     /// of what its tool prints this is the only field that names the target.
@@ -497,6 +503,7 @@ impl ArtefactSpec {
             order_only: a.order_only.clone(),
             steps: a.steps.iter().map(StepEntry::from_step).collect(),
             missing_rule: a.missing_rule,
+            side_effect_only: a.side_effect_only,
             stdout_file: a.stdout_file.clone(),
             intermediate: a.intermediate,
             branches: a
@@ -1282,6 +1289,7 @@ impl OwlmakeSpec {
                     steps,
                     gaps,
                     missing_rule: a.missing_rule,
+                    side_effect_only: a.side_effect_only,
                     stdout_file: a.stdout_file,
                     intermediate: a.intermediate,
                     branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
@@ -1302,6 +1310,7 @@ impl OwlmakeSpec {
                     steps,
                     gaps,
                     missing_rule: a.missing_rule,
+                    side_effect_only: a.side_effect_only,
                     stdout_file: a.stdout_file,
                     intermediate: a.intermediate,
                     branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
@@ -1390,6 +1399,7 @@ pub fn bind_version(
     plan: &Plan,
     version: &str,
     today: Option<&str>,
+    clock: Option<&str>,
     dir: &Path,
 ) -> Result<Plan> {
     let spec = OwlmakeSpec::from_plan(plan);
@@ -1409,10 +1419,11 @@ pub fn bind_version(
     // TODAY=2026-08-19 across midnight.
     let today = today.map(str::to_string).unwrap_or_else(crate::plan::today);
     substitute(&mut value, crate::plan::VERSION_TODAY, &today);
-    // …and the clock is the clock. A recipe that shells out to `date` gets the
-    // day the build runs whatever version it stamps, because that is what the
-    // recipe would have got.
-    substitute(&mut value, crate::plan::VERSION_CLOCK, &crate::plan::today());
+    // …and the clock is the clock, unless the run names it: a recipe that
+    // shells out to `date` gets the day the build runs whatever version it
+    // stamps, and `CLOCK=` reproduces such a build on any later day.
+    let clock = clock.map(str::to_string).unwrap_or_else(crate::plan::today);
+    substitute(&mut value, crate::plan::VERSION_CLOCK, &clock);
     let mut bound: OwlmakeSpec = serde_json::from_value(value)
         .context("internal: a plan did not read back while binding its release version")?;
     bound.version = version.to_string();
@@ -2219,10 +2230,60 @@ enum Rebase {
     /// result is the same whatever happens to exist on disk.
     Field,
     /// A shell line, a message, a tool's argument vector — arbitrary text a
-    /// human wrote, in which a path can only be guessed at. Here the "parent
-    /// directory must exist" test earns its keep: it is what stops `sed`'s
-    /// `s/[<>]//g` (which has a `/` and clears the shape gate) being rewritten.
+    /// human wrote, in which a path can only be guessed at. Here a token must
+    /// vouch for its parent directory — through the plan's own declared paths
+    /// first, the filesystem second — which is what stops `sed`'s `s/[<>]//g`
+    /// (it has a `/` and clears the shape gate) being rewritten.
     FreeText,
+}
+
+/// The directories a plan's own declared paths establish: every proper ancestor
+/// of every path named by a path FIELD, in the same base the strings themselves
+/// are in.
+///
+/// This is what makes free-text rebasing deterministic where it matters. The
+/// filesystem probe below answers by what a build happened to leave on disk, and
+/// EFO's `.gitignore` lists `build`, `mirror` and `tmp` — so a command argument
+/// `build/efo.owl` would rebase on a built tree and stay put on a fresh clone,
+/// and the committed plan would fail the staleness check on exactly the machine
+/// a committed plan exists for. The plan already declares `build/efo.owl` as a
+/// target; that declaration, not the directory's existence, is what says
+/// `build/` is a directory.
+struct KnownDirs(std::collections::HashSet<PathBuf>);
+
+impl KnownDirs {
+    /// Collect from a serialized plan, honouring the same key discipline as
+    /// [`relocate`]: free-text and literal values hold no declared paths.
+    fn of(value: &serde_json::Value) -> Self {
+        let mut dirs = std::collections::HashSet::new();
+        fn walk(v: &serde_json::Value, dirs: &mut std::collections::HashSet<PathBuf>) {
+            match v {
+                serde_json::Value::String(s) => {
+                    if could_be_path(s) || is_dot_path(s) {
+                        let mut p = normalize(Path::new(s));
+                        while p.pop() && !p.as_os_str().is_empty() {
+                            dirs.insert(p.clone());
+                        }
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|v| walk(v, dirs)),
+                serde_json::Value::Object(o) => {
+                    for (k, v) in o {
+                        if !is_free_text_key(k) && !is_literal_key(k) {
+                            walk(v, dirs);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        walk(value, &mut dirs);
+        Self(dirs)
+    }
+
+    fn vouches_for(&self, parent: &Path) -> bool {
+        self.0.contains(parent)
+    }
 }
 
 /// Reinterpret `tok` — a path relative to `from` — as a path relative to `to`.
@@ -2237,7 +2298,12 @@ enum Rebase {
 /// `src/ontology/src/ontology/build/efo.owl`, exit code 0. It would also make the
 /// plan's own bytes depend on which gitignored directories happened to be
 /// present.
-fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase) -> Option<String> {
+///
+/// A free-text token therefore asks the plan first ([`KnownDirs`]) and the
+/// filesystem only for directories the plan does not know — tracked material
+/// like `../scripts/`, present on every machine, where the probe answers the
+/// same everywhere.
+fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) -> Option<String> {
     let shaped = match mode {
         Rebase::Field => could_be_path(tok) || is_dot_path(tok),
         Rebase::FreeText => could_be_path(tok),
@@ -2253,7 +2319,10 @@ fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase) -> Option<String> {
         return None;
     }
     let abs = normalize(&from.join(tok));
-    if mode == Rebase::FreeText && !abs.parent().is_some_and(|p| p.is_dir()) {
+    if mode == Rebase::FreeText
+        && !normalize(Path::new(tok)).parent().is_some_and(|p| known.vouches_for(p))
+        && !abs.parent().is_some_and(|p| p.is_dir())
+    {
         return None;
     }
     Some(relative_to(&abs, to).to_string_lossy().into_owned())
@@ -2320,7 +2389,7 @@ fn shell_words(s: &str) -> Vec<&str> {
 /// `/g'`, and the first and last look exactly like paths, so the plan would
 /// record `sed -i 'src/ontology/s  */ ../../../g' …`. Kept whole, `s/  */ /g`
 /// resolves to nothing that exists and `rebase` declines it.
-fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase) -> String {
+fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) -> String {
     const EDGE: [char; 10] = ['\'', '"', '(', ')', ';', ',', '<', '>', '|', '`'];
     let mut subs: Vec<(String, String)> = Vec::new();
     for raw in shell_words(s) {
@@ -2328,7 +2397,7 @@ fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase) -> String {
         if tok.is_empty() || subs.iter().any(|(t, _)| t == tok) {
             continue;
         }
-        if let Some(new) = rebase(tok, from, to, mode) {
+        if let Some(new) = rebase(tok, from, to, mode, known) {
             if new != tok {
                 subs.push((tok.to_string(), new));
             }
@@ -2395,12 +2464,12 @@ fn is_literal_key(key: &str) -> bool {
 /// to the FIELD treatment is deliberate: a path field added later is rebased
 /// without anyone remembering to list it, which is the direction the mistake
 /// should fall.
-fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase) {
+fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) {
     match value {
-        serde_json::Value::String(s) => *s = rebase_in_string(s, from, to, mode),
+        serde_json::Value::String(s) => *s = rebase_in_string(s, from, to, mode, known),
         serde_json::Value::Array(a) => {
             for v in a {
-                relocate(v, from, to, mode);
+                relocate(v, from, to, mode, known);
             }
         }
         serde_json::Value::Object(o) => {
@@ -2409,7 +2478,7 @@ fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase)
                     continue;
                 }
                 let m = if is_free_text_key(k) { Rebase::FreeText } else { mode };
-                relocate(v, from, to, m);
+                relocate(v, from, to, m, known);
             }
         }
         _ => {}
@@ -2472,7 +2541,11 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
     // directory, so translate them to that base before anything reads them.
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        relocate(&mut value, &file_dir, &exec, Rebase::Field);
+        // The declared paths that vouch for free-text tokens are read from the
+        // SAME document being relocated, so they are in the same base its
+        // strings are.
+        let known = KnownDirs::of(&value);
+        relocate(&mut value, &file_dir, &exec, Rebase::Field, &known);
     }
     let spec: OwlmakeSpec = serde_json::from_value(value)
         .with_context(|| format!("interpreting {}", path.display()))?;
@@ -2563,7 +2636,8 @@ pub fn to_value(spec: &OwlmakeSpec, path: &Path) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(spec)?;
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        relocate(&mut value, &exec, &file_dir, Rebase::Field);
+        let known = KnownDirs::of(&value);
+        relocate(&mut value, &exec, &file_dir, Rebase::Field, &known);
     }
     Ok(value)
 }
@@ -2623,6 +2697,55 @@ mod tests {
         assert!(!yaml.contains("may_fail"), "unexpected flag: {yaml}");
     }
 
+    /// A free-text token under a directory the plan declares rebases whether or
+    /// not the directory exists — and symmetrically, so the round trip is the
+    /// identity on a tree that has never built.
+    ///
+    /// EFO is the case: `build`, `mirror` and `tmp` are gitignored, and the qc
+    /// prerequisites name `build/efo.owl` in `owlmake-cli` args and python
+    /// commands. Decided by the filesystem, those tokens rebase on a built tree
+    /// and stay put on a fresh clone, so the committed plan fails the staleness
+    /// check on every machine that has not built yet — CI first among them.
+    #[test]
+    fn a_declared_directory_vouches_without_existing() {
+        let base = std::env::temp_dir()
+            .join(format!("owlmake-vouch-{}", std::process::id()));
+        let onto = base.join("src/ontology");
+        std::fs::create_dir_all(&onto).unwrap(); // no build/ anywhere
+
+        // Save direction: strings are exec-relative; `build/efo.owl` is declared
+        // by a path field of the same document.
+        let exec_doc = serde_json::json!({
+            "target": "build/efo.owl",
+            "steps": [{ "op": "shell", "command": "python3 check.py build/efo.owl" }],
+        });
+        let known = KnownDirs::of(&exec_doc);
+        let saved =
+            rebase_in_string("python3 check.py build/efo.owl", &onto, &base, Rebase::FreeText, &known);
+        // `check.py` rebases too — its parent is the exec dir itself, which
+        // exists wherever the plan does. The declared directory is what carries
+        // `build/efo.owl`.
+        assert_eq!(saved, "python3 src/ontology/check.py src/ontology/build/efo.owl");
+
+        // Load direction: the same document as written, file-relative.
+        let file_doc = serde_json::json!({ "target": "src/ontology/build/efo.owl" });
+        let known = KnownDirs::of(&file_doc);
+        assert_eq!(
+            rebase_in_string(&saved, &base, &onto, Rebase::FreeText, &known),
+            "python3 check.py build/efo.owl",
+            "the round trip is the identity with build/ absent on both sides"
+        );
+
+        // A sed script still has nothing vouching for it: `x.tsv` (parent: the
+        // exec dir) rebases, the script does not.
+        assert_eq!(
+            rebase_in_string("sed s/[<>]//g x.tsv", &onto, &base, Rebase::FreeText, &known),
+            "sed s/[<>]//g src/ontology/x.tsv"
+        );
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
     /// A rule naming both `X` and `X.tmp.obo` must rebase each exactly once.
     /// MONDO's `mondo.obo` recipe is the case: a sequence of `String::replace`
     /// calls would rewrite `mondo.obo` inside the replacement it had just produced
@@ -2636,19 +2759,20 @@ mod tests {
 
         // save: paths held relative to src/ontology, written relative to the root.
         let cmd = "grep -v ^owl-axioms mondo.obo.tmp.obo > mondo.obo";
-        let saved = rebase_in_string(cmd, &onto, &base, Rebase::FreeText);
+        let known = KnownDirs(Default::default());
+        let saved = rebase_in_string(cmd, &onto, &base, Rebase::FreeText, &known);
         assert_eq!(
             saved,
             "grep -v ^owl-axioms src/ontology/mondo.obo.tmp.obo > src/ontology/mondo.obo"
         );
 
         // load: and straight back, so the round trip is the identity.
-        assert_eq!(rebase_in_string(&saved, &base, &onto, Rebase::FreeText), cmd);
+        assert_eq!(rebase_in_string(&saved, &base, &onto, Rebase::FreeText, &known), cmd);
 
         // A quoted `sed` script is one word, not three path-shaped fragments.
         let sed = "sed -i 's/  */ /g' reports/mondo_release_diff.md";
         assert_eq!(
-            rebase_in_string(sed, &onto, &base, Rebase::FreeText),
+            rebase_in_string(sed, &onto, &base, Rebase::FreeText, &known),
             "sed -i 's/  */ /g' src/ontology/reports/mondo_release_diff.md"
         );
 
@@ -2695,6 +2819,7 @@ mod tests {
             })],
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
             intermediate: false,
             branches: vec![],
@@ -2712,6 +2837,7 @@ mod tests {
             })],
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
             intermediate: false,
             branches: vec![],
@@ -2864,11 +2990,11 @@ mod format_floor_tests {
         // says may fail as one that may not — a silent change of what the build
         // does, which is the case the floor exists to refuse.
         //
-        // `intermediate` (an artefact only pattern-rule chains name) and the
-        // copy step's `relative` (rsync -R) arrived together; both default off
-        // and an older build ignoring them over-builds rather than mis-builds,
-        // so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "dba3400291988e7f";
+        // `intermediate` (an artefact only pattern-rule chains name), the copy
+        // step's `relative` (rsync -R) and `side_effect_only` (a recipe that
+        // never writes its own target) all default off, and an older build
+        // ignoring them over-builds rather than mis-builds, so the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "0bc3fa17d01ba747";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -2924,6 +3050,7 @@ mod round_trip_tests {
                 })],
                 gaps: vec![],
                 missing_rule: false,
+                side_effect_only: false,
                 stdout_file: None,
                 intermediate: false,
                 branches: vec![crate::plan::Branch {

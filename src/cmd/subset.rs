@@ -311,7 +311,6 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         // ontology, so it takes neither the input's namespace declarations nor
         // the order its document happened to write reification blocks in.
         model.format_prefixes_cleared = true;
-        model.owl_reif_order.clear();
         // Nor does it inherit the source's import-closure evidence: that is what
         // decides which signature entities get a bare declaration stub, and the
         // subset's signature is its own.

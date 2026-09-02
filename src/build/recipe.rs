@@ -1177,7 +1177,7 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
-    let shims: [(&str, String); 22] = [
+    let shims: [(&str, String); 23] = [
         ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
         ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
@@ -1204,6 +1204,7 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
         // test` dies with exit 127 on its first prerequisite.
         ("dicer-cli", format!("#!/bin/sh\nexec {exe:?} dicer-cli \"$@\"\n")),
         ("fastobo-validator", format!("#!/bin/sh\nexec {exe:?} fastobo-validator \"$@\"\n")),
+        ("runoak", format!("#!/bin/sh\nexec {exe:?} runoak \"$@\"\n")),
         ("dosdp", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
         ("check-rdfxml", format!("#!/bin/sh\nexec {exe:?} check-rdfxml \"$@\"\n")),
         (
@@ -1284,6 +1285,7 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
     // PATH.
     out = replace_command_word(&out, "dicer-cli", &format!("{exe} dicer-cli"));
     out = replace_command_word(&out, "check-rdfxml", &format!("{exe} check-rdfxml"));
+    out = replace_command_word(&out, "runoak", &format!("{exe} runoak"));
     out = replace_command_word(&out, "odk-info", &format!("{exe} odk-info"));
     out = replace_command_word(&out, "sha256sum", &format!("{exe} sha256sum"));
     out = replace_command_word(&out, "semsql", &format!("{exe} semsql"));

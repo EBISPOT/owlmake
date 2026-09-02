@@ -354,8 +354,12 @@ pub fn relax_with(mut model: crate::model::Model, opts: &RelaxOptions) -> crate:
             added += 1;
         }
     }
+    let shared_n = derived_shared.len();
     for (owner, sig) in derived_shared {
         model.shared_anon.entry(owner).or_default().insert(sig);
+    }
+    if std::env::var_os("OM_RELAX_DEBUG").is_some() {
+        eprintln!("[relax-debug] derived_shared={shared_n} shared_anon_owners={}", model.shared_anon.len());
     }
     status!("relax: added {added} SubClassOf axiom(s)");
     model

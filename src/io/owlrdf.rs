@@ -137,13 +137,24 @@ fn ann_key(prop_iri: &str, av: &AnnotationValue<RcStr>) -> AnnKey {
     // an untyped one keys as whichever of `rdf:PlainLiteral` / `xsd:string` this
     // document's parse produced, see [`plain_datatype`]. Both render bare, but
     // they sort on opposite sides of `xsd:anyURI`.
+    // An inline-anon document sorts a predicate's literal values by LEXICAL
+    // value first, then language, then datatype; every other document keys the
+    // datatype first. The tuple below is (rank, va, vb, lang), so the two
+    // orderings load its slots differently.
+    let lexical_major = inline_anon();
     let (rank, va, vb, lang) = match av {
         AnnotationValue::IRI(i) => {
             let (n, r) = iri_key(i.as_ref());
             (0u8, n.to_string(), r.to_string(), String::new())
         }
+        AnnotationValue::Literal(Literal::Language { literal, lang }) if lexical_major => {
+            (1, literal.clone(), lang.clone(), RDF_PLAIN_LITERAL.to_string())
+        }
         AnnotationValue::Literal(Literal::Language { literal, lang }) => {
             (1, RDF_PLAIN_LITERAL.to_string(), literal.clone(), lang.clone())
+        }
+        AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri }) if lexical_major => {
+            (1, literal.clone(), String::new(), datatype_iri.as_ref().to_string())
         }
         // Every explicit datatype keys as itself, `xsd:string` included: a literal
         // that reached us as `Datatype{xsd:string}` came from an OBO read (see
@@ -152,6 +163,9 @@ fn ann_key(prop_iri: &str, av: &AnnotationValue<RcStr>) -> AnnKey {
         // come from an OFN/RDF-XML read.
         AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri }) => {
             (1, datatype_iri.as_ref().to_string(), literal.clone(), String::new())
+        }
+        AnnotationValue::Literal(l) if lexical_major => {
+            (1, l.literal().clone(), String::new(), plain_datatype().to_string())
         }
         AnnotationValue::Literal(l) => {
             (1, plain_datatype().to_string(), l.literal().clone(), String::new())
@@ -273,6 +287,19 @@ thread_local! {
     /// [`save`]; consulted by [`ann_key`], which is a free function reached from
     /// a dozen call sites.
     static PLAIN_TYPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `Model::owlapi_456` for the document being written: render every
+    /// anonymous class expression inline at each reference — no blank-node
+    /// numbering, no `rdf:nodeID`, an annotated axiom's `owl:annotatedTarget`
+    /// carries a full copy of the expression — and stamp the 4.5.6 banner.
+    /// Set by [`save`]; consulted where an annotated axiom or a general class
+    /// axiom would otherwise share a node with its reification.
+    static INLINE_ANON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether this document renders anonymous class expressions inline everywhere
+/// — see [`crate::model::Model::owlapi_456`].
+pub(crate) fn inline_anon() -> bool {
+    INLINE_ANON.with(|c| c.get())
 }
 
 /// The datatype IRI an untyped literal keys as in this document — see
@@ -588,7 +615,7 @@ pub(crate) const OWL_NS_BASE: &str = "http://www.w3.org/2002/07/owl";
 /// Done here, at the boundary, rather than at each of the ~140 places the writer
 /// emits a tag — and deliberately so. The writer keeps ONE internal spelling, which
 /// is also the spelling its own reification helpers (`reif_signature`,
-/// `order_reifs`, `nested_key`) scan for; renaming at emission would leave those
+/// `nested_key`) scan for; renaming at emission would leave those
 /// matching text that no longer exists, and they would fail silently.
 ///
 /// Safe as a textual pass because `<` occurs in well-formed XML only where a tag
@@ -865,10 +892,9 @@ fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
 
 /// A stable identity for an `<owl:Axiom>` reification block: its annotatedProperty
 /// plus a tag+value for its annotatedTarget. The SAME function reads both the
-/// reifications this renderer generates and the ones scanned from the source
-/// document, so a subject's reifications can be replayed in the source's order —
-/// the source document carries them in an arbitrary hash-set order that horned's
-/// model cannot reconstruct (the analog of the genid blank-node numbering).
+/// reifications this renderer generates and the blocks scanned from a source
+/// document, so a generated block can be matched to the source state recorded
+/// under its signature (the genid a block's nested nodes were numbered with).
 pub(crate) fn reif_signature(block: &str) -> String {
     let prop = between(block, "<owl:annotatedProperty rdf:resource=\"", "\"").unwrap_or("");
     let tsig = if let Some(v) = between(block, "<owl:annotatedTarget rdf:resource=\"", "\"") {
@@ -894,46 +920,6 @@ pub(crate) fn reif_signature(block: &str) -> String {
         String::new()
     };
     format!("{prop}\u{1}{tsig}")
-}
-
-/// Reorder a subject's concatenated `<owl:Axiom>` reification blocks to match the
-/// source document order in `order` (a list of [`reif_signature`]s). Blocks with a
-/// signature not found in `order` keep their position after the known ones; ties
-/// (same signature) preserve their incoming relative order.
-fn order_reifs(reifs: &str, order: Option<&Vec<String>>) -> String {
-    let Some(order) = order else { return reifs.to_string() };
-    if reifs.is_empty() {
-        return String::new();
-    }
-    // Split on the closing tag, keeping each `    <owl:Axiom>…</owl:Axiom>\n` block.
-    let marker = "    </owl:Axiom>\n";
-    let mut blocks: Vec<String> = Vec::new();
-    let mut rest = reifs;
-    while let Some(i) = rest.find(marker) {
-        let end = i + marker.len();
-        blocks.push(rest[..end].to_string());
-        rest = &rest[end..];
-    }
-    if !rest.is_empty() {
-        blocks.push(rest.to_string());
-    }
-    // A used-count map lets repeated signatures consume successive source slots.
-    let mut next_from: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut keyed: Vec<(usize, usize, String)> = Vec::with_capacity(blocks.len());
-    for (i, b) in blocks.into_iter().enumerate() {
-        let sig = reif_signature(&b);
-        let start = *next_from.get(&sig).unwrap_or(&0);
-        match order[start.min(order.len())..].iter().position(|s| *s == sig) {
-            Some(rel) => {
-                let p = start + rel;
-                next_from.insert(sig, p + 1);
-                keyed.push((p, i, b));
-            }
-            None => keyed.push((usize::MAX, i, b)),
-        }
-    }
-    keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    keyed.into_iter().map(|(_, _, b)| b).collect()
 }
 
 /// Order reification `owl:Axiom` blocks as root anonymous nodes: they are emitted
@@ -990,6 +976,29 @@ fn order_reifs_by_genid(reifs: &str, reif: Option<&Vec<(String, u64)>>) -> Strin
         (None, None) => a.1.cmp(&b.1),
     });
     keyed.into_iter().map(|(_, _, b)| b).collect()
+}
+
+
+/// Order two annotation lists the way reified `owl:Axiom` blocks sort when the
+/// axioms differ only in their annotations: elementwise on (property IRI,
+/// value) over the already property-sorted lists, shorter list first on a tie.
+/// The model's component set iterates in hash order, so without this tie-break
+/// the block order of two same-target annotated axioms is an accident of the
+/// hash function.
+fn cmp_ann_list(
+    a: &[(String, AnnotationValue<RcStr>)],
+    b: &[(String, AnnotationValue<RcStr>)],
+) -> std::cmp::Ordering {
+    for (x, y) in a.iter().zip(b.iter()) {
+        let c = x
+            .0
+            .cmp(&y.0)
+            .then_with(|| crate::io::owlfunc::cmp_annotation_value(&x.1, &y.1));
+        if c != std::cmp::Ordering::Equal {
+            return c;
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// Inject `rdf:nodeID="genidN"` into the first opening tag of a rendered class
@@ -1687,29 +1696,48 @@ fn render_gci_equivalent_annotated(
     let mut ops: Vec<&CE<RcStr>> = members.iter().collect();
     ops.sort_by(|a, b| crate::io::owlfunc::cmp_ce(a, b));
     let (src, tgt) = (ops[0], ops[1]);
-    let gid = shared
-        .get("__general__")
-        .and_then(|m| m.get(&crate::io::genid::ce_sig(tgt)))
-        .map(|g| format!("genid{g}"))
-        .unwrap_or_default();
     let no_g = Genids::new();
-    let src_block = insert_before_close(
-        &render_ce(src, 12, &no_g),
-        &format!("                <owl:equivalentClass rdf:nodeID=\"{gid}\"/>\n"),
-    );
+    // Inline-anon: the edge nests a full copy of the target inside the source
+    // block, the annotatedTarget carries another, and no standalone definition
+    // follows the axiom.
+    let (edge, target, defn) = if inline_anon() {
+        (
+            format!(
+                "                <owl:equivalentClass>\n{}                </owl:equivalentClass>\n",
+                render_ce(tgt, 20, &no_g)
+            ),
+            format!(
+                "        <owl:annotatedTarget>\n{}        </owl:annotatedTarget>\n",
+                render_ce(tgt, 12, &no_g)
+            ),
+            String::new(),
+        )
+    } else {
+        let gid = shared
+            .get("__general__")
+            .and_then(|m| m.get(&crate::io::genid::ce_sig(tgt)))
+            .map(|g| format!("genid{g}"))
+            .unwrap_or_default();
+        (
+            format!("                <owl:equivalentClass rdf:nodeID=\"{gid}\"/>\n"),
+            format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"),
+            inject_nodeid(&render_ce(tgt, 4, &no_g), &gid),
+        )
+    };
+    let src_block = insert_before_close(&render_ce(src, 12, &no_g), &edge);
     let mut s = String::from("    <owl:Axiom>\n");
     s.push_str("        <owl:annotatedSource>\n");
     s.push_str(&src_block);
     s.push_str("        </owl:annotatedSource>\n");
     s.push_str(&format!("        <owl:annotatedProperty rdf:resource=\"{EQUIV_PROP}\"/>\n"));
-    s.push_str(&format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"));
+    s.push_str(&target);
     let mut ns: Vec<&(String, AnnotationValue<RcStr>)> = anns.iter().collect();
     ns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
     for (p, av) in ns {
         s.push_str(&render_ann(p, av, prefixes));
     }
     s.push_str("    </owl:Axiom>\n");
-    s.push_str(&inject_nodeid(&render_ce(tgt, 4, &no_g), &gid));
+    s.push_str(&defn);
     s
 }
 
@@ -1761,6 +1789,17 @@ fn render_gci_subclass_annotated(
                 String::new(),
             )
         }
+        _ if inline_anon() => (
+            format!(
+                "                <rdfs:subClassOf>\n{}                </rdfs:subClassOf>\n",
+                render_ce(sup, 20, &no_g)
+            ),
+            format!(
+                "        <owl:annotatedTarget>\n{}        </owl:annotatedTarget>\n",
+                render_ce(sup, 12, &no_g)
+            ),
+            String::new(),
+        ),
         _ => {
             let gid = gid_override.clone().unwrap_or_else(|| {
                 shared
@@ -1809,31 +1848,49 @@ fn render_gci_disjoint_annotated(
     let mut ops: Vec<&CE<RcStr>> = members.iter().collect();
     ops.sort_by(|a, b| crate::io::owlfunc::cmp_ce(a, b));
     let (src, tgt) = (ops[0], ops[1]);
-    let gid = shared
-        .get("__general__")
-        .and_then(|m| m.get(&crate::io::genid::ce_sig(tgt)))
-        .map(|g| format!("genid{g}"))
-        .unwrap_or_default();
     let no_g = Genids::new();
-    // Source restriction inline at indent 12, with a disjointWith nodeID edge.
-    let src_block = insert_before_close(
-        &render_ce(src, 12, &no_g),
-        &format!("                <owl:disjointWith rdf:nodeID=\"{gid}\"/>\n"),
-    );
+    // Inline-anon: the edge nests a full copy of the target inside the source
+    // block, the annotatedTarget carries another, and no standalone definition
+    // follows the axiom.
+    let (edge, target, defn) = if inline_anon() {
+        (
+            format!(
+                "                <owl:disjointWith>\n{}                </owl:disjointWith>\n",
+                render_ce(tgt, 20, &no_g)
+            ),
+            format!(
+                "        <owl:annotatedTarget>\n{}        </owl:annotatedTarget>\n",
+                render_ce(tgt, 12, &no_g)
+            ),
+            String::new(),
+        )
+    } else {
+        let gid = shared
+            .get("__general__")
+            .and_then(|m| m.get(&crate::io::genid::ce_sig(tgt)))
+            .map(|g| format!("genid{g}"))
+            .unwrap_or_default();
+        (
+            format!("                <owl:disjointWith rdf:nodeID=\"{gid}\"/>\n"),
+            format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"),
+            // Target restriction standalone with nodeID (the shared node's definition).
+            inject_nodeid(&render_ce(tgt, 4, &no_g), &gid),
+        )
+    };
+    let src_block = insert_before_close(&render_ce(src, 12, &no_g), &edge);
     let mut s = String::from("    <owl:Axiom>\n");
     s.push_str("        <owl:annotatedSource>\n");
     s.push_str(&src_block);
     s.push_str("        </owl:annotatedSource>\n");
     s.push_str(&format!("        <owl:annotatedProperty rdf:resource=\"{DISJOINT_PROP}\"/>\n"));
-    s.push_str(&format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"));
+    s.push_str(&target);
     let mut ns: Vec<&(String, AnnotationValue<RcStr>)> = anns.iter().collect();
     ns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
     for (p, av) in ns {
         s.push_str(&render_ann(p, av, prefixes));
     }
     s.push_str("    </owl:Axiom>\n");
-    // Target restriction standalone with nodeID (the shared node's definition).
-    s.push_str(&inject_nodeid(&render_ce(tgt, 4, &no_g), &gid));
+    s.push_str(&defn);
     s
 }
 
@@ -1991,6 +2048,7 @@ fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<()> {
     // Which datatype this document's untyped literals key as; it decides their
     // sort position against typed ones (see `plain_datatype`).
     PLAIN_TYPED.with(|c| c.set(model.plain_literals_typed));
+    INLINE_ANON.with(|c| c.set(model.owlapi_456));
     // Debug: dump genid pre-pass results for a window of ids
     // (OM_GENID_DEBUG="lo:hi").
     // `OM_MODEL_DEBUG=<substring>`: report the carried-metadata state of the model
@@ -2001,11 +2059,10 @@ fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<()> {
         let name = crate::io::out_name();
         if want.is_empty() || name.contains(&want) {
             eprintln!(
-                "model[{name}]: shared_anon={} owl_reif_order={} owl_genid_refs={} \
+                "model[{name}]: shared_anon={} owl_genid_refs={} \
 owl_anon_blocks={} closure_declared={} closure_ann_ns={} materialised_decls={} \
 idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared={} axioms={}",
                 model.shared_anon.len(),
-                model.owl_reif_order.len(),
                 model.owl_genid_refs.len(),
                 model.owl_anon_blocks.len(),
                 model.closure_declared.len(),
@@ -2057,6 +2114,15 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     .map(|(sig, id)| format!("genid{id}={}", sig.split('\u{1}').next().unwrap_or("")))
                     .collect();
                 eprintln!("[reif] {o}: {}", shown.join(" "));
+            }
+        }
+        if let Ok(cap) = std::env::var("OM_GENID_STARTS") {
+            let cap: u64 = cap.parse().unwrap_or(600);
+            let mut starts: Vec<(&String, &u64)> =
+                g.entity_start.iter().filter(|(_, v)| **v < cap).collect();
+            starts.sort_by_key(|(_, v)| **v);
+            for (o, v) in starts {
+                eprintln!("[start] {v} {o}");
             }
         }
         if std::env::var("OM_GENID_REUSED").is_ok() {
@@ -2146,21 +2212,30 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     }
     let prefixes = prefixes;
     // Compute genid blank-node numbering from the model (replaces the ids scanned
-    // from the input document, which are wrong once om re-numbers).
-    let genid_pass = crate::io::genid::compute(model, 0, 0);
+    // from the input document, which are wrong once om re-numbers). An
+    // inline-anon document has no numbered nodes at all, so the pass is skipped
+    // and every lookup below comes back empty — which is what routes each
+    // anonymous expression to its inline rendering.
+    let genid_pass = if model.owlapi_456 {
+        crate::io::genid::Genids::default()
+    } else {
+        crate::io::genid::compute(model, 0, 0)
+    };
     // Publish which anonymous expressions ended up sharing ONE blank node, so the
     // OFN cache written right after this can carry the fact to the next build step.
     // Without it the identity is lost and the next RDF/XML write renumbers.
-    model.rdf_shared_anon = genid_pass
-        .shared
-        .iter()
-        .map(|(owner, m)| {
-            (
-                owner.clone(),
-                m.keys().map(|sig| crate::io::anon_sig_hash(sig)).collect(),
-            )
-        })
-        .collect();
+    if !model.owlapi_456 {
+        model.rdf_shared_anon = genid_pass
+            .shared
+            .iter()
+            .map(|(owner, m)| {
+                (
+                    owner.clone(),
+                    m.keys().map(|sig| crate::io::anon_sig_hash(sig)).collect(),
+                )
+            })
+            .collect();
+    }
     let shared_genids = &genid_pass.shared;
     // Per-owner genids in ALLOCATION order, consumed positionally below: two
     // annotated axioms over structurally-equal expressions are two distinct nodes,
@@ -2197,8 +2272,14 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // target is a shared blank node and the axiom reifies.
     let mut disjoint_anon: BTreeMap<String, Vec<(CE<RcStr>, Vec<(String, AnnotationValue<RcStr>)>)>> =
         BTreeMap::new();
+    // Annotated `DisjointClasses(named, named)` reifications, keyed by the class
+    // whose section renders the block; the value records the axiom's own
+    // (source, target) pair. In an inline-anon document the block renders under
+    // BOTH operands — the second copy keeps the first operand as its
+    // `annotatedSource` — so the same (source, target, anns) entry appears under
+    // each key.
     #[allow(clippy::type_complexity)]
-    let mut disjoint_reif: BTreeMap<String, Vec<(String, Vec<(String, AnnotationValue<RcStr>)>)>> =
+    let mut disjoint_reif: BTreeMap<String, Vec<(String, String, Vec<(String, AnnotationValue<RcStr>)>)>> =
         BTreeMap::new();
     let mut disjoint_union: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
     // `rdf:type` of a named individual — `ClassAssertion(C, i)`, rendered as the
@@ -2430,7 +2511,13 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                                 disjoint_reif
                                     .entry(a.0.as_ref().to_string())
                                     .or_default()
-                                    .push((b.0.as_ref().to_string(), anns));
+                                    .push((a.0.as_ref().to_string(), b.0.as_ref().to_string(), anns.clone()));
+                                if inline_anon() {
+                                    disjoint_reif
+                                        .entry(b.0.as_ref().to_string())
+                                        .or_default()
+                                        .push((a.0.as_ref().to_string(), b.0.as_ref().to_string(), anns));
+                                }
                             }
                         }
                         // C disjointWith (anonymous) → rendered under the named class,
@@ -3037,20 +3124,22 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // class and an individual, so rendering its annotations inline would emit every
     // one of them twice AND leave the `Annotations` section short.
     //
-    // Punned = an IRI in the ontology's own signature under two or more of the six
-    // entity kinds. The SIGNATURE, not the render lists, which drop built-ins and
-    // closure-declared stubs.
+    // Punned = an IRI DECLARED under two or more of the six entity kinds. The
+    // declarations, not the usage signature: a property-hierarchy axiom that
+    // reaches an annotation property from the object-property side puts the IRI
+    // in the signature under both kinds, but the document still declares one
+    // entity, and that block carries the annotations.
     let mut punned: std::collections::HashSet<String> = std::collections::HashSet::new();
     {
-        let sig = crate::cmd::select::signature_entities(model);
+        let dec = crate::cmd::select::entities(model);
         let mut seen: std::collections::HashSet<&String> = std::collections::HashSet::new();
         for kind in [
-            &sig.classes,
-            &sig.data_properties,
-            &sig.object_properties,
-            &sig.annotation_properties,
-            &sig.datatypes,
-            &sig.individuals,
+            &dec.classes,
+            &dec.data_properties,
+            &dec.object_properties,
+            &dec.annotation_properties,
+            &dec.datatypes,
+            &dec.individuals,
         ] {
             for iri in kind.iter() {
                 if !seen.insert(iri) {
@@ -3428,9 +3517,13 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let mut sub_reif = String::new();
 
         let mut eqs: Vec<&SubSup> = equiv_class.get(iri).unwrap_or(&no_eq).iter().collect();
-        eqs.sort_by(|a, b| ce_key(&a.0).cmp(&ce_key(&b.0)));
+        eqs.sort_by(|a, b| {
+            ce_key(&a.0).cmp(&ce_key(&b.0)).then_with(|| cmp_ann_list(&a.1, &b.1))
+        });
         let mut sups: Vec<&SubSup> = sub_class.get(iri).unwrap_or(&no_sub).iter().collect();
-        sups.sort_by(|a, b| ce_key(&a.0).cmp(&ce_key(&b.0)));
+        sups.sort_by(|a, b| {
+            ce_key(&a.0).cmp(&ce_key(&b.0)).then_with(|| cmp_ann_list(&a.1, &b.1))
+        });
 
         // The blank-node ids (`genidN`) for this class's annotated anonymous
         // equivalentClass/subClassOf expressions, in the render order the loop below
@@ -3488,7 +3581,15 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let mut ann_q: Vec<String> = Vec::new();
         let mut defs: Vec<(String, &CE<RcStr>)> = Vec::new();
         let mut gi = 0usize;
-        for (ce, anns) in eqs.iter().chain(sups.iter()).chain(dj_ann_refs.iter()) {
+        // An inline-anon document numbers nothing: the maps and the genid queue
+        // stay empty, so every annotated anonymous expression below takes its
+        // inline rendering.
+        for (ce, anns) in eqs
+            .iter()
+            .chain(sups.iter())
+            .chain(dj_ann_refs.iter())
+            .take_while(|_| !inline_anon())
+        {
             if matches!(ce, CE::Class(_)) || anns.is_empty() {
                 continue;
             }
@@ -3553,7 +3654,18 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     }
                 }
                 _ if !anns.is_empty() => {
-                    if let Some(gid) = ann_q.get(aqi).cloned() {
+                    if inline_anon() {
+                        // Inline-anon: every axiom renders its own full inline
+                        // edge — two axioms over structurally-equal expressions
+                        // are two anonymous nodes — and the reification's
+                        // annotatedTarget carries its own copy.
+                        let inner = render_ce(eq, 12, &operand_map);
+                        if !inner.is_empty() {
+                            body.push_str(&format!("        <owl:equivalentClass>\n{inner}        </owl:equivalentClass>\n"));
+                        }
+                        let target = format!("        <owl:annotatedTarget>\n{inner}        </owl:annotatedTarget>\n");
+                        equiv_reif.push_str(&edge_reif(iri, EQUIV_PROP, &target, anns, prefixes));
+                    } else if let Some(gid) = ann_q.get(aqi).cloned() {
                         aqi += 1;
                         body.push_str(&format!("        <owl:equivalentClass rdf:nodeID=\"{gid}\"/>\n"));
                         let target = format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n");
@@ -3598,6 +3710,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         // rather than a second, inline `<owl:Restriction>` block.
         let mut seen_named_sup: HashSet<&str> = HashSet::new();
         let mut seen_plain_anon: HashSet<String> = HashSet::new();
+        let mut seen_ann_gid: HashSet<String> = HashSet::new();
         // Which anonymous superclasses an ANNOTATED `SubClassOf` will render for
         // this class. Only those make a plain twin's triple redundant. A genid
         // minted by an annotated *equivalentClass* does not: `C ≡ ∃R.X` emits
@@ -3628,9 +3741,25 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     }
                 }
                 _ if !anns.is_empty() => {
-                    if let Some(gid) = ann_q.get(aqi).cloned() {
+                    if inline_anon() {
+                        // Inline-anon: every axiom renders its own full inline
+                        // edge — two axioms over structurally-equal expressions
+                        // are two anonymous nodes — and the reification's
+                        // annotatedTarget carries its own copy.
+                        let inner = render_ce(sup, 12, &operand_map);
+                        if !inner.is_empty() {
+                            body.push_str(&format!("        <rdfs:subClassOf>\n{inner}        </rdfs:subClassOf>\n"));
+                        }
+                        let target = format!("        <owl:annotatedTarget>\n{inner}        </owl:annotatedTarget>\n");
+                        sub_reif.push_str(&edge_reif(iri, SUB_PROP, &target, anns, prefixes));
+                    } else if let Some(gid) = ann_q.get(aqi).cloned() {
                         aqi += 1;
-                        body.push_str(&format!("        <rdfs:subClassOf rdf:nodeID=\"{gid}\"/>\n"));
+                        // Two annotated axioms over one shared node are one RDF
+                        // triple: the edge renders once, each axiom keeps its own
+                        // reification block pointing at the node.
+                        if seen_ann_gid.insert(gid.clone()) {
+                            body.push_str(&format!("        <rdfs:subClassOf rdf:nodeID=\"{gid}\"/>\n"));
+                        }
                         let target = format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n");
                         sub_reif.push_str(&edge_reif(iri, SUB_PROP, &target, anns, prefixes));
                     } else {
@@ -3640,7 +3769,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
                 _ => {
                     let sig = ce_sig(sup);
-                    if annotated_sub_sigs.contains(&sig) {
+                    if !inline_anon() && annotated_sub_sigs.contains(&sig) {
                         WRITER_SKIPS.with(|c| c.set(c.get() + 1));
                         // An annotated SubClassOf over this same expression already
                         // emitted `<rdfs:subClassOf rdf:nodeID="genidN"/>`; that IS
@@ -3671,13 +3800,28 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let dj_ann_sigs: HashSet<String> = dj_ann.iter().map(|(ce, _)| ce_sig(ce)).collect();
         for dj in sorted_ce(disjoint_class.get(iri)) {
             if dj_ann_sigs.contains(&ce_sig(dj)) {
+                let anns = dj_ann
+                    .iter()
+                    .find(|(ce, _)| ce_sig(ce) == ce_sig(dj))
+                    .map(|(_, a)| a.clone())
+                    .unwrap_or_default();
+                if inline_anon() {
+                    // Inline-anon: full inline edge, and the reification's
+                    // annotatedTarget carries its own copy.
+                    let inner = render_ce(dj, 12, &no_g);
+                    body.push_str(&format!("        <owl:disjointWith>\n{inner}        </owl:disjointWith>\n"));
+                    let target = format!("        <owl:annotatedTarget>\n{inner}        </owl:annotatedTarget>\n");
+                    dj_anon_reif.push_str(&edge_reif(
+                        iri,
+                        "http://www.w3.org/2002/07/owl#disjointWith",
+                        &target,
+                        &anns,
+                        prefixes,
+                    ));
+                    continue;
+                }
                 if let Some(gid) = ann_q.get(aqi).cloned() {
                     aqi += 1;
-                    let anns = dj_ann
-                        .iter()
-                        .find(|(ce, _)| ce_sig(ce) == ce_sig(dj))
-                        .map(|(_, a)| a.clone())
-                        .unwrap_or_default();
                     body.push_str(&format!("        <owl:disjointWith rdf:nodeID=\"{gid}\"/>\n"));
                     let target = format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n");
                     dj_anon_reif.push_str(&edge_reif(
@@ -3725,11 +3869,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let mut dj_reif = String::new();
         if let Some(djs) = disjoint_reif.get(iri) {
             let mut sorted = djs.clone();
-            sorted.sort_by(|a, b| iri_key(&a.0).cmp(&iri_key(&b.0)));
-            for (target, anns) in sorted {
+            sorted.sort_by(|a, b| iri_key(&a.1).cmp(&iri_key(&b.1)).then_with(|| iri_key(&a.0).cmp(&iri_key(&b.0))));
+            for (source, target, anns) in sorted {
                 let tline = format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(&target));
                 dj_reif.push_str(&edge_reif(
-                    iri,
+                    &source,
                     "http://www.w3.org/2002/07/owl#disjointWith",
                     &tline,
                     &anns,
@@ -4019,7 +4163,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     write_rules(model, &prefixes, &genid_pass.rule_ids, w)?;
 
     write!(w, "</rdf:RDF>\n\n\n\n")?;
-    write!(w, "<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->\n\n")?;
+    let banner_version = if model.owlapi_456 { "4.5.6" } else { "4.5.29" };
+    write!(w, "<!-- Generated by the OWL API (version {banner_version}) https://github.com/owlcs/owlapi -->\n\n")?;
     Ok(())
 }
 

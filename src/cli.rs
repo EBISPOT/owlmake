@@ -352,6 +352,9 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
         // `fastobo-validator <ont>.obo` — the OBO 1.4 syntax check in HPO's
         // `test` target.
         Some("fastobo-validator") => return crate::cmd::fastobo_validator::main(&argv[1..]),
+        // `runoak -i pronto:<ont>.obo ontology-metadata` — MONDO's OBO parse
+        // check in its `test` target.
+        Some("runoak") => return crate::cmd::runoak::main(&argv[1..]),
         // `check-rdfxml <product>.owl` — the RDF/XML parse check over a product.
         Some("check-rdfxml") => return crate::cmd::check_rdfxml::main(&argv[1..]),
         // MONDO's `pattern_schema_checks`, a member of its `test` target.

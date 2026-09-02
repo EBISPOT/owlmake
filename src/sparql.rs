@@ -23,7 +23,7 @@ use crate::model::Model;
 /// `Integer`/`Long` that holds it; `xsd:decimal` strips trailing fractional zeros
 /// and becomes an integer when nothing is left after the point. `None` for
 /// anything else — a value whose hash cannot be reproduced leaves the cell alone.
-fn literal_value_hash(value: &str, datatype: &str, has_lang: bool) -> Option<i32> {
+pub(crate) fn literal_value_hash(value: &str, datatype: &str, has_lang: bool) -> Option<i32> {
     use crate::sparql::jena_order as jo;
     const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
     if has_lang {
@@ -172,18 +172,32 @@ fn unescape_xml(s: &str) -> String {
 /// the class once it closes.
 fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
     const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
     enum Frame {
         Node(u32),
-        Prop(u32),
+        /// An open property element. Until a child node element or an
+        /// `rdf:resource`/`rdf:parseType`/`rdf:nodeID` claims its object
+        /// (`done`), the element is a literal in waiting: `text_start` marks
+        /// where its lexical form begins, and the datatype and language tag
+        /// were read off the open tag.
+        Prop { pred: u32, text_start: usize, dt: Option<String>, has_lang: bool, done: bool },
     }
     let text = String::from_utf8_lossy(rdf);
     let mut out = ObjectOrder::default();
     let type_id = out.intern(RDF_TYPE);
     let mut ns: std::collections::HashMap<String, String> = Default::default();
     let mut stack: Vec<Frame> = Vec::new();
-    let expand = |ns: &std::collections::HashMap<String, String>, qname: &str| -> Option<String> {
-        let (pre, local) = qname.split_once(':')?;
-        ns.get(pre).map(|base| format!("{base}{local}"))
+    // The default `xmlns` in scope, one entry per open element; an unprefixed
+    // element name resolves against the innermost one.
+    let mut defaults: Vec<Option<String>> = Vec::new();
+    let expand = |ns: &std::collections::HashMap<String, String>,
+                  default: &Option<String>,
+                  qname: &str|
+     -> Option<String> {
+        match qname.split_once(':') {
+            Some((pre, local)) => ns.get(pre).map(|base| format!("{base}{local}")),
+            None => default.as_ref().map(|base| format!("{base}{qname}")),
+        }
     };
     let mut i = 0usize;
     while let Some(rel) = text[i..].find('<') {
@@ -196,25 +210,51 @@ fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
             continue;
         }
         if tag.starts_with('/') {
-            stack.pop();
+            // A property element closing with its object still unclaimed held a
+            // literal: everything between its open tag and here is the lexical
+            // form. The predicate index records it under the enclosing subject.
+            if let Some(Frame::Prop { pred, text_start, dt, has_lang, done: false }) = stack.pop()
+            {
+                if let Some(Frame::Node(s)) = stack.last() {
+                    let lex = unescape_xml(&text[text_start..open]);
+                    let h = if has_lang {
+                        literal_value_hash(&lex, "", true)
+                    } else {
+                        literal_value_hash(&lex, dt.as_deref().unwrap_or(XSD_STRING), false)
+                    };
+                    out.push_unkeyed(pred, *s, PObj::Lit(h));
+                }
+            }
+            defaults.pop();
             continue;
         }
         let empty = tag.ends_with('/');
         let name = tag.split([' ', '\t', '\n', '\r', '/']).next().unwrap_or("");
-        let element_depth = stack.len();
-        if element_depth == 0 {
-            for part in tag.split_whitespace() {
-                if let Some(rest) = part.strip_prefix("xmlns:") {
-                    if let Some((pre, val)) = rest.split_once("=\"") {
-                        if let Some(val) = val.split('"').next() {
-                            ns.insert(pre.to_string(), unescape_xml(val));
-                        }
+        for part in tag.split_whitespace() {
+            if let Some(rest) = part.strip_prefix("xmlns:") {
+                if let Some((pre, val)) = rest.split_once("=\"") {
+                    if let Some(val) = val.split('"').next() {
+                        ns.insert(pre.to_string(), unescape_xml(val));
                     }
                 }
             }
+        }
+        let default = match tag_attr(tag, "xmlns") {
+            Some(d) => Some(d),
+            None => defaults.last().cloned().flatten(),
+        };
+        let element_depth = stack.len();
+        if element_depth == 0 {
             if !empty {
                 // A placeholder, so the document's own children sit at odd depth.
-                stack.push(Frame::Prop(type_id));
+                stack.push(Frame::Prop {
+                    pred: type_id,
+                    text_start: i,
+                    dt: None,
+                    has_lang: false,
+                    done: true,
+                });
+                defaults.push(default);
             }
             continue;
         }
@@ -227,37 +267,72 @@ fn scan_object_order(rdf: &[u8]) -> ObjectOrder {
             };
             // The element's own name types it, unless it is `rdf:Description`.
             if name != "rdf:Description" {
-                if let Some(t) = expand(&ns, name) {
+                if let Some(t) = expand(&ns, &default, name) {
                     let o = out.intern(&t);
                     out.push(o, subject, type_id);
                 }
             }
             // Nested inside a property element, it is that property's object.
-            if subject != NO_SUBJECT && stack.len() >= 2 {
-                if let (Frame::Prop(p), Frame::Node(s)) =
-                    (&stack[stack.len() - 1], &stack[stack.len() - 2])
+            if stack.len() >= 2 {
+                let at = stack.len() - 1;
+                let (below, top) = stack.split_at_mut(at);
+                if let (Frame::Node(s), Frame::Prop { pred, done, .. }) =
+                    (&below[at - 1], &mut top[0])
                 {
-                    out.push(subject, *s, *p);
+                    if subject != NO_SUBJECT {
+                        out.push(subject, *s, *pred);
+                    } else if !*done {
+                        // A blank object holds a slot in the predicate index even
+                        // though its label reproduces no hash.
+                        out.push_unkeyed(*pred, *s, PObj::Anon);
+                    }
+                    *done = true;
                 }
             }
             if !empty {
                 stack.push(Frame::Node(subject));
+                defaults.push(default);
             }
         } else {
-            // A property element. `rdf:resource` is the whole triple; anything else
-            // is a literal or a nested node, and a literal has no named object.
-            let pred = match expand(&ns, name) {
+            // A property element. `rdf:resource` is the whole triple;
+            // `rdf:parseType` and `rdf:nodeID` give it a blank object; anything
+            // else is a literal or a nested node.
+            let pred = match expand(&ns, &default, name) {
                 Some(p) => out.intern(&p),
                 None => out.intern(name),
             };
+            let mut done = false;
             if let Some(r) = tag_attr(tag, "rdf:resource") {
                 if let Some(Frame::Node(s)) = stack.last() {
                     let o = out.intern(&r);
                     out.push(o, *s, pred);
                 }
+                done = true;
+            } else if tag_attr(tag, "rdf:parseType").is_some()
+                || tag_attr(tag, "rdf:nodeID").is_some()
+            {
+                if let Some(Frame::Node(s)) = stack.last() {
+                    out.push_unkeyed(pred, *s, PObj::Anon);
+                }
+                done = true;
+            }
+            let dt = tag_attr(tag, "rdf:datatype");
+            let has_lang = tag_attr(tag, "xml:lang").is_some();
+            if empty && !done {
+                // A self-closing property element with no object attribute is an
+                // empty literal.
+                if let Some(Frame::Node(s)) = stack.last() {
+                    let h = if has_lang {
+                        literal_value_hash("", "", true)
+                    } else {
+                        literal_value_hash("", dt.as_deref().unwrap_or(XSD_STRING), false)
+                    };
+                    out.push_unkeyed(pred, *s, PObj::Lit(h));
+                }
             }
             if !empty {
-                stack.push(Frame::Prop(pred));
+                stack.push(Frame::Prop { pred, text_start: i, dt, has_lang, done });
+                defaults.push(default);
             }
         }
     }
@@ -376,6 +451,22 @@ struct ObjectOrder {
     ids: std::collections::HashMap<String, u32>,
     /// object id -> (subject id, predicate id), in document order
     bunches: std::collections::HashMap<u32, Vec<(u32, u32)>>,
+    /// predicate id -> (subject id, object), in document order — EVERY triple
+    /// under the predicate, including those whose subject or object is a blank
+    /// node or a literal. A pattern with only its predicate bound is answered
+    /// from this index, so the whole bunch matters: a triple with no
+    /// reproducible hash still fills a slot and drives the table's growth.
+    pred_bunches: std::collections::HashMap<u32, Vec<(u32, PObj)>>,
+}
+
+/// The object of a triple as the predicate index sees it: a named node, a
+/// blank node (no reproducible hash), or a literal with its value hash where
+/// the datatype models one.
+#[derive(Clone, Copy)]
+enum PObj {
+    Named(u32),
+    Anon,
+    Lit(Option<i32>),
 }
 
 impl ObjectOrder {
@@ -395,11 +486,23 @@ impl ObjectOrder {
 
     fn push(&mut self, object: u32, subject: u32, predicate: u32) {
         self.bunches.entry(object).or_default().push((subject, predicate));
+        self.pred_bunches.entry(predicate).or_default().push((subject, PObj::Named(object)));
+    }
+
+    /// Record a triple whose object names nothing the object index can key on —
+    /// a blank node or a literal. Only the predicate index holds it.
+    fn push_unkeyed(&mut self, predicate: u32, subject: u32, object: PObj) {
+        self.pred_bunches.entry(predicate).or_default().push((subject, object));
     }
 
     fn bunch(&self, object: &str) -> Option<&[(u32, u32)]> {
         let id = self.ids.get(object)?;
         self.bunches.get(id).map(|v| v.as_slice())
+    }
+
+    fn pred_bunch(&self, predicate: &str) -> Option<&[(u32, PObj)]> {
+        let id = self.ids.get(predicate)?;
+        self.pred_bunches.get(id).map(|v| v.as_slice())
     }
 }
 
@@ -643,6 +746,44 @@ impl Queryable {
         self.type_order.get(type_iri).map(|v| v.as_slice())
     }
 
+    /// The nodes a `<start> <predicate>* ?x` path reaches, in the order the
+    /// graph enumerates them: the start node first (the zero-length path), then
+    /// a depth-first walk that takes each node's outgoing `predicate` edges in
+    /// that node's bunch slot order. A node is emitted once, at its first
+    /// visit; an edge to a blank node has no reproducible hash and is not
+    /// walked.
+    pub fn forward_path_order(&self, start: &str, predicate: &str) -> Vec<String> {
+        use crate::sparql::jena_order as jo;
+        let mut out: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        // Depth-first with an explicit stack: a node's children are pushed
+        // reversed, so its first-slot child is visited (and emitted) first.
+        let mut stack: Vec<String> = vec![start.to_string()];
+        while let Some(x) = stack.pop() {
+            if !seen.insert(x.clone()) {
+                continue;
+            }
+            out.push(x.clone());
+            let Some(bunch) = self.subject_bunch(&x) else { continue };
+            let s = jo::node_hash(&x);
+            let hashes: Vec<Option<i32>> = bunch
+                .iter()
+                .map(|(pred, _, oh)| oh.map(|oh| jo::triple_hash(s, jo::node_hash(pred), oh)))
+                .collect();
+            let mut children: Vec<String> = Vec::new();
+            for &i in &jo::bunch_order(&hashes) {
+                let (pred, lex, _) = &bunch[i];
+                if pred == predicate && !seen.contains(lex) {
+                    children.push(lex.clone());
+                }
+            }
+            for c in children.into_iter().rev() {
+                stack.push(c);
+            }
+        }
+        out
+    }
+
     /// The subjects of `(?, predicate, object)`, in the order the graph answers
     /// that pattern. A triple whose subject is a blank node has no reproducible
     /// hash: it holds its place in the bunch but names no subject.
@@ -667,6 +808,44 @@ impl Queryable {
                 .into_iter()
                 .filter(|&i| self.object_order.name(bunch[i].1) == predicate)
                 .map(|i| self.object_order.name(bunch[i].0).to_string())
+                .collect(),
+        )
+    }
+
+    /// The (subject, object) pairs of `(?, predicate, ?)`, in the order the
+    /// graph answers a pattern with only its predicate bound. The predicate's
+    /// whole bunch is replayed: a triple with a blank node at either end, or a
+    /// literal whose datatype models no value hash, fills its slot and drives
+    /// the table's growth but names no pair in the result.
+    pub fn predicate_pairs(&self, predicate: &str) -> Option<Vec<(String, String)>> {
+        use crate::sparql::jena_order as jo;
+        let bunch = self.object_order.pred_bunch(predicate)?;
+        let ph = jo::node_hash(predicate);
+        let hashes: Vec<Option<i32>> = bunch
+            .iter()
+            .map(|(s, o)| {
+                if *s == NO_SUBJECT {
+                    return None;
+                }
+                let oh = match o {
+                    PObj::Named(id) => Some(jo::node_hash(self.object_order.name(*id))),
+                    PObj::Lit(h) => *h,
+                    PObj::Anon => None,
+                }?;
+                Some(jo::triple_hash(jo::node_hash(self.object_order.name(*s)), ph, oh))
+            })
+            .collect();
+        Some(
+            jo::bunch_order(&hashes)
+                .into_iter()
+                .filter_map(|i| {
+                    let (s, o) = &bunch[i];
+                    let PObj::Named(oid) = o else { return None };
+                    Some((
+                        self.object_order.name(*s).to_string(),
+                        self.object_order.name(*oid).to_string(),
+                    ))
+                })
                 .collect(),
         )
     }
@@ -806,6 +985,32 @@ impl Queryable {
         // Not a graph query — re-run through the table path (cheap: the store is
         // in memory and the query has already been validated).
         Ok(QueryOutput::Table(self.query_table(sparql)?))
+    }
+
+    /// Run a SELECT and return the raw solutions: the variable names in
+    /// projection order, and one `Option<Term>` per variable per row (`None`
+    /// where a row leaves a variable unbound).
+    pub fn raw_solutions(
+        &self,
+        sparql: &str,
+    ) -> Result<(Vec<String>, Vec<Vec<Option<Term>>>)> {
+        let results = SparqlEvaluator::new()
+            .parse_query(&prepare(sparql)?)
+            .map_err(|e| anyhow!("SPARQL parse error: {e}"))?
+            .on_store(&self.store)
+            .execute()
+            .map_err(|e| anyhow!("SPARQL error: {e}"))?;
+        let QueryResults::Solutions(solutions) = results else {
+            bail!("SELECT query expected (the query does not produce solutions)");
+        };
+        let vars: Vec<String> =
+            solutions.variables().iter().map(|v| v.as_str().to_string()).collect();
+        let mut rows = Vec::new();
+        for sol in solutions {
+            let sol = sol.map_err(|e| anyhow!("solution error: {e}"))?;
+            rows.push((0..vars.len()).map(|i| sol.get(i).cloned()).collect());
+        }
+        Ok((vars, rows))
     }
 
     /// Run a SPARQL CONSTRUCT query and serialize the resulting graph as RDF in
@@ -1138,6 +1343,48 @@ pub mod jena_order {
             h ^= *node;
         }
         h
+    }
+
+    /// The order the subjects of a graph are read back in, given their node
+    /// hashes in the order each subject FIRST gained a triple.
+    ///
+    /// The graph keeps one bunch per subject in a slot map that starts with ten
+    /// slots and a threshold of five: a new subject takes the first free slot at
+    /// or below `hash * 127`, and when the subject count REACHES the threshold
+    /// the map regrows to the next prime above twice its capacity, re-placing
+    /// the subjects by walking the old slots in ascending order. Reading is slot
+    /// by slot, ascending. Returned as indices into `hashes`.
+    pub fn bunch_map_order(hashes: &[i32]) -> Vec<usize> {
+        let mut cap: i32 = 10;
+        let mut threshold = (cap as f64 * 0.5) as usize;
+        let mut keys: Vec<Option<usize>> = vec![None; cap as usize];
+        let mut size = 0usize;
+        let find_slot = |keys: &[Option<usize>], cap: i32, h: i32| -> usize {
+            let mut i = (h.wrapping_mul(127) & 0x7fff_ffff) % cap;
+            while keys[i as usize].is_some() {
+                i -= 1;
+                if i < 0 {
+                    i += cap;
+                }
+            }
+            i as usize
+        };
+        for (idx, &h) in hashes.iter().enumerate() {
+            let slot = find_slot(&keys, cap, h);
+            keys[slot] = Some(idx);
+            size += 1;
+            if size == threshold {
+                let old = std::mem::take(&mut keys);
+                cap = next_size(cap.saturating_mul(2));
+                threshold = (cap as f64 * 0.5) as usize;
+                keys = vec![None; cap as usize];
+                for cell in old.into_iter().flatten() {
+                    let s = find_slot(&keys, cap, hashes[cell]);
+                    keys[s] = Some(cell);
+                }
+            }
+        }
+        keys.into_iter().flatten().collect()
     }
 
     /// The table `n` distinct keys end up in, for a map that starts out sized for

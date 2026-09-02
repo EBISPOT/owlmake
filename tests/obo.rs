@@ -99,6 +99,41 @@ fn obo_roundtrips_through_owl() {
     assert_eq!(count_classes(&m3), 3);
 }
 
+#[test]
+fn obo_label_comments_use_the_last_colliding_rdfxml_label() {
+    let rdfxml = r#"<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Ontology rdf:about="http://purl.obolibrary.org/obo/test.owl"/>
+    <owl:ObjectProperty rdf:about="http://purl.obolibrary.org/obo/RO_0002314">
+        <rdfs:label xml:lang="en">characteristic of part of</rdfs:label>
+        <rdfs:label>inheres in part of</rdfs:label>
+    </owl:ObjectProperty>
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/TEST_1">
+        <rdfs:label>one</rdfs:label>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://purl.obolibrary.org/obo/RO_0002314"/>
+                <owl:someValuesFrom rdf:resource="http://purl.obolibrary.org/obo/TEST_2"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/TEST_2">
+        <rdfs:label>two</rdfs:label>
+    </owl:Class>
+</rdf:RDF>
+"#;
+    let model = io::load_from(std::io::Cursor::new(rdfxml.as_bytes()), Format::RdfXml).unwrap();
+    let mut out = Vec::new();
+    io::write_to_ref(&model, &mut out, Format::Obo).unwrap();
+    let obo = String::from_utf8(out).unwrap();
+    assert!(
+        obo.contains("relationship: RO:0002314 TEST:2 ! inheres in part of two"),
+        "{obo}"
+    );
+}
+
 // --- Writer fidelity: the exact bytes of an OBO release file --------------
 //
 // Most tests below render an OWL functional-syntax fixture to OBO and pin the

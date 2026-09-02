@@ -115,7 +115,9 @@ fn disjointness_yields_unsatisfiable() {
 #[test]
 fn materialize_existentials_over_transitive_chain() {
     // Endocardium ⊑ ∃part_of.HeartWall, HeartWall ⊑ ∃part_of.Heart,
-    // part_of ∘ part_of ⊑ part_of  ⟹  materialize gives Endocardium ⊑ ∃part_of.Heart.
+    // part_of ∘ part_of ⊑ part_of. `∃part_of.Heart` is entailed for Endocardium
+    // but is NOT direct — `∃part_of.HeartWall` sits below it along the chain —
+    // so materialize keeps the direct edge and does not assert the ancestor.
     let b = Build::new_rc();
     let c = |n: &str| CE::Class(b.class(format!("{NS}{n}")));
     let part_of = b.object_property(format!("{NS}part_of"));
@@ -135,15 +137,23 @@ fn materialize_existentials_over_transitive_chain() {
             sup: OPE::ObjectProperty(part_of.clone()),
         }),
     ]);
-    let r = Reasoner::classify(&m);
     let props = std::collections::HashSet::new(); // all properties
-    let rels = r.materialize(&props);
-    let endo = format!("{NS}Endocardium");
-    let po = format!("{NS}part_of");
-    let heart = format!("{NS}Heart");
+    let out = owlmake::cmd::materialize::materialize(m, &props);
+    let direct = Component::SubClassOf(horned_owl::model::SubClassOf {
+        sub: c("Endocardium"),
+        sup: some(c("HeartWall")),
+    });
+    let ancestor = Component::SubClassOf(horned_owl::model::SubClassOf {
+        sub: c("Endocardium"),
+        sup: some(c("Heart")),
+    });
     assert!(
-        rels.iter().any(|(c, p, d)| *c == endo && *p == po && *d == heart),
-        "expected materialized Endocardium ⊑ part_of some Heart, got: {rels:?}"
+        out.ont.iter().any(|ac| ac.component == direct),
+        "the direct edge Endocardium ⊑ part_of some HeartWall survives"
+    );
+    assert!(
+        !out.ont.iter().any(|ac| ac.component == ancestor),
+        "the chain ancestor Endocardium ⊑ part_of some Heart is not asserted"
     );
 }
 

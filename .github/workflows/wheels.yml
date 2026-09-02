@@ -10,6 +10,12 @@ name: Wheels
 # wheel per platform works on CPython 3.9+, so there is no per-minor-version
 # matrix. An sdist is built too.
 #
+# Every job runs on ubuntu-latest or windows-latest — no macOS runners (they
+# bill at ~10x the Linux rate). The two macOS wheels cross-compile from Linux
+# with maturin's `--zig` mode, the same Zig-as-linker approach release.yml uses
+# for the `om` binary: abi3 extension modules link against no libpython (macOS
+# uses `-undefined dynamic_lookup`), so no Apple SDK or interpreter is needed.
+#
 # Triggers (both build + upload artifacts only; neither publishes):
 #   * push tag `v*`   -> build all wheels + sdist.
 #   * manual dispatch -> build all wheels + sdist.
@@ -34,15 +40,37 @@ jobs:
         include:
           - { runner: ubuntu-latest,  platform: linux,   target: x86_64,  manylinux: '2_28' }
           - { runner: ubuntu-latest,  platform: linux,   target: aarch64, manylinux: '2_28' }
-          - { runner: macos-13,       platform: macos,   target: x86_64 }
-          - { runner: macos-14,       platform: macos,   target: aarch64 }
+          - { runner: ubuntu-latest,  platform: macos,   target: x86_64-apple-darwin,  zig: true }
+          - { runner: ubuntu-latest,  platform: macos,   target: aarch64-apple-darwin, zig: true }
           - { runner: windows-latest, platform: windows, target: x64 }
           - { runner: windows-latest, platform: windows, target: aarch64 }
+    # A hung runner must not sit for GitHub's 24-hour default (a stuck macos-13
+    # job once billed a full day); the slowest honest build here is ~20 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
+      # maturin-action installs zig itself when `--zig` is in args; this makes
+      # the dependency explicit so a change in the action's behaviour fails
+      # here, on the install, rather than mid-link.
+      - name: Install zig
+        if: matrix.zig
+        run: pip install ziglang
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
+        # The darwin cross-links need the same two accommodations as the `om`
+        # binary's (see release.yml, whose comments carry the detail): capping
+        # MAC_OS_X_VERSION_MIN_REQUIRED selects mimalloc's arc4random_buf path
+        # instead of a CommonCrypto #include Zig's SDK-less stubs cannot serve,
+        # and `-F .github/macos-stubs` resolves the CoreFoundation link that
+        # chrono's clock feature pulls in. Scoped to the darwin entries — unlike
+        # release.yml's all-zig matrix, the Windows jobs here link with MSVC,
+        # which has no `-F` flag.
+        env:
+          CFLAGS_x86_64_apple_darwin: -DMAC_OS_X_VERSION_MIN_REQUIRED=101400
+          CFLAGS_aarch64_apple_darwin: -DMAC_OS_X_VERSION_MIN_REQUIRED=101400
+          RUSTFLAGS: ${{ matrix.zig && format('-C link-arg=-F{0}/.github/macos-stubs', github.workspace) || '' }}
         with:
           # crates/owlmake-py holds the pyproject; the Rust crate it builds
           # depends on the workspace root, so the whole repo is the build context.
@@ -50,7 +78,10 @@ jobs:
           target: ${{ matrix.target }}
           # manylinux container only applies to the Linux targets; ignored else.
           manylinux: ${{ matrix.manylinux || 'auto' }}
-          args: --release --out dist
+          # `--zig` on the darwin targets: cross-link with Zig instead of an
+          # Apple toolchain (maturin drives cargo-zigbuild, the same SDK-less
+          # link release.yml uses).
+          args: --release --out dist ${{ matrix.zig && '--zig' || '' }}
           sccache: 'true'
 
       # Validate the wheel we can actually run here (native Linux x86_64).

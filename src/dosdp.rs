@@ -124,6 +124,12 @@ pub struct GenerateOptions {
     /// `stimulus` are both `owl:Thing`), and each must still print as its own
     /// name — a map keyed by filler IRI cannot express that.
     pub var_labels: HashMap<String, String>,
+    /// Per-VARIABLE range EXPRESSION, substituted verbatim (names resolved,
+    /// no parentheses added) for the variable's `%s` in a logical template.
+    /// `prototype` fills a variable ranging over `'anatomical entity' or
+    /// 'cell'` this way, and the substituted text then parses under Manchester
+    /// precedence exactly as it stands in the template.
+    pub var_range_exprs: HashMap<String, String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -620,6 +626,7 @@ pub fn generate_with(
             names: &names,
             labels,
             var_labels: &gopts.var_labels,
+            var_range_exprs: &gopts.var_range_exprs,
             var_values: &var_values,
             is_declared: &is_declared,
             raw_values: &raw_values,
@@ -938,6 +945,39 @@ fn is_builtin_vocabulary(iri: &str) -> bool {
     BUILTIN_NS.iter().any(|ns| iri.starts_with(ns))
 }
 
+/// The operands of a union or intersection are a SET: a duplicate operand
+/// collapses, and an n-ary expression left with a single operand IS that
+/// operand. Applied to every class expression a logical template builds.
+fn canonicalize_sets(ce: CE<RcStr>) -> CE<RcStr> {
+    let fold = |v: Vec<CE<RcStr>>| -> Vec<CE<RcStr>> {
+        let mut seen: Vec<CE<RcStr>> = Vec::new();
+        for x in v.into_iter().map(canonicalize_sets) {
+            if !seen.contains(&x) {
+                seen.push(x);
+            }
+        }
+        seen
+    };
+    match ce {
+        CE::ObjectUnionOf(v) => {
+            let mut v = fold(v);
+            if v.len() == 1 { v.pop().unwrap() } else { CE::ObjectUnionOf(v) }
+        }
+        CE::ObjectIntersectionOf(v) => {
+            let mut v = fold(v);
+            if v.len() == 1 { v.pop().unwrap() } else { CE::ObjectIntersectionOf(v) }
+        }
+        CE::ObjectSomeValuesFrom { ope, bce } => {
+            CE::ObjectSomeValuesFrom { ope, bce: Box::new(canonicalize_sets(*bce)) }
+        }
+        CE::ObjectAllValuesFrom { ope, bce } => {
+            CE::ObjectAllValuesFrom { ope, bce: Box::new(canonicalize_sets(*bce)) }
+        }
+        CE::ObjectComplementOf(b) => CE::ObjectComplementOf(Box::new(canonicalize_sets(*b))),
+        other => other,
+    }
+}
+
 /// Per-row substitution context.
 struct RowCtx<'a> {
     b: &'a Build<RcStr>,
@@ -946,6 +986,8 @@ struct RowCtx<'a> {
     labels: &'a HashMap<String, String>,
     /// Per-variable display text (see [`GenerateOptions::var_labels`]).
     var_labels: &'a HashMap<String, String>,
+    /// Per-variable range expression (see [`GenerateOptions::var_range_exprs`]).
+    var_range_exprs: &'a HashMap<String, String>,
     var_values: &'a dyn Fn(&str) -> Vec<String>,
     /// Whether a variable name is declared by the pattern (see `is_declared`).
     is_declared: &'a dyn Fn(&str) -> bool,
@@ -984,7 +1026,11 @@ impl RowCtx<'_> {
         };
         let mut ces: Vec<CE<RcStr>> = Vec::new();
         for txt in &texts {
-            ces.push(manchester::parse_class_expression(self.b, self.prefixes, txt)?);
+            ces.push(canonicalize_sets(manchester::parse_class_expression(
+                self.b,
+                self.prefixes,
+                txt,
+            )?));
         }
         match ces.len() {
             0 => None,
@@ -1024,6 +1070,13 @@ impl RowCtx<'_> {
         }
         let mut text = self.substitute_names(text);
         for var in vars {
+            // A variable carrying a whole range expression substitutes as that
+            // expression, names resolved and no parentheses added — the result
+            // parses under Manchester precedence exactly as written.
+            if let Some(expr) = self.var_range_exprs.get(var) {
+                text = replace_first(&text, "%s", &self.substitute_names(expr));
+                continue;
+            }
             let vals = (self.var_values)(var);
             if vals.is_empty() {
                 return None;
@@ -1045,6 +1098,12 @@ impl RowCtx<'_> {
     fn fill_clause_once(&self, text: &str, vars: &[String], idx: usize, logical: bool) -> Option<String> {
         let mut text = if logical { self.substitute_names(text) } else { text.to_string() };
         for var in vars {
+            if logical {
+                if let Some(expr) = self.var_range_exprs.get(var) {
+                    text = replace_first(&text, "%s", &self.substitute_names(expr));
+                    continue;
+                }
+            }
             let vals = (self.var_values)(var);
             if vals.is_empty() {
                 return None;
@@ -1407,6 +1466,13 @@ fn canon_component(c: &mut Component<RcStr>) {
             for ce in v.iter_mut() {
                 canon_ce(ce);
             }
+            // The axiom's operands are a SET, read back with named classes in
+            // IRI order ahead of anonymous expressions — which also decides the
+            // frame a two-named-class equivalence files under.
+            v.sort_by_key(|ce| match ce {
+                CE::Class(c) => (0u8, c.0.as_ref().to_string()),
+                _ => (1, String::new()),
+            });
         }
         Component::SubClassOf(sc) => {
             canon_ce(&mut sc.sub);
@@ -1846,6 +1912,7 @@ pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result
     // make the prototype unreadable. Seed those as labels (a supplied ontology's
     // label still wins).
     let mut var_labels: HashMap<String, String> = HashMap::new();
+    let mut var_range_exprs: HashMap<String, String> = HashMap::new();
     for (var, range) in pattern.vars.iter().chain(pattern.list_vars.iter()) {
         header.push(var.clone());
         // …but only for a range that is not itself an identifier. A range written
@@ -1855,6 +1922,12 @@ pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result
         let raw = range.trim();
         if !(raw.contains(':') || raw.starts_with("http")) {
             var_labels.insert(var.clone(), raw.to_string());
+        }
+        // A range that is itself an EXPRESSION (`'anatomical entity' or 'cell'`)
+        // substitutes verbatim into the logical templates, where it parses under
+        // Manchester precedence as written.
+        if raw.contains(" or ") || raw.contains(" and ") {
+            var_range_exprs.insert(var.clone(), raw.to_string());
         }
         row.push(range_filler(&pattern, &prefixes, range));
     }
@@ -1866,7 +1939,7 @@ pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result
         row.push(range.trim().to_string());
     }
     let tsv = format!("{}\n{}\n", header.join("\t"), row.join("\t"));
-    let gopts = GenerateOptions { var_labels, ..Default::default() };
+    let gopts = GenerateOptions { var_labels, var_range_exprs, ..Default::default() };
     let mut model = generate_with(pattern_yaml, &tsv, labels, &gopts)?;
     // Each prototype is titled with the pattern's name — the one annotation
     // `prototype` adds that `generate` does not.
@@ -2796,6 +2869,7 @@ fn run_cli(args: &[String]) -> Result<i32> {
                 annotation_index,
                 extra_prefixes,
                 var_labels: HashMap::new(),
+                var_range_exprs: HashMap::new(),
             };
             let read_data = |path: &str| -> Result<String> {
                 let mut d = std::fs::read_to_string(path).map_err(|e| anyhow!("reading infile {path}: {e}"))?;

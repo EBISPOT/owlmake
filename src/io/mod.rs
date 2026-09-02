@@ -90,8 +90,10 @@ pub mod obo;
 pub mod obograph;
 pub mod ofncache;
 pub mod owlfunc;
+pub mod owlapi_ttl;
 pub mod owlrdf;
 pub mod turtle;
+pub mod jena_ttl;
 
 /// A serialization format for OWL ontologies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -901,7 +903,7 @@ fn scan_owl_body_genids(bytes: &[u8]) -> std::collections::HashMap<String, Vec<S
 /// A subject with two labels names one of them in the `! …` comments that
 /// reference it, and where the two land in the same slot of the assertion set the
 /// choice falls to the order they were read in. horned's model is unordered, so
-/// that order is scanned here (the analog of [`scan_owl_reif_order`]).
+/// that order is scanned here.
 fn scan_label_order(bytes: &[u8]) -> std::collections::HashMap<String, Vec<String>> {
     let text = String::from_utf8_lossy(bytes);
     let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
@@ -951,35 +953,6 @@ fn unescape_attr(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// Per subject IRI, the ordered [`crate::io::owlrdf::reif_signature`]s of the
-/// `<owl:Axiom>` reification blocks in the source RDF/XML — so the writer can
-/// replay the order the source carried them in, which is not reconstructible from
-/// horned's unordered model.
-fn scan_owl_reif_order(bytes: &[u8]) -> std::collections::HashMap<String, Vec<String>> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    let open = "    <owl:Axiom>\n";
-    let close = "    </owl:Axiom>\n";
-    let mut idx = 0usize;
-    while let Some(rel) = text[idx..].find(open) {
-        let s = idx + rel;
-        let Some(e_rel) = text[s..].find(close) else { break };
-        let end = s + e_rel + close.len();
-        let block = &text[s..end];
-        let src = "<owl:annotatedSource rdf:resource=\"";
-        if let Some(a) = block.find(src) {
-            let a = a + src.len();
-            if let Some(q) = block[a..].find('"') {
-                let subject = block[a..a + q].to_string();
-                let sig = crate::io::owlrdf::reif_signature(block);
-                out.entry(subject).or_default().push(sig);
-            }
-        }
-        idx = end;
-    }
-    out
-}
-
 /// The bare `<rdf:Description>` blocks (no `rdf:about`) an RDF/XML document carries
 /// in its Individuals section for annotation assertions on ANONYMOUS individuals
 /// (EFO's obsolescence records). horned's RDF reader discards anonymous-subject
@@ -1014,8 +987,13 @@ fn scan_owl_anon_individual_blocks(bytes: &[u8]) -> Vec<AnonBlock> {
     let mut out: Vec<AnonBlock> = Vec::new();
     for (s, end) in top_level_anon_descriptions(&text) {
         let block = &text[s..end];
-        let renders_from_model = block.contains("owl:distinctMembers")
-            || block.contains("owl:members")
+        // Matched by local name, not by the `owl:` prefix: a document that
+        // binds the OWL namespace as its DEFAULT xmlns writes these elements
+        // unprefixed (`<distinctMembers>`), and a block missed here is written
+        // twice — once replayed verbatim, once rendered from its component.
+        let renders_from_model = block.contains("distinctMembers")
+            || block.contains(":members")
+            || block.contains("<members")
             || block.contains("http://www.w3.org/2003/11/swrl#");
         if !renders_from_model {
             // The block's own parse-time blank node is the allocation made AT its
@@ -1308,25 +1286,17 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
     (std::borrow::Cow::Owned(out), labels)
 }
 
-/// The verbatim anonymous-individual blocks, in the order a released RDF/XML file
-/// carries them.
+/// The verbatim anonymous-individual blocks, in canonical byte order.
 ///
-/// That order is neither document order nor label order. An anonymous individual is
-/// RE-NUMBERED when the section is rendered, and the renumbering visits them in
-/// hash order of their PARSE-TIME `_:genid<N>` label: buckets ascending, document
-/// order within a bucket. Reproducing it is what keeps a re-serialized file from
-/// reshuffling a section whose content has not changed, so a release diff shows
-/// real edits and nothing else.
+/// OWLAPI orders these blocks by a hash of their transient parse-time blank-node
+/// ids. That is not a canonical order: writing the document changes which block
+/// receives each id on the next parse, so another conversion applies the same
+/// permutation again. EFO 3.93 demonstrates a two-state cycle under ROBOT 1.9.7.
 ///
-/// `N` is `anon_alloc_base` (everything the import closure consumed first) plus
-/// the block's own document-relative position, over the counter seed below. EFO's
-/// edit file puts its fourteen obsolescence records at 2148125419… .
-///
-/// The bucket mask is the hash table's capacity, which owlmake does NOT model: for
-/// fourteen entries the answer is the same at every capacity from 256 up, and a
-/// document with few enough anonymous individuals to sit below that has too few
-/// for the mask to separate them differently. `HASH_CAPACITY` is therefore fixed
-/// well above any real count.
+/// owlmake instead sorts on the only stable identity available here: the verbatim
+/// block bytes. This deliberately differs from ROBOT for documents with multiple
+/// bare anonymous individuals, but makes an RDF/XML write a fixed point. Equal
+/// blocks need no secondary key because swapping equal bytes cannot change output.
 ///
 /// A block that is an OWL CONSTRUCT rather than an individual is dropped, not
 /// ordered: an `owl:inverseOf` renders inline within its property frame and a
@@ -1334,42 +1304,17 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
 /// model. The input scan sees only `<rdf:Description>` and mis-collects them.
 pub(crate) fn anon_individual_order(
     blocks: &[AnonBlock],
-    base: u64,
-    capacity: u64,
-    imports_end: u64,
+    _base: u64,
+    _capacity: u64,
+    _imports_end: u64,
 ) -> Vec<&String> {
-    /// The fallback when the document's own capacity is not known — a non-RDF/XML
-    /// source, or a model assembled rather than parsed. Taken larger than any real
-    /// anonymous-individual count so the mask at least never splits a small set.
-    const HASH_CAPACITY: u64 = 1 << 20;
-    let capacity = if capacity == 0 { HASH_CAPACITY } else { capacity };
-    /// Blank-node ids run upwards from 2^31, so the first one allocated is
-    /// `_:genid2147483648`. The seed is part of the hashed STRING, so it cannot
-    /// be dropped as a common offset.
-    const COUNTER_SEED: u64 = 2_147_483_648;
     // The type is named as an IRI in an `rdf:resource`, not as an element, so it
     // is matched on the local name alone.
     let is_construct =
         |t: &str| t.contains("owl:inverseOf") || t.contains("NegativePropertyAssertion");
     let mut kept: Vec<&AnonBlock> =
         blocks.iter().filter(|b| !is_construct(&b.text)).collect();
-    if std::env::var("OM_ANON_DEBUG").is_ok() {
-        eprintln!("[anon] base={base} capacity={capacity} blocks={}", kept.len());
-        for b in &kept {
-            let bb = if b.offset > imports_end { base } else { 0 };
-            eprintln!("[anon]   alloc={} id=_:genid{}", b.alloc, COUNTER_SEED + bb + b.alloc);
-        }
-    }
-    // A stable sort by bucket leaves same-bucket blocks in document order, which
-    // is the insertion order within a bucket.
-    // A block the document allocates BEFORE its `owl:imports` is numbered without
-    // the closure — an import is loaded when its triple streams past, so a header at
-    // the bottom of the file charges nothing to what precedes it. For one document
-    // written both ways, header first gives base 3 and header last gives base 0.
-    let base_for = |b: &AnonBlock| if b.offset > imports_end { base } else { 0 };
-    kept.sort_by_key(|b| {
-        java_hash_bucket(&format!("_:genid{}", COUNTER_SEED + base_for(b) + b.alloc), capacity)
-    });
+    kept.sort_by(|a, b| a.text.cmp(&b.text));
     kept.into_iter().map(|b| &b.text).collect()
 }
 
@@ -1388,17 +1333,6 @@ pub(crate) fn hash_map_capacity(n: u64) -> u64 {
         cap <<= 1;
     }
     cap
-}
-
-/// The bucket a string key falls in: the 31-multiplier hash over its UTF-16 code
-/// units, spread by `h ^ (h >> 16)` across the 32-bit value, masked to the table
-/// size.
-fn java_hash_bucket(key: &str, capacity: u64) -> u64 {
-    let mut h: u32 = 0;
-    for c in key.encode_utf16() {
-        h = h.wrapping_mul(31).wrapping_add(c as u32);
-    }
-    ((h ^ (h >> 16)) as u64) & (capacity - 1)
 }
 
 /// The byte offset of every blank node an RDF/XML document allocates, in document
@@ -1915,9 +1849,8 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // through the writer that consumes them. Anything that made the scans
             // conditional would leave that writer with no record of the source on an
             // ordinary build.
-            let (owl_genid_refs, owl_reif_order, owl_anon_blocks, owl_label_order) = (
+            let (owl_genid_refs, owl_anon_blocks, owl_label_order) = (
                 scan_owl_body_genids(&buf),
-                scan_owl_reif_order(&buf),
                 scan_owl_anon_individual_blocks(&buf),
                 scan_label_order(&buf),
             );
@@ -1947,7 +1880,6 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             model.idspaces = idspaces;
             model.rdf_prefixes = rdf_prefixes;
             model.owl_genid_refs = owl_genid_refs;
-            model.owl_reif_order = owl_reif_order;
             model.owl_label_order = owl_label_order;
             model.owl_anon_blocks = owl_anon_blocks;
             let raw = String::from_utf8_lossy(&buf);
@@ -2532,7 +2464,10 @@ fn write_to_with<W: Write>(
         Format::Obo => obo::save(model, &mut writer)?,
         Format::OboGraph => obograph::save(model, &mut writer)?,
         Format::Manchester => manchester::save(model, &mut writer)?,
-        Format::Turtle => turtle::save(model, &mut writer)?,
+        Format::Turtle => match owlapi_ttl::render(model) {
+            Some(bytes) => writer.write_all(&bytes)?,
+            None => turtle::save(model, &mut writer)?,
+        },
         Format::NTriples => {
             turtle::save_as(model, &mut writer, oxigraph::io::RdfFormat::NTriples)?
         }

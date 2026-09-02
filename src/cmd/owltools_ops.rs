@@ -275,6 +275,12 @@ fn owltools_run(args: &[String]) -> Result<i32> {
     let (first, rest) = inputs.split_first().context("owltools: no input ontology given")?;
     let mut model = crate::io::load(std::path::Path::new(first))
         .with_context(|| format!("owltools: loading {first}"))?;
+    // The input's `owl:imports` closure is loaded too (resolved through a
+    // sibling catalog when one exists): the reasoner and the module extractor
+    // must see the closure's axioms, while a save still writes only the root
+    // ontology's own components.
+    crate::cmd::resolve_imports_auto(&mut model, None, Some(std::path::Path::new(first)))
+        .with_context(|| format!("owltools: resolving imports of {first}"))?;
     let mut support: Vec<Model> = Vec::new();
     for p in rest {
         support.push(
@@ -322,6 +328,13 @@ fn owltools_run(args: &[String]) -> Result<i32> {
             Some(f) => crate::io::Format::from_name(f)?,
             None => crate::io::Format::RdfXml,
         };
+        // This command saves under the inline-anonymous-node RDF/XML profile:
+        // every anonymous class expression is rendered in full at each reference
+        // and the document carries no `rdf:nodeID` — see `Model::owlapi_456`.
+        model.owlapi_456 = true;
+        // The save writes the ROOT ontology: inlined-closure axioms come back
+        // out and the `owl:imports` declarations go back in.
+        crate::cmd::restore_root_for_save(&mut model);
         crate::io::save_as(&mut model, std::path::Path::new(&out), fmt)?;
     }
     Ok(0)
@@ -1087,6 +1100,20 @@ fn run_reasoner(
     if let Some(path) = module {
         let seeds: HashSet<String> = unsats.iter().cloned().collect();
         let mut m = crate::extract::extract(&model, &seeds, crate::extract::Method::Bot);
+        // The module is a NEW, anonymous ontology — it does not inherit the
+        // input's ontology IRI.
+        let ids: Vec<AnnotatedComponent<Str>> = m
+            .ont
+            .iter()
+            .filter(|ac| matches!(ac.component, Component::OntologyID(_) | Component::DocIRI(_)))
+            .cloned()
+            .collect();
+        for ac in ids {
+            m.ont.remove(&ac);
+        }
+        // Modules this command writes use the same inline-anonymous-node
+        // RDF/XML profile as its `-o` saves — see `Model::owlapi_456`.
+        m.owlapi_456 = true;
         crate::io::save(&mut m, std::path::Path::new(path))?;
     }
     if !unsats.is_empty() {
@@ -1205,6 +1232,21 @@ fn merge_equivalence_sets(
     if !rename.is_empty() {
         model = crate::cmd::rename::rename_model(model, &rename)?;
     }
+    // The merge rebuilds every entity's OBO-model view, whose id is derived
+    // from the IRI — so no `oboInOwl:id` assertion survives it, merged or not.
+    const OBO_ID: &str = "http://www.geneontology.org/formats/oboInOwl#id";
+    let drop: Vec<AnnotatedComponent<Str>> = model
+        .ont
+        .iter()
+        .filter(|ac| {
+            matches!(&ac.component,
+                Component::AnnotationAssertion(aa) if aa.ann.ap.0.as_ref() == OBO_ID)
+        })
+        .cloned()
+        .collect();
+    for ac in drop {
+        model.ont.remove(&ac);
+    }
     Ok(Some(model))
 }
 
@@ -1221,37 +1263,25 @@ fn has_obo_prefix(iri: &str, prefix: &str) -> bool {
     }
 }
 
-/// `owltools --remove-dangling`: drop every axiom that references an entity the
-/// ontology does not declare.
+/// `owltools --remove-dangling`: drop every axiom whose logical signature
+/// references a *dangling* entity — a class / object property / named
+/// individual with no `AnnotationAssertion` of its own (see [`drop_dangling`]).
+/// Declarations of dangling entities go with their axioms; annotation
+/// assertions never do, because a dangling subject or value IRI is not part of
+/// the assertion's logical signature.
 fn remove_dangling(mut model: Model) -> Model {
-    let declared: HashSet<String> = model
-        .ont
-        .iter()
-        .filter_map(|ac| match &ac.component {
-            Component::DeclareClass(d) => Some(d.0 .0.to_string()),
-            Component::DeclareObjectProperty(d) => Some(d.0 .0.to_string()),
-            Component::DeclareAnnotationProperty(d) => Some(d.0 .0.to_string()),
-            Component::DeclareDataProperty(d) => Some(d.0 .0.to_string()),
-            Component::DeclareNamedIndividual(d) => Some(d.0 .0.to_string()),
-            Component::DeclareDatatype(d) => Some(d.0 .0.to_string()),
-            _ => None,
-        })
-        .collect();
-    let drop: Vec<AnnotatedComponent<Str>> = model
-        .ont
-        .iter()
+    let comps: Vec<AnnotatedComponent<Str>> = model.ont.iter().cloned().collect();
+    let danglable = danglable_entities(&comps);
+    let annotated = annotated_subjects(&comps);
+    let dangling: HashSet<String> = danglable.difference(&annotated).cloned().collect();
+    if dangling.is_empty() {
+        return model;
+    }
+    let drop: Vec<AnnotatedComponent<Str>> = comps
+        .into_iter()
         .filter(|ac| {
-            !matches!(
-                &ac.component,
-                Component::OntologyID(_)
-                    | Component::DocIRI(_)
-                    | Component::Import(_)
-                    | Component::OntologyAnnotation(_)
-            ) && crate::sig::signature(&ac.component)
-                .iter()
-                .any(|i| !declared.contains(i.as_str()) && !i.starts_with("http://www.w3.org/"))
+            crate::sig::signature(&ac.component).iter().any(|e| dangling.contains(e))
         })
-        .cloned()
         .collect();
     for ac in drop {
         model.ont.remove(&ac);

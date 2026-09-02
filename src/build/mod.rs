@@ -60,6 +60,11 @@ pub struct Repo<'a> {
     /// into rebuilding `mirror/merged.owl` from mirrors a release build never
     /// downloads.
     pub refresh_imports: bool,
+    /// The mirrors / imports group was pinned EXPLICITLY this run (`MIR=false`,
+    /// `IMP=false`, `--keep`). See [`ExecOpts::mirrors_pinned`]: it decides what
+    /// a pin means for a file that is absent.
+    pub mirrors_pinned: bool,
+    pub imports_pinned: bool,
     /// ODK `PAT`. FALSE means the DOSDP products are the committed ones, and the
     /// import seed's pattern half is extracted from `definitions.owl` rather than
     /// from the per-pattern term files — a different derivation, not a skipped
@@ -111,6 +116,8 @@ impl<'a> Repo<'a> {
             always_make: false,
             refresh_mirrors: true,
             refresh_imports: true,
+            mirrors_pinned: false,
+            imports_pinned: false,
             regenerate_patterns: true,
             kept_groups: Vec::new(),
             built: &repo.built,
@@ -131,6 +138,8 @@ impl<'a> Repo<'a> {
             always_make: opts.always_make,
             refresh_mirrors: opts.refresh_mirrors,
             refresh_imports: matches!(opts.imports_mode, ImportsMode::Fresh),
+            mirrors_pinned: opts.mirrors_pinned,
+            imports_pinned: opts.imports_pinned,
             regenerate_patterns: opts.patterns_mode == PatternsMode::Regenerate,
             kept_groups: plan
                 .refresh_groups
@@ -231,10 +240,10 @@ fn is_mirror_target(repo: &Repo, target: &str) -> bool {
 /// message about a pinned file has to say.
 fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
     if !repo.refresh_mirrors && is_mirror_target(repo, target) {
-        return Some(Pin { flag: "MIR".into(), group: "mirrors".into() });
+        return Some(Pin { flag: "MIR".into(), group: "mirrors".into(), explicit: repo.mirrors_pinned });
     }
     if !repo.refresh_imports && is_import_target(repo, target) {
-        return Some(Pin { flag: "IMP".into(), group: "imports".into() });
+        return Some(Pin { flag: "IMP".into(), group: "imports".into(), explicit: repo.imports_pinned });
     }
     // A group of a repository's own invention is a plain list of targets, so
     // membership is the whole test. Compared by filename as well as by path,
@@ -248,7 +257,10 @@ fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
     repo.kept_groups
         .iter()
         .find(|g| g.targets.iter().any(|t| same(t)))
-        .map(|g| Pin { flag: g.flag.clone(), group: g.name.clone() })
+        // A repo-invented group reaches `kept_groups` through one resolution for
+        // the run, so default and explicit are not distinguished here; treated
+        // as explicit, which keeps the strict answer for its absent files.
+        .map(|g| Pin { flag: g.flag.clone(), group: g.name.clone(), explicit: true })
 }
 
 /// Why a target is pinned: the switch that turned its rules off, and the group
@@ -256,6 +268,8 @@ fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
 struct Pin {
     flag: String,
     group: String,
+    /// Stated by the caller for THIS run, as against the group's default.
+    explicit: bool,
 }
 
 impl std::fmt::Display for Pin {
@@ -426,7 +440,20 @@ fn mirror_import_for<'p>(repo: &Repo<'p>, path: &str) -> Option<&'p crate::plan:
         let d = repo.var("MIRRORDIR");
         if d.is_empty() { "mirror".to_string() } else { d.to_string() }
     };
-    repo.plan.imports.iter().find(|i| path == format!("{dir}/{}.owl", i.id))
+    // Compared as PATHS, with a leading `./` normalized away — `components()`
+    // alone keeps that one. The recorded `$(MIRRORDIR)` is the configuration's
+    // own spelling — EFO writes `./mirror` — while a rule's prerequisite says
+    // `mirror/mondo.owl`, and only as paths do the two meet.
+    use std::path::Component;
+    let parts = |p: &str| {
+        std::path::Path::new(p)
+            .components()
+            .filter(|c| !matches!(c, Component::CurDir))
+            .map(|c| c.as_os_str().to_os_string())
+            .collect::<Vec<_>>()
+    };
+    let want = parts(path);
+    repo.plan.imports.iter().find(|i| parts(&format!("{dir}/{}.owl", i.id)) == want)
 }
 
 /// Whether a path names one of the DOSDP products owlmake writes natively
@@ -495,6 +522,14 @@ pub struct ExecOpts {
     /// module rules are not defined. Forcing the rebuild regardless re-mirrored
     /// every upstream and overwrote the committed merged import.
     pub imports_pinned: bool,
+    /// The run pinned the MIRRORS group explicitly (`MIR=false`, `--keep
+    /// mirrors`), as against the plan's `default: keep`. The two pins hold
+    /// different promises for a file that is ABSENT: an explicit pin was stated
+    /// about this run and an absent file under it is an error, while a group
+    /// default pins the content of files that exist — a target nothing ever
+    /// committed (EFO gitignores `imports/mondo_import.owl` and its mirror) has
+    /// no content to pin, and every fresh clone must build it once.
+    pub mirrors_pinned: bool,
     /// The plan's OTHER refresh groups that this run keeps, by name — everything
     /// beyond `mirrors`/`imports`/`patterns`, whose own fields above carry them.
     /// A kept group's targets are not in play: their rules exist only under the
@@ -749,7 +784,12 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // `ifeq ($(strip $(MIR)),true)`; unpinned, every `MIR=false` build
         // shipped a fresh fetch of a mapping set the reference left committed.
         // A pinned file that is absent is an error naming the switch.
-        let pinned = pinned_by(repo, &a.target);
+        let pinned = pinned_by(repo, &a.target).filter(|p| {
+            // A DEFAULT pin holds only for a file that exists — see
+            // `run_target_recipe_inner`, which decides the same question for a
+            // recipe target. An explicit pin holds either way.
+            p.explicit || repo.dir.join(&a.target).is_file()
+        });
         if let Some(switch) = pinned {
             if repo.dir.join(&a.target).is_file() {
                 status!("make: `{}` pinned ({switch})", a.target);
@@ -1726,7 +1766,11 @@ fn run_target_recipe_inner(
     // instead is a silent substitution of a different input (P5), and it is how a
     // `MIR=false` run came to overwrite pinned copies with today's upstream.
     if let Some(pin) = pinned_by(repo, target) {
-        if !repo.dir.join(target).exists() {
+        if repo.dir.join(target).exists() {
+            status!("make: `{target}` pinned ({pin})");
+            return Ok(());
+        }
+        if pin.explicit {
             bail!(
                 "`{target}` is pinned by {pin} but is not present. \
                  Under {pin} the rules that build it do not exist, so there is nothing to \
@@ -1735,8 +1779,16 @@ fn run_target_recipe_inner(
                 pin.group,
             );
         }
-        status!("make: `{target}` pinned ({pin})");
-        return Ok(());
+        // Kept only by the group's DEFAULT, and absent. The default pins the
+        // content of a file that exists; a target nothing committed (EFO
+        // gitignores `imports/mondo_import.owl`) has no content to pin, and
+        // refusing it would leave every fresh clone — CI first among them —
+        // unable to build at all. Said out loud, so the run reads as what it
+        // did; an explicit `{flag}=false` still refuses above.
+        status!(
+            "make: `{target}` is kept by default ({pin}) but absent — building it this once",
+            pin = pin
+        );
     }
 
     // An AGGREGATE target — prerequisites plus nothing but bookkeeping (EFO's
@@ -1833,8 +1885,19 @@ fn run_target_recipe_inner(
     // that NEEDS one still has to find it there. `execute_plan` runs the pattern
     // stage up front; a single-target invocation (`om make tmp/seed.txt`) does
     // not, and would build a seed missing all 317 pattern terms. Run it on
-    // demand, once per run (`repo.built`).
-    if a.needs.iter().any(|n| is_native_pattern_product(repo, n) && !repo.dir.join(n).exists()) {
+    // demand, once per run (`repo.built`). A product the plan DOES carry a rule
+    // for is that rule's to build, not the pattern stage's.
+    let ruled = |n: &str| {
+        repo.plan
+            .artefacts
+            .iter()
+            .chain(repo.plan.prerequisites.iter())
+            .any(|a| a.target == n && !a.missing_rule)
+    };
+    if a.needs
+        .iter()
+        .any(|n| is_native_pattern_product(repo, n) && !ruled(n) && !repo.dir.join(n).exists())
+    {
         if repo.built.borrow_mut().insert("\u{1}patterns".to_string()) {
             if repo.regenerate_patterns {
                 regenerate_patterns_planned(repo, repo.plan)
@@ -2404,6 +2467,10 @@ fn run_cli_robot_step(
     // --queries … -O $(REPORTDIR)`, and `-O` does not match the scan, so
     // `--output <tmp>` would be appended to a command that has no such option and
     // clap would exit 2 — the QC check could not run at all.
+    // `explain` is NOT terminal: the model it hands the next command is the
+    // ontology of its justification axioms (empty when nothing needed
+    // explaining), so the chain file it writes through the appended `--output`
+    // is exactly that ontology and the pass-through would be wrong.
     const TERMINAL_COMMANDS: &[&str] = &[
         "report",
         "verify",
@@ -2412,7 +2479,6 @@ fn run_cli_robot_step(
         "diff",
         "export",
         "export-prefixes",
-        "explain",
         "mirror",
         "check-rdfxml",
         "validate-id-ranges",
@@ -2877,6 +2943,9 @@ fn run_steps(
                 }
             }
             Step::Inert(_) => {} // no observable effect; never reaches a plan
+            Step::UnsupportedSubcommand(name) => {
+                bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
+            }
             s if is_shell_step(s) => {
                 model = run_shell_step_in_pipeline(
                     repo, s, model, target, work, model_on_disk, pipeline_input,
@@ -2986,13 +3055,20 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
     // nothing. A pinned input that is absent is an error, not a licence to go and
     // get a different one (P5).
     if !refresh {
-        bail!(
-            "mirror `{}` is pinned by MIR=false but {} is not present. \
-             Under MIR=false the mirror rules do not exist, so there is nothing to fetch it \
-             with — re-run with MIR=true (or `--rebuild mirrors`) to download it",
-            imp.id,
-            dest.display()
-        );
+        if repo.mirrors_pinned {
+            bail!(
+                "mirror `{}` is pinned by MIR=false but {} is not present. \
+                 Under MIR=false the mirror rules do not exist, so there is nothing to fetch it \
+                 with — re-run with MIR=true (or `--rebuild mirrors`) to download it",
+                imp.id,
+                dest.display()
+            );
+        }
+        // Kept by the group's default and absent: there is no pinned copy to
+        // build against, so the fetch is the only way any consumer proceeds.
+        // The explicit `MIR=false` above still refuses — that pin was stated
+        // about this run (P5) — and the fetch announces itself.
+        status!("make: mirror `{}` is kept by default but absent — fetching it this once", imp.id);
     }
     if !repo.built.borrow_mut().insert(once) && dest.exists() {
         return Ok(dest);
@@ -3733,7 +3809,11 @@ fn run_artefact(
             let self_input = i == a.target;
             let not_built_this_run =
                 assumed_new(repo, i) || skip_missing_intermediate(repo, &a.target, i);
-            if names_ontology && !self_input && !not_built_this_run && repo.target(i).is_some() {
+            // A mirror is as buildable as a planned target — `resolve_input`
+            // fetches it — so reaching here with one means that fetch FAILED,
+            // and carrying on from an empty model would bury the failure.
+            let buildable = repo.target(i).is_some() || mirror_import_for(repo, i).is_some();
+            if names_ontology && !self_input && !not_built_this_run && buildable {
                 bail!(
                     "input `{i}` of `{}` was not built — its rule failed or was skipped, \
                      so there is nothing to build `{}` from",
@@ -3804,7 +3884,15 @@ fn run_artefact(
         // no blank-node ids — see the artefact path.
         if model.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
             let mark = crate::io::anon_counter();
-            model.banner_labels = closure_banner_labels(&model, &repo.dir, catalog);
+            // The document's identity at write time: the last version IRI a step
+            // of this pipeline sets, if any.
+            let write_version = a.steps.iter().rev().find_map(|s| match s {
+                Step::Op(Op::Annotate(sp))
+                | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
+                _ => None,
+            });
+            model.banner_labels =
+                closure_banner_labels(&model, &repo.dir, catalog, write_version.as_deref());
             crate::io::set_anon_counter(mark);
         }
         // Named the way `Op::Merge` will name it, so `merge -i $<` recognises the
@@ -3902,7 +3990,15 @@ fn run_artefact(
             // where the read pushed it numbers the artefact's OWN nodes from after
             // a whole closure that is not in it.
             let mark = crate::io::anon_counter();
-            m.banner_labels = closure_banner_labels(&m, &repo.dir, catalog);
+            // The document's identity at write time: the last version IRI a step
+            // of this pipeline sets, if any.
+            let write_version = a.steps.iter().rev().find_map(|s| match s {
+                Step::Op(Op::Annotate(sp))
+                | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
+                _ => None,
+            });
+            m.banner_labels =
+                closure_banner_labels(&m, &repo.dir, catalog, write_version.as_deref());
             crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
@@ -4077,7 +4173,7 @@ fn run_artefact(
                 continue;
             }
             Step::UnsupportedSubcommand(name) => {
-                bail!("unsupported ontology subcommand `{name}`: this step has no owlmake implementation")
+                bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
             }
             _ => bail!("internal: uncovered step reached executor: {}", step.label()),
         };
@@ -4119,6 +4215,20 @@ fn run_artefact(
             model.banner_labels = closure_labels(cl);
         }
         withdraw_materialised_declarations(&mut model);
+    }
+    // An OBO document comments every clause target that has a label — and a
+    // target the root only references (a GO process in a `relationship:`, a
+    // BFO class in an `is_a:`) is labelled by the ontology that declares it.
+    // MONDO's `filtered.obo` keeps its four imports, so its 34,000 clause
+    // comments come from the closure.
+    if a.target.ends_with(".obo") && model_has_imports(&model) {
+        if !closure_loaded {
+            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure_loaded = true;
+        }
+        if let Some(cl) = &closure {
+            model.banner_labels = closure_labels(cl);
+        }
     }
 
     // Every referenced entity is declared: an annotation property a merged non-OBO
@@ -4199,6 +4309,13 @@ fn run_artefact(
     //     write and destroy the output rather than merely fail to check for it.
     if repo.plan.is_phony(&a.target) {
         return surface_produced(repo, &a.target, &a.steps, work, out);
+    }
+    // A side-effect-only rule writes the files its steps name and nothing at
+    // the target path: no target file exists afterwards, the rule is simply
+    // always out of date, and materialising the pipeline model here would
+    // create an artefact the build never meant to produce.
+    if a.side_effect_only {
+        return Ok(());
     }
     let write_res = match explicit_fmt.or_else(|| crate::io::Format::from_path(out).ok()) {
         Some(f) => crate::io::save_as(&mut model, out, f),
@@ -5051,19 +5168,87 @@ fn reason_with_closure(
     reasoner: &str,
     opts: &cmd::reason::ReasonOptions,
 ) -> Result<crate::model::Model> {
-    use horned_owl::model::MutableOntology;
-    // Reason over root + the import closure, then assert the newly-inferred axioms
-    // into the root only (the imported axioms re-enter verbatim at the later
+    use horned_owl::model::{Component, MutableOntology};
+    // Reason over root + the import closure, then assert the inferred axioms
+    // into the root only (the imported axioms re-enter verbatim at a later
     // collapsing merge). NB: `-X` does NOT drop inferred axioms about imported
     // classes at this point — MONDO's `reasoned.owl` keeps inferred
-    // `CHEBI ⊑ BFO_…` and the like — so every newly-inferred axiom is added.
+    // `CHEBI ⊑ BFO_…` and the like.
+    //
+    // What counts as "inferred" follows `--exclude-duplicate-axioms`: with it,
+    // an axiom the union already asserts is a duplicate and stays out; without
+    // it, every generated inference lands in the root even when the closure
+    // asserts the same axiom — MONDO's `mondo-tags-reasoned.owl` carries
+    // 18,000 `hgnc ⊑ SO_0000704` edges re-asserted from its uncollapsed
+    // imports exactly that way.
     let union = union_with_closure(&root, closure);
-    let before: std::collections::HashSet<_> = union.ont.iter().cloned().collect();
-    let reasoned = cmd::reason::reason_with(union, reasoner, opts)?;
     let mut out = root;
-    for ac in reasoned.ont.iter() {
-        if !before.contains(ac) {
-            out.ont.insert(ac.clone());
+    if opts.exclude_duplicate_axioms {
+        let before: std::collections::HashSet<_> = union.ont.iter().cloned().collect();
+        let reasoned = cmd::reason::reason_with(union, reasoner, opts)?;
+        for ac in reasoned.ont.iter() {
+            if !before.contains(ac) {
+                out.ont.insert(ac.clone());
+            }
+        }
+    } else {
+        let mut iopts = opts.clone();
+        iopts.create_new_ontology = true;
+        iopts.create_new_ontology_with_annotations = false;
+        let inferred = cmd::reason::reason_with(union, reasoner, &iopts)?;
+        for ac in inferred.ont.iter() {
+            if matches!(
+                ac.component,
+                Component::SubClassOf(_)
+                    | Component::EquivalentClasses(_)
+                    | Component::ClassAssertion(_)
+            ) {
+                out.ont.insert(ac.clone());
+            }
+        }
+        // The redundant-subclass sweep runs against the merged result, and the
+        // inferred model carries exactly the direct pairs it needs: an
+        // un-annotated asserted `C ⊑ X` that is not a proper direct super goes,
+        // the same rule the non-closure path applies to its own merge.
+        if opts.remove_redundant_subclass_axioms {
+            use horned_owl::model::ClassExpression as CE;
+            let mut direct_set: std::collections::HashSet<(String, String)> = Default::default();
+            for ac in inferred.ont.iter() {
+                if let Component::SubClassOf(sc) = &ac.component {
+                    if let (CE::Class(c), CE::Class(x)) = (&sc.sub, &sc.sup) {
+                        direct_set
+                            .insert((c.0.as_ref().to_string(), x.0.as_ref().to_string()));
+                    }
+                }
+            }
+            const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+            const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+            let doomed: Vec<_> = out
+                .ont
+                .iter()
+                .filter(|ac| {
+                    if !ac.ann.is_empty() {
+                        return false;
+                    }
+                    match &ac.component {
+                        Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
+                            (CE::Class(c), CE::Class(x)) => {
+                                let (c, x) = (c.0.as_ref(), x.0.as_ref());
+                                let proper = direct_set
+                                    .contains(&(c.to_string(), x.to_string()))
+                                    && !direct_set.contains(&(x.to_string(), c.to_string()));
+                                x != OWL_THING && x != OWL_NOTHING && !proper
+                            }
+                            _ => false,
+                        },
+                        _ => false,
+                    }
+                })
+                .cloned()
+                .collect();
+            for ac in doomed {
+                out.ont.remove(&ac);
+            }
         }
     }
     Ok(out)
@@ -5083,6 +5268,10 @@ fn reduce_with_closure(
     let reduced = cmd::reduce::reduce_with_opts(&union, false, false, include_subproperties);
     let mut out = empty_model();
     out.prefixes = root.prefixes.clone();
+    // The root's document state — blank-node sharing recorded by relax above
+    // all — describes axioms that survive into `out`; rebuilding from an empty
+    // model without it makes every relax-shared node render as two copies.
+    out.carry_meta_from(&root);
     for ac in reduced.ont.iter() {
         if root_set.contains(ac) {
             out.ont.insert(ac.clone());
@@ -5113,6 +5302,7 @@ fn strip_external_subject_axioms(
     };
     let mut out = empty_model();
     out.prefixes = model.prefixes.clone();
+    out.carry_meta_from(&model);
     for ac in model.ont.iter() {
         if !fully_external(&ac.component) {
             out.ont.insert(ac.clone());
@@ -5315,6 +5505,16 @@ fn write_step_output(
         }
         withdraw_materialised_declarations(model);
     }
+    // An OBO write comments every clause target that has a label, and a target
+    // the root only references is labelled by the ontology that declares it —
+    // the closure's labels fill the map exactly as they do for a target's own
+    // closing write.
+    if matches!(fmt, Some(crate::io::Format::Obo)) && model_has_imports(model) {
+        let catalog = load_catalog_planned(repo);
+        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+            model.banner_labels = closure_labels(&cl);
+        }
+    }
     match fmt {
         Some(f) => crate::io::save_as(model, &out, f),
         None => crate::io::save(model, &out),
@@ -5335,6 +5535,9 @@ fn apply_op(
     pipeline_input: Option<&Path>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
+    if std::env::var_os("OM_PIPE_DEBUG").is_some() {
+        eprintln!("[pipe] {:?} in: shared_anon={} owners", std::mem::discriminant(op), model.shared_anon.len());
+    }
     Ok(match op {
         Op::Merge { inputs, collapse_import_closure } => {
             let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -6151,37 +6354,66 @@ fn writes_functional_syntax(steps: &[Step]) -> bool {
     })
 }
 
-/// The banner label set for a document with an import closure: the labels its own
-/// axioms assert together with those its closure asserts, decided between by the
-/// one rule (`cmd::rdfs_labels`). Best-effort — a closure that cannot be read
-/// leaves the document's own labels, and banners fall back to the entity IRI.
+/// The banner label set for a document with an import closure. Each document —
+/// the pipeline input and every file its closure resolves to — settles its own
+/// candidates by the one per-document rule (`cmd::rdfs_labels`); between
+/// documents, the first one in `owlapi_hash::ontology_set_order` that labels a
+/// subject names it. The input document's identity is the one it will be
+/// WRITTEN under: `write_version_iri` (the version a later step of the same
+/// pipeline sets) overrides the version it was read with, so a banner pick
+/// tracks the run's release date. Best-effort — a closure file that cannot be
+/// read contributes nothing, and banners fall back to the entity IRI.
 fn closure_banner_labels(
     model: &crate::model::Model,
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
+    write_version_iri: Option<&str>,
 ) -> std::collections::HashMap<String, String> {
-    let mut scratch = model.clone();
+    let main_id = model_ontology_id(model);
+    let main_version = write_version_iri.map(str::to_string).or(main_id.1);
+    if std::env::var("OM_BANNER_DEBUG").is_ok() {
+        eprintln!("[banner] input document id={:?} write version={:?}", main_id.0, main_version);
+    }
+    let mut docs: Vec<(i32, std::collections::HashMap<String, String>)> = vec![(
+        crate::owlapi_hash::ontology_id_hash(main_id.0.as_deref(), main_version.as_deref()),
+        crate::cmd::rdfs_labels(model),
+    )];
     let mut seen = std::collections::HashSet::new();
-    match import_closure_of_model(model, dir, catalog, &mut seen) {
-        Ok(files) => {
-            if std::env::var("OM_IMPORT_DEBUG").is_ok() {
-                eprintln!("[banner] closure: {} file(s): {files:?}", files.len());
-            }
-            for f in &files {
-                if let Err(e) = merge_file_into(&mut scratch, f) {
-                    if std::env::var("OM_IMPORT_DEBUG").is_ok() {
-                        eprintln!("[banner] merge {} failed: {e:#}", f.display());
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            if std::env::var("OM_IMPORT_DEBUG").is_ok() {
-                eprintln!("[banner] closure resolution failed: {e:#}");
-            }
+    if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
+        for f in &files {
+            let Ok(m) = crate::io::load(f) else { continue };
+            let (iri, ver) = model_ontology_id(&m);
+            docs.push((
+                crate::owlapi_hash::ontology_id_hash(iri.as_deref(), ver.as_deref()),
+                crate::cmd::rdfs_labels(&m),
+            ));
         }
     }
-    crate::cmd::rdfs_labels(&scratch)
+    let hashes: Vec<i32> = docs.iter().map(|(h, _)| *h).collect();
+    let mut out = std::collections::HashMap::new();
+    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
+        if std::env::var("OM_BANNER_DEBUG").is_ok() {
+            eprintln!("[banner] doc#{i} id-hash={} labels={}", hashes[i], docs[i].1.len());
+        }
+        for (subj, label) in &docs[i].1 {
+            out.entry(subj.clone()).or_insert_with(|| label.clone());
+        }
+    }
+    out
+}
+
+/// The ontology IRI and version IRI a model's document identifies itself by.
+fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+    use horned_owl::model::Component;
+    for ac in model.ont.iter() {
+        if let Component::OntologyID(id) = &ac.component {
+            return (
+                id.iri.as_ref().map(|i| i.to_string()),
+                id.viri.as_ref().map(|v| v.to_string()),
+            );
+        }
+    }
+    (None, None)
 }
 
 fn import_closure_of_model(
@@ -6454,6 +6686,13 @@ fn resolve_input(
                 return Ok(tmp_ofn);
             }
         }
+    }
+    // A mirror carries no plan rule of its own — the import's `source` and
+    // `mirror_steps` ARE the mirror — so it resolves through the mirror
+    // machinery, which fetches an absent one or refuses under an explicit
+    // `MIR=false`, exactly as it does for the import pipeline.
+    if let Some(imp) = mirror_import_for(repo, inp) {
+        return ensure_mirror(repo, imp, repo.refresh_mirrors);
     }
     bail!(
         "could not resolve pipeline input `{inp}` (no file in {} or {}, and no buildable rule)",
@@ -6902,6 +7141,7 @@ mod aggregate_tests {
             steps,
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
             intermediate: false,
             branches: vec![],

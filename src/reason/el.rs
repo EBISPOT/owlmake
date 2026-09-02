@@ -169,15 +169,6 @@ pub struct Reasoner {
     /// Ids that stand for asserted individuals (nominals). An unsatisfiable
     /// individual makes the whole ontology inconsistent.
     individuals: Vec<CId>,
-    /// Reflexive-transitive super-roles of each role. `materialize` needs it for
-    /// the third directness rule: `r2 ⊑ r` and `X ⊑ ∃r2.D` entail `X ⊑ ∃r.D`, so
-    /// the `r` edge is not direct.
-    role_super: Vec<HashSet<RId>>,
-    /// Roles declared `TransitiveObjectProperty`. `materialize` needs them: for a
-    /// transitive `r`, `∃r.D2 ⊑ ∃r.D` whenever `D2 ⊑ ∃r.D`, so `D` is not a
-    /// DIRECT superclass expression. Without it every ancestor along a `part_of`
-    /// chain is asserted.
-    transitive: HashSet<RId>,
 }
 
 /// Enable/disable the union-elimination completion rule for the current thread.
@@ -326,113 +317,6 @@ impl Reasoner {
     /// Number of ignored (non-EL) axioms.
     pub fn ignored(&self) -> usize {
         self.ignored
-    }
-
-    /// Materialize inferred existential restrictions: for each named class C
-    /// and each object property in `props`, return the most-specific named
-    /// classes D such that `C ⊑ (prop some D)` is entailed. Returns
-    /// (C_iri, prop_iri, D_iri) triples. If `props` is empty, all properties
-    /// are considered.
-    pub fn materialize(&self, props: &std::collections::HashSet<String>) -> Vec<(String, String, String)> {
-        let mut out = Vec::new();
-        let named_class = |c: CId| {
-            c != TOP && c != BOT && self.class_iri[c as usize].is_some() && self.named.contains(&c)
-        };
-        for ((r, x), ys) in &self.state.r_succ {
-            // Only materialize over requested properties with real IRIs. Skip
-            // owl:topObjectProperty — every class trivially relates to itself
-            // under it, so those edges carry no information and are omitted.
-            let r_iri = match self.role_iri.get(*r as usize) {
-                Some(iri)
-                    if !iri.starts_with("__owlmake_aux_role_")
-                        && iri != "http://www.w3.org/2002/07/owl#topObjectProperty" =>
-                {
-                    iri
-                }
-                _ => continue,
-            };
-            if !props.is_empty() && !props.contains(r_iri) {
-                continue;
-            }
-            if !named_class(*x) {
-                continue;
-            }
-            // Collect named subsumers of each successor, then keep the most
-            // specific ones (minimal under ⊑).
-            let mut candidates: Vec<CId> = Vec::new();
-            for &y in ys {
-                for &d in &self.state.s[y as usize] {
-                    if named_class(d) {
-                        candidates.push(d);
-                    }
-                }
-            }
-            candidates.sort_unstable();
-            candidates.dedup();
-            // For a TRANSITIVE role, `∃r.D2 ⊑ ∃r.D` also holds when `D2 ⊑ ∃r.D` —
-            // so a filler another candidate reaches ALONG r is not a direct
-            // superclass expression either. Pruning by filler subsumption alone
-            // kept the whole `part_of` chain: UBERON's `tmp/uberon.owl` came out
-            // with 172,981 `BFO_0000050` restrictions where ROBOT writes 21,117
-            // (and 33,328 `RO_0002202` against 1,990), inflating the file from
-            // 93 MB to 149 MB and every subset built from it.
-            let r_transitive = self.transitive.contains(r);
-            let reaches = |from: CId, to: CId| -> bool {
-                self.state.r_succ.get(&(*r, from)).is_some_and(|ys| {
-                    ys.iter().any(|&y| self.state.s[y as usize].contains(&to))
-                })
-            };
-            for &d in &candidates {
-                // d is most-specific iff no other candidate d' is strictly below d.
-                let redundant = candidates.iter().any(|&d2| {
-                    d2 != d
-                        && ((self.state.s[d2 as usize].contains(&d)
-                            && !self.state.s[d as usize].contains(&d2))
-                            || (r_transitive && !reaches(d, d2) && reaches(d2, d)))
-                });
-                // A sub-property providing the same filler does NOT make the `r`
-                // edge redundant here. `materialize` exists to state the requested
-                // property explicitly, so suppressing `X ⊑ ∃r.D` because
-                // `X ⊑ ∃r2.D` holds for some `r2 ⊑ r` defeats the command: UBERON
-                // asserts `pituitary gland immediate_transformation_of future
-                // pituitary gland`, and with `RO_0002495 ⊑ RO_0002494 ⊑ RO_0002202`
-                // the requested `develops_from` edge was suppressed. 199 such
-                // inferences were missing from `tmp/uberon.owl`, across all three
-                // properties the recipe asks to materialize.
-                //
-                // The rule it replaced was added to explain an apparent +858
-                // `part_of` EXCESS which later turned out to be duplicated blank
-                // nodes in the RDF/XML writer, not inference — so it was tuned
-                // against a measurement artefact and suppressed real inferences to
-                // match it.
-                if !redundant {
-                    out.push((*x, *r, d));
-                }
-            }
-        }
-        // An expression a class INHERITS from a named superclass is not a direct
-        // superclass expression of it either: if `X ⊑ X2` and `X2 ⊑ ∃r.D`, then
-        // `X ⊑ ∃r.D` is entailed through X2 and ELK does not report it for X.
-        // Keeping it left every subclass restating its parents' `part_of` edges.
-        let have: HashSet<(CId, RId, CId)> = out.iter().copied().collect();
-        out.retain(|&(x, r, d)| {
-            !self.state.s[x as usize].iter().any(|&x2| {
-                x2 != x && !self.state.s[x2 as usize].contains(&x) && have.contains(&(x2, r, d))
-            })
-        });
-        let mut out: Vec<(String, String, String)> = out
-            .into_iter()
-            .map(|(x, r, d)| {
-                (
-                    self.class_iri[x as usize].clone().unwrap(),
-                    self.role_iri[r as usize].clone(),
-                    self.class_iri[d as usize].clone().unwrap(),
-                )
-            })
-            .collect();
-        out.sort();
-        out.dedup();
-        out
     }
 
     /// Materialize the *full* (redundant) existential closure: for each named
@@ -1907,8 +1791,6 @@ impl Builder {
             ignored: self.ignored,
             named,
             individuals,
-            transitive: self.transitive,
-            role_super: role_super_closure,
         }
     }
 }
@@ -2371,12 +2253,18 @@ fn saturate_parallel(
         );
     }
 
-    // Move S-sets out of the cells and rebuild r_succ from forward links.
+    // Move S-sets out of the cells and rebuild r_succ by inverting the backward
+    // links. The backward store carries every link of every role — the forward
+    // store holds only the roles the chain rule consumes — and `materialize`
+    // reads r_succ for arbitrary roles, so the rebuild must come from the
+    // complete side.
     let s: Vec<HashSet<CId>> = shared.s.into_iter().map(|c| c.into_inner()).collect();
     let mut r_succ: HashMap<(RId, CId), HashSet<CId>> = HashMap::default();
-    for (c, cell) in shared.fwd.into_iter().enumerate() {
-        for (r, zs) in cell.into_inner() {
-            r_succ.entry((r, c as CId)).or_default().extend(zs);
+    for (c, cell) in shared.back.into_iter().enumerate() {
+        for (r, xs) in cell.into_inner() {
+            for x in xs {
+                r_succ.entry((r, x)).or_default().insert(c as CId);
+            }
         }
     }
     (s, r_succ)

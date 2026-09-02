@@ -218,7 +218,16 @@ pub fn step(
     if args.output.is_none() && args.explanation.is_none() {
         print!("{report}");
     }
-    Ok(Some(model))
+    // The model handed to the next command in a chain is the ontology OF the
+    // justifications — the union of their axioms, empty when nothing needed
+    // explaining — not the ontology that was examined. A chain ending
+    // `explain … annotate --output x.ofn` therefore writes the explanation
+    // ontology, carrying only the default prefix set.
+    let mut just = SetOntology::new();
+    for ac in justification_axioms {
+        just.insert(ac);
+    }
+    Ok(Some(Model::from_parts(just, horned_owl::curie::PrefixMapping::default())))
 }
 
 /// Resolve the ontology serialization for `--output`: an explicit `--format`
@@ -232,10 +241,11 @@ fn resolve_ontology_format(format: Option<&str>, output: &std::path::Path) -> Op
     }
 }
 
-/// Write the union of justification axioms (plus their declarations, for a
-/// well-formed result) to `path` in `fmt`, reusing the source prefixes.
+/// Write the union of justification axioms to `path` in `fmt`. The
+/// justification ontology is a NEW ontology: it carries the default prefix set,
+/// not the examined document's.
 fn write_justification_ontology(
-    source: &crate::model::Model,
+    _source: &crate::model::Model,
     axioms: &[AnnotatedComponent<RcStr>],
     path: &std::path::Path,
     fmt: crate::io::Format,
@@ -244,7 +254,7 @@ fn write_justification_ontology(
     for ac in axioms {
         ont.insert(ac.clone());
     }
-    let mut out = Model::from_parts(ont, clone_prefixes(&source.prefixes));
+    let mut out = Model::from_parts(ont, horned_owl::curie::PrefixMapping::default());
     crate::io::save_as(&mut out, path, fmt)
 }
 

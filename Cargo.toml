@@ -1,6 +1,6 @@
 [package]
 name = "owlmake"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
 description = "A complete ontology build stack in a single self-contained Rust binary: OWL I/O, reasoning, QC and releases."
 license = "Apache-2.0"
@@ -247,7 +247,7 @@ debug = 1
 # also satisfies hermit-rs/whelk-rs's `horned-owl = "^1.4"`, keeping one shared
 # model. Pinned by rev, not by branch, so a build is reproducible without the
 # lockfile; bump it when devel moves.
-horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "38010ad" }
+horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "f8315a0" }
 # pretty_rdf is no longer a separate dependency: horned-owl now vendors it as the
 # `horned-pretty-rdf` workspace member, so no patch is needed here.
 # oxigraph SPARQL optimizer (sparopt) — kept in-tree under deps/ (the one

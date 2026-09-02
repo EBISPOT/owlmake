@@ -650,16 +650,22 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         direct.clone()
     };
     {
-        // A class with a named parent below the top carries no root edge. A class
-        // whose only asserted superclass is an ANONYMOUS expression still gets
-        // one: the classifier's direct named superclass of such a class is the
-        // top, and `reduce` — not `reason` — is the operation that later drops
-        // the root edge as redundant beside the restriction.
-        let has_named_super: std::collections::HashSet<String> = direct
+        // A mutual pair — each member of an equivalence node subsuming the other
+        // — is no parent: a root equivalence node's members all carry the root
+        // edge themselves.
+        let pairs: std::collections::HashSet<(&str, &str)> =
+            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let mut has_named_super: std::collections::HashSet<String> = direct
             .iter()
-            .filter(|(_, sup)| sup.as_str() != OWL_THING)
+            .filter(|(sub, sup)| {
+                sup.as_str() != OWL_THING && !pairs.contains(&(sup.as_str(), sub.as_str()))
+            })
             .map(|(sub, _)| sub.clone())
             .collect();
+        // An asserted ANONYMOUS superclass does not carry the root edge: a class
+        // whose only superclass is a restriction still gets `⊑ owl:Thing`, so
+        // nothing more to mark here — the reasoner's hierarchy already named
+        // every class with a named parent.
         // Every class in the SIGNATURE, declared or not: a merge can leave an
         // undeclared class referenced by surviving axioms, and its inferred
         // superclass is still asserted — under a bare `reason` that is the
