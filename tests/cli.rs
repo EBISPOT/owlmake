@@ -2433,3 +2433,254 @@ fn a_path_and_an_in_list_fix_the_row_order() {
     let csvn = std::fs::read_to_string(&outn).unwrap();
     assert!(!csvn.contains("hasExactSynonym"), "NOT IN excludes:\n{csvn}");
 }
+
+/// The import-closure shape behind EBISPOT/owlmake#2, in two documents: a
+/// Plant-Ontology-like module carrying the hierarchy, a genus-differentia
+/// definition of `Perianth` and the transitive `part_of`, and a root that
+/// imports it and adds EFO's cyclic `part_of` definition, the bridging
+/// existentials, and one OBO-style id (`…/efo/EFO_0000998`) under a namespace
+/// the root binds as `efo:` and no context binds as `EFO`. Returns the root's
+/// path; the catalog sits beside it.
+fn plant_import_fixture(name: &str) -> std::path::PathBuf {
+    let dir = tmp(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("root.ofn"),
+        "Prefix(:=<http://x.org/root#>)\n\
+         Prefix(po:=<http://x.org/po#>)\n\
+         Prefix(efo:=<http://x.org/efo/>)\n\
+         Ontology(<http://x.org/root>\n\
+         Import(<http://x.org/po>)\n\
+         Declaration(Class(:ReproSystem))\n\
+         Declaration(Class(:LeafComponent))\n\
+         Declaration(Class(efo:EFO_0000998))\n\
+         Declaration(ObjectProperty(po:part_of))\n\
+         EquivalentClasses(:ReproSystem ObjectIntersectionOf(po:Structure ObjectSomeValuesFrom(po:part_of :ReproSystem)))\n\
+         EquivalentClasses(:LeafComponent ObjectIntersectionOf(po:Structure ObjectSomeValuesFrom(po:part_of po:Leaf)))\n\
+         SubClassOf(po:Flower ObjectSomeValuesFrom(po:part_of :ReproSystem))\n\
+         SubClassOf(po:Stoma ObjectSomeValuesFrom(po:part_of po:Leaf))\n\
+         SubClassOf(efo:EFO_0000998 po:Structure)\n\
+         )\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("po.ofn"),
+        "Prefix(po:=<http://x.org/po#>)\n\
+         Ontology(<http://x.org/po>\n\
+         Declaration(Class(po:Structure))\n\
+         Declaration(Class(po:Organ))\n\
+         Declaration(Class(po:Tissue))\n\
+         Declaration(Class(po:Flower))\n\
+         Declaration(Class(po:Perianth))\n\
+         Declaration(Class(po:Tepal))\n\
+         Declaration(Class(po:Leaf))\n\
+         Declaration(Class(po:Stoma))\n\
+         Declaration(ObjectProperty(po:part_of))\n\
+         TransitiveObjectProperty(po:part_of)\n\
+         SubClassOf(po:Tepal po:Perianth)\n\
+         EquivalentClasses(po:Perianth ObjectIntersectionOf(po:Organ ObjectSomeValuesFrom(po:part_of po:Flower)))\n\
+         SubClassOf(po:Perianth po:Organ)\n\
+         SubClassOf(po:Organ po:Structure)\n\
+         SubClassOf(po:Flower po:Structure)\n\
+         SubClassOf(po:Stoma po:Tissue)\n\
+         SubClassOf(po:Tissue po:Structure)\n\
+         SubClassOf(po:Leaf po:Structure)\n\
+         )\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://x.org/po\" uri=\"po.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    dir.join("root.ofn")
+}
+
+/// Does `text` state `SubClassOf(sub sup)`, whichever way the writer spelt the
+/// two fixture namespaces (`po:X` / `:X` or the full IRI)?
+fn plant_edge(text: &str, sub: &str, sup: &str) -> bool {
+    let forms = |t: &str| -> Vec<String> {
+        match t.split_once(':') {
+            Some(("po", l)) => vec![format!("po:{l}"), format!("<http://x.org/po#{l}>")],
+            Some(("", l)) => vec![format!(":{l}"), format!("<http://x.org/root#{l}>")],
+            _ => vec![t.to_string()],
+        }
+    };
+    forms(sub)
+        .iter()
+        .any(|s| forms(sup).iter().any(|p| text.contains(&format!("SubClassOf({s} {p})"))))
+}
+
+/// Both classifications the issue reported missing hold, and `explain` derives
+/// them through the catalog under the EL engine and under hermit-rs — saying on
+/// stderr which reasoner decided when it is not the EL engine.
+#[test]
+fn explain_derives_the_imported_plant_shape_under_elk_and_hermit() {
+    let root = plant_import_fixture("plant-explain");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    for reasoner in ["elk", "hermit"] {
+        for (sub, sup) in [
+            ("po:Tepal", "http://x.org/root#ReproSystem"),
+            ("po:Stoma", "http://x.org/root#LeafComponent"),
+        ] {
+            let out = bin()
+                .args(["explain", "-i"])
+                .arg(&root)
+                .arg("--catalog")
+                .arg(&catalog)
+                .args(["--sub", sub, "--sup", sup, "-r", reasoner])
+                .output()
+                .unwrap();
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{reasoner} {sub} ⊑ {sup}: {err}");
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(text.contains("1 justification(s)"), "{reasoner} {sub}: {text}");
+            if sub == "po:Tepal" {
+                assert!(
+                    text.contains("TransitiveObjectProperty"),
+                    "the chain through the flower is part of the justification:\n{text}"
+                );
+            }
+            assert_eq!(
+                reasoner == "hermit",
+                err.contains("decided by hermit-rs"),
+                "{reasoner}: the deciding backend must be named exactly when it is not the EL engine:\n{err}"
+            );
+        }
+    }
+}
+
+/// A query term that names no class is an error about the query, never a
+/// verdict about the ontology. `EFO:0000998` against a document that binds
+/// `efo:` — and an OBO context that binds no `EFO` — used to reach the reasoner
+/// as an unknown IRI and come back "not entailed" (EBISPOT/owlmake#2).
+#[test]
+fn explain_rejects_a_term_that_names_no_class_instead_of_calling_it_unentailed() {
+    let root = plant_import_fixture("plant-unbound");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let run = |sub: &str, sup: &str| {
+        let out = bin()
+            .args(["explain", "-i"])
+            .arg(&root)
+            .arg("--catalog")
+            .arg(&catalog)
+            .args(["--sub", sub, "--sup", sup])
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+
+    // An unbound prefix, with the class it almost certainly meant named.
+    let (ok, err) = run("po:Tepal", "EFO:0000998");
+    assert!(!ok, "an unexpanded CURIE must fail:\n{err}");
+    assert!(!err.contains("not entailed"), "not a verdict on the ontology:\n{err}");
+    assert!(
+        err.contains("`EFO:0000998` did not expand")
+            && err.contains("<http://x.org/efo/EFO_0000998>")
+            && err.contains("--prefix \"EFO: http://x.org/efo/EFO_\""),
+        "{err}"
+    );
+
+    // An unbound prefix with nothing to suggest.
+    let (ok, err) = run("ZZQ:Tepal", "http://x.org/root#ReproSystem");
+    assert!(!ok && err.contains("prefix `ZZQ` is bound neither") && !err.contains("not entailed"), "{err}");
+
+    // A bound prefix whose expansion the ontology never uses as a class.
+    let (ok, err) = run("po:Petal", "http://x.org/root#ReproSystem");
+    assert!(!ok && err.contains("<http://x.org/po#Petal> is not a class in the ontology"), "{err}");
+
+    // The document's own spelling of the same term works.
+    let (ok, err) = run("po:Tepal", "efo:EFO_0000998");
+    assert!(!ok && err.contains("is not entailed"), "a real class that is not a superclass:\n{err}");
+}
+
+/// `explain` validates `--reasoner` as `reason` does: a misspelt backend is an
+/// error, not a quiet EL run reporting a verdict the requested reasoner never gave.
+#[test]
+fn explain_rejects_an_unknown_reasoner() {
+    let root = plant_import_fixture("plant-reasoner");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let out = bin()
+        .args(["explain", "-i"])
+        .arg(&root)
+        .arg("--catalog")
+        .arg(&catalog)
+        .args(["--sub", "po:Tepal", "--sup", "http://x.org/root#ReproSystem", "-r", "hermitt"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("unknown reasoner 'hermitt'"), "{err}");
+}
+
+/// `--create-new-ontology` writes a NEW ontology of inferences. An inferred
+/// direct parent that the import also asserts is an inference all the same and
+/// stays in it, as in ROBOT (`--exclude-duplicate-axioms` is the switch that
+/// drops it); the import declaration is kept, as ROBOT keeps it. The processed
+/// root, by contrast, hands back the root: what the import lent is not written
+/// into it. And `--include-indirect` needs redundancy removal switched off to
+/// keep its indirect edges, exactly as it does in ROBOT.
+#[test]
+fn a_fresh_reasoned_ontology_keeps_an_inference_the_import_also_asserts() {
+    let root = plant_import_fixture("plant-fresh");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let reason = |name: &str, extra: &[&str]| -> String {
+        let out = tmp(name);
+        let st = bin()
+            .args(["reason", "-i"])
+            .arg(&root)
+            .arg("--catalog")
+            .arg(&catalog)
+            .args(extra)
+            .args(["-f", "ofn", "-o"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(st.status.success(), "{name}: {}", String::from_utf8_lossy(&st.stderr));
+        std::fs::read_to_string(&out).unwrap()
+    };
+
+    let fresh = reason("plant-fresh-out.ofn", &["--create-new-ontology", "true"]);
+    assert!(
+        plant_edge(&fresh, "po:Tepal", "po:Perianth"),
+        "Tepal ⊑ Perianth is an inferred direct parent even though the import asserts it:\n{fresh}"
+    );
+    // Perianth is itself a ReproSystem, so that is the direct derived edge;
+    // Tepal reaches ReproSystem through it (see the indirect run below).
+    assert!(plant_edge(&fresh, "po:Perianth", ":ReproSystem"), "{fresh}");
+    assert!(plant_edge(&fresh, "po:Stoma", ":LeafComponent"), "{fresh}");
+    assert!(
+        fresh.contains("Import(<http://x.org/po>)"),
+        "a fresh reasoned ontology still declares the root's imports:\n{fresh}"
+    );
+    assert!(
+        !fresh.contains("Declaration(Class(po:Tepal))") && !fresh.contains("TransitiveObjectProperty"),
+        "only inferences, none of the import's own axioms:\n{fresh}"
+    );
+
+    let indirect = reason(
+        "plant-fresh-indirect.ofn",
+        &[
+            "--create-new-ontology",
+            "true",
+            "--include-indirect",
+            "true",
+            "--remove-redundant-subclass-axioms",
+            "false",
+        ],
+    );
+    assert!(plant_edge(&indirect, "po:Tepal", ":ReproSystem"), "{indirect}");
+    assert!(plant_edge(&indirect, "po:Tepal", "po:Structure"), "{indirect}");
+    assert!(plant_edge(&indirect, "po:Tepal", "po:Organ"), "{indirect}");
+
+    let processed = reason("plant-root-out.ofn", &[]);
+    assert!(plant_edge(&processed, "po:Perianth", ":ReproSystem"), "{processed}");
+    assert!(
+        !plant_edge(&processed, "po:Tepal", "po:Perianth"),
+        "the processed root does not carry what its import lent:\n{processed}"
+    );
+    assert!(processed.contains("Import(<http://x.org/po>)"), "{processed}");
+}

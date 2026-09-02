@@ -15,6 +15,7 @@ use clap::Args as ClapArgs;
 use horned_owl::model::{AnnotatedComponent, Component, Kinded, MutableOntology, RcStr};
 use horned_owl::ontology::set::SetOntology;
 
+use crate::cmd::reason::ReasonerKind;
 use crate::cmd::select;
 use crate::extract::{self, Method};
 use crate::model::{clone_prefixes, Model};
@@ -47,8 +48,11 @@ pub struct Args {
     /// `all`.
     #[arg(short = 'u', long)]
     pub unsatisfiable: Option<String>,
-    /// Reasoner to use: `elk`/`structural`/`emr`/ `owlmake` use the
-    /// built-in EL reasoner.
+    /// Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake`
+    /// use the built-in EL reasoner (`owlmake` with union-elimination),
+    /// `hermit`/`jfact` the hermit-rs OWL 2 DL reasoner, `whelk` the whelk-rs EL
+    /// reasoner. Justifications are always minimized with the built-in EL
+    /// reasoner. An unknown name is an error, as it is for `reason`.
     #[arg(short = 'r', long, default_value = "elk")]
     pub reasoner: String,
     /// Maximum number of justifications (distinct minimal explanations) to
@@ -79,6 +83,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
     Ok(())
 }
 
+const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 
 pub fn step(
@@ -88,18 +93,13 @@ pub fn step(
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
 
-    // `--reasoner`: `owlmake` enables union-elimination, others run on the EL
-    // engine (with a note for non-EL choices). Set before classification.
-    crate::reason::configure(&args.reasoner);
-
-    let lc = args.reasoner.to_ascii_lowercase();
-    let dl = matches!(lc.as_str(), "hermit" | "jfact");
-    if !dl && !matches!(lc.as_str(), "elk" | "structural" | "emr" | "owlmake") {
-        status!(
-            "note: reasoner '{}' not supported for explain; using the built-in EL reasoner",
-            args.reasoner
-        );
-    }
+    // `--reasoner` is validated up front, exactly as `reason` validates it: a
+    // misspelt backend is an error, never a quiet fall-back to the EL engine
+    // that then reports a verdict the requested reasoner never gave. Only
+    // `owlmake` changes how the EL engine itself runs (union-elimination), and
+    // that is set before any classification below.
+    let kind = ReasonerKind::parse(&args.reasoner)?;
+    crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
 
     let max = args.max.max(1);
 
@@ -161,23 +161,17 @@ pub fn step(
             }
             // entailment mode: take the pair from --axiom or --sub/--sup.
             let (sub, sup) = resolve_entailment(&model, args)?;
-            // The DL reasoners answer the entailment check directly (via the DL
-            // tableau's `is_subsumed`, bypassing the classification candidate-set);
-            // the justification below is still computed with the EL machinery.
-            // The DL reasoner (hermit-rs) is not compiled into the wasm build;
-            // there the entailment check uses the built-in EL reasoner.
-            #[cfg(not(target_arch = "wasm32"))]
-            let entailed = if dl {
-                crate::reason::DlReasoner::classify(&model).is_subsumed(&sub, &sup)
-            } else {
-                Reasoner::classify(&model).is_subsumed(&sub, &sup)
-            };
-            #[cfg(target_arch = "wasm32")]
-            let entailed = Reasoner::classify(&model).is_subsumed(&sub, &sup);
-            if dl {
-                status!("explain: DL ({lc}) entailment check: {sub} ⊑ {sup} = {entailed}");
-            }
-            if !entailed {
+            // Both ends must name a class the ontology actually uses. Without
+            // this check a term that expanded to nothing — `EFO:0000998` against
+            // a document that binds `efo:` and an OBO context that binds no
+            // `EFO` — went to the reasoner as an unknown IRI and came back as
+            // "not entailed": a verdict on the ontology, when the fault was in
+            // the spelling of the query (EBISPOT/owlmake#2).
+            let classes = class_signature(&model);
+            require_class(&classes, &sub)?;
+            require_class(&classes, &sup)?;
+            let (sub, sup) = (sub.iri, sup.iri);
+            if !entailed_by(&model, kind, &args.reasoner, &sub, &sup) {
                 bail!("{sub} ⊑ {sup} is not entailed by the ontology");
             }
             vec![(sub, sup)]
@@ -258,25 +252,134 @@ fn write_justification_ontology(
     crate::io::save_as(&mut out, path, fmt)
 }
 
+/// Decide `sub ⊑ sup` with the requested backend.
+///
+/// The justification search that follows always minimizes with the built-in EL
+/// reasoner, so the backend choice governs the verdict — and says so on stderr
+/// whenever it is not the EL engine, so a reader can tell which reasoner
+/// answered. An entailment only a DL reasoner can see is reported entailed and
+/// then yields no EL justification; that is stated, not hidden.
+fn entailed_by(model: &Model, kind: ReasonerKind, name: &str, sub: &str, sup: &str) -> bool {
+    match kind {
+        ReasonerKind::Hermit | ReasonerKind::JFact => {
+            let entailed = crate::reason::DlReasoner::classify(model).is_subsumed(sub, sup);
+            status!(
+                "explain: entailment decided by hermit-rs (--reasoner {name}): {sub} ⊑ {sup} = {entailed}; \
+                 justifications are minimized with the built-in EL reasoner"
+            );
+            entailed
+        }
+        ReasonerKind::Whelk => {
+            let entailed = crate::reason::WhelkClassification::classify(model)
+                .all_subsumptions()
+                .iter()
+                .any(|(a, b)| a == sub && b == sup);
+            status!(
+                "explain: entailment decided by whelk-rs: {sub} ⊑ {sup} = {entailed}; \
+                 justifications are minimized with the built-in EL reasoner"
+            );
+            entailed
+        }
+        ReasonerKind::Structural | ReasonerKind::Emr => {
+            status!("note: --reasoner {name}: explain decides the entailment with the built-in EL reasoner");
+            Reasoner::classify(model).is_subsumed(sub, sup)
+        }
+        ReasonerKind::Elk | ReasonerKind::Owlmake => Reasoner::classify(model).is_subsumed(sub, sup),
+    }
+}
+
+/// The IRIs the ontology uses as classes: declared as one, or standing in a
+/// class position of some axiom.
+fn class_signature(model: &Model) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for ac in model.ont.iter() {
+        if let Component::DeclareClass(dc) = &ac.component {
+            out.insert(dc.0 .0.as_ref().to_string());
+        }
+        for (k, iri) in crate::sig::typed_signature(&ac.component) {
+            if k == crate::sig::kind::CLASS {
+                out.insert(iri);
+            }
+        }
+    }
+    out
+}
+
+/// A query term as the caller typed it, with the IRI it expanded to.
+struct Term {
+    raw: String,
+    iri: String,
+}
+
+fn term(model: &Model, raw: &str) -> Term {
+    Term {
+        raw: raw.to_string(),
+        iri: select::expand(model, raw),
+    }
+}
+
+/// A query term must name a class of the ontology (`owl:Thing`/`owl:Nothing`
+/// always count). The error says which step failed — a CURIE whose prefix is
+/// bound nowhere, so it never became an IRI, or an IRI the ontology never uses
+/// as a class — and, for an unexpanded CURIE, names any class whose IRI ends in
+/// the OBO-style `PREFIX_LOCAL`, since that is almost always the term meant:
+/// `EFO:0000998` against EFO, whose document binds `efo:` and whose ids are
+/// `…/efo/EFO_0000998`.
+fn require_class(classes: &HashSet<String>, t: &Term) -> anyhow::Result<()> {
+    let (raw, iri) = (t.raw.as_str(), t.iri.as_str());
+    if iri == OWL_THING || iri == OWL_NOTHING || classes.contains(iri) {
+        return Ok(());
+    }
+    let has_scheme = iri.starts_with("http://") || iri.starts_with("https://") || iri.starts_with("urn:");
+    if has_scheme {
+        bail!(
+            "<{iri}> is not a class in the ontology: it is neither declared as one nor used in a \
+             class position (from `{raw}`)"
+        );
+    }
+    let Some((pre, local)) = iri.split_once(':') else {
+        bail!("`{raw}` is neither an IRI nor a CURIE with a bound prefix, and names no class in the ontology");
+    };
+    let suffix = format!("{pre}_{local}");
+    let mut candidates: Vec<&String> = classes
+        .iter()
+        .filter(|c| c.ends_with(&suffix) && c[..c.len() - suffix.len()].ends_with(['/', '#']))
+        .collect();
+    candidates.sort();
+    let hint = match candidates.as_slice() {
+        [] => String::new(),
+        [one] => format!(
+            " The ontology has a class <{one}>; if that is the term, bind the prefix with \
+             --prefix \"{pre}: {ns}\" or give the IRI.",
+            ns = &one[..one.len() - local.len()]
+        ),
+        many => format!(
+            " Classes whose IRI ends in `{suffix}`: {}.",
+            many.iter().map(|c| format!("<{c}>")).collect::<Vec<_>>().join(", ")
+        ),
+    };
+    bail!(
+        "`{raw}` did not expand to an IRI: the prefix `{pre}` is bound neither in the ontology's \
+         prefix map nor in the bundled OBO context, so it names no class.{hint}"
+    )
+}
+
 /// Resolve the entailment to explain from `--axiom` (Manchester
-/// `SUB SubClassOf SUP`) or the `--sub`/`--sup` pair, returning expanded IRIs.
-fn resolve_entailment(model: &crate::model::Model, args: &Args) -> anyhow::Result<(String, String)> {
+/// `SUB SubClassOf SUP`) or the `--sub`/`--sup` pair.
+fn resolve_entailment(model: &Model, args: &Args) -> anyhow::Result<(Term, Term)> {
     if let Some(axiom) = &args.axiom {
         return parse_subclassof_axiom(model, axiom);
     }
     match (&args.sub, &args.sup) {
-        (Some(sub), Some(sup)) => Ok((select::expand(model, sub), select::expand(model, sup))),
+        (Some(sub), Some(sup)) => Ok((term(model, sub), term(model, sup))),
         _ => bail!("explain requires --axiom or both --sub and --sup (in entailment mode)"),
     }
 }
 
 /// Parse a Manchester `<SUBCLASS> SubClassOf <SUPERCLASS>` axiom into the
-/// expanded subclass/superclass IRIs. Only named classes on either side are
+/// expanded subclass/superclass terms. Only named classes on either side are
 /// supported (matching what the justification machinery can explain).
-fn parse_subclassof_axiom(
-    model: &crate::model::Model,
-    axiom: &str,
-) -> anyhow::Result<(String, String)> {
+fn parse_subclassof_axiom(model: &Model, axiom: &str) -> anyhow::Result<(Term, Term)> {
     // Split on the SubClassOf keyword (case-insensitive), tolerating extra
     // whitespace.
     let lower = axiom.to_ascii_lowercase();
@@ -288,12 +391,13 @@ fn parse_subclassof_axiom(
     if sub_str.is_empty() || sup_str.is_empty() {
         bail!("--axiom must name both a subclass and a superclass");
     }
-    let parse_side = |side: &str| -> anyhow::Result<String> {
-        match crate::io::manchester::parse_class_expression(&model.build, &model.prefixes, side) {
-            Some(horned_owl::model::ClassExpression::Class(c)) => Ok(c.0.as_ref().to_string()),
+    let parse_side = |side: &str| -> anyhow::Result<Term> {
+        let iri = match crate::io::manchester::parse_class_expression(&model.build, &model.prefixes, side) {
+            Some(horned_owl::model::ClassExpression::Class(c)) => c.0.as_ref().to_string(),
             Some(_) => bail!("--axiom: only named classes are supported (got a complex expression in '{side}')"),
-            None => Ok(select::expand(model, side)), // fall back to CURIE/IRI expansion
-        }
+            None => select::expand(model, side), // fall back to CURIE/IRI expansion
+        };
+        Ok(Term { raw: side.to_string(), iri })
     };
     Ok((parse_side(sub_str)?, parse_side(sup_str)?))
 }

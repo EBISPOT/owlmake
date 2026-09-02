@@ -721,11 +721,18 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         let mut fresh = Model::from_parts(horned_owl::ontology::set::SetOntology::new(), prefixes);
         if opts.create_new_ontology_with_annotations {
             // Reached only when `free_model` is false, so the model is still held.
-            for ac in model.as_ref().expect("model retained for annotation copy").ont.iter() {
+            // The ROOT's annotations and declarations, as in ROBOT (whose
+            // `OWLOntology.getAxioms()` is root-only): what the import closure
+            // lent is not copied here — and, see below, nothing is stripped from
+            // the fresh ontology on save either, so this filter is the only
+            // thing keeping the closure's annotations out of it.
+            let src = model.as_ref().expect("model retained for annotation copy");
+            for ac in src.ont.iter() {
                 if matches!(
                     ac.component,
                     Component::AnnotationAssertion(_) | Component::DeclareClass(_)
-                ) {
+                ) && !src.imported_components.contains(ac)
+                {
                     fresh.ont.insert(ac.clone());
                 }
             }
@@ -914,6 +921,18 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     }
 
     target.carry_meta_from(&meta_src);
+    // A fresh output is a NEW ontology of inferences, not the processed root. It
+    // still declares the root's imports on save, as ROBOT's does, but nothing in
+    // it was lent by the closure: an inferred `C ⊑ D` that an import also asserts
+    // is an inference all the same, and ROBOT writes it
+    // (`--exclude-duplicate-axioms` is the switch that drops it). Carrying the
+    // root's `imported_components` into the fresh model made the save strip
+    // exactly those edges — on EFO, every direct parent of a PO class that the
+    // PO import asserts, so `tepal` came out of `--create-new-ontology` with no
+    // parent at all while `explain` derived them (EBISPOT/owlmake#2).
+    if opts.create_new_ontology || opts.create_new_ontology_with_annotations {
+        target.imported_components.clear();
+    }
     Ok(target)
 }
 
