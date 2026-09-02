@@ -42,6 +42,13 @@ pub struct Args {
     #[arg(short = 'k', long = "keep-going")]
     pub keep_going: bool,
 
+    /// `-W`/`--assume-new`: pretend the named file was just modified. Targets
+    /// that depend on it run their recipes; the file itself is neither rebuilt
+    /// nor touched. This is how `recreate-components` forces the component
+    /// recipes over their stamps.
+    #[arg(short = 'W', long = "assume-new", value_name = "FILE")]
+    pub assume_new: Vec<String>,
+
     /// Directory of the ontology repo to build (its root, the `src/ontology`
     /// directory, or the `<id>-odk.yaml` file). Defaults to the current
     /// directory.
@@ -322,7 +329,8 @@ fn classify(plan: &Plan, target: &str) -> Kind {
         "update_repo" => Kind::Unsupported(
             "regenerates the ODK scaffolding from a downloaded ODK release; owlmake does not manage ODK setup",
         ),
-        "clean" => Kind::Unsupported("removes build outputs; delete them yourself or use `git clean`"),
+        // `clean` runs from its recorded recipe like any other target: the
+        // recipe's own realpath guard keeps the removals inside the repo.
         "seed" | "seed_via_docker" => {
             Kind::Unsupported("bootstraps a new ODK repository; use the ODK seed tooling")
         }
@@ -739,6 +747,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         run_env: make_vars.env.clone(),
         always_make: args.always_make,
         keep_going: args.keep_going,
+        assume_new: args.assume_new.clone(),
     };
     let run_one = |t: &str, kind: &Kind, repo: &OdkRepo, plan: &Plan| -> Result<()> {
         match kind {
@@ -857,6 +866,7 @@ pub fn prepare_release(a: &TargetArgs) -> Result<()> {
         run_env: Vec::new(),
         always_make: false,
         keep_going: false,
+        assume_new: Vec::new(),
     };
     build_plan(&repo, &plan, &opts, true)?;
     // A curated whole-release command names no individual target, so nothing here
@@ -925,6 +935,7 @@ fn default_exec_opts(repo: &OdkRepo) -> ExecOpts {
         run_env: Vec::new(),
         always_make: false,
         keep_going: false,
+        assume_new: Vec::new(),
     }
 }
 

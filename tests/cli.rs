@@ -1120,12 +1120,13 @@ fn odk_targets_as_commands() {
     )
     .unwrap();
 
-    // An infrastructure-only target owlmake does not run: clear error.
+    // `clean` runs from the repo's own recorded recipe; a repo that defines no
+    // such rule gets the ordinary no-rule error, not a special case.
     let out = bin().current_dir(&ont).arg("clean").output().unwrap();
     assert!(!out.status.success());
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("ODK-infrastructure"),
-        "clean should be rejected clearly: {}",
+        String::from_utf8_lossy(&out.stderr).contains("no rule to make target `clean`"),
+        "a repo with no clean rule should say so: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 

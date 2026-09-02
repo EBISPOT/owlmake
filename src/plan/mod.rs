@@ -40,6 +40,14 @@ pub struct ArtefactPlan {
     pub gaps: Vec<String>,
     /// Set when no rule for the target was found.
     pub missing_rule: bool,
+    /// The target is reached only by instantiating pattern rules — its concrete
+    /// name is never spelled in the build configuration as a target or a
+    /// prerequisite. Such a file is an intermediate of the chain that uses it:
+    /// when it does not exist and the target that needs it is otherwise up to
+    /// date, the chain does not run and the file is never created. ECTO's
+    /// `tmp/stamp-component-<x>.owl` markers are the shape — a build whose
+    /// components are all present creates no stamps.
+    pub intermediate: bool,
     /// The recipe never names its own target as something it writes (`$@`
     /// appears nowhere in it, nor the target path itself): it produces only the
     /// side files its steps name, the target file is never created, and the

@@ -2249,9 +2249,9 @@ fn set_unify(tparts: &[CE<RcStr>], gparts: &[CE<RcStr>], binds: &mut BTreeMap<St
 /// than silently dropped).
 fn render_filler(ce: &CE<RcStr>) -> String {
     use horned_owl::model::ObjectPropertyExpression as OPE;
-    let ope = |o: &OPE<RcStr>| match o {
-        OPE::ObjectProperty(p) => p.0.as_ref().to_string(),
-        OPE::InverseObjectProperty(p) => format!("inverse {}", p.0.as_ref()),
+    let ope = |o: &horned_owl::model::ObjectPropertyExpression<RcStr>| match o {
+        horned_owl::model::ObjectPropertyExpression::ObjectProperty(p) => p.0.as_ref().to_string(),
+        horned_owl::model::ObjectPropertyExpression::InverseObjectProperty(p) => format!("inverse {}", p.0.as_ref()),
     };
     match ce {
         CE::Class(c) => c.0.as_ref().to_string(),
@@ -2278,36 +2278,485 @@ fn has_var(ce: &CE<RcStr>) -> bool {
 }
 
 /// Render a simple Markdown document for a pattern.
-pub fn document(pattern_yaml: &str) -> Result<String> {
-    let pattern: Pattern =
-        parse_pattern(pattern_yaml)?;
-    let mut s = String::new();
-    let name = pattern.pattern_name.clone().unwrap_or_else(|| "Pattern".to_string());
-    s.push_str(&format!("# {name}\n\n"));
-    if let Some(iri) = &pattern.pattern_iri {
-        s.push_str(&format!("IRI: `{iri}`\n\n"));
+// ─────────────────────────────── dosdp docs ─────────────────────────────────
+//
+// `om dosdp docs` renders each pattern of a batch as a Markdown page — the
+// pattern's variables, its text templates with `%s` fillers shown as `{var}`
+// placeholders, its logical definition in Manchester syntax with every entity a
+// Markdown link, and a preview of the first five data rows — plus an `index.md`
+// over the batch. The page layout, the expression spacing and the preview's
+// column order are all part of the bytes a repo's docs tree pins.
+
+/// The IRI namespace a docs page's prototypical fillers live in; an entity in
+/// it renders as its bare `{var}` placeholder rather than a link.
+const DOCS_FILLER_NS: &str = "http://dosdp.org/filler/";
+
+/// Scala's `Hashing.improve` bit-mixer, the hash a `scala.collection.immutable`
+/// hash trie buckets by.
+fn scala_improve(hcode: i32) -> i32 {
+    let mut h = hcode.wrapping_add(!(hcode << 9));
+    h ^= ((h as u32) >> 14) as i32;
+    h = h.wrapping_add(h << 4);
+    h ^ (((h as u32) >> 10) as i32)
+}
+
+/// The iteration order of a `scala.collection.immutable.Map[String, _]` built
+/// by inserting `keys` in order: up to four entries the small-map classes keep
+/// insertion order; beyond that the hash trie orders keys by ascending 5-bit
+/// slices of the improved hash, level by level (ties within a slice descend a
+/// level; full-hash collisions keep insertion order). A docs page's data
+/// preview reads its column set through such a map, so the column ORDER of a
+/// wide table is this order, not the file's.
+fn scala_map_key_order(keys: &[String]) -> Vec<usize> {
+    if keys.len() <= 4 {
+        return (0..keys.len()).collect();
     }
-    if let Some(d) = &pattern.description {
-        s.push_str(&format!("{d}\n\n"));
-    }
-    let all_vars: Vec<(&String, &String)> = pattern
-        .vars
-        .iter()
-        .chain(pattern.list_vars.iter())
-        .chain(pattern.data_vars.iter())
-        .collect();
-    if !all_vars.is_empty() {
-        s.push_str("## Variables\n\n");
-        for (v, range) in all_vars {
-            s.push_str(&format!("- `{v}`: {range}\n"));
+    fn sort_level(idx: &mut [usize], hashes: &[i32], shift: u32) {
+        if idx.len() <= 1 || shift >= 32 {
+            return;
         }
-        s.push('\n');
+        idx.sort_by_key(|&i| ((hashes[i] as u32) >> shift) & 31);
+        let mut s = 0;
+        while s < idx.len() {
+            let mask = ((hashes[idx[s]] as u32) >> shift) & 31;
+            let mut e = s + 1;
+            while e < idx.len() && ((hashes[idx[e]] as u32) >> shift) & 31 == mask {
+                e += 1;
+            }
+            if e - s > 1 {
+                sort_level(&mut idx[s..e], hashes, shift + 5);
+            }
+            s = e;
+        }
     }
-    if let Some((atype, text, _)) = pick_primary(&pattern) {
-        s.push_str("## Logical axiom\n\n");
-        s.push_str(&format!("- **{atype}**: `{text}`\n\n"));
+    let hashes: Vec<i32> = keys
+        .iter()
+        .map(|k| scala_improve(crate::owlapi_hash::java_string_hash(k)))
+        .collect();
+    let mut idx: Vec<usize> = (0..keys.len()).collect();
+    sort_level(&mut idx, &hashes, 0);
+    idx
+}
+
+/// HTML4 entity escaping as applied to docs literal text: the four markup
+/// characters. (Full HTML4 escaping also maps non-ASCII letters to named
+/// entities; none of the pattern corpora carry any.)
+fn escape_html4(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Manchester-syntax renderer producing Markdown-linked entity names.
+///
+/// Newlines are part of the syntax writer's wrapping (a conjunction wraps
+/// before each `and`, an intersection filler is indented four further columns);
+/// the docs page flattens each rendered expression to one line by replacing
+/// every newline with a space, which is where the double spaces around `and`
+/// come from.
+struct MdRenderer<'a> {
+    labels: &'a HashMap<String, String>,
+    out: String,
+    tabs: Vec<usize>,
+}
+
+impl<'a> MdRenderer<'a> {
+    fn new(labels: &'a HashMap<String, String>) -> Self {
+        MdRenderer { labels, out: String::new(), tabs: vec![0] }
     }
-    Ok(s)
+
+    fn entity_text(&self, iri: &str) -> String {
+        if let Some(var) = iri.strip_prefix(DOCS_FILLER_NS) {
+            return format!("`{{{var}}}`");
+        }
+        let label = self
+            .labels
+            .get(iri)
+            .cloned()
+            .unwrap_or_else(|| crate::owlapi_hash::iri_split(iri).1.to_string());
+        format!("[{label}]({iri})")
+    }
+
+    fn newline(&mut self) {
+        self.out.push('\n');
+        for _ in 0..*self.tabs.last().unwrap_or(&0) {
+            self.out.push(' ');
+        }
+    }
+
+    fn literal(&mut self, text: &str) {
+        self.out.push('"');
+        self.out.push_str(&escape_html4(text));
+        self.out.push('"');
+        self.out.push_str("^^");
+        let xsd = "http://www.w3.org/2001/XMLSchema#string";
+        let e = self.entity_text(xsd);
+        self.out.push_str(&e);
+    }
+
+    fn ce(&mut self, ce: &CE<RcStr>) {
+        match ce {
+            CE::Class(c) => {
+                let e = self.entity_text(c.0.as_ref());
+                self.out.push_str(&e);
+            }
+            CE::ObjectIntersectionOf(ops) => self.junction(ops, "and", true),
+            CE::ObjectUnionOf(ops) => self.junction(ops, "or", false),
+            CE::ObjectComplementOf(op) => {
+                self.out.push_str(if matches!(**op, CE::Class(_)) { "not" } else { "not " });
+                self.wrapped(op);
+            }
+            CE::ObjectSomeValuesFrom { ope, bce } => self.restriction(ope, "some", bce),
+            CE::ObjectAllValuesFrom { ope, bce } => self.restriction(ope, "only", bce),
+            CE::ObjectHasValue { ope, i } => {
+                self.ope(ope);
+                self.out.push_str(" value ");
+                if let horned_owl::model::Individual::Named(n) = i {
+                    let e = self.entity_text(n.0.as_ref());
+                    self.out.push_str(&e);
+                }
+            }
+            other => self.out.push_str(&format!("{other:?}")),
+        }
+    }
+
+    fn ope(&mut self, ope: &horned_owl::model::ObjectPropertyExpression<RcStr>) {
+        match ope {
+            horned_owl::model::ObjectPropertyExpression::ObjectProperty(p) => {
+                let e = self.entity_text(p.0.as_ref());
+                self.out.push_str(&e);
+            }
+            horned_owl::model::ObjectPropertyExpression::InverseObjectProperty(p) => {
+                self.out.push_str("inverse ");
+                let e = self.entity_text(p.0.as_ref());
+                self.out.push_str(&e);
+            }
+        }
+    }
+
+    fn junction(&mut self, ops: &[CE<RcStr>], word: &str, wrap: bool) {
+        let mut sorted: Vec<&CE<RcStr>> = ops.iter().collect();
+        sorted.sort_by(|a, b| crate::owlapi_hash::owl_cmp(a, b));
+        let mut first = true;
+        for op in sorted {
+            if !first {
+                if wrap {
+                    self.newline();
+                }
+                self.out.push(' ');
+                self.out.push_str(word);
+                self.out.push(' ');
+            }
+            first = false;
+            self.wrapped(op);
+        }
+    }
+
+    /// Parenthesize an anonymous operand.
+    fn wrapped(&mut self, op: &CE<RcStr>) {
+        if matches!(op, CE::Class(_)) {
+            self.ce(op);
+        } else {
+            self.out.push('(');
+            self.ce(op);
+            self.out.push(')');
+        }
+    }
+
+    fn restriction(&mut self, ope: &horned_owl::model::ObjectPropertyExpression<RcStr>, word: &str, filler: &CE<RcStr>) {
+        self.ope(ope);
+        self.out.push(' ');
+        self.out.push_str(word);
+        self.out.push(' ');
+        match filler {
+            CE::Class(_) => self.ce(filler),
+            CE::ObjectIntersectionOf(_) | CE::ObjectUnionOf(_) => {
+                let base = *self.tabs.last().unwrap_or(&0);
+                self.tabs.push(base + 4);
+                self.newline();
+                self.out.push('(');
+                self.ce(filler);
+                self.out.push(')');
+                self.tabs.pop();
+            }
+            _ => {
+                self.out.push('(');
+                self.ce(filler);
+                self.out.push(')');
+            }
+        }
+    }
+
+    /// Render one expression on one line (the wrapping newlines become spaces).
+    fn render(labels: &'a HashMap<String, String>, ce: &CE<RcStr>) -> String {
+        let mut r = MdRenderer::new(labels);
+        r.ce(ce);
+        r.out.replace('\n', " ")
+    }
+}
+
+/// Fill a text template for a docs page: each `%s` becomes its variable's
+/// `{var}` placeholder, whatever kind of variable it is.
+fn docs_fill_text(text: &str, vars: &[String]) -> String {
+    let mut out = text.to_string();
+    for v in vars {
+        out = replace_first(&out, "%s", &format!("`{{{v}}}`"));
+    }
+    out
+}
+
+/// Parse a logical template into a class expression over `{var}` filler
+/// entities.
+fn docs_template_ce(
+    pattern: &Pattern,
+    prefixes: &horned_owl::curie::PrefixMapping,
+    b: &Build<RcStr>,
+    t: &AxiomTemplate,
+) -> Option<CE<RcStr>> {
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    for dict in [
+        &pattern.classes,
+        &pattern.relations,
+        &pattern.object_properties,
+        &pattern.data_properties,
+    ] {
+        for (k, v) in dict {
+            names.insert(k.clone(), v.clone());
+        }
+    }
+    // Quoted references first (longest name first), then barewords — one
+    // dictionary name is often a word-prefix of another.
+    let mut sorted: Vec<(&String, &String)> = names.iter().collect();
+    sorted.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
+    let mut text = t.text.clone();
+    for (name, iri) in &sorted {
+        text = text.replace(&format!("'{name}'"), &format!("<{}>", expand(prefixes, iri)));
+    }
+    for (name, iri) in &sorted {
+        text = replace_word(&text, name, &format!("<{}>", expand(prefixes, iri)));
+    }
+    for var in &t.vars {
+        text = replace_first(&text, "%s", &format!("<{DOCS_FILLER_NS}{var}>"));
+    }
+    manchester::parse_class_expression(b, prefixes, &text)
+}
+
+/// The `vars:` (and `data_vars:`) keys of a pattern document, in document
+/// order. The `Pattern` struct's maps are sorted; the docs table shows the
+/// variables as the pattern writes them.
+fn docs_var_order(pattern_yaml: &str, key: &str) -> Vec<String> {
+    let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(pattern_yaml) else {
+        return Vec::new();
+    };
+    let Some(m) = v.get(key).and_then(|m| m.as_mapping()) else { return Vec::new() };
+    m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()
+}
+
+/// The `contributors:` list of a pattern document, present only when declared.
+fn docs_contributors(pattern_yaml: &str) -> Option<Vec<String>> {
+    let v = serde_yaml::from_str::<serde_yaml::Value>(pattern_yaml).ok()?;
+    let seq = v.get("contributors")?.as_sequence()?;
+    Some(seq.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+}
+
+/// A docs data-preview cell: an `http…` value or a CURIE links to its IRI
+/// (any unknown CURIE prefix expands under the OBO namespace); anything else
+/// stands as written.
+fn docs_cell(v: &str) -> String {
+    if v.starts_with("http") {
+        return format!("[{v}]({v})");
+    }
+    if let Some((prefix, local)) = v.split_once(':') {
+        let ns = match prefix {
+            "rdf" => "http://www.w3.org/1999/02/22-rdf-syntax-ns#".to_string(),
+            "rdfs" => "http://www.w3.org/2000/01/rdf-schema#".to_string(),
+            "owl" => "http://www.w3.org/2002/07/owl#".to_string(),
+            "xsd" => "http://www.w3.org/2001/XMLSchema#".to_string(),
+            "dc" => "http://purl.org/dc/elements/1.1/".to_string(),
+            "dct" => "http://purl.org/dc/terms/".to_string(),
+            "skos" => "http://www.w3.org/2004/02/skos/core#".to_string(),
+            "obo" => "http://purl.obolibrary.org/obo/".to_string(),
+            "oio" | "oboInOwl" => "http://www.geneontology.org/formats/oboInOwl#".to_string(),
+            other => format!("http://purl.obolibrary.org/obo/{other}_"),
+        };
+        return format!("[{v}]({ns}{local})");
+    }
+    v.to_string()
+}
+
+/// One pattern's docs page.
+fn docs_markdown(
+    pattern_yaml: &str,
+    labels: &HashMap<String, String>,
+    data_tsv: &str,
+    data_location: &str,
+) -> Result<String> {
+    let pattern: Pattern = parse_pattern(pattern_yaml)?;
+    let prefixes = dosdp_prefixes();
+    let b: Build<RcStr> = Build::new();
+
+    let name = pattern.pattern_name.clone().unwrap_or_default();
+    let iri_text =
+        pattern.pattern_iri.clone().unwrap_or_else(|| "Missing pattern IRI".to_string());
+    let iri_link = pattern.pattern_iri.clone().unwrap_or_default();
+    let desc = pattern.description.clone().unwrap_or_else(|| "*No description*".to_string());
+
+    let contributors = docs_contributors(pattern_yaml);
+    let contrib_header =
+        if contributors.is_some() { "## Contributors\n".to_string() } else { String::new() };
+    let contrib_list = contributors
+        .unwrap_or_default()
+        .iter()
+        .map(|c| format!("- {c}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Variables table: object/list variables render their range expression;
+    // data variables show their declared range as written.
+    let mut var_rows: Vec<String> = Vec::new();
+    for key in ["vars", "list_vars"] {
+        let dict = if key == "vars" { &pattern.vars } else { &pattern.list_vars };
+        for v in docs_var_order(pattern_yaml, key) {
+            let Some(range) = dict.get(&v) else { continue };
+            let rendered = match docs_template_ce(
+                &pattern,
+                &prefixes,
+                &b,
+                &AxiomTemplate { text: range.clone(), ..Default::default() },
+            ) {
+                Some(ce) => MdRenderer::render(labels, &ce),
+                None => range.clone(),
+            };
+            var_rows.push(format!("| `{{{v}}}` | {rendered} |"));
+        }
+    }
+    for key in ["data_vars", "data_list_vars"] {
+        let dict = if key == "data_vars" { &pattern.data_vars } else { &pattern.data_list_vars };
+        for v in docs_var_order(pattern_yaml, key) {
+            let Some(range) = dict.get(&v) else { continue };
+            var_rows.push(format!("| `{{{v}}}` | {range} |"));
+        }
+    }
+
+    let render_literal = |t: &Template| -> String {
+        let mut r = MdRenderer::new(labels);
+        r.literal(&docs_fill_text(&t.text, &t.vars));
+        r.out.replace('\n', " ")
+    };
+    let names = pattern.name.as_ref().map(|t| render_literal(t)).unwrap_or_default();
+    let defs = pattern.def.as_ref().map(|t| render_literal(t)).unwrap_or_default();
+
+    let mut ann_bullets: Vec<String> = Vec::new();
+    for a in &pattern.annotations {
+        let (Some(prop), Some(text)) = (&a.annotation_property, &a.text) else { continue };
+        let prop_iri = pattern
+            .annotation_properties
+            .get(prop)
+            .map(|c| expand(&prefixes, c))
+            .unwrap_or_else(|| expand(&prefixes, prop));
+        let mut r = MdRenderer::new(labels);
+        let e = r.entity_text(&prop_iri);
+        r.out.push_str(&e);
+        r.out.push_str(": ");
+        r.literal(&docs_fill_text(text, &a.vars));
+        ann_bullets.push(format!("- {}", r.out.replace('\n', " ")));
+    }
+
+    let equivs = pattern
+        .equivalent_to
+        .as_ref()
+        .and_then(|t| docs_template_ce(&pattern, &prefixes, &b, t))
+        .map(|ce| MdRenderer::render(labels, &ce))
+        .unwrap_or_default();
+    let subs = pattern
+        .subclass_of
+        .as_ref()
+        .and_then(|t| docs_template_ce(&pattern, &prefixes, &b, t))
+        .map(|ce| MdRenderer::render(labels, &ce))
+        .unwrap_or_default();
+    let sub_header =
+        if pattern.subclass_of.is_some() { "## Subclass of\n".to_string() } else { String::new() };
+
+    // Data preview: header + first five rows, columns in the order a
+    // string-keyed map yields them.
+    let lines: Vec<&str> = data_tsv.lines().filter(|l| !l.trim().is_empty()).collect();
+    // The column set is the header zipped with the FIRST data row: a header
+    // name with no cell under it (a table whose rows stop short of a trailing
+    // empty column) is not a column of the preview. A table with no data rows
+    // previews no columns at all.
+    let header: Vec<String> =
+        lines.first().map(|h| h.split('\t').map(str::to_string).collect()).unwrap_or_default();
+    let first_row_len = lines.get(1).map(|r| r.split('\t').count()).unwrap_or(0);
+    let file_cols: Vec<String> =
+        header.into_iter().take(first_row_len).collect();
+    let order = scala_map_key_order(&file_cols);
+    let cols: Vec<&String> = order.iter().map(|&i| &file_cols[i]).collect();
+    let mut data_rows: Vec<String> = Vec::new();
+    for line in lines.iter().skip(1).take(5) {
+        let cells: Vec<&str> = line.split('\t').collect();
+        let row: Vec<String> = order
+            .iter()
+            .map(|&i| docs_cell(cells.get(i).copied().unwrap_or("")))
+            .collect();
+        data_rows.push(format!("| {} |", row.join(" | ")));
+    }
+    let header_row = format!("| {} |", cols.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(" | "));
+    let sep_row = cols.iter().map(|_| "|:--").collect::<String>();
+
+    Ok(format!(
+        "# {name}\n\n[{iri_text}]({iri_link})\n\n## Description\n\n{desc}\n\n{contrib_header}\n{contrib_list}\n\n## Variables\n\n| Variable name | Allowed type |\n|:--------------|:-------------|\n{var_rows}\n\n## Name\n\n{names}\n\n## Annotations\n\n{anns}\n\n## Definition\n\n{defs}\n\n## Equivalent to\n\n{equivs}\n\n{sub_header}\n{subs}\n\n{other_header}\n{others}\n\n## Data preview\n\n*See full table [here]({data_location})*\n\n{header_row}\n{sep_row}|\n{data_rows}\n\n",
+        var_rows = var_rows.join("\n"),
+        anns = ann_bullets.join("\n"),
+        other_header = "",
+        others = "",
+        data_rows = data_rows.join("\n"),
+    ))
+}
+
+/// Render every pattern of a batch to `<outdir>/<pattern>.md`, plus an
+/// `index.md` over the batch (sorted by pattern name, stably).
+pub fn docs_batch(
+    template_dir: &std::path::Path,
+    infile_dir: &std::path::Path,
+    patterns: &[String],
+    outdir: &std::path::Path,
+    data_location_prefix: &str,
+    labels: &HashMap<String, String>,
+    table_ext: &str,
+) -> Result<()> {
+    let mut index: Vec<(Option<String>, Option<String>, String)> = Vec::new();
+    for p in patterns {
+        let yaml_path = template_dir.join(format!("{p}.yaml"));
+        let yaml = std::fs::read_to_string(&yaml_path)
+            .map_err(|e| anyhow!("reading pattern {}: {e}", yaml_path.display()))?;
+        let data_path = infile_dir.join(format!("{p}.{table_ext}"));
+        let data = std::fs::read_to_string(&data_path)
+            .map_err(|e| anyhow!("reading data {}: {e}", data_path.display()))?;
+        let data_location =
+            format!("{data_location_prefix}{}", data_path.file_name().unwrap().to_string_lossy());
+        let md = docs_markdown(&yaml, labels, &data, &data_location)?;
+        std::fs::write(outdir.join(format!("{p}.md")), md)?;
+        let pat: Pattern = parse_pattern(&yaml)?;
+        index.push((pat.pattern_name.clone(), pat.description.clone(), format!("{p}.md")));
+    }
+    if !patterns.is_empty() {
+        let mut sorted = index.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        let rows: Vec<String> = sorted
+            .iter()
+            .map(|(name, desc, file)| {
+                format!(
+                    "| [{}]({file}) | {} |",
+                    name.as_deref().unwrap_or("*unnamed*"),
+                    desc.as_deref().unwrap_or("*no description*")
+                )
+            })
+            .collect();
+        let md = format!(
+            "# Design Patterns\n\n| Pattern | Description |\n|:--------|:------------|\n{}\n",
+            rows.join("\n")
+        );
+        std::fs::write(outdir.join("index.md"), md)?;
+    }
+    Ok(())
 }
 
 // ──────────────────────────────── dosdp CLI ─────────────────────────────────
@@ -2361,7 +2810,7 @@ pub fn cli_main(args: &[String]) -> i32 {
 /// flag grammar with the rest. Repos spell it on the same command line, so one
 /// shim serves both.
 pub fn is_subcommand(s: &str) -> bool {
-    matches!(s, "generate" | "terms" | "query" | "prototype" | "document" | "validate")
+    matches!(s, "generate" | "terms" | "query" | "prototype" | "docs" | "validate")
 }
 
 fn run_cli(args: &[String]) -> Result<i32> {
@@ -2544,9 +2993,39 @@ fn run_cli(args: &[String]) -> Result<i32> {
             write_text(result.to_tsv(), outfile.as_deref())?;
             Ok(0)
         }
-        "document" => {
-            let pattern = read_template()?;
-            write_text(document(&pattern)?, outfile.as_deref())?;
+        "docs" => {
+            let template_dir = template.clone().ok_or_else(|| anyhow!("--template is required"))?;
+            let infile = val(&["--infile", "-i"]).ok_or_else(|| anyhow!("--infile is required"))?;
+            let outdir = outfile.clone().ok_or_else(|| anyhow!("--outfile is required"))?;
+            let batch: Vec<String> = val(&["--batch-patterns"])
+                .map(|s| s.split_whitespace().map(str::to_string).collect())
+                .unwrap_or_default();
+            if batch.is_empty() {
+                bail!("docs: --batch-patterns is required (single-file mode is not supported)");
+            }
+            let data_location_prefix =
+                val(&["--data-location-prefix"]).unwrap_or_else(|| "http://example.org/".to_string());
+            let table_ext = val(&["--table-format"]).unwrap_or_else(|| "tsv".to_string()).to_lowercase();
+            let catalog = val(&["--catalog", "-c"]);
+            let annotation_index = annotation_index_from_with_catalog(
+                val(&["--ontology", "--input"]).as_deref(),
+                catalog.as_deref().map(std::path::Path::new),
+            )?;
+            let labels: HashMap<String, String> = annotation_index
+                .iter()
+                .filter_map(|(iri, props)| {
+                    props.get(RDFS_LABEL).and_then(|v| v.iter().min()).map(|l| (iri.clone(), l.clone()))
+                })
+                .collect();
+            docs_batch(
+                std::path::Path::new(&template_dir),
+                std::path::Path::new(&infile),
+                &batch,
+                std::path::Path::new(&outdir),
+                &data_location_prefix,
+                &labels,
+                &table_ext,
+            )?;
             Ok(0)
         }
         other => bail!("unknown dosdp subcommand '{other}'"),

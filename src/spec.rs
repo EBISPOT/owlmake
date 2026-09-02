@@ -481,6 +481,12 @@ pub struct ArtefactSpec {
     /// of what its tool prints this is the only field that names the target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdout_file: Option<String>,
+    /// The target is an intermediate of a pattern-rule chain: nothing in the
+    /// build configuration spells its concrete name. When it is missing and the
+    /// target that needs it is otherwise up to date, the chain does not run and
+    /// the file is not created (ECTO's `tmp/stamp-component-<x>.owl`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub intermediate: bool,
     /// What this target is built by under the OTHER value of a switch. Absent is
     /// the ordinary case: the other branch defines no rule, so under that value
     /// the target is not built and the committed file stands.
@@ -499,6 +505,7 @@ impl ArtefactSpec {
             missing_rule: a.missing_rule,
             side_effect_only: a.side_effect_only,
             stdout_file: a.stdout_file.clone(),
+            intermediate: a.intermediate,
             branches: a
                 .branches
                 .iter()
@@ -986,12 +993,16 @@ pub enum StepSpec {
     /// The bundled SSSOM CLI (`owlmake sssom`) with its argument tokens
     /// (including the `sssom`/`sssom:<cmd>` launcher).
     Sssom { args: Vec<String> },
-    /// `cp [-r] SRC… DST` — a native file copy.
+    /// `cp [-r] SRC… DST` — a native file copy. `relative` is `rsync -R`'s
+    /// relative mode: each source's own relative path is recreated under the
+    /// destination.
     CopyFile {
         src: Vec<String>,
         dst: String,
         #[serde(default, skip_serializing_if = "is_false")]
         recursive: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        relative: bool,
     },
     /// `mv SRC… DST` — a native file move.
     MoveFile { src: Vec<String>, dst: String },
@@ -1280,6 +1291,7 @@ impl OwlmakeSpec {
                     missing_rule: a.missing_rule,
                     side_effect_only: a.side_effect_only,
                     stdout_file: a.stdout_file,
+                    intermediate: a.intermediate,
                     branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
                 }
             })
@@ -1300,6 +1312,7 @@ impl OwlmakeSpec {
                     missing_rule: a.missing_rule,
                     side_effect_only: a.side_effect_only,
                     stdout_file: a.stdout_file,
+                    intermediate: a.intermediate,
                     branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
                 }
             })
@@ -1525,10 +1538,11 @@ impl StepSpec {
 
     fn from_file_op(op: &FileOp) -> Self {
         match op {
-            FileOp::Copy { src, dst, recursive } => StepSpec::CopyFile {
+            FileOp::Copy { src, dst, recursive, relative } => StepSpec::CopyFile {
                 src: src.clone(),
                 dst: dst.clone(),
                 recursive: *recursive,
+                relative: *relative,
             },
             FileOp::Move { src, dst } => StepSpec::MoveFile { src: src.clone(), dst: dst.clone() },
             FileOp::Remove { paths, recursive, force } => StepSpec::RemoveFile {
@@ -1988,7 +2002,9 @@ impl StepSpec {
             StepSpec::Fallback { command, requires } => Step::Fallback { command, requires },
             StepSpec::Jq { args } => Step::Jq(args),
             StepSpec::Sssom { args } => Step::Sssom(args),
-            StepSpec::CopyFile { src, dst, recursive } => Step::File(FileOp::Copy { src, dst, recursive }),
+            StepSpec::CopyFile { src, dst, recursive, relative } => {
+                Step::File(FileOp::Copy { src, dst, recursive, relative })
+            }
             StepSpec::MoveFile { src, dst } => Step::File(FileOp::Move { src, dst }),
             StepSpec::RemoveFile { paths, recursive, force } => {
                 Step::File(FileOp::Remove { paths, recursive, force })
@@ -2293,6 +2309,13 @@ fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) ->
         Rebase::FreeText => could_be_path(tok),
     };
     if !shaped {
+        return None;
+    }
+    // An ABSOLUTE path names a machine location, not a repo file — the reference
+    // image's `/tools/obo.epm.json` is the case. Expressed relative to the plan
+    // it would encode where the repo happens to sit, so the same tree at two
+    // paths would carry two different plans.
+    if tok.starts_with('/') {
         return None;
     }
     let abs = normalize(&from.join(tok));
@@ -2798,6 +2821,7 @@ mod tests {
             missing_rule: false,
             side_effect_only: false,
             stdout_file: None,
+            intermediate: false,
             branches: vec![],
         };
         let release = ArtefactPlan {
@@ -2809,11 +2833,13 @@ mod tests {
                 src: vec!["build/tiny.owl".into()],
                 dst: "../..".into(),
                 recursive: false,
+                relative: false,
             })],
             gaps: vec![],
             missing_rule: false,
             side_effect_only: false,
             stdout_file: None,
+            intermediate: false,
             branches: vec![],
         };
         let plan = Plan {
@@ -2963,7 +2989,12 @@ mod format_floor_tests {
         // does not fail on `may_fail`, it IGNORES it, and runs a step the plan
         // says may fail as one that may not — a silent change of what the build
         // does, which is the case the floor exists to refuse.
-        const PLAN_SCHEMA_DIGEST: &str = "755dc2594349610b";
+        //
+        // `intermediate` (an artefact only pattern-rule chains name), the copy
+        // step's `relative` (rsync -R) and `side_effect_only` (a recipe that
+        // never writes its own target) all default off, and an older build
+        // ignoring them over-builds rather than mis-builds, so the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "0bc3fa17d01ba747";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3021,6 +3052,7 @@ mod round_trip_tests {
                 missing_rule: false,
                 side_effect_only: false,
                 stdout_file: None,
+                intermediate: false,
                 branches: vec![crate::plan::Branch {
                     flag: "BRI".into(),
                     value: "false".into(),
