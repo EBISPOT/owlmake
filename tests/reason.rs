@@ -9,7 +9,7 @@ use horned_owl::ontology::set::SetOntology;
 use horned_owl::model::MutableOntology;
 
 use owlmake::model::Model;
-use owlmake::reason::{Reasoner, WhelkClassification};
+use owlmake::reason::{DlReasoner, Reasoner, WhelkClassification};
 
 const NS: &str = "http://example.org/";
 
@@ -508,4 +508,74 @@ fn materialize_states_the_requested_property_over_a_subproperty() {
         "the asserted sub-property edge survives:\n{r}");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The shape EFO's Plant Ontology import produces (EBISPOT/owlmake#2): the
+/// hierarchy and a genus-differentia definition live in the imported module,
+/// the cyclic `part_of` definition and the bridging existentials in the root.
+///
+///   Tepal ⊑ Perianth;  Perianth ≡ Organ ⊓ ∃part_of.Flower;  Organ ⊑ Structure
+///   Flower ⊑ Structure;  Flower ⊑ ∃part_of.ReproSystem;  part_of transitive
+///   ReproSystem ≡ Structure ⊓ ∃part_of.ReproSystem
+///   Stoma ⊑ Tissue ⊑ Structure;  Stoma ⊑ ∃part_of.Leaf
+///   LeafComponent ≡ Structure ⊓ ∃part_of.Leaf
+///
+/// Entails Tepal ⊑ ReproSystem (the existential through the definition, then
+/// the transitive chain, into the cyclic definition), Flower ⊑ ReproSystem and
+/// Stoma ⊑ LeafComponent — under the EL engine and under hermit-rs alike. The
+/// asserted parent stays a direct parent; the derived edge is direct where it
+/// is derived (Perianth) and indirect below it (Tepal).
+#[test]
+fn imported_plant_ontology_shape_with_a_cyclic_part_of_definition() {
+    let b = Build::new_rc();
+    let c = |n: &str| CE::Class(b.class(format!("{NS}{n}")));
+    let part_of = b.object_property(format!("{NS}part_of"));
+    let some = |filler: CE<_>| CE::ObjectSomeValuesFrom {
+        ope: OPE::ObjectProperty(part_of.clone()),
+        bce: Box::new(filler),
+    };
+    let sub = |x: CE<_>, y: CE<_>| Component::SubClassOf(horned_owl::model::SubClassOf { sub: x, sup: y });
+    let equiv = |x: CE<_>, y: CE<_>| {
+        Component::EquivalentClasses(horned_owl::model::EquivalentClasses(vec![x, y]))
+    };
+    let and = |x: CE<_>, y: CE<_>| CE::ObjectIntersectionOf(vec![x, y]);
+
+    let m = model_from(vec![
+        // the imported module
+        sub(c("Tepal"), c("Perianth")),
+        equiv(c("Perianth"), and(c("Organ"), some(c("Flower")))),
+        sub(c("Organ"), c("Structure")),
+        sub(c("Flower"), c("Structure")),
+        sub(c("Stoma"), c("Tissue")),
+        sub(c("Tissue"), c("Structure")),
+        sub(c("Leaf"), c("Structure")),
+        Component::TransitiveObjectProperty(horned_owl::model::TransitiveObjectProperty(
+            OPE::ObjectProperty(part_of.clone()),
+        )),
+        // the root
+        equiv(c("ReproSystem"), and(c("Structure"), some(c("ReproSystem")))),
+        equiv(c("LeafComponent"), and(c("Structure"), some(c("Leaf")))),
+        sub(c("Flower"), some(c("ReproSystem"))),
+        sub(c("Stoma"), some(c("Leaf"))),
+    ]);
+    let iri = |n: &str| format!("{NS}{n}");
+
+    let r = Reasoner::classify(&m);
+    assert!(r.is_consistent());
+    assert!(r.is_subsumed(&iri("Tepal"), &iri("ReproSystem")), "EL: Tepal ⊑ ReproSystem");
+    assert!(r.is_subsumed(&iri("Flower"), &iri("ReproSystem")), "EL: Flower ⊑ ReproSystem");
+    assert!(r.is_subsumed(&iri("Stoma"), &iri("LeafComponent")), "EL: Stoma ⊑ LeafComponent");
+    let direct = r.direct_subsumptions();
+    assert!(direct.contains(&(iri("Tepal"), iri("Perianth"))), "asserted parent stays direct: {direct:?}");
+    // Perianth is itself a ReproSystem (Organ ⊓ ∃part_of.Flower, Flower ⊑
+    // ∃part_of.ReproSystem), so that is where the derived edge is direct — and
+    // ReproSystem reaches Tepal only indirectly, through Perianth.
+    assert!(direct.contains(&(iri("Perianth"), iri("ReproSystem"))), "derived parent is direct: {direct:?}");
+    assert!(!direct.contains(&(iri("Tepal"), iri("ReproSystem"))), "indirect for Tepal: {direct:?}");
+
+    let d = DlReasoner::classify(&m);
+    assert!(d.is_consistent());
+    assert!(d.is_subsumed(&iri("Tepal"), &iri("ReproSystem")), "HermiT: Tepal ⊑ ReproSystem");
+    assert!(d.is_subsumed(&iri("Flower"), &iri("ReproSystem")), "HermiT: Flower ⊑ ReproSystem");
+    assert!(d.is_subsumed(&iri("Stoma"), &iri("LeafComponent")), "HermiT: Stoma ⊑ LeafComponent");
 }
