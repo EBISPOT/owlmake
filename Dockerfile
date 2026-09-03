@@ -97,9 +97,14 @@ CMD ["om", "--help"]
 # steps, which is why a plan records `requires: [git]` for them), but it costs
 # ~13 MB — 7 MB of git and the rest its HTTPS stack, a third of the slim image
 # for something no release build needs. Against this layer it is noise.
+#
+# bash is here for the same reason: a GitHub Actions container job runs every
+# step inside this image, and JavaScript actions that shell out (actions-js/push
+# starts with `bash start.sh`) fail with ENOENT without it. EFO's ID-allocation
+# workflow is one such job.
 FROM base AS with-python
 USER root
-RUN apk add --no-cache python3 py3-pandas git
+RUN apk add --no-cache python3 py3-pandas git bash
 USER owlmake
 
 # ---- default target: the slim image (om only) ----
