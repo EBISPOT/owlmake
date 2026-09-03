@@ -878,7 +878,7 @@ pub fn run_line(
         let r = run_shell(l, dir, exe, robot_prefix);
         if let Err(e) = r {
             if ignore_err {
-                eprintln!("odk:   (ignored) {e:#}");
+                status!("make:   (ignored) {e:#}");
             } else {
                 return Err(e);
             }
@@ -901,7 +901,7 @@ pub fn run_line(
         let r = run_shell(l, dir, exe, robot_prefix);
         return match r {
             Err(e) if ignore_err => {
-                eprintln!("odk:   (ignored) {e:#}");
+                status!("make:   (ignored) {e:#}");
                 Ok(())
             }
             other => other,
@@ -936,7 +936,7 @@ pub fn run_line(
     }
     if let Some(e) = pending_err {
         if ignore_err {
-            eprintln!("odk:   (ignored) {e:#}");
+            status!("make:   (ignored) {e:#}");
         } else {
             return Err(e);
         }

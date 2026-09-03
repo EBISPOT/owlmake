@@ -261,7 +261,7 @@ impl OdkRepo {
             // it, so the ontology builds without any build files of its own.
             if let Some((id, seed)) = find_seed_file(&dir) {
                 status!(
-                    "odk: no ODK layout; seeding a stock release from `{seed}` \
+                    "plan: no ODK layout; seeding a stock release from `{seed}` \
                      (as `odk seed` would for a new `{id}` setup)"
                 );
                 let yaml = OdkYaml {
@@ -325,7 +325,7 @@ impl OdkRepo {
                 // information, so fall back to synthesizing the config from it.
                 Err(e) => {
                     status!(
-                        "odk: {} is malformed ({e}); using the Makefile instead",
+                        "plan: {} is malformed ({e}); using the Makefile instead",
                         yaml_path.display()
                     );
                     synthesize_yaml_from_make(&make, &dir)

@@ -633,7 +633,7 @@ pub fn build_import_module(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpt
         bail!("no import `{id}` in the plan");
     };
     if opts.imports_pinned {
-        eprintln!("make: `{}` pinned (IMP=false)", imp.output);
+        status!("make: `{}` pinned (IMP=false)", imp.output);
         return Ok(());
     }
     let catalog = load_catalog_planned(&r);
@@ -866,7 +866,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
             if !opts.keep_going {
                 return Err(e).with_context(|| format!("building {}", a.target));
             }
-            eprintln!("odk: *** [{}] {e:#}", a.target);
+            status!("make: *** [{}] {e:#}", a.target);
             repo.failed.borrow_mut().insert(a.target.clone());
             failed.push(a.target.clone());
             continue;
@@ -917,7 +917,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
             if !opts.keep_going {
                 return Err(e).with_context(|| format!("building {}", a.target));
             }
-            eprintln!("odk: *** [{}] {e:#}", a.target);
+            status!("make: *** [{}] {e:#}", a.target);
             repo.failed.borrow_mut().insert(a.target.clone());
             failed.push(a.target.clone());
             continue;
@@ -945,7 +945,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                 if !opts.keep_going {
                     return Err(e).with_context(|| format!("building {}", a.target));
                 }
-                eprintln!("odk: *** [{}] {e:#}", a.target);
+                status!("make: *** [{}] {e:#}", a.target);
                 repo.failed.borrow_mut().insert(a.target.clone());
                 failed.push(a.target.clone());
             }
@@ -959,7 +959,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     for &i in &order {
         let a = &plan.artefacts[i];
         if a.missing_rule || !a.gaps.is_empty() {
-            eprintln!("odk: skipping {} (not fully covered)", a.target);
+            status!("make: skipping {} (not fully covered)", a.target);
         }
     }
     Ok(())
@@ -1049,7 +1049,7 @@ fn prepare_imports(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                 let p = repo.dir.join(&imp.output);
                 if !p.exists() && plan.merged_import.is_none() {
                     eprintln!(
-                        "odk: cached import {} missing ({}); building it from upstream",
+                        "import: cached module {} missing ({}); building it from upstream",
                         imp.id,
                         p.display()
                     );
@@ -1196,7 +1196,7 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
         std::fs::create_dir_all(&work)?;
         for sub in &repo.target("all_imports").expect("checked by has_import_rules").needs {
             if exclude_large && large.contains(&sub.as_str()) {
-                eprintln!("odk: skipping large import `{sub}`");
+                status!("import: skipping large import `{sub}`");
                 continue;
             }
             // A module the plan records as an import PRODUCT is built by the
@@ -1232,7 +1232,7 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
         std::fs::create_dir_all(&work)?;
         for imp in &plan.imports {
             if exclude_large && imp.product.as_ref().is_some_and(|p| p.is_large) {
-                eprintln!("odk: skipping large import `{}`", imp.output);
+                status!("import: skipping large import `{}`", imp.output);
                 continue;
             }
             if imp.steps.is_empty() {
@@ -1320,7 +1320,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
         return Ok(true);
     }
 
-    eprintln!("make: regenerating patterns/definitions.owl from {} DOSDP pattern(s)", names.len());
+    status!("make: regenerating patterns/definitions.owl from {} DOSDP pattern(s)", names.len());
     // Labels + the permutation annotation index come from the edit ontology AND
     // its import closure (resolved via the catalog) — the fillers' labels live in
     // the imports, so without the closure they cannot be resolved at all.
@@ -1706,7 +1706,7 @@ fn build_all_imports_planned(repo: &Repo, plan: &Plan) -> Result<()> {
         return refresh_imports_planned(repo, plan, false);
     }
     if plan.imports.is_empty() {
-        eprintln!("make: no import products configured");
+        status!("make: no import products configured");
     }
     // Under base merging there are no per-product modules: `IMPORT_ROOTS` is
     // `merged_import` alone, and `$(IMPORT_FILES)` — the release asset — is that
@@ -2094,7 +2094,7 @@ fn run_target_recipe_inner(
     // and any `$(eval)` are already resolved — so running them needs no further
     // variable expansion.
     if !a.steps.is_empty() {
-        eprintln!("make: running target `{target}`");
+        status!("make: running target `{target}`");
         let catalog = load_catalog_planned(repo);
         let work = repo.dir.join(".owlmake-odk-tmp");
         std::fs::create_dir_all(&work)?;
@@ -2146,7 +2146,7 @@ fn build_imports_fresh(
     for p in &products {
         // `refresh-imports-excluding-large` skips the products flagged large.
         if exclude_large && p.is_large {
-            eprintln!("make: skipping large import {} (excluding-large)", p.id);
+            status!("import: skipping large import {} (excluding-large)", p.id);
             continue;
         }
         // Custom mirrors have no plain download URL — the project supplies a
@@ -2158,7 +2158,7 @@ fn build_imports_fresh(
         if p.mirror_type.as_deref() == Some("custom") {
             let cached = import_dir.join(format!("{}_import.owl", p.id));
             if cached.exists() {
-                eprintln!("odk: import {} (custom) — using cached {}", p.id, cached.display());
+                status!("import: {} (custom) — using cached {}", p.id, cached.display());
                 merge_file_into(&mut merged, &cached)?;
                 continue;
             }
@@ -2198,7 +2198,7 @@ fn build_imports_fresh(
 
     // Seed: committed *_terms.txt plus the edit ontology's signature.
     let seed = import_seed(repo, plan)?;
-    eprintln!("odk: extracting ⊥-module over {} seed terms", seed.len());
+    status!("import: extracting ⊥-module over {} seed terms", seed.len());
     // Honour the plan's `slme_individuals` policy (`extract --individuals`).
     // ECTO sets `exclude`, so imported individuals — and any now-degenerate
     // Same/DifferentIndividuals axioms left when their peers fall outside the
@@ -2207,7 +2207,7 @@ fn build_imports_fresh(
     if let Some(spec) = &plan.slme_individuals {
         match extract::Individuals::parse(spec) {
             Some(ind) => opts.individuals = ind,
-            None => eprintln!("odk: warning: unknown slme_individuals `{spec}`, using include"),
+            None => status!("import: warning: unknown slme_individuals `{spec}`, using include"),
         }
     }
     let mut module = extract::extract_with(&merged, &seed, Method::Bot, &opts);
@@ -2282,7 +2282,7 @@ fn build_imports_fresh(
     module.format_prefixes_cleared = true;
     module.prefixes = crate::io::robot_ofn_prefixes(&module);
     crate::io::save_as(&mut module, &out, crate::io::Format::Functional)?;
-    eprintln!("odk: wrote {} ({} components)", out.display(), module.ont.iter().count());
+    status!("import: wrote {} ({} components)", out.display(), module.ont.iter().count());
     Ok(())
 }
 
@@ -2347,8 +2347,8 @@ fn build_one_import(
         }
     }
     if !crate::progress::stage_active() {
-        eprintln!(
-            "odk: built import {} → {} ({} components)",
+        status!(
+            "import: built {} → {} ({} components)",
             imp.id,
             out.display(),
             model.ont.iter().count()
@@ -3170,7 +3170,7 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
     let once = format!("\u{1}mirror:{}", imp.id);
     if dest.exists() && (!refresh || repo.built.borrow().contains(&once)) {
         if !refresh && !crate::progress::stage_active() {
-            eprintln!("odk: mirror {} pinned (MIR=false), reusing {}", imp.id, dest.display());
+            status!("mirror: {} pinned (MIR=false), reusing {}", imp.id, dest.display());
         }
         return Ok(dest);
     }
@@ -3223,7 +3223,7 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
         return Ok(dest);
     }
     if !crate::progress::stage_active() {
-        eprintln!("odk: downloading mirror {} ← {}", imp.id, imp.source);
+        status!("mirror: downloading {} ← {}", imp.id, imp.source);
     }
     let bytes = http_get(&imp.source)?;
     std::fs::write(&dest, &bytes)?;
@@ -3314,7 +3314,7 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
                 );
             } else {
                 if !crate::progress::stage_active() {
-                    eprintln!("odk: mirror {} \u{2190} {}", imp.id, imp.source);
+                    status!("mirror: {} \u{2190} {}", imp.id, imp.source);
                 }
                 let bytes = http_get(&imp.source)?;
                 let p = work.join(format!("{}-download.owl", imp.id));
@@ -3348,7 +3348,7 @@ fn run_custom_mirror(repo: &Repo, id: &str, recorded: &[Step]) -> Result<()> {
     // commands name their own `-i`/`-o`), so every step carries a full command
     // line and is run as one.
     if !recorded.is_empty() {
-        eprintln!("odk: import {id} (custom) — running the recorded mirror steps");
+        status!("mirror: {id} (custom) — running the recorded mirror steps");
         for step in recorded {
             match step {
                 Step::Shell { command: _, .. } | Step::File(_) => {
@@ -3366,7 +3366,7 @@ fn run_custom_mirror(repo: &Repo, id: &str, recorded: &[Step]) -> Result<()> {
     // prerequisite doing the download and processing.
     let phony = format!("mirror-{id}");
     if repo.target(&target).is_some() || repo.target(&phony).is_some() {
-        eprintln!("odk: import {id} (custom) — running planned mirror target `{target}`");
+        status!("mirror: {id} (custom) — running planned mirror target `{target}`");
         ensure_built(repo, &target, 8)?;
         // Some projects only define the phony rule (which writes the mirror
         // itself); run it directly if the file target didn't materialize one.
@@ -4734,7 +4734,7 @@ fn ensure_built(repo: &Repo, rel: &str, depth: usize) -> Result<bool> {
             ensure_built(repo, pre, depth - 1)?;
         }
     }
-    eprintln!("odk:   building prerequisite {rel}");
+    status!("make:   building prerequisite {rel}");
     let mut seen = std::collections::HashSet::new();
     run_target_recipe_inner(repo, rel, &mut seen)?;
     Ok(repo.dir.join(rel).exists())
@@ -4900,7 +4900,7 @@ fn build_prerequisite(
         }
         bail!("no rule to make target `{pre}`, needed by `{}`", p.target);
     }
-    eprintln!("odk:   building prerequisite {}", p.target);
+    status!("make:   building prerequisite {}", p.target);
     // A target's directory is not created for it, and recipes usually don't
     // create it either — they rely on some earlier rule having made it. That
     // earlier rule is often conditional on what is already on disk: a
@@ -6460,7 +6460,7 @@ fn fetch_import_iri(iri: &str, dir: &Path) -> Result<PathBuf> {
     if path.exists() {
         return Ok(path);
     }
-    eprintln!("odk: owl:imports <{iri}> (network — not in the catalog)");
+    status!("import: owl:imports <{iri}> (network — not in the catalog)");
     let bytes = http_get(iri)?;
     std::fs::write(&path, &bytes)?;
     Ok(path)
@@ -6989,7 +6989,7 @@ fn build_seed(repo: &Repo, seed_rel: &str, work: &Path) -> Result<PathBuf> {
 
     let out = work.join(Path::new(seed_rel).file_name().unwrap_or(std::ffi::OsStr::new("seed.txt")));
     std::fs::write(&out, terms.into_iter().collect::<Vec<_>>().join("\n") + "\n")?;
-    eprintln!("odk:   built seed {} ({} terms)", out.display(), std::fs::read_to_string(&out)?.lines().count());
+    status!("import:   built seed {} ({} terms)", out.display(), std::fs::read_to_string(&out)?.lines().count());
     Ok(out)
 }
 
