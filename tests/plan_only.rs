@@ -787,7 +787,14 @@ fn an_edited_import_pipeline_is_what_a_rebuild_runs() {
     // `refresh-imports` re-mirrors by definition, and the fixture's mirror is a
     // local file — so it is asked for the way ODK's `no_mirror_refresh_imports`
     // asks: with the mirrors pinned.
-    for what in [vec!["imports/x_import.owl"], vec!["all_imports"], vec!["refresh-imports", "MIR=false"]] {
+    for what in [
+        vec!["imports/x_import.owl"],
+        vec!["all_imports"],
+        vec!["refresh-imports", "MIR=false"],
+        // `MIR=false` pins the mirrors only; the module named alongside
+        // `--rebuild imports` is still rebuilt.
+        vec!["imports/x_import.owl", "--rebuild", "imports", "MIR=false"],
+    ] {
         let _ = std::fs::remove_file(&module);
         let out = bin().arg("make").args(&what).arg("-C").arg(&ont).output().unwrap();
         let what = what[0];

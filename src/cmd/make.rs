@@ -1357,13 +1357,15 @@ fn apply_make_var(vars: &mut MakeVars, name: &str, value: &str) {
         // mirrors. IMP=false → reuse the committed imports (`--imports cached`);
         // IMP=true → re-mirror from upstream (`--imports fresh`).
         "IMP" => vars.imports = Some(if truthy { ImportsMode::Fresh } else { ImportsMode::Cached }),
-        // `MIR`: whether to refresh the mirror downloads. It's subordinate to
-        // IMP here — only fill in an import mode if IMP hasn't already set one.
-        "MIR" => {
-            vars.mir = Some(truthy);
-            let mode = if truthy { ImportsMode::Fresh } else { ImportsMode::Cached };
-            vars.imports.get_or_insert(mode);
-        }
+        // `MIR`: whether to refresh the mirror downloads — and nothing else.
+        // It used to fill in the import mode too, so a positional `MIR=false`
+        // pinned the modules as well: `om make imports/obi_import.owl --rebuild
+        // imports MIR=false` reported the module "pinned (IMP=false)" and rebuilt
+        // nothing, and `--imports fresh MIR=false` likewise. `IMP` and `MIR` are
+        // independent switches, and what `MIR` implies for the import mode
+        // (`MIR=true` alone still runs the import path) is decided where the mode
+        // is resolved, with the flags and the plan in view.
+        "MIR" => vars.mir = Some(truthy),
         // `PAT`: whether to regenerate `patterns/definitions.owl` from the
         // DOSDP patterns (PAT=true) or reuse the committed file (PAT=false).
         "PAT" => {
@@ -1513,6 +1515,21 @@ mod tests {
         partition_make_args(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
     }
 
+    /// `MIR=false` pins the mirrors and says nothing about the modules: the
+    /// import mode stays unset so `--rebuild imports` / `--imports fresh` can
+    /// decide it. It used to fill in `Cached`, and the flags were overridden.
+    #[test]
+    fn mir_alone_does_not_decide_the_import_mode() {
+        let (targets, vars) = split(&["imports/obi_import.owl", "MIR=false"]);
+        assert_eq!(targets, vec!["imports/obi_import.owl"]);
+        assert_eq!(vars.mir, Some(false));
+        assert!(vars.imports.is_none(), "MIR=false must not pin the imports");
+        let (_, vars) = split(&["MIR=true"]);
+        assert!(vars.imports.is_none(), "MIR=true's implication is resolved with the flags, not here");
+        let (_, vars) = split(&["IMP=true", "MIR=false"]);
+        assert!(matches!(vars.imports, Some(ImportsMode::Fresh)));
+    }
+
     /// CL's `qc.yml`: `make ROBOT_ENV='ROBOT_JAVA_ARGS=-Xmx6G' test IMP=false PAT=false MIR=false`.
     #[test]
     fn qc_invocation_splits_vars_from_the_test_target() {
@@ -1562,14 +1579,17 @@ mod tests {
 
     #[test]
     fn imp_takes_precedence_over_mir_regardless_of_order() {
-        // IMP is the primary import control; MIR only fills in when IMP is absent.
+        // IMP is the import control; MIR pins or refreshes the mirrors and is
+        // never read as an import mode, whichever order the two arrive in.
         let (_, a) = split(&["MIR=true", "IMP=false"]);
         assert!(matches!(a.imports, Some(ImportsMode::Cached)));
+        assert_eq!(a.mir, Some(true));
         let (_, b) = split(&["IMP=false", "MIR=true"]);
         assert!(matches!(b.imports, Some(ImportsMode::Cached)));
-        // MIR alone still applies.
+        // MIR alone leaves the import mode to the flags and the plan.
         let (_, c) = split(&["MIR=false"]);
-        assert!(matches!(c.imports, Some(ImportsMode::Cached)));
+        assert!(c.imports.is_none());
+        assert_eq!(c.mir, Some(false));
     }
 
     #[test]
