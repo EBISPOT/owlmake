@@ -44,7 +44,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM alpine:3.24 AS base
 # ca-certificates: owlmake fetches imports over HTTPS and trusts the system CA
 # store (ureq native-certs).
-RUN apk add --no-cache ca-certificates
+#
+# bash: a GitHub Actions container job runs every step inside this image, and a
+# step that shells out finds no interpreter without it — `actions-js/push` opens
+# with `bash start.sh` and dies on `spawn bash ENOENT`, which is how EFO's
+# ID-allocation workflow failed after minting its IDs. Repository scripts assume
+# it just as readily. It costs ~4 MB with readline and ncurses-libs, so unlike
+# git (~13 MB, see the python stage) it is cheap enough for both images.
+RUN apk add --no-cache ca-certificates bash
 
 COPY --from=build /out/om /usr/local/bin/om
 
@@ -97,14 +104,9 @@ CMD ["om", "--help"]
 # steps, which is why a plan records `requires: [git]` for them), but it costs
 # ~13 MB — 7 MB of git and the rest its HTTPS stack, a third of the slim image
 # for something no release build needs. Against this layer it is noise.
-#
-# bash is here for the same reason: a GitHub Actions container job runs every
-# step inside this image, and JavaScript actions that shell out (actions-js/push
-# starts with `bash start.sh`) fail with ENOENT without it. EFO's ID-allocation
-# workflow is one such job.
 FROM base AS with-python
 USER root
-RUN apk add --no-cache python3 py3-pandas git bash
+RUN apk add --no-cache python3 py3-pandas git
 USER owlmake
 
 # ---- default target: the slim image (om only) ----
