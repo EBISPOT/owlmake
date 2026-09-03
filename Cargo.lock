@@ -1972,7 +1972,7 @@ dependencies = [
 
 [[package]]
 name = "owlmake"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "arrow-array",
