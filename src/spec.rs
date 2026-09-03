@@ -159,6 +159,11 @@ pub struct OwlmakeSpec {
     /// The single merged-import file, when base-merging is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_import: Option<String>,
+    /// The ontology IRI to stamp on the merged import module. Without it the IRI is
+    /// derived from `ontology_iri` and the module path (compression suffix and the
+    /// ontology directory stripped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_iri: Option<String>,
     /// Component files merged into the edit ontology before the release runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<String>,
@@ -1197,6 +1202,7 @@ impl OwlmakeSpec {
                 })
                 .collect(),
             merged_import: plan.merged_import.clone(),
+            merged_import_iri: plan.merged_import_iri.clone(),
             components: plan.components.clone(),
             variables: plan.variables.clone(),
             component_gaps: plan.component_gaps.clone(),
@@ -1376,6 +1382,7 @@ impl OwlmakeSpec {
             slme_individuals: self.slme_individuals,
             imports,
             merged_import: self.merged_import,
+            merged_import_iri: self.merged_import_iri,
             components: self.components,
             variables: self.variables,
             component_gaps: self.component_gaps,
@@ -2855,6 +2862,7 @@ mod tests {
             slme_individuals: None,
             imports: vec![],
             merged_import: None,
+            merged_import_iri: None,
             components: vec!["components/c.owl".into()],
             variables: [("ROBOT".to_string(), "../../bin/robot".to_string())]
                 .into_iter()
@@ -2996,7 +3004,7 @@ mod format_floor_tests {
         // step's `relative` (rsync -R) and `side_effect_only` (a recipe that
         // never writes its own target) all default off, and an older build
         // ignoring them over-builds rather than mis-builds, so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "0bc3fa17d01ba747";
+        const PLAN_SCHEMA_DIGEST: &str = "2e096c77dfb8a214";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3035,6 +3043,7 @@ mod round_trip_tests {
             slme_individuals: Some("minimal".into()),
             imports: vec![],
             merged_import: Some("imports/merged_import.owl".into()),
+            merged_import_iri: None,
             components: vec!["components/c.owl".into()],
             variables: [("OTHER_SRC".to_string(), "components/c.owl".to_string())]
                 .into_iter()
@@ -3141,6 +3150,7 @@ mod round_trip_tests {
             slme_individuals: None,
             imports: vec![],
             merged_import: None,
+            merged_import_iri: None,
             components: vec![],
             variables: Default::default(),
             component_gaps: vec![],

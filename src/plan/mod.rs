@@ -278,6 +278,8 @@ pub struct Plan {
     pub slme_individuals: Option<String>,
     pub imports: Vec<ImportPlan>,
     pub merged_import: Option<String>,
+    /// Explicit ontology IRI for the merged import module, if the plan names one.
+    pub merged_import_iri: Option<String>,
     pub components: Vec<String>,
     /// Build variables the *executor* still needs after planning — `$(SRC)`,
     /// `$(OTHER_SRC)`, `$(ROBOT)`, `$(OBOBASE)`, `$(MIRRORDIR)` — resolved at

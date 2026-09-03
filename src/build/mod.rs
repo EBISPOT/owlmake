@@ -2114,6 +2114,29 @@ fn run_target_recipe_inner(
 /// excluded IRIs, then extract a ⊥-locality module over the seed signature
 /// (the committed `imports/*_terms.txt` plus the edit ontology's own signature).
 /// Mirrors are cached under `mirror/`.
+/// The ontology IRI and version IRI to stamp on the merged import module.
+///
+/// A plan may name the IRI outright (`merged_import_iri`): EFO's modules live
+/// under `http://www.ebi.ac.uk/efo/imports/` while its plan carries the OBO PURL
+/// as `ontology_iri`. Otherwise it is derived from `ontology_iri` and the
+/// module's path — the path of the *document*: without the compression suffix a
+/// gzipped module carries, and relative to the ontology directory even when the
+/// plan spells it from the repository root.
+fn merged_import_iris(
+    ontology_iri: &str,
+    version: &str,
+    explicit: Option<&str>,
+    rel: &str,
+    dir_rel: &str,
+) -> (String, String) {
+    let ontbase = ontology_iri.strip_suffix(".owl").unwrap_or(ontology_iri);
+    let doc = rel.strip_suffix(".gz").unwrap_or(rel);
+    let doc = if dir_rel.is_empty() { doc } else { doc.strip_prefix(&format!("{dir_rel}/")).unwrap_or(doc) };
+    let iri = explicit.map(str::to_string).unwrap_or_else(|| format!("{ontbase}/{doc}"));
+    let ver = format!("{ontbase}/releases/{version}/{doc}");
+    (iri, ver)
+}
+
 fn build_imports_fresh(
     repo: &Repo,
     plan: &Plan,
@@ -2261,14 +2284,14 @@ fn build_imports_fresh(
     // one stale.
     let rel = plan.merged_import.as_deref().unwrap_or("imports/merged_import.owl");
     let out = repo.dir.join(rel);
-    // 4. `$(ANNOTATE_CONVERT_FILE)` — `annotate --ontology-iri $(ONTBASE)/$@
-    //    --version-iri $(ONTBASE)/releases/$(VERSION)/$@ --annotation
-    //    owl:versionInfo $(VERSION) convert -f ofn`. Without it the module goes out
-    //    under a bare `Ontology(`, with neither IRI nor `owl:versionInfo`. `$@` is
-    //    the target as the rule names it, so both IRIs follow the plan's path.
-    let ontbase = plan.ontology_iri.strip_suffix(".owl").unwrap_or(&plan.ontology_iri);
-    let mi_iri = format!("{ontbase}/{rel}");
-    let mi_ver = format!("{ontbase}/releases/{}/{rel}", plan.version);
+    let dir_rel = repo
+        .dir
+        .strip_prefix(&repo.root)
+        .ok()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (mi_iri, mi_ver) =
+        merged_import_iris(&plan.ontology_iri, &plan.version, plan.merged_import_iri.as_deref(), rel, &dir_rel);
     let annos =
         vec!["http://www.w3.org/2002/07/owl#versionInfo".to_string(), plan.version.clone()];
     let mut module =
@@ -7320,5 +7343,33 @@ mod aggregate_tests {
     #[test]
     fn a_leaf_target_is_not_an_aggregate() {
         assert!(!is_aggregate(&target(&[], vec![])));
+    }
+}
+
+#[cfg(test)]
+mod merged_import_iri_tests {
+    use super::merged_import_iris;
+
+    #[test]
+    fn merged_import_iri_names_the_document_not_the_file() {
+        let (iri, ver) = merged_import_iris(
+            "http://purl.obolibrary.org/obo/efo.owl",
+            "4.0.0",
+            None,
+            "src/ontology/imports/merged_import.owl.gz",
+            "src/ontology",
+        );
+        assert_eq!(iri, "http://purl.obolibrary.org/obo/efo/imports/merged_import.owl");
+        assert_eq!(ver, "http://purl.obolibrary.org/obo/efo/releases/4.0.0/imports/merged_import.owl");
+        let (iri, _) = merged_import_iris(
+            "http://purl.obolibrary.org/obo/efo.owl",
+            "4.0.0",
+            Some("http://www.ebi.ac.uk/efo/imports/merged_import.owl"),
+            "src/ontology/imports/merged_import.owl.gz",
+            "src/ontology",
+        );
+        assert_eq!(iri, "http://www.ebi.ac.uk/efo/imports/merged_import.owl");
+        let (iri, _) = merged_import_iris("http://purl.obolibrary.org/obo/x.owl", "1", None, "imports/merged_import.owl", "");
+        assert_eq!(iri, "http://purl.obolibrary.org/obo/x/imports/merged_import.owl");
     }
 }
