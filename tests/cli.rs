@@ -2684,3 +2684,65 @@ fn a_fresh_reasoned_ontology_keeps_an_inference_the_import_also_asserts() {
     );
     assert!(processed.contains("Import(<http://x.org/po>)"), "{processed}");
 }
+
+/// A `.gz` path is a gzipped file of the format named inside the suffix:
+/// `x.owl.gz` is gzipped RDF/XML, `x.ofn.gz` gzipped functional syntax. Both
+/// directions, so a repository can commit a module GitHub would refuse as plain
+/// text (EFO's untrimmed OBA module: 106 MB, or 2 MB gzipped).
+#[test]
+fn gzipped_ontologies_round_trip() {
+    let a = tmp("gz_a.ofn");
+    std::fs::write(
+        &a,
+        "Prefix(:=<http://ex/>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\nOntology(<http://ex/o.owl>\nDeclaration(Class(:Gz))\nAnnotationAssertion(rdfs:label :Gz \"gzipped class\")\n)\n",
+    )
+    .unwrap();
+    for (mid, back) in [("gz_b.owl.gz", "gz_c.ofn"), ("gz_d.ofn.gz", "gz_e.ofn")] {
+        let m = tmp(mid);
+        let out = bin().args(["convert", "-i"]).arg(&a).arg("-o").arg(&m).output().unwrap();
+        assert!(out.status.success(), "convert to {mid} failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        let bytes = std::fs::read(&m).unwrap();
+        assert!(bytes.starts_with(&[0x1f, 0x8b]), "{mid} must start with the gzip magic");
+        let b = tmp(back);
+        let out = bin().args(["convert", "-i"]).arg(&m).arg("-o").arg(&b).output().unwrap();
+        assert!(out.status.success(), "convert from {mid} failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        let text = std::fs::read_to_string(&b).unwrap();
+        assert!(text.contains("http://ex/Gz") && text.contains("gzipped class"), "round trip through {mid} lost content:\n{text}");
+    }
+}
+
+/// An `owl:imports` the catalog maps to a `.gz` module loads like any other —
+/// the OWL API does the same, so a gzipped module works in Protégé and ROBOT too.
+#[test]
+fn a_catalog_import_may_be_gzipped() {
+    let dir = tmp("gzcat");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let module_ofn = dir.join("mod.ofn");
+    std::fs::write(
+        &module_ofn,
+        "Prefix(:=<http://ex/mod/>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\nOntology(<http://ex/imports/mod_import.owl>\nDeclaration(Class(:M1))\nAnnotationAssertion(rdfs:label :M1 \"module class\")\n)\n",
+    )
+    .unwrap();
+    let module_gz = dir.join("mod_import.owl.gz");
+    assert!(bin().args(["convert", "-i"]).arg(&module_ofn).arg("-o").arg(&module_gz).status().unwrap().success());
+    std::fs::write(
+        dir.join("edit.ofn"),
+        "Prefix(:=<http://ex/edit/>)\nOntology(<http://ex/edit.owl>\nImport(<http://ex/imports/mod_import.owl>)\nDeclaration(Class(:E1))\nSubClassOf(:E1 <http://ex/mod/M1>)\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n  <uri name=\"http://ex/imports/mod_import.owl\" uri=\"mod_import.owl.gz\"/>\n</catalog>\n",
+    )
+    .unwrap();
+    let out_path = dir.join("merged.ofn");
+    let out = bin()
+        .args(["merge", "--catalog"]).arg(dir.join("catalog-v001.xml")).arg("-i").arg(dir.join("edit.ofn")).arg("-o").arg(&out_path)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merge through a gzipped import failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let merged = std::fs::read_to_string(&out_path).unwrap();
+    assert!(merged.contains("module class"), "the gzipped module's content did not reach the merge:\n{merged}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

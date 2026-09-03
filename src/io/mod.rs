@@ -191,8 +191,32 @@ pub fn is_empty_ontology_file(path: &Path) -> bool {
 /// the `.owl`/`.rdf` extensions are ambiguous — such a file may hold RDF/XML *or*
 /// Functional Syntax — so the file's leading bytes are sniffed to pick the right
 /// parser.
+/// Whether `path` names a gzipped file (`x.owl.gz`, `x.ofn.gz`, …). The format
+/// is taken from the extension inside the `.gz`, as [`Format::from_path`] does.
+pub fn is_gzipped_path(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("gz"))
+}
+
+/// Read an ontology file, transparently gunzipping a `.gz` one (or any file that
+/// starts with the gzip magic, whatever it is called). GitHub refuses files over
+/// 100 MB, so a large import module is committed gzipped: EFO's untrimmed OBA
+/// module is 106 MB as RDF/XML and 2 MB gzipped, and the OWL API (Protégé,
+/// ROBOT) resolves a catalog entry to a `.gz` module transparently.
+fn read_ontology_bytes(path: &Path) -> Result<Vec<u8>> {
+    let raw = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+    if !(is_gzipped_path(path) || raw.starts_with(&[0x1f, 0x8b])) {
+        return Ok(raw);
+    }
+    use std::io::Read;
+    let mut out = Vec::with_capacity(raw.len() * 8);
+    flate2::read::GzDecoder::new(&raw[..])
+        .read_to_end(&mut out)
+        .with_context(|| format!("gunzipping {}", path.display()))?;
+    Ok(out)
+}
+
 pub fn load(path: &Path) -> Result<Model> {
-    let bytes = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+    let bytes = read_ontology_bytes(path)?;
     let fmt = match Format::from_path(path) {
         Ok(f) => disambiguate(f, &bytes),
         Err(_) => sniff(&bytes)
@@ -283,7 +307,7 @@ pub fn load_with(path: &Path, format: Option<&str>) -> Result<Model> {
     match format {
         Some(name) => {
             let fmt = Format::from_name(name)?;
-            let bytes = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+            let bytes = read_ontology_bytes(path)?;
             IN_PATH.with(|c| *c.borrow_mut() = Some(path.to_path_buf()));
             let r = parse_bytes(bytes, fmt, &display_name(path))
                 .with_context(|| format!("parsing {}", path.display()));
@@ -2218,6 +2242,26 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
         )
     });
     OUT_NAME.with(|c| *c.borrow_mut() = display_name(path));
+    if is_gzipped_path(path) {
+        // Serialise in memory, then gzip to disk. The serialisers stream through
+        // a `Write`, so the gzip could wrap the file directly — but the OFN cache
+        // markers below read the written bytes back, and a gzipped output carries
+        // none, so the plain bytes are kept in hand instead.
+        PENDING_MARKERS.with(|c| *c.borrow_mut() = None);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut pw = crate::progress::ProgressWriter::new(&mut buf, format!("write {}", display_name(path)));
+        write_to_with(model, &mut pw, fmt, RdfXmlWriter::Owlapi)
+            .with_context(|| format!("writing {}", path.display()))?;
+        pw.finish().with_context(|| format!("writing {}", path.display()))?;
+        let file = File::create(path).with_context(|| format!("creating {}", path.display()))?;
+        let mut enc = flate2::write::GzEncoder::new(BufWriter::new(file), flate2::Compression::default());
+        enc.write_all(&buf).with_context(|| format!("gzipping {}", path.display()))?;
+        enc.finish()
+            .and_then(|mut w| w.flush())
+            .with_context(|| format!("gzipping {}", path.display()))?;
+        PENDING_MARKERS.with(|c| c.borrow_mut().take());
+        return Ok(());
+    }
     let file = File::create(path).with_context(|| format!("creating {}", path.display()))?;
     let mut pw =
         crate::progress::ProgressWriter::new(BufWriter::new(file), format!("write {}", display_name(path)));
