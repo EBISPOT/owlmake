@@ -443,10 +443,12 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         for a in artefacts.iter().chain(prerequisites.iter()) {
             planned.extend(crate::plan::gaps::recipe_outputs(&a.steps));
         }
+        let products: Vec<String> =
+            imports.iter().filter(|i| !i.steps.is_empty()).map(|i| i.output.clone()).collect();
         for a in artefacts.iter_mut().chain(prerequisites.iter_mut()) {
             a.gaps.extend(crate::plan::gaps::term_file_gaps(&repo.dir, &a.steps, &planned));
             a.gaps.extend(crate::plan::gaps::prerequisite_gaps(
-                &repo.dir, &a.needs, &planned, &phony,
+                &repo.dir, &a.needs, &planned, &phony, &products,
             ));
         }
     }

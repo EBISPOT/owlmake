@@ -187,9 +187,20 @@ pub fn prerequisite_gaps(
     needs: &[String],
     planned: &HashSet<String>,
     phony: &HashSet<String>,
+    products: &[String],
 ) -> Vec<String> {
     let mut gaps = Vec::new();
+    // An import product is built by its own recorded pipeline, so a prerequisite
+    // naming its module is not a gap even when no rule of its own names the file.
+    // Spelled either repo-relative or from the ontology directory, as the
+    // executor matches them.
+    let is_product = |n: &str| {
+        products.iter().any(|o| o == n || Path::new(o).ends_with(n) || Path::new(n).ends_with(o))
+    };
     for n in needs {
+        if is_product(n) {
+            continue;
+        }
         // Plugin-JAR targets are deliberately not planned: owlmake implements
         // those plugin commands natively, so there are no JARs to fetch.
         if n == "all_robot_plugins" || n.ends_with(".jar") {

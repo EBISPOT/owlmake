@@ -629,3 +629,184 @@ fn a_deleted_source_fails_the_build_that_has_only_the_plan() {
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&stash);
 }
+
+/// The committed plan records an import module twice: once as the import
+/// product's own pipeline (`imports: - id: x … steps:`), which is what
+/// `--plan-only` shows and what a curator edits, and once as the replayed
+/// Makefile rule for the same file (`targets: - target: …/x_import.owl`). The two
+/// agree on the day the plan is generated and diverge the moment someone edits
+/// the product's steps — EFO flipped the OBA filter's `trim: false` and the
+/// rebuilt module came out byte-identical, because both `om make
+/// imports/oba_import.owl` and the `imports` refresh group replayed the recorded
+/// rule and never ran the product's pipeline. The product's recorded steps are
+/// the plan; they must be what runs.
+#[test]
+fn an_edited_import_pipeline_is_what_a_rebuild_runs() {
+    let root = scratch("importfix");
+    let ont = root.join("src/ontology");
+    let mirror = ont.join("mirror/x.owl");
+
+    // The source: X_1 is seeded; F_1 is the filler of a relation on X_1 and is NOT
+    // seeded, so `filter --trim true` drops the relation and `--trim false` keeps it.
+    write(
+        &mirror,
+        "Prefix(:=<http://example.org/x/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/x.owl>\n\
+         Declaration(Class(<http://example.org/x/X_1>))\n\
+         Declaration(Class(<http://example.org/x/X_2>))\n\
+         Declaration(Class(<http://example.org/f/F_1>))\n\
+         Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000050>))\n\
+         SubClassOf(<http://example.org/x/X_1> <http://example.org/x/X_2>)\n\
+         SubClassOf(<http://example.org/x/X_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000050> <http://example.org/f/F_1>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/x/X_1> \"x one\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/x/X_2> \"x two\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/f/F_1> \"filler\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/x_terms.txt"), "http://example.org/x/X_1\n");
+    write(
+        &ont.join("x-edit.ofn"),
+        "Prefix(:=<http://example.org/x/>)\n\
+         Ontology(<http://example.org/x-edit.owl>\n\
+         Declaration(Class(<http://example.org/x/X_9>))\n\
+         )\n",
+    );
+    write(
+        &ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         </catalog>\n",
+    );
+    // EFO's import rules, verbatim in shape: a BOT module, then a filter that
+    // trims to the seed signature.
+    write(
+        &ont.join("Makefile"),
+        "ONT = x\n\
+         SRC = x-edit.ofn\n\
+         ROBOT = robot\n\
+         BASE = http://example.org/x\n\
+         IMPORTS_OWL = imports/x_import.owl\n\
+         \n\
+         all: x.owl\n\
+         .PHONY: all all_imports\n\
+         \n\
+         x.owl: $(SRC) imports/x_import.owl\n\
+         \t$(ROBOT) merge -i $< -i imports/x_import.owl annotate --ontology-iri http://example.org/x.owl -o $@\n\
+         \n\
+         all_imports: $(IMPORTS_OWL)\n\
+         \n\
+         imports/%_terms.txt: iri_dependencies/%_terms.txt\n\
+         \tcat $^ | sort | uniq > $@\n\
+         \n\
+         imports/%_bot.owl: mirror/%.owl imports/%_terms.txt\n\
+         \t$(ROBOT) extract -i $< -T imports/$*_terms.txt --method BOT -O $(BASE)/$@ -o $@\n\
+         \n\
+         imports/%_import.owl: imports/%_bot.owl imports/%_terms.txt $(SRC)\n\
+         \t$(ROBOT) filter -i $< --term-file imports/$*_terms.txt --select \"annotations ontology anonymous self\" --trim true --signature true -O $(BASE)/$@ -o $@\n\
+         .PRECIOUS: imports/%_import.owl\n",
+    );
+    write(
+        &ont.join("x-odk.yaml"),
+        &format!(
+            "id: x\n\
+             import_group:\n\
+             \x20 products:\n\
+             \x20   - id: x\n\
+             \x20     mirror_from: file://{}\n",
+            mirror.display()
+        ),
+    );
+
+    let plan_out = bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap();
+    assert!(plan_out.status.success(), "planning failed:\n{}", String::from_utf8_lossy(&plan_out.stderr));
+    let plan_file = root.join("owlmake.yaml");
+    let plan_text = std::fs::read_to_string(&plan_file).unwrap();
+    let product_at = plan_text.find("- id: x\n").expect("the plan records the import product");
+    let trim_at = plan_text[product_at..].find("trim: true").map(|i| i + product_at).expect(
+        "the product's recorded filter step carries the rule's `--trim true`",
+    );
+    assert!(
+        plan_text.contains("target: src/ontology/imports/x_import.owl"),
+        "the plan also replays the Makefile rule for the module — the shadowing this test is about:\n{plan_text}"
+    );
+
+    // EFO's situation: the build configuration is gone and the committed plan is
+    // the only statement of the build. (With the Makefile present, om rightly
+    // refuses a plan that disagrees with it.)
+    let stash = scratch("importfix_stash");
+    std::fs::create_dir_all(&stash).unwrap();
+    std::fs::rename(ont.join("Makefile"), stash.join("Makefile")).unwrap();
+    std::fs::rename(ont.join("x-odk.yaml"), stash.join("x-odk.yaml")).unwrap();
+
+    let module = ont.join("imports/x_import.owl");
+    let build = |what: &str| {
+        let out = bin().args(["make", what, "--rebuild", "imports", "-C"]).arg(&ont).output().unwrap();
+        assert!(out.status.success(), "`om make {what}` failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        std::fs::read_to_string(&module).unwrap()
+    };
+
+    // As recorded, the filter trims: the unseeded filler is dropped.
+    let trimmed = build("imports/x_import.owl");
+    assert!(trimmed.contains("X_1") && !trimmed.contains("F_1"), "trim: true must drop the unseeded filler:\n{trimmed}");
+
+    // Edit the PRODUCT's step, as a curator would, and leave the replayed rule alone.
+    let edited = format!("{}trim: false{}", &plan_text[..trim_at], &plan_text[trim_at + "trim: true".len()..]);
+    std::fs::write(&plan_file, edited).unwrap();
+
+    // Both spellings of "rebuild this module" must run the edited pipeline.
+    let by_name = build("imports/x_import.owl");
+    assert!(by_name.contains("F_1"), "`om make imports/x_import.owl` ran the replayed rule, not the product's edited pipeline:\n{by_name}");
+    std::fs::remove_file(&module).unwrap();
+    let by_group = build("all_imports");
+    assert!(by_group.contains("F_1"), "`om make all_imports` ran the replayed rule, not the product's edited pipeline:\n{by_group}");
+
+    // The plan with the replayed rules REMOVED — one source of truth, which is
+    // where a repo ends up once it notices the duplication — must build the same
+    // module from the product pipelines alone, whichever way it is asked.
+    let plan_text = std::fs::read_to_string(&plan_file).unwrap();
+    let mut kept = String::new();
+    let mut skipping = false;
+    for line in plan_text.lines() {
+        if line.starts_with("- target: ") {
+            let t = &line["- target: ".len()..];
+            skipping = t.starts_with("src/ontology/imports/x_") && !t.ends_with("_terms.txt");
+        } else if !line.starts_with(' ') && !line.starts_with('-') {
+            skipping = false;
+        }
+        if !skipping {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    assert!(
+        !kept.contains("target: src/ontology/imports/x_import.owl") && kept.contains("- id: x\n"),
+        "the replayed module rules should be gone and the product kept:\n{kept}"
+    );
+    std::fs::write(&plan_file, kept).unwrap();
+    // `refresh-imports` re-mirrors by definition, and the fixture's mirror is a
+    // local file — so it is asked for the way ODK's `no_mirror_refresh_imports`
+    // asks: with the mirrors pinned.
+    for what in [vec!["imports/x_import.owl"], vec!["all_imports"], vec!["refresh-imports", "MIR=false"]] {
+        let _ = std::fs::remove_file(&module);
+        let out = bin().arg("make").args(&what).arg("-C").arg(&ont).output().unwrap();
+        let what = what[0];
+        assert!(out.status.success(), "`om make {what}` failed on the de-duplicated plan:\n{}", String::from_utf8_lossy(&out.stderr));
+        let built = std::fs::read_to_string(&module).unwrap_or_default();
+        assert!(built.contains("F_1"), "`om make {what}` on the de-duplicated plan did not run the product's pipeline:\n{built}");
+    }
+
+    // A fresh checkout: the module is absent (EFO gitignores its MONDO module) and
+    // the release needs it. With no rule of its own for the file, the product's
+    // pipeline must build it on the way — not "no rule to make target".
+    let _ = std::fs::remove_file(&module);
+    let _ = std::fs::remove_file(ont.join("x.owl"));
+    let out = bin().args(["make", "x.owl", "-C"]).arg(&ont).output().unwrap();
+    assert!(out.status.success(), "`om make x.owl` failed with the module absent:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(module.is_file(), "the release did not build the import module it needs");
+    let release = std::fs::read_to_string(ont.join("x.owl")).unwrap();
+    assert!(release.contains("X_1") && release.contains("F_1"), "the release should merge the module built from the product's edited pipeline:\n{release}");
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&stash);
+}

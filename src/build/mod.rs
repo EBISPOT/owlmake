@@ -278,6 +278,17 @@ impl std::fmt::Display for Pin {
     }
 }
 
+/// The import product whose module `target` names, when the plan records that
+/// product's own pipeline (`ImportPlan::steps`). The plan spells outputs
+/// repo-relative (`src/ontology/imports/x_import.owl`) while a caller names them
+/// from the ontology directory (`imports/x_import.owl`), so the match is on whole
+/// trailing path components, not on the file name alone — `mirror/x.owl` must not
+/// pass for `imports/x.owl`.
+pub fn import_module_for<'p>(plan: &'p Plan, target: &str) -> Option<&'p crate::plan::ImportPlan> {
+    let same = |a: &str| a == target || Path::new(a).ends_with(target) || Path::new(target).ends_with(a);
+    plan.imports.iter().find(|i| !i.steps.is_empty() && same(&i.output))
+}
+
 /// A target that is built only while the import modules are being rebuilt — the
 /// merged import and every per-product module, in the plan's own spelling.
 fn is_import_target(repo: &Repo, target: &str) -> bool {
@@ -610,6 +621,28 @@ pub fn refresh_one_mirror(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpts
         bail!("no import `{id}` in the plan");
     };
     ensure_mirror(&r, imp, r.refresh_mirrors).map(|_| ())
+}
+
+/// Build one import module by its product's recorded pipeline — `om make
+/// imports/<id>_import.owl`. The plan may also carry the replayed rule for the
+/// same file; the product's steps are the plan's statement of how the module is
+/// built, so they are what runs (see `refresh_imports_planned`).
+pub fn build_import_module(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpts) -> Result<()> {
+    let r = Repo::of_with(repo, plan, opts);
+    let Some(imp) = plan.imports.iter().find(|i| i.id == id) else {
+        bail!("no import `{id}` in the plan");
+    };
+    if opts.imports_pinned {
+        eprintln!("make: `{}` pinned (IMP=false)", imp.output);
+        return Ok(());
+    }
+    let catalog = load_catalog_planned(&r);
+    let work = r.output_dir.join(".owlmake-odk-tmp");
+    std::fs::create_dir_all(&work)?;
+    build_one_import(&r, plan, imp, &catalog, &work)
+        .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
+    r.built.borrow_mut().insert(imp.output.clone());
+    Ok(())
 }
 
 /// Run a target the plan defines. A target the plan does not define is an error:
@@ -1158,9 +1191,28 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
             .map(|i| i.output.as_str())
             .collect();
         let mut seen = std::collections::HashSet::new();
+        let catalog = load_catalog_planned(repo);
+        let work = repo.output_dir.join(".owlmake-odk-tmp");
+        std::fs::create_dir_all(&work)?;
         for sub in &repo.target("all_imports").expect("checked by has_import_rules").needs {
             if exclude_large && large.contains(&sub.as_str()) {
                 eprintln!("odk: skipping large import `{sub}`");
+                continue;
+            }
+            // A module the plan records as an import PRODUCT is built by the
+            // product's own pipeline (`ImportPlan::steps`): that is the pipeline
+            // `--plan-only` shows and the one a curator edits. The plan may also
+            // carry the replayed Makefile rule for the same file. The two agree on
+            // the day the plan is generated and diverge the moment the product is
+            // edited — EFO set its OBA filter to `trim: false` in the product and
+            // the rebuilt module came out byte-identical, because this loop
+            // replayed the recorded rule and never ran the product's steps.
+            if let Some(imp) = import_module_for(plan, sub) {
+                if seen.insert(sub.clone()) && !memo_has(repo, sub) {
+                    build_one_import(repo, plan, imp, &catalog, &work)
+                        .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
+                    repo.built.borrow_mut().insert(sub.clone());
+                }
                 continue;
             }
             run_target_recipe_inner(repo, sub, &mut seen)?;
@@ -1169,6 +1221,33 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
     }
     // `refresh-imports` IS the request to re-mirror from upstream, so the mirrors
     // are refreshed by definition here.
+    //
+    // A plan whose products carry their own recorded pipelines but no replayed
+    // rules — EFO once its duplicated import targets are gone — is built from
+    // those pipelines: the synthesized builder is only for products that carry
+    // none, as the comment above says.
+    if plan.imports.iter().any(|i| !i.steps.is_empty()) {
+        let catalog = load_catalog_planned(repo);
+        let work = repo.output_dir.join(".owlmake-odk-tmp");
+        std::fs::create_dir_all(&work)?;
+        for imp in &plan.imports {
+            if exclude_large && imp.product.as_ref().is_some_and(|p| p.is_large) {
+                eprintln!("odk: skipping large import `{}`", imp.output);
+                continue;
+            }
+            if imp.steps.is_empty() {
+                continue;
+            }
+            // Re-mirrored by definition — unless the same command line pinned the
+            // mirrors (`MIR=false`, ODK's `no_mirror_refresh_imports`), which
+            // outranks the request exactly as a pinned import does above.
+            ensure_mirror(repo, imp, !repo.mirrors_pinned)?;
+            build_one_import(repo, plan, imp, &catalog, &work)
+                .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
+            repo.built.borrow_mut().insert(imp.output.clone());
+        }
+        return Ok(());
+    }
     build_imports_fresh(repo, plan, exclude_large, true)
 }
 
@@ -1612,14 +1691,19 @@ fn write_pattern_terms_from_definitions(repo: &Repo, dosdp: &crate::spec::DosdpS
 /// `all_imports`: (re)build every individual `imports/<id>_import.owl` module the
 /// release declares, from upstream mirrors.
 fn build_all_imports_planned(repo: &Repo, plan: &Plan) -> Result<()> {
-    // Replay the repo's OWN rules when it has them, exactly as `refresh-imports`
-    // does. The synthesized builder derives the standard mirror -> module
-    // pipeline from the import products' flags, which is right for a repo with no
-    // explicit rules and wrong for one that spells its own out: EFO extracts a
-    // BOT module and then filters it, and synthesizing that instead yields a
-    // different module under the source ontology's IRI.
+    // A repo with rules of its own is built exactly as `refresh-imports` builds
+    // it: each module the plan records as an import PRODUCT runs the product's
+    // pipeline, and anything else `all_imports` needs is replayed as the rule the
+    // plan recorded. Replaying the `all_imports` target itself would walk its
+    // prerequisites through the recorded rules alone and never run a product's
+    // steps — so an edit to the product (EFO's `trim: false` on the OBA filter)
+    // changed nothing. The synthesized builder below derives the standard
+    // mirror -> module pipeline from the products' flags, which is right for a
+    // repo with no explicit rules and wrong for one that spells its own out: EFO
+    // extracts a BOT module and then filters it, and synthesizing that instead
+    // yields a different module under the source ontology's IRI.
     if has_import_rules(repo) {
-        return run_target_recipe_planned(repo, "all_imports");
+        return refresh_imports_planned(repo, plan, false);
     }
     if plan.imports.is_empty() {
         eprintln!("make: no import products configured");
@@ -1731,6 +1815,43 @@ fn assumed_new(repo: &Repo, name: &str) -> bool {
     repo.assume_new.iter().any(|w| same_target(w, name, &dir_rel))
 }
 
+/// A prerequisite that is an import PRODUCT has no rule of its own: the
+/// product's recorded pipeline builds it. A module on disk stands, as any kept
+/// (`IMP`) target does; an absent one is built this once — unless the run pinned
+/// the imports explicitly, in which case there is nothing to build it from. EFO
+/// gitignores `imports/mondo_import.owl`, so on a fresh checkout `build/efo.owl`
+/// needs a module nothing has written yet.
+fn build_import_prerequisite(
+    repo: &Repo,
+    imp: &crate::plan::ImportPlan,
+    name: &str,
+    seen: &mut std::collections::HashSet<String>,
+) -> Result<()> {
+    if !seen.insert(name.to_string()) || memo_has(repo, name) {
+        return Ok(());
+    }
+    let present = repo.dir.join(name).exists() || repo.root.join(&imp.output).exists();
+    if present && !repo.refresh_imports {
+        return Ok(());
+    }
+    if !present && repo.imports_pinned {
+        bail!(
+            "`{name}` is an import module pinned by IMP=false but is not present. \
+             Under IMP=false nothing builds it — re-run with IMP=true (or `--rebuild imports`)"
+        );
+    }
+    if !present {
+        status!("make: `{name}` is kept by default (IMP) but absent — building it from its pipeline this once");
+    }
+    let catalog = load_catalog_planned(repo);
+    let work = repo.output_dir.join(".owlmake-odk-tmp");
+    std::fs::create_dir_all(&work)?;
+    build_one_import(repo, repo.plan, imp, &catalog, &work)
+        .with_context(|| format!("building import module `{}`", imp.id))?;
+    repo.built.borrow_mut().insert(name.to_string());
+    Ok(())
+}
+
 fn run_target_recipe_inner(
     repo: &Repo,
     target: &str,
@@ -1821,6 +1942,11 @@ fn run_target_recipe_inner(
             continue;
         }
         if repo.target(pre).is_none() {
+            // No rule of its own — but an import PRODUCT is built by its recorded
+            // pipeline, and a release that needs the module cannot wait for one.
+            if let Some(imp) = import_module_for(repo.plan, pre) {
+                build_import_prerequisite(repo, imp, pre, seen)?;
+            }
             continue;
         }
         // An `--assume-new` file is treated as just modified: dependents run,

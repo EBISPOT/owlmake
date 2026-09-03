@@ -194,6 +194,10 @@ enum Kind {
     /// One mirror, by file (`mirror/<id>.owl`) or by the phony that fetches it
     /// (`mirror-<id>`). The payload is the import id.
     Mirror(String),
+    /// One import module (`imports/<id>_import.owl`), built by its product's
+    /// recorded pipeline rather than by the replayed rule the plan may also
+    /// carry for the same file. The payload is the import id.
+    ImportModule(String),
     /// Any other target the plan defines — QC targets included — run by
     /// executing the recipe the plan records for it.
     Recipe,
@@ -317,6 +321,13 @@ fn classify(plan: &Plan, target: &str) -> Kind {
     // and mirror rules do not exist under those flags — does nothing at all.
     if plan.merged_import.as_deref() == Some(target) && !plan_target(plan, target) {
         return Kind::AllImports;
+    }
+    // An import module the plan records as a product runs the product's own
+    // pipeline. The plan may carry the replayed rule for the same file too, and
+    // `Kind::Recipe` would run that instead — the rule agrees with the product
+    // only until the product is edited.
+    if let Some(imp) = crate::build::import_module_for(plan, target) {
+        return Kind::ImportModule(imp.id.clone());
     }
     // The well-known phony target names are underscore-separated; owlmake accepts
     // the dashed form too, so normalize before matching them.
@@ -763,6 +774,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 Ok(())
             }
             Kind::Mirror(id) => build::refresh_one_mirror(repo, plan, id, &run_opts),
+            Kind::ImportModule(id) => build::build_import_module(repo, plan, id, &run_opts),
             Kind::Recipe => build::run_target_recipe(repo, plan, t, &run_opts),
             Kind::Unsupported(_) | Kind::Unknown => unreachable!(),
         }

@@ -1229,7 +1229,7 @@ impl OwlmakeSpec {
             .get("OBOBASE")
             .map(|s| s.trim_end_matches('/').to_string())
             .unwrap_or_else(|| "http://purl.obolibrary.org/obo".to_string());
-        let imports = self
+        let imports: Vec<ImportPlan> = self
             .imports
             .into_iter()
             .map(|i| {
@@ -1332,10 +1332,12 @@ impl OwlmakeSpec {
                 planned.extend(crate::plan::gaps::recipe_outputs(&a.steps));
             }
             let phony: std::collections::HashSet<String> = self.phony.iter().cloned().collect();
+            let products: Vec<String> =
+                imports.iter().filter(|i| !i.steps.is_empty()).map(|i| i.output.clone()).collect();
             for a in artefacts.iter_mut().chain(prerequisites.iter_mut()) {
                 a.gaps.extend(crate::plan::gaps::term_file_gaps(dir, &a.steps, &planned));
                 a.gaps.extend(crate::plan::gaps::prerequisite_gaps(
-                    dir, &a.needs, &planned, &phony,
+                    dir, &a.needs, &planned, &phony, &products,
                 ));
             }
         }
