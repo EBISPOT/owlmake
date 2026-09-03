@@ -49,8 +49,17 @@ fn subclass_edges(m: &Model) -> usize {
         .count()
 }
 
+/// The tests below all parse documents, and every parse draws blank-node ids
+/// from one process-global counter (`io::reset_anon_counter` /
+/// `ANON_COUNTER`). Run in parallel, a round trip in one test can take an id
+/// between another test's reset and its read, so the id assertions race — rarely,
+/// but a full `cargo test` did lose it once. The counter is process state by
+/// design (one run, one sequence), so the tests take turns instead.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn obograph_json_roundtrip() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let m = sample();
     let mut json = Vec::new();
     io::write_to_ref(&m, &mut json, Format::OboGraph).unwrap();
@@ -65,6 +74,7 @@ fn obograph_json_roundtrip() {
 
 #[test]
 fn manchester_roundtrip() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     // Add an existential so the Manchester `some` parser is exercised.
     let b = Build::new();
     let mut m = sample();
@@ -95,6 +105,7 @@ fn manchester_roundtrip() {
 
 #[test]
 fn turtle_roundtrip() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let m = sample();
     let mut ttl = Vec::new();
     io::write_to_ref(&m, &mut ttl, Format::Turtle).unwrap();
@@ -113,6 +124,7 @@ fn turtle_roundtrip() {
 /// sorts, and a `_:` inside a string literal is text, not a node id.
 #[test]
 fn a_functional_documents_node_ids_are_reminted_in_first_mention_order() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     const DOC: &str = concat!(
         "Prefix(:=<http://ex.org/>)\n",
         "Ontology(<http://ex.org/anon.owl>\n",
@@ -174,6 +186,7 @@ fn a_functional_documents_node_ids_are_reminted_in_first_mention_order() {
 /// inverse(STATO_0000205))` — and so does every mirror merged from it.
 #[test]
 fn an_equivalence_between_two_inverses_survives_rdfxml() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     use horned_owl::model::{
         EquivalentObjectProperties, ObjectPropertyExpression as OPE,
     };
