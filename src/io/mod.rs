@@ -171,6 +171,26 @@ impl Format {
     }
 }
 
+/// Whether `path` names the null sink — a caller asking for the output to be
+/// thrown away. `om reason -i x.owl -r elk -o /dev/null` is a *check*: the run is
+/// wanted for its verdict, the document is not. There is nothing to infer a
+/// format from and nothing to serialize, so a discard path skips the write
+/// entirely rather than failing on the extension it does not have.
+pub fn is_discard_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    // Only the platform's own null device counts: `nul` is a device name on
+    // Windows and an ordinary file name everywhere else, and a repo that names a
+    // target `nul` must still get its bytes.
+    #[cfg(windows)]
+    {
+        s.eq_ignore_ascii_case("nul") || s.eq_ignore_ascii_case(r"\\.\nul")
+    }
+    #[cfg(not(windows))]
+    {
+        s == "/dev/null"
+    }
+}
+
 /// Whether `path` is an *empty* file — zero bytes, or only whitespace. Such a
 /// file denotes an empty ontology (no axioms): notably a build *stamp*, `touch`ed
 /// as a marker whose real outputs are written elsewhere (e.g. UBERON's
@@ -2077,6 +2097,9 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
 
 /// Save `model` to `path`, inferring the format from its extension.
 pub fn save(model: &mut Model, path: &Path) -> Result<()> {
+    if is_discard_path(path) {
+        return Ok(());
+    }
     let fmt = Format::from_path(path)?;
     save_as(model, path, fmt)
 }
@@ -2206,6 +2229,9 @@ pub fn normalize_set_operands(model: &mut Model) {
 }
 
 pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
+    if is_discard_path(path) {
+        return Ok(());
+    }
     // Create the output's parent directory if needed — steps write into `subsets/`,
     // `tmp/`, `reports/` etc. which a fresh checkout may not contain and which no
     // earlier step is required to have made.

@@ -2746,3 +2746,140 @@ fn a_catalog_import_may_be_gzipped() {
     assert!(merged.contains("module class"), "the gzipped module's content did not reach the merge:\n{merged}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The reasoner that decides an entailment is the reasoner that justifies it.
+///
+/// `:A` here is unsatisfiable only through a cardinality clash — an axiom shape
+/// the EL engine does not see — so under `-r hermit` the class must both be
+/// FOUND unsatisfiable and be explained. Deciding with hermit-rs and minimizing
+/// with EL reports the ontology coherent and returns nothing, which is what the
+/// `elk` half of this test shows.
+#[test]
+fn explain_justifies_a_non_el_unsatisfiability_with_the_reasoner_that_decided_it() {
+    let ont = tmp("cardinality-clash.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         Declaration(Class(:A))\n\
+         Declaration(ObjectProperty(:r))\n\
+         SubClassOf(:A ObjectMinCardinality(2 :r))\n\
+         SubClassOf(:A ObjectMaxCardinality(1 :r))\n\
+         )\n",
+    )
+    .unwrap();
+
+    let run = |reasoner: &str| {
+        let out = bin()
+            .args(["explain", "-i"])
+            .arg(&ont)
+            .args(["-M", "unsatisfiability", "-r", reasoner])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{reasoner}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+
+    let hermit = run("hermit");
+    assert!(
+        hermit.contains("1 justification(s)") && hermit.contains("http://example.org/A"),
+        "hermit must explain the class it found unsatisfiable:\n{hermit}"
+    );
+    assert!(
+        hermit.contains("ObjectMinCardinality") && hermit.contains("ObjectMaxCardinality"),
+        "the justification is the clashing pair:\n{hermit}"
+    );
+
+    // The EL engine cannot see the clash at all, so there is nothing to explain.
+    assert_eq!(run("elk"), "No explanations found.");
+
+    let _ = std::fs::remove_file(&ont);
+}
+
+/// The justification search is bounded by the size of the justification's
+/// neighbourhood, not by the size of the module around it: it grows a set
+/// outward from the terms of the entailment until it entails, and minimizes
+/// that. Both halves are measured here — how many entailment tests the search
+/// asks, and how big the largest ontology it classified was. Contracting the
+/// module itself instead costs one classification of the whole module per axiom
+/// in it, which is hours on a module the size of a real import closure.
+#[test]
+fn explain_does_not_test_every_axiom_of_the_module() {
+    // `:X ⊑ :A`, `:X ⊑ :B` and `DisjointClasses(:A :B)` make `:X` unsatisfiable
+    // in three axioms; the 8,000 others are pulled into the ⊥-module by hanging
+    // off `:A`, and none of them is part of any justification.
+    const N: usize = 4000;
+    let mut text = String::from("Prefix(:=<http://example.org/>)\nOntology(\n");
+    text.push_str("SubClassOf(:X :A)\nSubClassOf(:X :B)\nDisjointClasses(:A :B)\n");
+    for i in 0..N {
+        text.push_str(&format!("SubClassOf(:A ObjectSomeValuesFrom(:p :F{i}))\n"));
+        text.push_str(&format!("SubClassOf(:F{i} :G{i})\n"));
+    }
+    text.push_str(")\n");
+    let ont = tmp("wide-module.ofn");
+    std::fs::write(&ont, text).unwrap();
+
+    let out = bin()
+        .args(["explain", "-i"])
+        .arg(&ont)
+        .args(["-M", "unsatisfiability"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("1 justification(s)") && report.contains("DisjointClasses"),
+        "the three-axiom justification must be found:\n{report}"
+    );
+
+    // The status line carries all three numbers.
+    let line = err
+        .lines()
+        .find(|l| l.contains("entailment tests"))
+        .unwrap_or_else(|| panic!("no search-cost status line:\n{err}"));
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let num = |marker: &str, offset: isize| -> usize {
+        let i = words.iter().position(|w| *w == marker).unwrap_or_else(|| panic!("{marker}: {line}"));
+        words[(i as isize + offset) as usize]
+            .trim_matches(|c: char| !c.is_ascii_digit())
+            .parse()
+            .unwrap_or_else(|_| panic!("{marker}: {line}"))
+    };
+    let (tests, widest, candidates) = (num("entailment", -1), num("widest", 1), num("over", 1));
+    assert!(candidates > 2 * N, "the module must be wide: {line}");
+    assert!(tests * 10 < candidates, "the search must not walk the module: {line}");
+    assert!(
+        widest * 10 < candidates,
+        "the search must not classify the module: {line}"
+    );
+
+    let _ = std::fs::remove_file(&ont);
+}
+
+/// `-o /dev/null` is a discard, not a document: a command run for its verdict
+/// writes nothing and does not need a format to infer.
+#[cfg(unix)]
+#[test]
+fn output_to_dev_null_is_a_discard() {
+    let ont = tmp("discard.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:B :C)\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin()
+        .args(["reason", "-i"])
+        .arg(&ont)
+        .args(["-r", "elk", "-o", "/dev/null"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(!err.contains("cannot infer ontology format"), "{err}");
+    let _ = std::fs::remove_file(&ont);
+}

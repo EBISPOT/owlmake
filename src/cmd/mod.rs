@@ -265,6 +265,19 @@ pub fn resolve_format(format: Option<&str>, output: &Path) -> Result<Format> {
 /// chain steps simply pass the model along).
 pub fn maybe_save(model: &mut Model, output: Option<&Path>, format: Option<&str>) -> Result<()> {
     if let Some(out) = output {
+        // A discard path writes nothing: the caller ran the command for its
+        // verdict, not its document. The `--format` name is still validated —
+        // throwing the output away is not a reason to accept a format that does
+        // not exist.
+        if io::is_discard_path(out) {
+            if let Some(name) = format {
+                Format::from_name(name)?;
+            }
+            if crate::progress::verbosity() >= 1 {
+                status!("discarding output ({}): {} axioms", out.display(), model.ont.iter().count());
+            }
+            return Ok(());
+        }
         // Write the ROOT ontology. A command works over the whole inlined
         // closure, so the two halves of that inlining are undone together here:
         // the axioms the imports contributed come back out, and the
