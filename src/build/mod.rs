@@ -2179,8 +2179,16 @@ fn build_imports_fresh(
         // `$(ROBOT)` resolving to the owlmake binary) to produce
         // mirror/<id>.owl, then process it like any other mirror.
         if p.mirror_type.as_deref() == Some("custom") {
-            let cached = import_dir.join(format!("{}_import.owl", p.id));
-            if cached.exists() {
+            // The module may be committed gzipped (`<id>_import.owl.gz`: EFO's PR
+            // module is over GitHub's file-size limit as plain RDF/XML), and
+            // `io::load` reads either form. Missing the `.gz` here silently fell
+            // through to the raw mirror, skipping the custom recipe's own steps
+            // (PR's `rename-terms`/`remove-terms`) for the merged import.
+            let cached = [format!("{}_import.owl", p.id), format!("{}_import.owl.gz", p.id)]
+                .into_iter()
+                .map(|f| import_dir.join(f))
+                .find(|c| c.exists());
+            if let Some(cached) = cached {
                 status!("import: {} (custom) — using cached {}", p.id, cached.display());
                 merge_file_into(&mut merged, &cached)?;
                 continue;
