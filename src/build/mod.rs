@@ -2447,16 +2447,16 @@ fn shard_owner(c: &horned_owl::model::Component<horned_owl::model::RcStr>) -> Op
 fn shard_key(iri: &str) -> String {
     let local = iri.rsplit(['/', '#']).next().unwrap_or(iri);
     if let Some((prefix, id)) = local.split_once('_') {
-        // `PREFIX_NNNN`, allowing a short letter run before the digits
-        // (`OBA_VT0010487`, `NCIT_C25464`) — not `Western_Sahara`, not
-        // `gard_rare`, not `gene_symbol_report?hgnc_id=5`.
-        let digits = id.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+        // `PREFIX_ID` where the id is alphanumeric with at least one digit
+        // (`MONDO_0005267`, `OBA_VT0010487`, `NCIT_C25464`, PR's UniProt-style
+        // `PR_A0A0B4J2F0`) — not `Western_Sahara`, not `gard_rare`, not
+        // `gene_symbol_report?hgnc_id=5`.
         let ok = !prefix.is_empty()
             && prefix.chars().all(|c| c.is_ascii_alphanumeric())
             && prefix.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-            && id.len() - digits.len() <= 4
-            && !digits.is_empty()
-            && digits.chars().all(|c| c.is_ascii_digit());
+            && !id.is_empty()
+            && id.chars().all(|c| c.is_ascii_alphanumeric())
+            && id.chars().any(|c| c.is_ascii_digit());
         if ok {
             return prefix.to_ascii_lowercase();
         }
