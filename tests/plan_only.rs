@@ -984,7 +984,6 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
          <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
          <uri name=\"http://example.org/x/imports/merged_import.owl\" uri=\"imports/merged_import.owl\"/>\n\
-         <rewriteURI uriStartString=\"http://example.org/x/imports/merged/\" rewritePrefix=\"imports/merged/\"/>\n\
          </catalog>\n",
     );
     write(
@@ -1074,8 +1073,23 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
     assert!(ont.join("imports/merged/a-1.owl").exists() && ont.join("imports/merged/a-2.owl").exists(), "a split bucket merged back");
     assert!(!ont.join("imports/merged/a.owl").exists(), "a split bucket was rewritten as one file");
 
-    // The closure loads through the catalog's rewriteURI: merging the edit file
-    // resolves the index, then every shard.
+    // The build wrote one `<uri>` per shard into a group of its own in the
+    // catalog (Protégé resolves those, not `rewriteURI`), and left the curators'
+    // entry alone. The stale shard's entry is gone with the file.
+    let catalog = std::fs::read_to_string(ont.join("catalog-v001.xml")).unwrap();
+    assert!(catalog.contains("<group id=\"merged import shards\""), "no shard group in the catalog:\n{catalog}");
+    for f in ["a-1", "a-2", "b", "other"] {
+        assert!(
+            catalog.contains(&format!("<uri name=\"http://example.org/x/imports/merged/{f}.owl\" uri=\"imports/merged/{f}.owl\"/>")),
+            "no catalog entry for shard {f}:\n{catalog}"
+        );
+    }
+    assert!(!catalog.contains("stale.owl"), "the stale shard kept a catalog entry:\n{catalog}");
+    assert!(catalog.contains("uri=\"imports/merged_import.owl\""), "the curators' index entry was lost:\n{catalog}");
+    assert_eq!(catalog.matches("<group id=\"merged import shards\"").count(), 1, "the shard group was written twice:\n{catalog}");
+
+    // The closure loads through the catalog: merging the edit file resolves the
+    // index by the curators' entry, then every shard by the generated group.
     let merged = ont.join("merged.ofn");
     let out = bin()
         .args(["merge", "-i"])
