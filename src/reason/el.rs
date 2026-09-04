@@ -187,7 +187,7 @@ impl Reasoner {
     pub fn classify(model: &Model) -> Reasoner {
         // Arm the memory safety valve before any large structure is built, so the
         // reasoner can never drive the whole machine into the OOM-killer.
-        spawn_mem_watchdog();
+        let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
         let b = Self::normalize(model, t0, timing);
@@ -201,7 +201,7 @@ impl Reasoner {
     /// RSS by that much. Use only when the caller no longer needs the model
     /// (reasoning-only / fresh-output modes).
     pub fn classify_consume(model: Model) -> Reasoner {
-        spawn_mem_watchdog();
+        let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
         // `normalize` returns a fully-owned `Builder` (interned ids + normal
@@ -1871,7 +1871,24 @@ fn mem_available_gib() -> Option<usize> {
 /// desktop-safe margin that keeps an editor/UI responsive rather than swapping
 /// right up to the abort; `0` disables the guard entirely). Off Linux (no
 /// `MemAvailable`) the guard is a no-op.
-fn spawn_mem_watchdog() {
+/// Number of classifications in flight. The watchdog thread lives for the
+/// process, but it only aborts while this is non-zero: EFO's CI showed a
+/// `verify` step parsing a 500 MB release AFTER the reasoner had finished, on a
+/// 16 GB runner, and the still-armed watchdog killed a job that was nowhere near
+/// an OOM.
+static MEM_GUARD_ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Held by a classification for as long as it runs; dropping it disarms the
+/// watchdog once the last classification is over.
+pub struct MemGuard(());
+impl Drop for MemGuard {
+    fn drop(&mut self) {
+        MEM_GUARD_ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn spawn_mem_watchdog() -> MemGuard {
+    MEM_GUARD_ACTIVE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let floor_gib: u64 = std::env::var("OWLMAKE_MEM_FLOOR_GIB")
@@ -1890,6 +1907,9 @@ fn spawn_mem_watchdog() {
             // Poll often: the saturator can allocate gigabytes per second, so a
             // long interval could overshoot the floor between checks.
             std::thread::sleep(std::time::Duration::from_millis(100));
+            if MEM_GUARD_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                continue;
+            }
             if let Some(avail) = mem_available_mib() {
                 if avail < floor_mib {
                     status!(
@@ -1908,6 +1928,7 @@ fn spawn_mem_watchdog() {
             }
         });
     });
+    MemGuard(())
 }
 
 /// Choose a worker count. The parallel engine's peak memory is dominated by the
