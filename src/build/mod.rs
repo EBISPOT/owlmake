@@ -2166,6 +2166,8 @@ fn build_imports_fresh(
         plan.imports.iter().filter_map(|i| i.product.clone()).collect();
 
     let mut merged = empty_model();
+    // Classes declared by cached custom modules; joined to the seed below.
+    let mut cached_seed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for p in &products {
         // `refresh-imports-excluding-large` skips the products flagged large.
         if exclude_large && p.is_large {
@@ -2190,7 +2192,33 @@ fn build_imports_fresh(
                 .find(|c| c.exists());
             if let Some(cached) = cached {
                 status!("import: {} (custom) — using cached {}", p.id, cached.display());
-                merge_file_into(&mut merged, &cached)?;
+                // The recipe that wrote this module already chose its contents,
+                // and the ⊥-extraction below must not shrink that choice. It
+                // would: the seed is the recipe's `*_terms.txt`, and a class the
+                // recipe's OWN extraction kept only because an axiom tied it to a
+                // seed term can have lost that axiom to a later recipe step.
+                // EFO's MONDO module keeps 1,077 gene-defined disease subtypes
+                // (`retinitis pigmentosa 59 ≡ retinitis pigmentosa ⊓ ∃ has
+                // material basis in.HGNC:20603`) because BOT locality keeps an
+                // equivalence that mentions a seed, then strips the HGNC IRIs —
+                // leaving plain subclasses that a second BOT pass over the same
+                // seed drops. Seeding every class the module declares keeps the
+                // merged import a superset of what the recipe produced.
+                if !crate::io::is_empty_ontology_file(&cached) {
+                    let other = crate::io::load(&cached)?;
+                    let before = cached_seed.len();
+                    for ac in other.ont.iter() {
+                        if let horned_owl::model::Component::DeclareClass(d) = &ac.component {
+                            cached_seed.insert(d.0 .0.as_ref().to_string());
+                        }
+                    }
+                    status!(
+                        "import: {} (custom) — seeding its {} declared classes",
+                        p.id,
+                        cached_seed.len() - before
+                    );
+                    merge_loaded_into_as(&mut merged, &other, MergeRole::Input)?;
+                }
                 continue;
             }
         }
@@ -2225,7 +2253,8 @@ fn build_imports_fresh(
     }
 
     // Seed: committed *_terms.txt plus the edit ontology's signature.
-    let seed = import_seed(repo, plan)?;
+    let mut seed = import_seed(repo, plan)?;
+    seed.extend(cached_seed);
     status!("import: extracting ⊥-module over {} seed terms", seed.len());
     // Honour the plan's `slme_individuals` policy (`extract --individuals`).
     // ECTO sets `exclude`, so imported individuals — and any now-degenerate
@@ -6687,7 +6716,6 @@ pub(crate) fn merge_file_into_as(
     path: &Path,
     role: MergeRole,
 ) -> Result<()> {
-    use horned_owl::model::{Component, MutableOntology};
     // A merge prerequisite may be a *stamp* — an empty marker `touch`ed by a
     // rule whose real outputs are written elsewhere (UBERON's `collected-%.owl`
     // merges `$^`, which includes the 0-byte `tmp/bridges` stamp). It carries no
@@ -6696,6 +6724,18 @@ pub(crate) fn merge_file_into_as(
         return Ok(());
     }
     let other = crate::io::load(path)?;
+    merge_loaded_into_as(model, &other, role)
+}
+
+/// `merge_file_into_as` for an ontology the caller has already loaded — so a
+/// caller that needs to look at the input (the merged-import builder seeds from
+/// a cached module's declarations) parses it once.
+pub(crate) fn merge_loaded_into_as(
+    model: &mut crate::model::Model,
+    other: &crate::model::Model,
+    role: MergeRole,
+) -> Result<()> {
+    use horned_owl::model::{Component, MutableOntology};
     for ac in other.ont.iter() {
         if matches!(
             ac.component,
@@ -6714,9 +6754,9 @@ pub(crate) fn merge_file_into_as(
     for (prefix, ns) in &other.idspaces {
         let _ = model.prefixes.add_prefix(prefix, ns);
     }
-    crate::cmd::merge::carry_shared_anon(model, &other);
+    crate::cmd::merge::carry_shared_anon(model, other);
     if role == MergeRole::Import {
-        crate::cmd::merge::charge_import_allocations(model, &other);
+        crate::cmd::merge::charge_import_allocations(model, other);
     }
     Ok(())
 }

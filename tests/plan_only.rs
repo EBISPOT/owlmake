@@ -817,3 +817,130 @@ fn an_edited_import_pipeline_is_what_a_rebuild_runs() {
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&stash);
 }
+
+/// Under base merging, a custom product's cached module is what its own recipe
+/// chose to keep, and the merged ⊥-extraction must not shrink it. It did: the
+/// merged seed is the recipe's `*_terms.txt`, so a class the recipe's own
+/// extraction kept only because an axiom (an equivalence with a seed term, say)
+/// tied it to a seed term — an axiom a later recipe step then removed — is
+/// dropped by the second BOT pass. EFO's MONDO module lost 1,077 gene-defined
+/// disease subtypes that way. A normal product is still extracted over its
+/// seed, so an unseeded leaf in a plain mirror stays out.
+#[test]
+fn a_cached_custom_module_is_kept_whole_by_the_merged_import() {
+    let root = scratch("cachedcustom");
+    let ont = root.join("src/ontology");
+    let mirror = ont.join("mirror/a.owl");
+
+    // A plain mirror: A_1 is seeded, A_2 is its parent, A_3 an UNSEEDED leaf.
+    write(
+        &mirror,
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/a.owl>\n\
+         Declaration(Class(<http://example.org/a/A_1>))\n\
+         Declaration(Class(<http://example.org/a/A_2>))\n\
+         Declaration(Class(<http://example.org/a/A_3>))\n\
+         SubClassOf(<http://example.org/a/A_1> <http://example.org/a/A_2>)\n\
+         SubClassOf(<http://example.org/a/A_3> <http://example.org/a/A_1>)\n\
+         AnnotationAssertion(rdfs:label <http://example.org/a/A_1> \"a one\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/a/A_2> \"a two\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/a/A_3> \"a three\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/a_terms.txt"), "http://example.org/a/A_1\n");
+
+    // The custom product's cached module, as its recipe left it: C_1 is seeded;
+    // C_2 is a leaf under it that the recipe kept and the seed does not name.
+    write(
+        &ont.join("imports/c_import.owl"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/x/imports/c_import.owl>\n\
+         Declaration(Class(<http://example.org/c/C_1>))\n\
+         Declaration(Class(<http://example.org/c/C_2>))\n\
+         SubClassOf(<http://example.org/c/C_2> <http://example.org/c/C_1>)\n\
+         AnnotationAssertion(rdfs:label <http://example.org/c/C_1> \"c one\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/c/C_2> \"c two\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/c_terms.txt"), "http://example.org/c/C_1\n");
+    write(
+        &ont.join("x-edit.ofn"),
+        "Ontology(<http://example.org/x-edit.owl>\n\
+         Declaration(Class(<http://example.org/x/X_9>))\n\
+         )\n",
+    );
+    write(
+        &ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         </catalog>\n",
+    );
+    // A committed plan, EFO's shape: base merging into one merged module, one
+    // plain product and one custom product with a cached module.
+    write(
+        &root.join("owlmake.yaml"),
+        &format!(
+            "id: x\n\
+             version: '1'\n\
+             ontology_iri: http://example.org/x.owl\n\
+             reasoner: elk\n\
+             use_base_merging: true\n\
+             merged_import: src/ontology/imports/merged_import.owl\n\
+             merged_import_iri: http://example.org/x/imports/merged_import.owl\n\
+             edit_file: src/ontology/x-edit.ofn\n\
+             catalog_file: src/ontology/catalog-v001.xml\n\
+             artefacts: []\n\
+             imports:\n\
+             - id: a\n\
+             \x20 source: file://{mirror}\n\
+             \x20 output: src/ontology/imports/a_import.owl\n\
+             \x20 steps:\n\
+             \x20 - op: extract\n\
+             \x20   method: BOT\n\
+             \x20   term_files:\n\
+             \x20   - src/ontology/iri_dependencies/a_terms.txt\n\
+             \x20 product:\n\
+             \x20   id: a\n\
+             \x20   mirror_from: file://{mirror}\n\
+             - id: c\n\
+             \x20 source: file://{root}/nowhere/c.owl\n\
+             \x20 output: src/ontology/imports/c_import.owl\n\
+             \x20 steps:\n\
+             \x20 - op: extract\n\
+             \x20   method: BOT\n\
+             \x20   term_files:\n\
+             \x20   - src/ontology/iri_dependencies/c_terms.txt\n\
+             \x20 product:\n\
+             \x20   id: c\n\
+             \x20   mirror_type: custom\n\
+             refresh_groups:\n\
+             - name: mirrors\n\
+             \x20 flag: MIR\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/mirror/a.owl\n\
+             \x20 default: keep\n\
+             - name: imports\n\
+             \x20 flag: IMP\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/imports/merged_import.owl\n\
+             \x20 default: keep\n",
+            mirror = mirror.display(),
+            root = root.display(),
+        ),
+    );
+
+    let out = bin()
+        .args(["make", "imports/merged_import.owl", "--rebuild", "imports", "--keep", "mirrors", "-C"])
+        .arg(&ont)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merged import build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let merged = std::fs::read_to_string(ont.join("imports/merged_import.owl")).unwrap();
+    assert!(merged.contains("A_1") && merged.contains("A_2"), "the plain product's seed and its ancestor are in:\n{merged}");
+    assert!(!merged.contains("A_3"), "an unseeded leaf of a plain mirror is still extracted away:\n{merged}");
+    assert!(merged.contains("C_1"), "the cached module's seed term is in:\n{merged}");
+    assert!(
+        merged.contains("C_2"),
+        "the cached custom module's unseeded leaf was dropped by the merged extraction:\n{merged}"
+    );
+}
