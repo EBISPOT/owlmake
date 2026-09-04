@@ -2535,6 +2535,37 @@ fn existing_shard_layout(dir: &Path) -> std::collections::BTreeMap<String, std::
     out
 }
 
+/// Replace (or add, before `</catalog>`) the `<group id="…">` of an XML catalog
+/// with one `<uri name=IRI uri=PATH/>` per entry. The group is the build's:
+/// everything else in the catalog — the curators' and Protégé's own entries —
+/// is left byte-for-byte. Paths are catalog-relative, as Protégé writes them.
+fn write_catalog_group(catalog: &Path, id: &str, entries: &[(String, String)]) -> Result<()> {
+    let text = std::fs::read_to_string(catalog)?;
+    let open = format!("<group id=\"{id}\"");
+    let mut block = String::new();
+    block.push_str(&format!("    {open} prefer=\"public\" xml:base=\"\">\n"));
+    for (iri, path) in entries {
+        block.push_str(&format!("        <uri name=\"{iri}\" uri=\"{path}\"/>\n"));
+    }
+    block.push_str("    </group>\n");
+    let out = if let Some(start) = text.find(&open) {
+        // From the start of that line to the end of the line holding `</group>`.
+        let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+        let close = text[start..].find("</group>").map(|i| start + i + "</group>".len())
+            .ok_or_else(|| anyhow::anyhow!("catalog {}: group `{id}` is not closed", catalog.display()))?;
+        let line_end = text[close..].find('\n').map_or(text.len(), |i| close + i + 1);
+        format!("{}{}{}", &text[..line_start], block, &text[line_end..])
+    } else if let Some(end) = text.rfind("</catalog>") {
+        format!("{}{}{}", &text[..end], block, &text[end..])
+    } else {
+        anyhow::bail!("catalog {} has no </catalog>", catalog.display());
+    };
+    if out != text {
+        std::fs::write(catalog, out)?;
+    }
+    Ok(())
+}
+
 /// Write the merged import as one functional-syntax document per source
 /// ontology under `shards_rel`, and `out` as the index that `owl:imports` them.
 ///
@@ -2619,6 +2650,21 @@ fn write_sharded_merged_import(
             if p.extension().is_some_and(|x| x == "owl") && !written.contains(&p) {
                 let _ = std::fs::remove_file(&p);
             }
+        }
+    }
+    // Protégé's catalog library resolves `<uri>` entries and not `rewriteURI`,
+    // so the catalog carries one entry per shard, in a group this build owns.
+    if let Some(rel) = plan.catalog_file.as_deref() {
+        let catalog = repo.dir.join(rel);
+        if catalog.exists() {
+            let entries: Vec<(String, String)> = shard_iris
+                .iter()
+                .map(|iri| {
+                    let file = iri.rsplit('/').next().unwrap_or(iri);
+                    (iri.clone(), format!("{shards_rel}/{file}"))
+                })
+                .collect();
+            write_catalog_group(&catalog, "merged import shards", &entries)?;
         }
     }
     // The index: the module's own header, annotations and an import per shard.
