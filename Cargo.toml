@@ -1,6 +1,6 @@
 [package]
 name = "owlmake"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 description = "A complete ontology build stack in a single self-contained Rust binary: OWL I/O, reasoning, QC and releases."
 license = "Apache-2.0"
