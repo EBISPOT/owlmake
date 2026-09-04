@@ -2356,10 +2356,11 @@ fn build_imports_fresh(
 }
 
 /// A shard is split into numbered parts above this many bytes of functional
-/// syntax, so no file approaches GitHub's 100 MB limit. Parts are cut in the
+/// syntax, so no file approaches GitHub's 100 MB limit even after a year of
+/// growth. Parts are cut in the
 /// writer's sorted order, so growth moves a few lines across one boundary
 /// rather than reshuffling everything.
-const MAX_SHARD_BYTES: usize = 80 * 1024 * 1024;
+const MAX_SHARD_BYTES: usize = 64 * 1024 * 1024;
 
 /// The entity an axiom is *about*, for sharding: the declared entity, the
 /// subclass, the first operand, the annotated subject, the property, the
@@ -2446,10 +2447,16 @@ fn shard_owner(c: &horned_owl::model::Component<horned_owl::model::RcStr>) -> Op
 fn shard_key(iri: &str) -> String {
     let local = iri.rsplit(['/', '#']).next().unwrap_or(iri);
     if let Some((prefix, id)) = local.split_once('_') {
+        // `PREFIX_NNNN`, allowing a short letter run before the digits
+        // (`OBA_VT0010487`, `NCIT_C25464`) — not `Western_Sahara`, not
+        // `gard_rare`, not `gene_symbol_report?hgnc_id=5`.
+        let digits = id.trim_start_matches(|c: char| c.is_ascii_alphabetic());
         let ok = !prefix.is_empty()
-            && !id.is_empty()
             && prefix.chars().all(|c| c.is_ascii_alphanumeric())
-            && prefix.chars().next().is_some_and(|c| c.is_ascii_alphabetic());
+            && prefix.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && id.len() - digits.len() <= 4
+            && !digits.is_empty()
+            && digits.chars().all(|c| c.is_ascii_digit());
         if ok {
             return prefix.to_ascii_lowercase();
         }

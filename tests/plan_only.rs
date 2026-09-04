@@ -961,15 +961,17 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
          Declaration(Class(<http://example.org/a/A_1>))\n\
          Declaration(Class(<http://example.org/a/A_2>))\n\
          Declaration(Class(<http://example.org/b/B_1>))\n\
+         Declaration(Class(<http://dbpedia.org/resource/Western_Sahara>))\n\
          Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000050>))\n\
          SubClassOf(<http://example.org/a/A_1> <http://example.org/a/A_2>)\n\
          SubClassOf(<http://example.org/a/A_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000050> <http://example.org/b/B_1>))\n\
          AnnotationAssertion(rdfs:label <http://example.org/a/A_1> \"a one\")\n\
          AnnotationAssertion(rdfs:label <http://example.org/a/A_2> \"a two\")\n\
          AnnotationAssertion(rdfs:label <http://example.org/b/B_1> \"b one\")\n\
+         AnnotationAssertion(rdfs:label <http://dbpedia.org/resource/Western_Sahara> \"Western Sahara\")\n\
          )\n",
     );
-    write(&ont.join("iri_dependencies/a_terms.txt"), "http://example.org/a/A_1\n");
+    write(&ont.join("iri_dependencies/a_terms.txt"), "http://example.org/a/A_1\nhttp://dbpedia.org/resource/Western_Sahara\n");
     write(
         &ont.join("x-edit.ofn"),
         "Ontology(<http://example.org/x-edit.owl>\n\
@@ -1046,6 +1048,10 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
     assert!(b.contains("\"b one\""), "B_1 shards by its own prefix:\n{b}");
     assert!(!a.contains("B_1>) \"b one\""), "B_1's label is not in the a shard:\n{a}");
     assert!(!ont.join("imports/merged/stale.owl").exists(), "the stale shard was not removed");
+    // A local name that is not `PREFIX_NNNN` is not a prefix of its own.
+    let other = std::fs::read_to_string(ont.join("imports/merged/other.owl")).unwrap();
+    assert!(other.contains("Western_Sahara"), "a non-OBO local name shards to `other`:\n{other}");
+    assert!(!ont.join("imports/merged/western.owl").exists(), "`Western_Sahara` must not become a `western` shard");
     // Sorted output: every axiom line after the header is in non-decreasing order
     // of the writer's ordering — a proxy: labels come out sorted by IRI.
     let a1 = a.find("A_1> \"a one\"").unwrap();
