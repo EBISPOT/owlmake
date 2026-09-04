@@ -2347,8 +2347,298 @@ fn build_imports_fresh(
     // owl/rdf/xml/xsd/rdfs, and nothing else.
     module.format_prefixes_cleared = true;
     module.prefixes = crate::io::robot_ofn_prefixes(&module);
+    if let Some(shards_rel) = plan.merged_import_shards.as_deref() {
+        return write_sharded_merged_import(repo, plan, module, &out, &dir_rel, shards_rel, &mi_iri);
+    }
     crate::io::save_as(&mut module, &out, crate::io::Format::Functional)?;
     status!("import: wrote {} ({} components)", out.display(), module.ont.iter().count());
+    Ok(())
+}
+
+/// Default cap on a shard file, in bytes of functional syntax: above it the
+/// shard is split on its local ids (see [`write_sharded_merged_import`]).
+/// `merged_import_shard_bytes` in the plan overrides it.
+const DEFAULT_SHARD_BYTES: usize = 10 * 1024 * 1024;
+
+/// The entity an axiom is *about*, for sharding: the declared entity, the
+/// subclass, the first operand, the annotated subject, the property, the
+/// individual. Ontology-level components (`Ontology`, `Import`, annotations on
+/// the ontology) have none and go to the index.
+fn shard_owner(c: &horned_owl::model::Component<horned_owl::model::RcStr>) -> Option<String> {
+    use horned_owl::model::*;
+    fn ce(e: &ClassExpression<horned_owl::model::RcStr>) -> Option<String> {
+        match e {
+            ClassExpression::Class(c) => Some(c.0.to_string()),
+            _ => None,
+        }
+    }
+    fn ope(e: &ObjectPropertyExpression<horned_owl::model::RcStr>) -> String {
+        match e {
+            ObjectPropertyExpression::ObjectProperty(p) | ObjectPropertyExpression::InverseObjectProperty(p) => {
+                p.0.to_string()
+            }
+        }
+    }
+    fn ind(i: &Individual<horned_owl::model::RcStr>) -> Option<String> {
+        match i {
+            Individual::Named(n) => Some(n.0.to_string()),
+            Individual::Anonymous(_) => None,
+        }
+    }
+    match c {
+        Component::DeclareClass(d) => Some(d.0 .0.to_string()),
+        Component::DeclareObjectProperty(d) => Some(d.0 .0.to_string()),
+        Component::DeclareAnnotationProperty(d) => Some(d.0 .0.to_string()),
+        Component::DeclareDataProperty(d) => Some(d.0 .0.to_string()),
+        Component::DeclareNamedIndividual(d) => Some(d.0 .0.to_string()),
+        Component::DeclareDatatype(d) => Some(d.0 .0.to_string()),
+        Component::SubClassOf(a) => ce(&a.sub),
+        Component::EquivalentClasses(a) => a.0.iter().find_map(ce),
+        Component::DisjointClasses(a) => a.0.iter().find_map(ce),
+        Component::DisjointUnion(a) => Some(a.0 .0.to_string()),
+        Component::SubObjectPropertyOf(a) => Some(match &a.sub {
+            SubObjectPropertyExpression::ObjectPropertyExpression(e) => ope(e),
+            SubObjectPropertyExpression::ObjectPropertyChain(_) => ope(&a.sup),
+        }),
+        Component::EquivalentObjectProperties(a) => a.0.first().map(ope),
+        Component::DisjointObjectProperties(a) => a.0.first().map(ope),
+        Component::InverseObjectProperties(a) => Some(ope(&a.0)),
+        Component::ObjectPropertyDomain(a) => Some(ope(&a.ope)),
+        Component::ObjectPropertyRange(a) => Some(ope(&a.ope)),
+        Component::FunctionalObjectProperty(a) => Some(ope(&a.0)),
+        Component::InverseFunctionalObjectProperty(a) => Some(ope(&a.0)),
+        Component::ReflexiveObjectProperty(a) => Some(ope(&a.0)),
+        Component::IrreflexiveObjectProperty(a) => Some(ope(&a.0)),
+        Component::SymmetricObjectProperty(a) => Some(ope(&a.0)),
+        Component::AsymmetricObjectProperty(a) => Some(ope(&a.0)),
+        Component::TransitiveObjectProperty(a) => Some(ope(&a.0)),
+        Component::SubDataPropertyOf(a) => Some(a.sub.0.to_string()),
+        Component::EquivalentDataProperties(a) => a.0.first().map(|d| d.0.to_string()),
+        Component::DisjointDataProperties(a) => a.0.first().map(|d| d.0.to_string()),
+        Component::DataPropertyDomain(a) => Some(a.dp.0.to_string()),
+        Component::DataPropertyRange(a) => Some(a.dp.0.to_string()),
+        Component::FunctionalDataProperty(a) => Some(a.0 .0.to_string()),
+        Component::DatatypeDefinition(a) => Some(a.kind.0.to_string()),
+        Component::HasKey(a) => ce(&a.ce),
+        Component::SameIndividual(a) => a.0.iter().find_map(ind),
+        Component::DifferentIndividuals(a) => a.0.iter().find_map(ind),
+        Component::ClassAssertion(a) => ind(&a.i),
+        Component::ObjectPropertyAssertion(a) => ind(&a.from),
+        Component::NegativeObjectPropertyAssertion(a) => ind(&a.from),
+        Component::DataPropertyAssertion(a) => ind(&a.from),
+        Component::NegativeDataPropertyAssertion(a) => ind(&a.from),
+        Component::AnnotationAssertion(a) => match &a.subject {
+            AnnotationSubject::IRI(i) => Some(i.to_string()),
+            AnnotationSubject::AnonymousIndividual(_) => None,
+        },
+        Component::SubAnnotationPropertyOf(a) => Some(a.sub.0.to_string()),
+        Component::AnnotationPropertyDomain(a) => Some(a.ap.0.to_string()),
+        Component::AnnotationPropertyRange(a) => Some(a.ap.0.to_string()),
+        Component::OntologyID(_) | Component::DocIRI(_) | Component::Import(_) | Component::OntologyAnnotation(_) => None,
+        _ => None,
+    }
+}
+
+/// The shard an entity IRI belongs to: its OBO id space under the OBO PURL base,
+/// by the same OBO 1.4 rule the OBO writer translates IRIs with
+/// (`…/obo/MONDO_0005267` → `mondo`, `…/obo/OBA_VT0010487` → `oba`,
+/// `…/obo/NCBITaxon_Union_0000030` → `ncbitaxon_union`). An IRI that is not an
+/// OBO PURL — a dbpedia country, an HGNC gene page, a SwissLipids id — goes to
+/// `other`.
+fn shard_key(iri: &str) -> String {
+    const OBO: &str = "http://purl.obolibrary.org/obo/";
+    iri.strip_prefix(OBO)
+        .filter(|id| !id.contains(['/', '#']))
+        .and_then(crate::io::obo::canonical_prefixed_id)
+        .map(|(pre, _)| pre.to_ascii_lowercase())
+        .unwrap_or_else(|| "other".to_string())
+}
+
+/// One entity's axioms within a shard, keyed for splitting by its local id.
+struct ShardEntry {
+    local: String,
+    size: usize,
+    comps: Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>,
+}
+
+/// The local id an entity is split on: the part of the IRI after the last
+/// `/` or `#`, after its OBO id space prefix (`MONDO_0005267` → `0005267`),
+/// lower-cased, with anything but ASCII letters and digits folded to `_` so it
+/// can name a file.
+fn local_id_key(iri: &str) -> String {
+    let local = iri.rsplit(['/', '#']).next().unwrap_or(iri);
+    let local = crate::io::obo::canonical_prefixed_id(local).map(|(_, l)| l).unwrap_or(local);
+    local
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect()
+}
+
+/// Split a shard's entries into files of at most `cap` bytes, hierarchically on
+/// the local id: a shard that fits is one file `<key>.owl`; one that does not is
+/// grouped on the next character of its local ids (`mondo-000`, `mondo-001`, …),
+/// and a group still over the cap is split again on the character after
+/// (`mondo-0010`, …). Membership is fixed by the id, so a new entity lands in
+/// exactly one file, and a split only ever renames the bucket that overflowed.
+/// A run of characters every id shares (MONDO's leading `00`) is skipped over
+/// rather than made a level of its own.
+///
+/// Splits are sticky. `existing` is the layout already on disk (the suffixes of
+/// this key's files from the previous build, committed with the repo), and a
+/// bucket that was split stays split however small it has become — otherwise
+/// removing an import could merge a bucket back and rename every file under it.
+/// A bucket that empties is simply not written, and the stale file is removed.
+fn split_shard(
+    key: &str,
+    suffix: String,
+    entries: Vec<ShardEntry>,
+    depth: usize,
+    cap: usize,
+    existing: &std::collections::BTreeSet<String>,
+    out: &mut Vec<(String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>)>,
+) {
+    let total: usize = entries.iter().map(|e| e.size).sum();
+    let exhausted = entries.iter().all(|e| e.local.len() <= depth);
+    let split_before = existing.iter().any(|s| s.len() > suffix.len() && s.starts_with(suffix.as_str()));
+    // One entity cannot be split (its axioms stay together), unless the layout
+    // on disk already goes deeper, in which case it is placed where it was.
+    if exhausted || (entries.len() <= 1 && !split_before) || !(total > cap || split_before) {
+        let stem = if suffix.is_empty() { key.to_string() } else { format!("{key}-{suffix}") };
+        out.push((stem, entries.into_iter().flat_map(|e| e.comps).collect()));
+        return;
+    }
+    let mut groups: std::collections::BTreeMap<char, Vec<ShardEntry>> = std::collections::BTreeMap::new();
+    for e in entries {
+        let c = e.local.chars().nth(depth).unwrap_or('_');
+        groups.entry(c).or_default().push(e);
+    }
+    for (c, g) in groups {
+        split_shard(key, format!("{suffix}{c}"), g, depth + 1, cap, existing, out);
+    }
+}
+
+/// The shard layout already in `dir`: for each key, the suffixes of its files
+/// (`mondo.owl` → `""`, `mondo-0012.owl` → `"0012"`).
+fn existing_shard_layout(dir: &Path) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+    let mut out: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = std::collections::BTreeMap::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".owl") else { continue };
+            let (key, suffix) = match stem.rsplit_once('-') {
+                Some((k, s)) => (k.to_string(), s.to_string()),
+                None => (stem.to_string(), String::new()),
+            };
+            out.entry(key).or_default().insert(suffix);
+        }
+    }
+    out
+}
+
+/// Write the merged import as one functional-syntax document per source
+/// ontology under `shards_rel`, and `out` as the index that `owl:imports` them.
+///
+/// Every shard is a complete ontology document with its own IRI, derived from
+/// the index's (`…/imports/merged_import.owl` → `…/imports/merged/<key>.owl`),
+/// so any OWL tool loads the closure through the catalog — one `rewriteURI`
+/// line for the shard directory. Files the previous build wrote and this one
+/// did not are removed, so a shard that emptied or split leaves nothing stale.
+fn write_sharded_merged_import(
+    repo: &Repo,
+    plan: &Plan,
+    module: crate::model::Model,
+    out: &Path,
+    dir_rel: &str,
+    shards_rel: &str,
+    mi_iri: &str,
+) -> Result<()> {
+    use horned_owl::model::{Component, Import, MutableOntology};
+    let shards_dir = repo.dir.join(shards_rel);
+    std::fs::create_dir_all(&shards_dir)?;
+    // Partition. Ontology-level components stay with the index.
+    let mut shards: std::collections::BTreeMap<String, Vec<(String, horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>)>> =
+        std::collections::BTreeMap::new();
+    let mut index_level = Vec::new();
+    for ac in module.ont.iter() {
+        match shard_owner(&ac.component) {
+            Some(iri) => shards.entry(shard_key(&iri)).or_default().push((iri, ac.clone())),
+            None => index_level.push(ac.clone()),
+        }
+    }
+    // The IRI directory the shards hang off: the index's, plus the shard
+    // directory's own name (`imports/merged` under `imports/merged_import.owl`).
+    let dir_name = Path::new(shards_rel)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "merged".into());
+    let iri_dir = mi_iri.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_else(|| mi_iri.to_string());
+    let mut written: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    let mut shard_iris: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    let cap = plan.merged_import_shard_bytes.unwrap_or(DEFAULT_SHARD_BYTES).max(1);
+    let layout = existing_shard_layout(&shards_dir);
+    let no_files = std::collections::BTreeSet::new();
+    for (key, entries) in shards {
+        // Group by owner, measure, and split hierarchically on the local id.
+        let mut by_owner: std::collections::BTreeMap<String, ShardEntry> = std::collections::BTreeMap::new();
+        for (owner, ac) in entries {
+            let e = by_owner.entry(owner.clone()).or_insert_with(|| ShardEntry {
+                local: local_id_key(&owner),
+                size: 0,
+                comps: Vec::new(),
+            });
+            e.size += crate::io::owlfunc::render_component_line(&ac).len() + 1;
+            e.comps.push(ac);
+        }
+        let mut files: Vec<(String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>)> = Vec::new();
+        split_shard(&key, String::new(), by_owner.into_values().collect(), 0, cap, layout.get(&key).unwrap_or(&no_files), &mut files);
+        for (stem, mut comps) in files {
+            comps.sort_by(|a, b| crate::io::owlfunc::cmp_component(&a.component, &b.component));
+            let file = format!("{stem}.owl");
+            let shard_rel = format!("{shards_rel}/{file}");
+            let shard_iri = format!("{iri_dir}/{dir_name}/{file}");
+            let (iri, ver) = merged_import_iris(&plan.ontology_iri, &plan.version, Some(&shard_iri), &shard_rel, dir_rel);
+            let mut m = empty_model();
+            for ac in comps {
+                total += 1;
+                m.ont.insert(ac);
+            }
+            let mut m = crate::cmd::annotate::annotate(m, Some(&iri), Some(&ver), &[], &[], false)?;
+            m.format_prefixes_cleared = true;
+            m.prefixes = crate::io::robot_ofn_prefixes(&m);
+            let path = shards_dir.join(&file);
+            crate::io::save_as(&mut m, &path, crate::io::Format::Functional)?;
+            written.insert(path);
+            shard_iris.push(iri);
+        }
+    }
+    // Stale shards from an earlier layout.
+    if let Ok(rd) = std::fs::read_dir(&shards_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "owl") && !written.contains(&p) {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+    // The index: the module's own header, annotations and an import per shard.
+    let mut index = empty_model();
+    for ac in index_level {
+        index.ont.insert(ac);
+    }
+    for iri in &shard_iris {
+        index.ont.insert(Component::Import(Import(index.build.iri(iri.as_str()))));
+    }
+    index.format_prefixes_cleared = true;
+    index.prefixes = crate::io::robot_ofn_prefixes(&index);
+    crate::io::save_as(&mut index, out, crate::io::Format::Functional)?;
+    status!(
+        "import: wrote {} ({} components in {} shard(s) under {})",
+        out.display(),
+        total,
+        shard_iris.len(),
+        shards_dir.display()
+    );
     Ok(())
 }
 
@@ -6636,7 +6926,7 @@ fn import_closure_of_model(
         // basename probe of the sibling directory — is a filesystem convention
         // that matches neither the catalog nor the `/obo/` PURL rule, i.e. a
         // third resolution policy discovered at build time.
-        match catalog.get(&iri).cloned() {
+        match crate::cmd::catalog_resolve(catalog, &iri) {
             Some(p) => {
                 if seen.insert(p.clone()) {
                     if p.exists() {
@@ -7230,6 +7520,23 @@ fn read_catalog(dir: &Path, path: &Path) -> BTreeMap<String, PathBuf> {
     let mut map = BTreeMap::new();
     if let Ok(text) = std::fs::read_to_string(path) {
         for line in text.lines() {
+            // `<rewriteURI uriStartString=… rewritePrefix=…/>`: a prefix rule,
+            // kept under the marker key `catalog_resolve` looks for.
+            if line.contains("<rewriteURI") {
+                if let (Some(s0), Some(p0)) = (line.find("uriStartString=\""), line.find("rewritePrefix=\"")) {
+                    let start = &line[s0 + 16..];
+                    let start = &start[..start.find('"').unwrap_or(0)];
+                    let prefix = &line[p0 + 15..];
+                    let prefix = &prefix[..prefix.find('"').unwrap_or(0)];
+                    if !start.is_empty() && !prefix.is_empty() {
+                        map.insert(
+                            format!("{}{start}", crate::cmd::CATALOG_REWRITE_KEY),
+                            dir.join(percent_decode(prefix)),
+                        );
+                    }
+                }
+                continue;
+            }
             if let (Some(n0), Some(u0)) = (line.find("name=\""), line.find("uri=\"")) {
                 let name = &line[n0 + 6..];
                 let name = &name[..name.find('"').unwrap_or(0)];
@@ -7294,7 +7601,7 @@ fn import_closure(
             Err(_) => continue,
         };
         for iri in import_iris(&text) {
-            let local = catalog.get(&iri).cloned();
+            let local = crate::cmd::catalog_resolve(catalog, &iri);
             if let Some(p) = local {
                 if seen.insert(p.clone()) && p.exists() {
                     out.push(p.clone());

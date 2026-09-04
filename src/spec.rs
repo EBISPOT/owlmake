@@ -164,6 +164,16 @@ pub struct OwlmakeSpec {
     /// ontology directory stripped).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_import_iri: Option<String>,
+    /// Shard the merged import: one functional-syntax document per source
+    /// ontology in this directory (`imports/merged`), and `merged_import` becomes
+    /// the index that `owl:imports` them. Opt-in; without it the merged import is
+    /// the single file `merged_import` names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_shards: Option<String>,
+    /// Cap on one shard file in bytes; a shard above it is split on its local ids
+    /// (`mondo-000.owl`, …). Default 10 MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_shard_bytes: Option<usize>,
     /// Component files merged into the edit ontology before the release runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<String>,
@@ -1203,6 +1213,8 @@ impl OwlmakeSpec {
                 .collect(),
             merged_import: plan.merged_import.clone(),
             merged_import_iri: plan.merged_import_iri.clone(),
+            merged_import_shards: plan.merged_import_shards.clone(),
+            merged_import_shard_bytes: plan.merged_import_shard_bytes,
             components: plan.components.clone(),
             variables: plan.variables.clone(),
             component_gaps: plan.component_gaps.clone(),
@@ -1383,6 +1395,8 @@ impl OwlmakeSpec {
             imports,
             merged_import: self.merged_import,
             merged_import_iri: self.merged_import_iri,
+            merged_import_shards: self.merged_import_shards,
+            merged_import_shard_bytes: self.merged_import_shard_bytes,
             components: self.components,
             variables: self.variables,
             component_gaps: self.component_gaps,
@@ -2863,6 +2877,8 @@ mod tests {
             imports: vec![],
             merged_import: None,
             merged_import_iri: None,
+            merged_import_shards: None,
+            merged_import_shard_bytes: None,
             components: vec!["components/c.owl".into()],
             variables: [("ROBOT".to_string(), "../../bin/robot".to_string())]
                 .into_iter()
@@ -2988,6 +3004,13 @@ mod format_floor_tests {
         // a build that does not know it — only the frozen version comes back.
         // That is a format an older owlmake can still execute, so the floor stays.
         //
+        // `merged_import_shards` and `merged_import_shard_bytes` are optional with
+        // no default behaviour change: a plan without them is the single-file
+        // merged import every owlmake wrote. A plan WITH them is executable only
+        // by a build that shards and reads `rewriteURI` catalogs, and an older one
+        // stops with an unresolved import rather than mis-executing — a repo that
+        // opts in pins `min_owlmake_version` itself (EFO: 0.2.11). The floor stays.
+        //
         // `may_fail` arrives as an optional field on every step, flattened beside
         // the `op` it applies to — the first setting that belongs to a step rather
         // than to an operation, which is why it is a field of `StepEntry` and not
@@ -3004,7 +3027,7 @@ mod format_floor_tests {
         // step's `relative` (rsync -R) and `side_effect_only` (a recipe that
         // never writes its own target) all default off, and an older build
         // ignoring them over-builds rather than mis-builds, so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "2e096c77dfb8a214";
+        const PLAN_SCHEMA_DIGEST: &str = "9711b33d71a6a643";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3044,6 +3067,8 @@ mod round_trip_tests {
             imports: vec![],
             merged_import: Some("imports/merged_import.owl".into()),
             merged_import_iri: None,
+            merged_import_shards: None,
+            merged_import_shard_bytes: None,
             components: vec!["components/c.owl".into()],
             variables: [("OTHER_SRC".to_string(), "components/c.owl".to_string())]
                 .into_iter()
@@ -3151,6 +3176,8 @@ mod round_trip_tests {
             imports: vec![],
             merged_import: None,
             merged_import_iri: None,
+            merged_import_shards: None,
+            merged_import_shard_bytes: None,
             components: vec![],
             variables: Default::default(),
             component_gaps: vec![],

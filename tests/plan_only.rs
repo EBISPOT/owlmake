@@ -944,3 +944,151 @@ fn a_cached_custom_module_is_kept_whole_by_the_merged_import() {
         "the cached custom module's unseeded leaf was dropped by the merged extraction:\n{merged}"
     );
 }
+
+/// With `merged_import_shards`, the merged import is one functional-syntax
+/// document per source ontology plus an index that `owl:imports` them, and a
+/// single `rewriteURI` catalog line resolves the lot. Ontology-level components
+/// stay with the index; entities shard by the prefix of their local name.
+#[test]
+fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
+    let root = scratch("shards");
+    let ont = root.join("src/ontology");
+    let mirror = ont.join("mirror/a.owl");
+    write(
+        &mirror,
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/a.owl>\n\
+         Declaration(Class(<http://purl.obolibrary.org/obo/A_1>))\n\
+         Declaration(Class(<http://purl.obolibrary.org/obo/A_2>))\n\
+         Declaration(Class(<http://purl.obolibrary.org/obo/B_1>))\n\
+         Declaration(Class(<http://dbpedia.org/resource/Western_Sahara>))\n\
+         Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000050>))\n\
+         SubClassOf(<http://purl.obolibrary.org/obo/A_1> <http://purl.obolibrary.org/obo/A_2>)\n\
+         SubClassOf(<http://purl.obolibrary.org/obo/A_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000050> <http://purl.obolibrary.org/obo/B_1>))\n\
+         AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/A_1> \"a one\")\n\
+         AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/A_2> \"a two\")\n\
+         AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/B_1> \"b one\")\n\
+         AnnotationAssertion(rdfs:label <http://dbpedia.org/resource/Western_Sahara> \"Western Sahara\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/a_terms.txt"), "http://purl.obolibrary.org/obo/A_1\nhttp://dbpedia.org/resource/Western_Sahara\n");
+    write(
+        &ont.join("x-edit.ofn"),
+        "Ontology(<http://example.org/x-edit.owl>\n\
+         Import(<http://example.org/x/imports/merged_import.owl>)\n\
+         Declaration(Class(<http://example.org/x/X_9>))\n\
+         )\n",
+    );
+    write(
+        &ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://example.org/x/imports/merged_import.owl\" uri=\"imports/merged_import.owl\"/>\n\
+         <rewriteURI uriStartString=\"http://example.org/x/imports/merged/\" rewritePrefix=\"imports/merged/\"/>\n\
+         </catalog>\n",
+    );
+    write(
+        &root.join("owlmake.yaml"),
+        &format!(
+            "id: x\n\
+             version: '1'\n\
+             ontology_iri: http://example.org/x.owl\n\
+             reasoner: elk\n\
+             use_base_merging: true\n\
+             merged_import: src/ontology/imports/merged_import.owl\n\
+             merged_import_iri: http://example.org/x/imports/merged_import.owl\n\
+             merged_import_shards: src/ontology/imports/merged\n\
+             merged_import_shard_bytes: 150\n\
+             edit_file: src/ontology/x-edit.ofn\n\
+             catalog_file: src/ontology/catalog-v001.xml\n\
+             artefacts: []\n\
+             imports:\n\
+             - id: a\n\
+             \x20 source: file://{mirror}\n\
+             \x20 output: src/ontology/imports/a_import.owl\n\
+             \x20 steps:\n\
+             \x20 - op: extract\n\
+             \x20   method: BOT\n\
+             \x20   term_files:\n\
+             \x20   - src/ontology/iri_dependencies/a_terms.txt\n\
+             \x20 product:\n\
+             \x20   id: a\n\
+             \x20   mirror_from: file://{mirror}\n\
+             refresh_groups:\n\
+             - name: mirrors\n\
+             \x20 flag: MIR\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/mirror/a.owl\n\
+             \x20 default: keep\n\
+             - name: imports\n\
+             \x20 flag: IMP\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/imports/merged_import.owl\n\
+             \x20 default: keep\n",
+            mirror = mirror.display(),
+        ),
+    );
+    // A stale shard from an earlier layout must not survive the rebuild.
+    write(&ont.join("imports/merged/stale.owl"), "Ontology(<http://example.org/x/imports/merged/stale.owl>)\n");
+
+    let out = bin()
+        .args(["make", "imports/merged_import.owl", "--rebuild", "imports", "--keep", "mirrors", "-C"])
+        .arg(&ont)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merged import build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let index = std::fs::read_to_string(ont.join("imports/merged_import.owl")).unwrap();
+    // The A shard is over the 150-byte cap, so it splits on the local id: A_1's
+    // axioms in `a-1.owl`, A_2's in `a-2.owl`. B fits in one file.
+    let a1 = std::fs::read_to_string(ont.join("imports/merged/a-1.owl")).unwrap();
+    let a2 = std::fs::read_to_string(ont.join("imports/merged/a-2.owl")).unwrap();
+    let b = std::fs::read_to_string(ont.join("imports/merged/b.owl")).unwrap();
+    assert!(!ont.join("imports/merged/a.owl").exists(), "a split shard leaves no unsplit file");
+    for f in ["a-1", "a-2", "b"] {
+        assert!(index.contains(&format!("Import(<http://example.org/x/imports/merged/{f}.owl>)")), "index imports {f}:\n{index}");
+    }
+    assert!(!index.contains("A_1"), "axioms live in the shards, not the index:\n{index}");
+    assert!(a1.contains("Ontology(<http://example.org/x/imports/merged/a-1.owl>"), "a shard has its own IRI:\n{a1}");
+    assert!(a1.contains("SubClassOf(<http://purl.obolibrary.org/obo/A_1> <http://purl.obolibrary.org/obo/A_2>)"), "A_1's axioms shard with A_1:\n{a1}");
+    assert!(a2.contains("A_2> \"a two\"") && !a1.contains("A_2> \"a two\""), "A_2's label is in a-2 only:\n{a1}\n{a2}");
+    assert!(b.contains("\"b one\""), "B_1 shards by its own prefix:\n{b}");
+    assert!(!ont.join("imports/merged/stale.owl").exists(), "the stale shard was not removed");
+    // A local name that is not `PREFIX_NNNN` is not a prefix of its own.
+    let other = std::fs::read_to_string(ont.join("imports/merged/other.owl")).unwrap();
+    assert!(other.contains("Western_Sahara"), "a non-OBO local name shards to `other`:\n{other}");
+    assert!(!ont.join("imports/merged/western.owl").exists(), "`Western_Sahara` must not become a `western` shard");
+
+    // Splits are sticky: with the cap raised so A would fit in one file, the
+    // rebuild keeps `a-1`/`a-2` rather than merging them back into `a.owl` —
+    // which would rename every file under a bucket whenever an import shrank.
+    let plan = root.join("owlmake.yaml");
+    let text = std::fs::read_to_string(&plan).unwrap().replace("merged_import_shard_bytes: 150", "merged_import_shard_bytes: 1000000");
+    std::fs::write(&plan, text).unwrap();
+    let out = bin()
+        .args(["make", "imports/merged_import.owl", "--rebuild", "imports", "--keep", "mirrors", "-C"])
+        .arg(&ont)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "rebuild with a larger cap failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(ont.join("imports/merged/a-1.owl").exists() && ont.join("imports/merged/a-2.owl").exists(), "a split bucket merged back");
+    assert!(!ont.join("imports/merged/a.owl").exists(), "a split bucket was rewritten as one file");
+
+    // The closure loads through the catalog's rewriteURI: merging the edit file
+    // resolves the index, then every shard.
+    let merged = ont.join("merged.ofn");
+    let out = bin()
+        .args(["merge", "-i"])
+        .arg(ont.join("x-edit.ofn"))
+        .args(["--catalog"])
+        .arg(ont.join("catalog-v001.xml"))
+        .arg("-o")
+        .arg(&merged)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merge through the catalog failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let text = std::fs::read_to_string(&merged).unwrap();
+    for want in ["X_9", "A_1", "A_2", "B_1"] {
+        assert!(text.contains(want), "`{want}` did not arrive through the sharded closure:\n{text}");
+    }
+}

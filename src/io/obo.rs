@@ -2218,21 +2218,26 @@ impl Ctx {
         // `DHBA_10333` → `DHBA:10333` (`https://purl.brain-bican.org/…`),
         // `Ontology_extensions` → `Ontology:extensions` (a GO-wiki link). No
         // `idspace:` line is emitted for these; the reader re-splits at the last `_`.
-        if let Some(p) = id.rfind('_') {
-            let (pre, local) = (&id[..p], &id[p + 1..]);
-            // A single-underscore id always splits (`CL_0000540`, `FOO_baz`,
-            // `Ontology_extensions`). A multi-underscore idspace splits only when the
-            // local id is numeric: `NCBITaxon_Union_0000030` →
-            // `NCBITaxon_Union:0000030`, but `valid_for_gocam` stays a full IRI. An id
-            // with no `_` (an ORCID, a DOI, a GitHub issue URL) stays full too.
-            let single = !pre.contains('_');
-            let numeric_local = local.bytes().all(|b| b.is_ascii_digit());
-            if !pre.is_empty() && !local.is_empty() && (single || numeric_local) {
-                return format!("{pre}:{}", percent_decode(local));
-            }
+        if let Some((pre, local)) = canonical_prefixed_id(id) {
+            return format!("{pre}:{}", percent_decode(local));
         }
         iri.to_string()
     }
+}
+
+/// OBO 1.4 §5.9.2 row 4, Canonical-Prefixed-ID: the LAST `_` of an id (the part
+/// of an IRI after the final `/`) splits idspace from local id. A
+/// single-underscore id always splits (`CL_0000540`, `FOO_baz`,
+/// `Ontology_extensions`); a multi-underscore idspace splits only when the local
+/// id is numeric (`NCBITaxon_Union_0000030` → `NCBITaxon_Union:0000030`, but
+/// `valid_for_gocam` does not split). An id with no `_` (an ORCID, a DOI, a
+/// GitHub issue URL) is not an OBO id.
+pub(crate) fn canonical_prefixed_id(id: &str) -> Option<(&str, &str)> {
+    let p = id.rfind('_')?;
+    let (pre, local) = (&id[..p], &id[p + 1..]);
+    let single = !pre.contains('_');
+    let numeric_local = local.bytes().all(|b| b.is_ascii_digit());
+    (!pre.is_empty() && !local.is_empty() && (single || numeric_local)).then_some((pre, local))
 }
 
 /// Case-insensitive sort key for the repeated clauses of a tag (`xref:`,
