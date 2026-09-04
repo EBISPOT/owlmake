@@ -3004,6 +3004,13 @@ mod format_floor_tests {
         // a build that does not know it — only the frozen version comes back.
         // That is a format an older owlmake can still execute, so the floor stays.
         //
+        // `merged_import_shards` and `merged_import_shard_bytes` are optional with
+        // no default behaviour change: a plan without them is the single-file
+        // merged import every owlmake wrote. A plan WITH them is executable only
+        // by a build that shards and reads `rewriteURI` catalogs, and an older one
+        // stops with an unresolved import rather than mis-executing — a repo that
+        // opts in pins `min_owlmake_version` itself (EFO: 0.2.11). The floor stays.
+        //
         // `may_fail` arrives as an optional field on every step, flattened beside
         // the `op` it applies to — the first setting that belongs to a step rather
         // than to an operation, which is why it is a field of `StepEntry` and not
@@ -3020,7 +3027,7 @@ mod format_floor_tests {
         // step's `relative` (rsync -R) and `side_effect_only` (a recipe that
         // never writes its own target) all default off, and an older build
         // ignoring them over-builds rather than mis-builds, so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "2e096c77dfb8a214";
+        const PLAN_SCHEMA_DIGEST: &str = "9711b33d71a6a643";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
