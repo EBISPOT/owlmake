@@ -387,7 +387,7 @@ pub(crate) fn resolve_import_closure(
         if !seen.insert(iri.clone()) {
             continue;
         }
-        let path = map.get(&iri).cloned().or_else(|| default_local(&iri, base));
+        let path = catalog_resolve(map, &iri).or_else(|| default_local(&iri, base));
         // …and dedupe on the DOCUMENT too, not only on the name that reached it.
         // Two import IRIs a catalog maps to one file must be parsed once and
         // advance the blank-node counter once. Keyed on the IRI alone, the same
@@ -717,6 +717,18 @@ fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::
     let text = std::fs::read_to_string(path)?;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut map = std::collections::BTreeMap::new();
+    // `<rewriteURI uriStartString="IRI-PREFIX" rewritePrefix="PATH-PREFIX"/>`:
+    // every IRI under the prefix maps to the path under the other, which is how
+    // one catalog line covers a directory of import shards.
+    for frag in text.split("<rewriteURI").skip(1) {
+        let tag = frag.split('>').next().unwrap_or(frag);
+        if let (Some(start), Some(prefix)) = (attr(tag, "uriStartString"), attr(tag, "rewritePrefix")) {
+            let prefix = percent_decode(&prefix);
+            let p = std::path::Path::new(&prefix);
+            let resolved = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
+            map.insert(format!("{CATALOG_REWRITE_KEY}{start}"), resolved);
+        }
+    }
     for frag in text.split("<uri").skip(1) {
         let tag = frag.split('>').next().unwrap_or(frag);
         let (name, uri) = match (attr(tag, "name"), attr(tag, "uri")) {
@@ -729,6 +741,31 @@ fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::
         map.insert(name, resolved);
     }
     Ok(map)
+}
+
+/// Marker prefix under which a catalog map carries its `rewriteURI` rules: the
+/// key is the marker plus the IRI prefix, the value the path prefix. Exact
+/// `<uri>` entries are plain keys, and [`catalog_resolve`] consults both.
+pub(crate) const CATALOG_REWRITE_KEY: &str = "\u{2}rewriteURI\u{2}";
+
+/// Resolve an import IRI against a catalog map: an exact `<uri>` entry first,
+/// else the longest `rewriteURI` prefix that matches, with the rest of the IRI
+/// appended to its path prefix.
+pub(crate) fn catalog_resolve(
+    map: &std::collections::BTreeMap<String, std::path::PathBuf>,
+    iri: &str,
+) -> Option<std::path::PathBuf> {
+    if let Some(p) = map.get(iri) {
+        return Some(p.clone());
+    }
+    map.iter()
+        .filter_map(|(k, v)| {
+            let start = k.strip_prefix(CATALOG_REWRITE_KEY)?;
+            let rest = iri.strip_prefix(start)?;
+            Some((start.len(), format!("{}{}", v.display(), rest)))
+        })
+        .max_by_key(|(n, _)| *n)
+        .map(|(_, p)| std::path::PathBuf::from(p))
 }
 
 /// Fallback for an import with no catalog entry: a sibling file named after the
