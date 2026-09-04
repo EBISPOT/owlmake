@@ -170,6 +170,10 @@ pub struct OwlmakeSpec {
     /// the single file `merged_import` names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_import_shards: Option<String>,
+    /// Cap on one shard file in bytes; a shard above it is split on its local ids
+    /// (`mondo-000.owl`, …). Default 10 MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_shard_bytes: Option<usize>,
     /// Component files merged into the edit ontology before the release runs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<String>,
@@ -1210,6 +1214,7 @@ impl OwlmakeSpec {
             merged_import: plan.merged_import.clone(),
             merged_import_iri: plan.merged_import_iri.clone(),
             merged_import_shards: plan.merged_import_shards.clone(),
+            merged_import_shard_bytes: plan.merged_import_shard_bytes,
             components: plan.components.clone(),
             variables: plan.variables.clone(),
             component_gaps: plan.component_gaps.clone(),
@@ -1391,6 +1396,7 @@ impl OwlmakeSpec {
             merged_import: self.merged_import,
             merged_import_iri: self.merged_import_iri,
             merged_import_shards: self.merged_import_shards,
+            merged_import_shard_bytes: self.merged_import_shard_bytes,
             components: self.components,
             variables: self.variables,
             component_gaps: self.component_gaps,
@@ -2872,6 +2878,7 @@ mod tests {
             merged_import: None,
             merged_import_iri: None,
             merged_import_shards: None,
+            merged_import_shard_bytes: None,
             components: vec!["components/c.owl".into()],
             variables: [("ROBOT".to_string(), "../../bin/robot".to_string())]
                 .into_iter()
@@ -3054,6 +3061,7 @@ mod round_trip_tests {
             merged_import: Some("imports/merged_import.owl".into()),
             merged_import_iri: None,
             merged_import_shards: None,
+            merged_import_shard_bytes: None,
             components: vec!["components/c.owl".into()],
             variables: [("OTHER_SRC".to_string(), "components/c.owl".to_string())]
                 .into_iter()
@@ -3162,6 +3170,7 @@ mod round_trip_tests {
             merged_import: None,
             merged_import_iri: None,
             merged_import_shards: None,
+            merged_import_shard_bytes: None,
             components: vec![],
             variables: Default::default(),
             component_gaps: vec![],

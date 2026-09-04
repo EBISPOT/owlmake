@@ -286,6 +286,9 @@ pub struct Plan {
     /// can delta-compress, so a one-term import costs kilobytes of history rather
     /// than the whole module; and `git diff --stat` says which ontologies moved.
     pub merged_import_shards: Option<String>,
+    /// Cap on one shard file in bytes (default 10 MiB): a shard above it is split
+    /// on its local ids.
+    pub merged_import_shard_bytes: Option<usize>,
     pub components: Vec<String>,
     /// Build variables the *executor* still needs after planning — `$(SRC)`,
     /// `$(OTHER_SRC)`, `$(ROBOT)`, `$(OBOBASE)`, `$(MIRRORDIR)` — resolved at

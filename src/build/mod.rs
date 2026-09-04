@@ -2355,12 +2355,10 @@ fn build_imports_fresh(
     Ok(())
 }
 
-/// A shard is split into numbered parts above this many bytes of functional
-/// syntax, so no file approaches GitHub's 100 MB limit even after a year of
-/// growth. Parts are cut in the
-/// writer's sorted order, so growth moves a few lines across one boundary
-/// rather than reshuffling everything.
-const MAX_SHARD_BYTES: usize = 64 * 1024 * 1024;
+/// Default cap on a shard file, in bytes of functional syntax: above it the
+/// shard is split on its local ids (see [`write_sharded_merged_import`]).
+/// `merged_import_shard_bytes` in the plan overrides it.
+const DEFAULT_SHARD_BYTES: usize = 10 * 1024 * 1024;
 
 /// The entity an axiom is *about*, for sharding: the declared entity, the
 /// subclass, the first operand, the annotated subject, the property, the
@@ -2441,27 +2439,100 @@ fn shard_owner(c: &horned_owl::model::Component<horned_owl::model::RcStr>) -> Op
     }
 }
 
-/// The shard an entity IRI belongs to: the lower-cased prefix of an OBO-style
-/// local name (`…/obo/MONDO_0005267` → `mondo`, `…/efo/EFO_0000001` → `efo`,
-/// `…/rdf/SLM_000000001` → `slm`), and `other` for anything else.
+/// The shard an entity IRI belongs to: its OBO id space under the OBO PURL base,
+/// by the same OBO 1.4 rule the OBO writer translates IRIs with
+/// (`…/obo/MONDO_0005267` → `mondo`, `…/obo/OBA_VT0010487` → `oba`,
+/// `…/obo/NCBITaxon_Union_0000030` → `ncbitaxon_union`). An IRI that is not an
+/// OBO PURL — a dbpedia country, an HGNC gene page, a SwissLipids id — goes to
+/// `other`.
 fn shard_key(iri: &str) -> String {
+    const OBO: &str = "http://purl.obolibrary.org/obo/";
+    iri.strip_prefix(OBO)
+        .filter(|id| !id.contains(['/', '#']))
+        .and_then(crate::io::obo::canonical_prefixed_id)
+        .map(|(pre, _)| pre.to_ascii_lowercase())
+        .unwrap_or_else(|| "other".to_string())
+}
+
+/// One entity's axioms within a shard, keyed for splitting by its local id.
+struct ShardEntry {
+    local: String,
+    size: usize,
+    comps: Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>,
+}
+
+/// The local id an entity is split on: the part of the IRI after the last
+/// `/` or `#`, after its OBO id space prefix (`MONDO_0005267` → `0005267`),
+/// lower-cased, with anything but ASCII letters and digits folded to `_` so it
+/// can name a file.
+fn local_id_key(iri: &str) -> String {
     let local = iri.rsplit(['/', '#']).next().unwrap_or(iri);
-    if let Some((prefix, id)) = local.split_once('_') {
-        // `PREFIX_ID` where the id is alphanumeric with at least one digit
-        // (`MONDO_0005267`, `OBA_VT0010487`, `NCIT_C25464`, PR's UniProt-style
-        // `PR_A0A0B4J2F0`) — not `Western_Sahara`, not `gard_rare`, not
-        // `gene_symbol_report?hgnc_id=5`.
-        let ok = !prefix.is_empty()
-            && prefix.chars().all(|c| c.is_ascii_alphanumeric())
-            && prefix.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-            && !id.is_empty()
-            && id.chars().all(|c| c.is_ascii_alphanumeric())
-            && id.chars().any(|c| c.is_ascii_digit());
-        if ok {
-            return prefix.to_ascii_lowercase();
+    let local = crate::io::obo::canonical_prefixed_id(local).map(|(_, l)| l).unwrap_or(local);
+    local
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect()
+}
+
+/// Split a shard's entries into files of at most `cap` bytes, hierarchically on
+/// the local id: a shard that fits is one file `<key>.owl`; one that does not is
+/// grouped on the next character of its local ids (`mondo-000`, `mondo-001`, …),
+/// and a group still over the cap is split again on the character after
+/// (`mondo-0010`, …). Membership is fixed by the id, so a new entity lands in
+/// exactly one file, and a split only ever renames the bucket that overflowed.
+/// A run of characters every id shares (MONDO's leading `00`) is skipped over
+/// rather than made a level of its own.
+///
+/// Splits are sticky. `existing` is the layout already on disk (the suffixes of
+/// this key's files from the previous build, committed with the repo), and a
+/// bucket that was split stays split however small it has become — otherwise
+/// removing an import could merge a bucket back and rename every file under it.
+/// A bucket that empties is simply not written, and the stale file is removed.
+fn split_shard(
+    key: &str,
+    suffix: String,
+    entries: Vec<ShardEntry>,
+    depth: usize,
+    cap: usize,
+    existing: &std::collections::BTreeSet<String>,
+    out: &mut Vec<(String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>)>,
+) {
+    let total: usize = entries.iter().map(|e| e.size).sum();
+    let exhausted = entries.iter().all(|e| e.local.len() <= depth);
+    let split_before = existing.iter().any(|s| s.len() > suffix.len() && s.starts_with(suffix.as_str()));
+    // One entity cannot be split (its axioms stay together), unless the layout
+    // on disk already goes deeper, in which case it is placed where it was.
+    if exhausted || (entries.len() <= 1 && !split_before) || !(total > cap || split_before) {
+        let stem = if suffix.is_empty() { key.to_string() } else { format!("{key}-{suffix}") };
+        out.push((stem, entries.into_iter().flat_map(|e| e.comps).collect()));
+        return;
+    }
+    let mut groups: std::collections::BTreeMap<char, Vec<ShardEntry>> = std::collections::BTreeMap::new();
+    for e in entries {
+        let c = e.local.chars().nth(depth).unwrap_or('_');
+        groups.entry(c).or_default().push(e);
+    }
+    for (c, g) in groups {
+        split_shard(key, format!("{suffix}{c}"), g, depth + 1, cap, existing, out);
+    }
+}
+
+/// The shard layout already in `dir`: for each key, the suffixes of its files
+/// (`mondo.owl` → `""`, `mondo-0012.owl` → `"0012"`).
+fn existing_shard_layout(dir: &Path) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+    let mut out: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = std::collections::BTreeMap::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".owl") else { continue };
+            let (key, suffix) = match stem.rsplit_once('-') {
+                Some((k, s)) => (k.to_string(), s.to_string()),
+                None => (stem.to_string(), String::new()),
+            };
+            out.entry(key).or_default().insert(suffix);
         }
     }
-    "other".to_string()
+    out
 }
 
 /// Write the merged import as one functional-syntax document per source
@@ -2485,12 +2556,12 @@ fn write_sharded_merged_import(
     let shards_dir = repo.dir.join(shards_rel);
     std::fs::create_dir_all(&shards_dir)?;
     // Partition. Ontology-level components stay with the index.
-    let mut shards: std::collections::BTreeMap<String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>> =
+    let mut shards: std::collections::BTreeMap<String, Vec<(String, horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>)>> =
         std::collections::BTreeMap::new();
     let mut index_level = Vec::new();
     for ac in module.ont.iter() {
         match shard_owner(&ac.component) {
-            Some(iri) => shards.entry(shard_key(&iri)).or_default().push(ac.clone()),
+            Some(iri) => shards.entry(shard_key(&iri)).or_default().push((iri, ac.clone())),
             None => index_level.push(ac.clone()),
         }
     }
@@ -2504,33 +2575,31 @@ fn write_sharded_merged_import(
     let mut written: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
     let mut shard_iris: Vec<String> = Vec::new();
     let mut total = 0usize;
-    for (key, mut comps) in shards {
-        comps.sort_by(|a, b| crate::io::owlfunc::cmp_component(&a.component, &b.component));
-        // Cut into parts by rendered size, in sorted order.
-        let sizes: Vec<usize> =
-            comps.iter().map(|ac| crate::io::owlfunc::render_component_line(ac).len() + 1).collect();
-        let bytes: usize = sizes.iter().sum();
-        let parts = bytes.div_ceil(MAX_SHARD_BYTES).max(1);
-        let target = bytes.div_ceil(parts);
-        let mut groups: Vec<Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>> = vec![Vec::new()];
-        let mut acc = 0usize;
-        for (ac, sz) in comps.into_iter().zip(sizes) {
-            if acc >= target && groups.len() < parts {
-                groups.push(Vec::new());
-                acc = 0;
-            }
-            groups.last_mut().unwrap().push(ac);
-            acc += sz;
+    let cap = plan.merged_import_shard_bytes.unwrap_or(DEFAULT_SHARD_BYTES).max(1);
+    let layout = existing_shard_layout(&shards_dir);
+    let no_files = std::collections::BTreeSet::new();
+    for (key, entries) in shards {
+        // Group by owner, measure, and split hierarchically on the local id.
+        let mut by_owner: std::collections::BTreeMap<String, ShardEntry> = std::collections::BTreeMap::new();
+        for (owner, ac) in entries {
+            let e = by_owner.entry(owner.clone()).or_insert_with(|| ShardEntry {
+                local: local_id_key(&owner),
+                size: 0,
+                comps: Vec::new(),
+            });
+            e.size += crate::io::owlfunc::render_component_line(&ac).len() + 1;
+            e.comps.push(ac);
         }
-        let n = groups.len();
-        for (i, group) in groups.into_iter().enumerate() {
-            let stem = if n == 1 { key.clone() } else { format!("{key}-{}", i + 1) };
+        let mut files: Vec<(String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>)> = Vec::new();
+        split_shard(&key, String::new(), by_owner.into_values().collect(), 0, cap, layout.get(&key).unwrap_or(&no_files), &mut files);
+        for (stem, mut comps) in files {
+            comps.sort_by(|a, b| crate::io::owlfunc::cmp_component(&a.component, &b.component));
             let file = format!("{stem}.owl");
             let shard_rel = format!("{shards_rel}/{file}");
             let shard_iri = format!("{iri_dir}/{dir_name}/{file}");
             let (iri, ver) = merged_import_iris(&plan.ontology_iri, &plan.version, Some(&shard_iri), &shard_rel, dir_rel);
             let mut m = empty_model();
-            for ac in group {
+            for ac in comps {
                 total += 1;
                 m.ont.insert(ac);
             }
