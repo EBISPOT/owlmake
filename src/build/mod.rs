@@ -2224,9 +2224,6 @@ fn build_imports_fresh(
         merge_model_into(&mut merged, m);
     }
 
-    // Drop excluded IRIs (the plan's `exclude_iri_patterns`, e.g. `<…/GOCHE_*>`).
-    merged = drop_excluded(merged, plan)?;
-
     // Seed: committed *_terms.txt plus the edit ontology's signature.
     let seed = import_seed(repo, plan)?;
     status!("import: extracting ⊥-module over {} seed terms", seed.len());
@@ -2242,6 +2239,15 @@ fn build_imports_fresh(
         }
     }
     let mut module = extract::extract_with(&merged, &seed, Method::Bot, &opts);
+    drop(merged);
+
+    // Drop excluded IRIs (the plan's `exclude_iri_patterns`, e.g. `<…/GOCHE_*>`)
+    // from the MODULE, which is where the ODK recipe runs its `remove` chain
+    // (`merge … extract … $(foreach x,$(EXCLUDE_IRIS),remove --select "$(x)")`).
+    // Removing from the merged mirror instead — six million axioms for EFO,
+    // one structure-preserving pass per pattern — took nine minutes for sixteen
+    // patterns; on the module it is a few seconds.
+    module = drop_excluded(module, plan)?;
 
     // The merged-import rule post-processes the ⊥-module before writing it:
     //
@@ -3477,15 +3483,22 @@ fn merge_model_into(model: &mut crate::model::Model, other: crate::model::Model)
 ///    `PO_`/`CL_`/`OBI_` scaffolding is re-attached to the surviving superclasses
 ///    of what was removed. That is 168 `SubClassOf` axioms in ECTO's merged
 ///    import that a filter cannot produce at all, because they are in no input.
-fn drop_excluded(mut model: crate::model::Model, plan: &Plan) -> Result<crate::model::Model> {
-    for pattern in &plan.exclude_iri_patterns {
-        let pattern = pattern.trim();
-        if pattern.is_empty() {
-            continue;
-        }
-        model = crate::cmd::remove::remove(model, &[], &[], &[pattern.to_string()], &[], &[])?;
+fn drop_excluded(model: crate::model::Model, plan: &Plan) -> Result<crate::model::Model> {
+    // One `remove` over the union of the patterns: every pattern selects
+    // against the same signature, and `--preserve-structure` bridges each
+    // removed class to its surviving superclasses whether the set is removed
+    // in one pass or sixteen, so the result is the chain's result at a
+    // sixteenth of the cost.
+    let patterns: Vec<String> = plan
+        .exclude_iri_patterns
+        .iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if patterns.is_empty() {
+        return Ok(model);
     }
-    Ok(model)
+    crate::cmd::remove::remove(model, &[], &[], &patterns, &[], &[])
 }
 
 /// The merged-import seed: the union of every import's declared seed term file
