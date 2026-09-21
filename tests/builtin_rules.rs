@@ -10,7 +10,8 @@
 //!
 //! * `tests/fixtures/odk-<version>/<name>/` — a `config.yaml`, the `Makefile`
 //!   that ODK release really generated for it, and optionally the rules a
-//!   repository wrote itself (`own.Makefile`). Add one for any option with
+//!   repository wrote itself (`own.Makefile`) and files it holds (`tree/`, laid
+//!   out from the repository root). Add one for any option with
 //!   `scripts/gen_odk_fixture.sh`; it runs ODK's own generator, so the expected
 //!   side of the comparison is never written by hand.
 //! * real repositories, named in `OM_ORACLE_REPOS` (colon-separated roots, each
@@ -139,6 +140,22 @@ fn repository_for(fixture: &Path) -> std::path::PathBuf {
     std::fs::copy(fixture.join("Makefile"), ont.join("Makefile")).unwrap();
     if fixture.join("own.Makefile").exists() {
         std::fs::copy(fixture.join("own.Makefile"), ont.join(format!("{id}.Makefile"))).unwrap();
+    }
+    // Files the rules read off the repository — pattern and data tables, which
+    // the pattern rules find by listing directories.
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap().flatten() {
+            let (src, dst) = (entry.path(), to.join(entry.file_name()));
+            if src.is_dir() {
+                copy_tree(&src, &dst);
+            } else {
+                std::fs::copy(&src, &dst).unwrap();
+            }
+        }
+    }
+    if fixture.join("tree").is_dir() {
+        copy_tree(&fixture.join("tree"), &root);
     }
     root
 }

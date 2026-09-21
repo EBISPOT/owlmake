@@ -127,6 +127,24 @@ pub struct Config {
     #[serde(default)]
     pub owltools_memory: String,
 
+    /// Generate classes from design patterns and their data tables.
+    #[serde(default)]
+    pub use_dosdps: bool,
+    #[serde(default = "default_dosdp_tools_options")]
+    pub dosdp_tools_options: String,
+    #[serde(default)]
+    pub pattern_pipelines_group: Option<PatternPipelineGroup>,
+    /// Where the repository is hosted: the pattern documentation links its data
+    /// tables there.
+    #[serde(default)]
+    pub repo_url: String,
+    #[serde(default)]
+    pub github_org: String,
+    #[serde(default = "default_repo")]
+    pub repo: String,
+    #[serde(default = "default_git_main_branch")]
+    pub git_main_branch: String,
+
     // Describes the repository; no effect on what is built.
     #[serde(default)]
     title: Option<IgnoredAny>,
@@ -139,12 +157,6 @@ pub struct Config {
     #[serde(default)]
     creators: Option<IgnoredAny>,
     #[serde(default)]
-    github_org: Option<IgnoredAny>,
-    #[serde(default)]
-    repo: Option<IgnoredAny>,
-    #[serde(default)]
-    git_main_branch: Option<IgnoredAny>,
-    #[serde(default)]
     documentation: Option<IgnoredAny>,
     #[serde(default)]
     ci: Option<IgnoredAny>,
@@ -153,6 +165,60 @@ pub struct Config {
     /// Memory for a JVM owlmake does not start.
     #[serde(default)]
     robot_java_args: Option<IgnoredAny>,
+}
+
+/// The pattern data directories beyond `default`, each generated on its own.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternPipelineGroup {
+    #[serde(default)]
+    pub products: Vec<PatternPipeline>,
+    /// Pipelines that MATCH the patterns against an ontology rather than
+    /// generating from them.
+    #[serde(default)]
+    pub matches: Option<Vec<PatternPipeline>>,
+    #[serde(default)]
+    pub ids: Vec<String>,
+    #[serde(default)]
+    disabled: Option<IgnoredAny>,
+    #[serde(default)]
+    rebuild_if_source_changes: Option<IgnoredAny>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternPipeline {
+    pub id: String,
+    #[serde(default = "default_dosdp_tools_options")]
+    pub dosdp_tools_options: String,
+    #[serde(default = "default_pipeline_ontology")]
+    pub ontology: String,
+    #[serde(default)]
+    description: Option<IgnoredAny>,
+    #[serde(default)]
+    maintenance: Option<IgnoredAny>,
+    #[serde(default)]
+    rebuild_if_source_changes: Option<IgnoredAny>,
+    #[serde(default)]
+    robot_settings: Option<IgnoredAny>,
+}
+
+impl PatternPipelineGroup {
+    fn derive(&mut self) {
+        for id in std::mem::take(&mut self.ids) {
+            if !self.products.iter().any(|p| p.id == id) {
+                self.products.push(PatternPipeline {
+                    id,
+                    dosdp_tools_options: default_dosdp_tools_options(),
+                    ontology: default_pipeline_ontology(),
+                    description: None,
+                    maintenance: None,
+                    rebuild_if_source_changes: None,
+                    robot_settings: None,
+                });
+            }
+        }
+    }
 }
 
 /// The import modules, and what holds for all of them unless a product says
@@ -460,6 +526,18 @@ fn default_edit_format() -> String {
 fn default_reasoner() -> String {
     "ELK".into()
 }
+fn default_dosdp_tools_options() -> String {
+    "--obo-prefixes=true".into()
+}
+fn default_pipeline_ontology() -> String {
+    "$(SRC)".into()
+}
+fn default_repo() -> String {
+    "noname".into()
+}
+fn default_git_main_branch() -> String {
+    "main".into()
+}
 fn default_catalog_file() -> String {
     "catalog-v001.xml".into()
 }
@@ -535,6 +613,9 @@ impl Config {
         if let Some(g) = &mut config.components {
             g.derive(&config.uribase, &config.id);
         }
+        if let Some(g) = &mut config.pattern_pipelines_group {
+            g.derive();
+        }
         // An OBO export is always cleaned; a configuration may only add to that.
         if !config.obo_format_options.contains("--clean-obo") {
             if !config.obo_format_options.is_empty() {
@@ -589,6 +670,25 @@ impl Config {
         match &self.namespaces {
             Some(ns) => ns.iter().map(|i| format!("--base-iri {i} ")).collect(),
             None => format!("--base-iri $(URIBASE)/{} ", self.id.to_uppercase()),
+        }
+    }
+
+    fn pipelines(&self) -> &[PatternPipeline] {
+        self.pattern_pipelines_group.as_ref().map(|g| g.products.as_slice()).unwrap_or(&[])
+    }
+
+    /// Where a pattern pipeline's data tables can be browsed, as the option the
+    /// documentation generator takes — nothing when the hosting is not configured.
+    fn data_location(&self, pipeline: &str) -> String {
+        if !self.repo_url.is_empty() {
+            format!(" --data-location-prefix={}/src/patterns/data/{pipeline}", self.repo_url)
+        } else if !self.github_org.is_empty() && !self.repo.is_empty() {
+            format!(
+                " --data-location-prefix=https://github.com/{}/{}/tree/{}/src/patterns/data/{pipeline}",
+                self.github_org, self.repo, self.git_main_branch
+            )
+        } else {
+            String::new()
         }
     }
 
@@ -699,8 +799,11 @@ pub fn model(
     );
     b.phony(
         "test",
-        "validate_idranges reason_test sparql_test robot_reports \
-         $(REPORTDIR)/validate_profile_owl2dl_$(ONT).owl.txt",
+        &format!(
+            "validate_idranges {}reason_test sparql_test robot_reports \
+             $(REPORTDIR)/validate_profile_owl2dl_$(ONT).owl.txt",
+            if config.use_dosdps { "dosdp_validation " } else { "" }
+        ),
         "",
         &["echo \"Finished running all tests successfully.\""],
         &[],
@@ -733,6 +836,7 @@ pub fn model(
     components(&mut b, config);
     mirrors(&mut b, config);
     subsets(&mut b);
+    patterns(&mut b, config);
     artefacts(&mut b, config);
     utilities(&mut b, config);
     m
@@ -768,6 +872,7 @@ fn variables(b: &mut Build, c: &Config) {
     }
     b.var("REASONER", c.reasoner.as_str());
     b.var("RELEASEDIR", "../..");
+    b.var("DOCSDIR", "../../docs");
     b.var("REPORTDIR", "reports");
     b.var("TEMPLATEDIR", "../templates");
     b.var("TMPDIR", "tmp");
@@ -805,11 +910,18 @@ fn variables(b: &mut Build, c: &Config) {
             c.import_component_format
         ),
     );
-    let other_src: Vec<String> = c
+    let mut other_src: Vec<String> = c
         .component_products()
         .iter()
         .map(|p| format!("$(COMPONENTSDIR)/{}", p.filename))
         .collect();
+    if c.use_dosdps {
+        b.var("PATTERNDIR", "../patterns");
+        b.var("PATTERN_TESTER", "dosdp validate -i");
+        b.var("DOSDPT", "dosdp-tools");
+        b.var("PATTERN_RELEASE_FILES", "$(PATTERNDIR)/definitions.owl $(PATTERNDIR)/pattern.owl");
+        other_src.insert(0, "$(PATTERNDIR)/definitions.owl".to_string());
+    }
     b.var("OTHER_SRC", other_src.join(" "));
     b.var("ONTOLOGYTERMS", "$(TMPDIR)/ontologyterms.txt");
     b.var("EDIT_PREPROCESSED", "$(TMPDIR)/$(ONT)-preprocess.owl");
@@ -921,7 +1033,11 @@ fn variables(b: &mut Build, c: &Config) {
             .collect::<Vec<_>>()
             .join(" "),
     );
-    b.var("ASSETS", "$(IMPORT_FILES) $(MAIN_FILES) $(REPORT_FILES) $(SUBSET_FILES) $(MAPPING_FILES)");
+    let pattern_files = if c.use_dosdps { "$(PATTERN_RELEASE_FILES) " } else { "" };
+    b.var(
+        "ASSETS",
+        format!("$(IMPORT_FILES) $(MAIN_FILES) {pattern_files}$(REPORT_FILES) $(SUBSET_FILES) $(MAPPING_FILES)"),
+    );
     let released_imports =
         if group.is_some_and(|g| g.release_imports) { "$(IMPORT_FILES) " } else { "" };
     b.var("RELEASE_ASSETS", format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES)"));
@@ -934,7 +1050,12 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("RELEASE_ASSETS_AFTER_RELEASE", released.join(" "));
     b.var("CURRENT_RELEASE", "$(ONTBASE).owl");
     b.var("TSV", "");
-    b.var("ALL_TSV_FILES", "");
+    let mut tables: Vec<String> = Vec::new();
+    if c.use_dosdps {
+        tables.extend(c.pipelines().iter().map(|p| format!("$(DOSDP_TSV_FILES_{})", p.id.to_uppercase())));
+        tables.push("$(DOSDP_TSV_FILES_DEFAULT)".to_string());
+    }
+    b.var("ALL_TSV_FILES", tables.join(" "));
     b.var("GHVERSION", "v$(VERSION)");
 }
 
@@ -1114,7 +1235,14 @@ fn seeds(b: &mut Build, c: &Config) {
             &["$(ROBOT) query --input $< --format --csv --query $(SPARQLDIR)/terms.sparql $@"],
             &[],
         );
-        b.rule("$(IMPORTSEED)", "$(PRESEED)", "$(TMPDIR)", &["cat $^ | sort | uniq > $@"], &[]);
+        // The terms the patterns refer to are imported along with the edit file's.
+        b.rule(
+            "$(IMPORTSEED)",
+            if c.use_dosdps { "$(PRESEED) $(TMPDIR)/all_pattern_terms.txt" } else { "$(PRESEED)" },
+            "$(TMPDIR)",
+            &["cat $^ | sort | uniq > $@"],
+            &[],
+        );
     }
     b.rule(
         "$(ONTOLOGYTERMS)",
@@ -1640,6 +1768,223 @@ fn mirrors(b: &mut Build, c: &Config) {
     );
 }
 
+/// Classes generated from design patterns: each pipeline's data tables become
+/// one module per pattern, and the modules together become `definitions.owl`, a
+/// source of the release.
+fn patterns(b: &mut Build, c: &Config) {
+    if !c.use_dosdps {
+        return;
+    }
+    b.var("ALL_PATTERN_FILES", "$(wildcard $(PATTERNDIR)/dosdp-patterns/*.yaml)");
+    b.var(
+        "ALL_PATTERN_NAMES",
+        "$(strip $(patsubst %.yaml,%, $(notdir $(wildcard $(PATTERNDIR)/dosdp-patterns/*.yaml))))",
+    );
+    // `default` first, then the configured pipelines: (directory, variable suffix, options).
+    let mut pipelines: Vec<(String, String, String)> =
+        vec![("default".into(), "DEFAULT".into(), c.dosdp_tools_options.clone())];
+    pipelines.extend(
+        c.pipelines().iter().map(|p| (p.id.clone(), p.id.to_uppercase(), p.dosdp_tools_options.clone())),
+    );
+    let each = |what: &str| -> String {
+        pipelines.iter().map(|(_, v, _)| format!("$(DOSDP_{what}_FILES_{v}) ")).collect()
+    };
+    b.var(
+        "PATTERN_CLEAN_FILES",
+        format!(
+            "../patterns/all_pattern_terms.txt {}",
+            pipelines
+                .iter()
+                .map(|(_, v, _)| format!("$(DOSDP_OWL_FILES_{v}) $(DOSDP_TERM_FILES_{v}) "))
+                .collect::<String>()
+        ),
+    );
+    b.phony("pattern_clean", "", "", &["rm -f $(PATTERN_CLEAN_FILES)"], &[]);
+
+    // The per-pipeline file lists are read off the data directory.
+    for (dir, v, _) in &pipelines {
+        b.var(&format!("DOSDP_TSV_FILES_{v}"), format!("$(wildcard $(PATTERNDIR)/data/{dir}/*.tsv)"));
+        b.var(
+            &format!("DOSDP_PATTERN_NAMES_{v}"),
+            format!("$(strip $(patsubst %.tsv, %, $(notdir $(DOSDP_TSV_FILES_{v}))))"),
+        );
+        for (what, ext, under) in [
+            ("OWL", "ofn", format!("data/{dir}")),
+            ("TERM", "txt", format!("data/{dir}")),
+            ("YAML", "yaml", "dosdp-patterns".to_string()),
+        ] {
+            b.var(
+                &format!("DOSDP_{what}_FILES_{v}"),
+                format!("$(foreach name, $(DOSDP_PATTERN_NAMES_{v}), $(PATTERNDIR)/{under}/$(name).{ext})"),
+            );
+        }
+    }
+
+    if !b.switch("PAT") {
+        // Generation is off, but the committed definitions still name terms the
+        // imports have to bring in.
+        b.rule(
+            "$(TMPDIR)/all_pattern_terms.txt",
+            "$(PATTERNDIR)/definitions.owl",
+            "",
+            &["$(ROBOT) query --use-graphs true -f csv -i $< --query $(SPARQLDIR)/terms.sparql $@"],
+            &["PAT"],
+        );
+        b.rule("dosdp_validation", "", "", &[], &["PAT"]);
+        return;
+    }
+    let g = &["PAT"];
+    b.m.phony.insert("patterns".to_string());
+    b.rule(
+        "patterns dosdp",
+        "",
+        "",
+        &[
+            "echo \"Validating all DOSDP templates\"",
+            "$(MAKE) dosdp_validation",
+            "echo \"Building $(PATTERNDIR)/definitions.owl\"",
+            "$(MAKE) $(PATTERNDIR)/pattern.owl $(PATTERNDIR)/definitions.owl",
+        ],
+        g,
+    );
+    b.rule(
+        "$(TMPDIR)/pattern_schema_checks",
+        "$(ALL_PATTERN_FILES)",
+        "$(TMPDIR)",
+        &["$(PATTERN_TESTER) $(PATTERNDIR)/dosdp-patterns/ && touch $@"],
+        g,
+    );
+    b.m.phony.insert("pattern_schema_checks".to_string());
+    b.rule("pattern_schema_checks dosdp_validation", "$(TMPDIR)/pattern_schema_checks", "", &[], g);
+    b.phony(
+        "update_patterns",
+        "download_patterns",
+        "",
+        &["if [ -n \"$$(find $(TMPDIR) -type f -path '$(TMPDIR)/dosdp/*.yaml')\" ]; then \
+           cp -r $(TMPDIR)/dosdp/*.yaml $(PATTERNDIR)/dosdp-patterns; fi"],
+        g,
+    );
+    // The patterns a repository takes from elsewhere, listed in `external.txt`.
+    b.phony(
+        "download_patterns",
+        "",
+        "",
+        &[
+            "rm -f $(TMPDIR)/dosdp/*.yaml.1 || true",
+            "if [ -s $(PATTERNDIR)/dosdp-patterns/external.txt ]; then \
+             wget -i $(PATTERNDIR)/dosdp-patterns/external.txt --backups=1 -P $(TMPDIR)/dosdp; fi",
+            "rm -f $(TMPDIR)/dosdp/*.yaml.1 || true",
+        ],
+        g,
+    );
+    b.rule(
+        "$(PATTERNDIR)/dospd-patterns/%.yml",
+        "download_patterns",
+        "",
+        &["if cmp -s $(TMPDIR)/dosdp-$*.yml $@ ; then echo \"DOSDP templates identical.\"; \
+           else echo \"DOSDP templates different, updating.\" && cp $(TMPDIR)/dosdp-$*.yml $@; fi"],
+        g,
+    );
+
+    for (dir, v, options) in &pipelines {
+        // One `generate` writes every module of the pipeline.
+        let slash = if dir == "default" { "/" } else { "" };
+        let template_slash = if dir == "default" { "" } else { "/" };
+        b.rule(
+            &format!("$(DOSDP_OWL_FILES_{v})"),
+            &format!("$(EDIT_PREPROCESSED) $(DOSDP_TSV_FILES_{v}) $(ALL_PATTERN_FILES)"),
+            "",
+            &[&format!(
+                "if [ \"${{DOSDP_PATTERN_NAMES_{v}}}\" ]; then $(DOSDPT) generate --catalog=$(CATALOG) \
+                 --infile=$(PATTERNDIR)/data/{dir}{slash} --template=$(PATTERNDIR)/dosdp-patterns{template_slash} \
+                 --batch-patterns=\"$(DOSDP_PATTERN_NAMES_{v})\" \
+                 --ontology=$< {options} --outfile=$(PATTERNDIR)/data/{dir}; fi"
+            )],
+            g,
+        );
+        b.phony(
+            &format!("dosdp-docs-{dir}"),
+            &format!("$(EDIT_PREPROCESSED) $(DOSDP_TSV_FILES_{v}) $(DOSDP_YAML_FILES_{v})"),
+            "",
+            &[
+                &format!("mkdir -p $(DOCSDIR)/patterns/{dir}"),
+                &format!(
+                    "$(DOSDPT) docs {options} --catalog=$(CATALOG) --ontology=$< \
+                     --infile=$(PATTERNDIR)/data/{dir} --template=$(PATTERNDIR)/dosdp-patterns \
+                     --batch-patterns=\"$(DOSDP_PATTERN_NAMES_{v})\" \
+                     --outfile=$(DOCSDIR)/patterns/{dir}{}",
+                    c.data_location(dir)
+                ),
+            ],
+            g,
+        );
+    }
+    // The terms each data table refers to.
+    for (dir, _, _) in &pipelines {
+        b.rule(
+            &format!("$(PATTERNDIR)/data/{dir}/%.txt"),
+            &format!("$(PATTERNDIR)/dosdp-patterns/%.yaml $(PATTERNDIR)/data/{dir}/%.tsv"),
+            "",
+            &["$(DOSDPT) terms --infile=$(word 2, $^) --template=$< --obo-prefixes=true --outfile=$@"],
+            g,
+        );
+    }
+    for m in c.pattern_pipelines_group.iter().flat_map(|g| g.matches.iter().flatten()) {
+        b.rule(
+            &format!("dosdp-matches-{}", m.id),
+            &format!("{} $(ALL_PATTERN_FILES)", m.ontology),
+            "",
+            &[&format!(
+                "$(DOSDPT) query --ontology=$< --catalog=$(CATALOG) --reasoner=elk {} \
+                 --batch-patterns=\"$(ALL_PATTERN_NAMES)\" --template=\"$(PATTERNDIR)/dosdp-patterns\" \
+                 --outfile=\"$(PATTERNDIR)/data/{}/\"",
+                m.dosdp_tools_options, m.id
+            )],
+            g,
+        );
+    }
+    b.rule(
+        "$(TMPDIR)/all_pattern_terms.txt",
+        &format!("{}$(TMPDIR)/pattern_owl_seed.txt", each("TERM")),
+        "",
+        &["cat $^ | sort | uniq > $@"],
+        g,
+    );
+    b.rule(
+        "$(TMPDIR)/pattern_owl_seed.txt",
+        "$(PATTERNDIR)/pattern.owl",
+        "",
+        &["$(ROBOT) query --use-graphs true -f csv -i $< --query ../sparql/terms.sparql $@"],
+        g,
+    );
+    // Every pattern as an ontology of its own…
+    b.rule(
+        "$(PATTERNDIR)/pattern.owl",
+        "$(ALL_PATTERN_FILES)",
+        "",
+        &["$(DOSDPT) prototype --obo-prefixes true --template=$(PATTERNDIR)/dosdp-patterns --outfile=$@"],
+        g,
+    );
+    // …and every generated module merged into the one file the release reads.
+    let any_names: String = pipelines
+        .iter()
+        .map(|(_, v, _)| format!("[ \"${{DOSDP_PATTERN_NAMES_{v}}}\" ]"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    b.rule(
+        "$(PATTERNDIR)/definitions.owl",
+        each("OWL").trim_end(),
+        "",
+        &[&format!(
+            "if {any_names} && [ $(PAT) = true ]; then $(ROBOT) merge $(addprefix -i , $^) \
+             annotate --ontology-iri $(ONTBASE)/patterns/definitions.owl \
+             --version-iri $(ONTBASE)/releases/$(TODAY)/patterns/definitions.owl \
+             --annotation owl:versionInfo $(VERSION) -o definitions.ofn && mv definitions.ofn $@; fi"
+        )],
+        g,
+    );
+}
+
 /// A subset is the slice of the release tagged with it, in every export format
 /// and as a table of its classes.
 fn subsets(b: &mut Build) {
@@ -1979,17 +2324,16 @@ fn utilities(b: &mut Build, c: &Config) {
         &[],
     );
     b.rule("validate-all-tsv", "$(ALL_TSV_FILES)", "", &["$(MAKE) validate-tsv TSV=\"$^\""], &[]);
-    b.phony(
-        "clean",
-        "",
-        "",
-        &[
-            "for dir in $(MIRRORDIR) $(TMPDIR) $(UPDATEREPODIR) ; do \
-             reldir=$$(realpath --relative-to=$$(pwd) $$dir) ; \
-             case $$reldir in .*|\"\") ;; *) rm -rf $$reldir/* ;; esac \
-             done",
-            "rm -f $(CLEANFILES)",
-        ],
-        &[],
+    let mut clean: Vec<&str> = Vec::new();
+    if c.use_dosdps {
+        clean.push("$(MAKE) pattern_clean");
+    }
+    clean.push(
+        "for dir in $(MIRRORDIR) $(TMPDIR) $(UPDATEREPODIR) ; do \
+         reldir=$$(realpath --relative-to=$$(pwd) $$dir) ; \
+         case $$reldir in .*|\"\") ;; *) rm -rf $$reldir/* ;; esac \
+         done",
     );
+    clean.push("rm -f $(CLEANFILES)");
+    b.phony("clean", "", "", &clean, &[]);
 }
