@@ -287,6 +287,93 @@ fn template_manchester_and_dsl() {
     let _ = std::fs::remove_file(&owl);
 }
 
+/// Individuals: a `TYPE` cell naming a class makes the row a named individual of
+/// that class (several with `TYPE SPLIT=`), and an `I <prop>` column asserts a
+/// property — to another individual, or to a literal when a row types `<prop>` as
+/// a data property.
+#[test]
+fn template_individual_types_and_property_assertions() {
+    let tmpl = tmp("ind.tsv");
+    std::fs::write(
+        &tmpl,
+        "ID\tLabel\tType\tLocated in\tPopulation\n\
+         ID\tLABEL\tTYPE SPLIT=|\tI EX:located_in\tI 'population' SPLIT=|\n\
+         EX:population\tpopulation\tdata property\t\t\n\
+         EX:europe\tEurope\tEX:Region\t\t\n\
+         EX:austria\tAustria\tEX:Country|EX:Place\tEurope\t9000000^^xsd:integer|about nine million\n",
+    )
+    .unwrap();
+
+    let owl = tmp("ind.ofn");
+    let status = bin()
+        .args(["template", "--template"])
+        .arg(&tmpl)
+        .arg("-o")
+        .arg(&owl)
+        .args(["--format", "ofn"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "template command failed");
+    let text = std::fs::read_to_string(&owl).unwrap();
+    let ex = |local: &str| format!("<http://purl.obolibrary.org/obo/EX_{local}>");
+
+    // The subject is an individual, never a class, and carries each TYPE value.
+    assert!(
+        text.contains(&format!("Declaration(NamedIndividual({}))", ex("austria"))),
+        "expected an individual declaration:\n{text}"
+    );
+    assert!(
+        !text.contains(&format!("Declaration(Class({}))", ex("austria"))),
+        "a row typed by a class is not itself a class:\n{text}"
+    );
+    for class in ["Country", "Place"] {
+        assert!(
+            text.contains(&format!("ClassAssertion({} {})", ex(class), ex("austria"))),
+            "expected a {class} class assertion:\n{text}"
+        );
+    }
+    assert!(
+        text.contains(&format!("ClassAssertion({} {})", ex("Region"), ex("europe"))),
+        "expected a Region class assertion:\n{text}"
+    );
+
+    // `I <prop>` to an individual named by label; the property is never a class.
+    assert!(
+        text.contains(&format!(
+            "ObjectPropertyAssertion({} {} {})",
+            ex("located_in"),
+            ex("austria"),
+            ex("europe")
+        )),
+        "expected an object property assertion:\n{text}"
+    );
+    assert!(
+        !text.contains(&format!("ClassAssertion({}", ex("located_in"))),
+        "the property of an `I <prop>` column is not a type:\n{text}"
+    );
+
+    // `I <prop>` on a data property named by label: typed and plain literals.
+    assert!(
+        text.contains(&format!(
+            "DataPropertyAssertion({} {} \"9000000\"^^xsd:integer)",
+            ex("population"),
+            ex("austria")
+        )),
+        "expected a typed data property assertion:\n{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "DataPropertyAssertion({} {} \"about nine million\")",
+            ex("population"),
+            ex("austria")
+        )),
+        "expected a plain data property assertion:\n{text}"
+    );
+
+    let _ = std::fs::remove_file(&tmpl);
+    let _ = std::fs::remove_file(&owl);
+}
+
 #[test]
 fn explain_finds_justification() {
     // The canonical EL inference; explain must return a non-empty justification.
