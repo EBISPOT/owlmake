@@ -35,8 +35,6 @@ const UNPORTED: &[&str] = &[
     "babelon_translation_group",
     "use_custom_import_module",
     "custom_makefile_header",
-    "public_release",
-    "public_release_assets",
     "robot_plugins",
 ];
 
@@ -158,6 +156,13 @@ pub struct Config {
     pub repo: String,
     #[serde(default = "default_git_main_branch")]
     pub git_main_branch: String,
+    /// How a release is published to the repository's host: `none`,
+    /// `github_curl` or `github_python`.
+    #[serde(default = "default_public_release")]
+    pub public_release: String,
+    /// The files published with it. Defaults to every asset.
+    #[serde(default)]
+    pub public_release_assets: Option<Vec<String>>,
     /// How the documentation is built. Only whether it is configured matters here.
     #[serde(default)]
     pub documentation: Option<serde_yaml::Value>,
@@ -527,6 +532,9 @@ fn default_dosdp_tools_options() -> String {
 }
 fn default_pipeline_ontology() -> String {
     "$(SRC)".into()
+}
+fn default_public_release() -> String {
+    "none".into()
 }
 fn default_repo() -> String {
     "noname".into()
@@ -1073,7 +1081,6 @@ fn variables(b: &mut Build, c: &Config) {
         tables.push("$(DOSDP_TSV_FILES_DEFAULT)".to_string());
     }
     b.var("ALL_TSV_FILES", tables.join(" "));
-    b.var("GHVERSION", "v$(VERSION)");
 }
 
 /// The QC a release must pass: reasoning, the SPARQL checks, the report, the
@@ -1190,6 +1197,8 @@ fn checks(b: &mut Build, c: &Config) {
 /// Publishing a release: copy the release files to the repository root, and the
 /// comparison against the release currently published.
 fn release(b: &mut Build, _c: &Config) {
+    let c = _c;
+    let _ = c;
     b.phony(
         "prepare_release",
         "all_odk",
@@ -1220,17 +1229,99 @@ fn release(b: &mut Build, _c: &Config) {
         &["$(ROBOT) diff --labels true --left $(TMPDIR)/current-release.owl --right $(ONT).owl -f markdown -o $@"],
         &[],
     );
-    b.phony(
-        "public_release",
-        "",
-        "",
-        &[
-            "@test $(GHVERSION)",
-            "ls -alt $(RELEASE_ASSETS_AFTER_RELEASE)",
-            "gh release create $(GHVERSION) --title \"$(VERSION) Release\" --draft $(RELEASE_ASSETS_AFTER_RELEASE) --generate-notes",
-        ],
-        &[],
-    );
+    publishing(b, _c);
+}
+
+/// Publishing a release on the repository's host.
+fn publishing(b: &mut Build, c: &Config) {
+    if c.public_release != "none" {
+        b.var(
+            "RELEASEFILES",
+            match &c.public_release_assets {
+                Some(files) => files.join(" "),
+                None => "$(ASSETS)".to_string(),
+            },
+        );
+        b.var("TAGNAME", "v$(TODAY)");
+    }
+    if c.public_release == "github_curl" {
+        // Through the host's API: find or create the release, then upload each file.
+        b.var("USER", "unknown");
+        b.var("GH_ASSETS", "$(patsubst %, $(TMPDIR)/gh_release_asset_%.txt, $(RELEASEFILES))");
+        b.var("GITHUB_REPO", format!("{}/{}", c.github_org, c.repo));
+        b.rule(
+            "$(TMPDIR)/release_get.txt",
+            "",
+            "$(TMPDIR)",
+            &["curl -s https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${TAGNAME} > $@"],
+            &[],
+        );
+        b.rule(
+            "$(TMPDIR)/release_op.txt",
+            "$(TMPDIR)/release_get.txt",
+            "$(TMPDIR)",
+            &[
+                "$(eval RELEASEID=$(shell cat $(TMPDIR)/release_get.txt | jq '.id'))",
+                "if ! [ \"$(RELEASEID)\" -eq \"$(RELEASEID)\" ] ; then \
+                 curl -s -X POST \
+                 https://api.github.com/repos/${GITHUB_REPO}/releases \
+                 -H 'Accept: */*' \
+                 -H 'Content-Type: application/json' \
+                 -u ${USER} \
+                 -d '{ \"tag_name\": \"${TAGNAME}\", \"target_commitish\": \"master\", \"name\": \"${TAGNAME}\", \"body\": \"Ontology release ${TODAY}\", \"draft\": false, \"prerelease\": false }' > $@; \
+                 else \
+                 cp $< $@; \
+                 fi;",
+            ],
+            &[],
+        );
+        b.rule(
+            "$(TMPDIR)/gh_release_id.txt",
+            "$(TMPDIR)/release_op.txt",
+            "$(TMPDIR)",
+            &["echo $(shell cat $(TMPDIR)/release_op.txt | jq '.id') > $@;"],
+            &[],
+        );
+        b.rule(
+            "$(TMPDIR)/gh_release_asset_%.txt",
+            "$(TMPDIR)/gh_release_id.txt %",
+            "$(TMPDIR)",
+            &["curl -X POST \
+               \"https://uploads.github.com/repos/${GITHUB_REPO}/releases/$(shell cat $(TMPDIR)/gh_release_id.txt)/assets?name=$*&label=$*\" \
+               --data-binary @$* \
+               -u ${USER} \
+               -H 'Accept: */*' \
+               -H 'Cache-Control: no-cache' \
+               -H 'Connection: keep-alive' \
+               -H 'Content-Type: application/octet-stream' > $@"],
+            &[],
+        );
+        b.rule("public_release", "$(TMPDIR)/gh_release_id.txt $(GH_ASSETS)", "$(TMPDIR)", &[], &[]);
+    }
+    if c.public_release == "github_python" {
+        b.var("GITHUB_RELEASE_PYTHON", "make-release-assets.py");
+        b.phony(
+            "public_release",
+            "",
+            "",
+            &["ls -alt $(ASSETS)", "$(GITHUB_RELEASE_PYTHON) --release $(TAGNAME) $(RELEASEFILES)"],
+            &[],
+        );
+    } else {
+        // With the host's own command-line client.
+        b.var("GHVERSION", "v$(VERSION)");
+        b.phony(
+            "public_release",
+            "",
+            "",
+            &[
+                "@test $(GHVERSION)",
+                "ls -alt $(RELEASE_ASSETS_AFTER_RELEASE)",
+                "gh release create $(GHVERSION) --title \"$(VERSION) Release\" --draft $(RELEASE_ASSETS_AFTER_RELEASE) --generate-notes",
+            ],
+            &[],
+        );
+    }
 }
 
 /// The term lists the import modules and the simple artefact are cut against,
@@ -2326,11 +2417,24 @@ fn utilities(b: &mut Build, c: &Config) {
         &["$(ROBOT) explain -i $< -M unsatisfiability --unsatisfiable random:10 --explanation $(TMPDIR)/$@.md"],
         &[],
     );
+    // Rewriting the edit file in its own serialization, so a diff shows only what
+    // an editor changed.
+    if c.edit_format.contains("obo") {
+        b.phony(
+            "normalize_obo_src",
+            "$(SRC)",
+            "",
+            &["$(ROBOT) repair -i $< --merge-axiom-annotations true \
+               convert -o $(TMPDIR)/NORM.tmp.obo && mv $(TMPDIR)/NORM.tmp.obo $(SRC)"],
+            &[],
+        );
+    }
+    let format = if c.edit_format == "obo" { "obo --check false" } else { "ofn" };
     b.phony(
         "normalize_src",
         "$(SRC)",
         "",
-        &["$(ROBOT) convert -i $< -f ofn -o $(TMPDIR)/normalise && mv $(TMPDIR)/normalise $<"],
+        &[&format!("$(ROBOT) convert -i $< -f {format} -o $(TMPDIR)/normalise && mv $(TMPDIR)/normalise $<")],
         &[],
     );
     if c.documentation.is_some() {
