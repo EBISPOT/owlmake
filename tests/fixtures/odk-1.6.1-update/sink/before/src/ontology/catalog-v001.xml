@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+    <!-- a comment of the curators' -->
+    <uri name="http://example.org/obo/sink/imports/ro_import.owl" uri="imports/ro_import.owl"/>
+    <uri name="http://example.org/obo/sink/imports/gone_import.owl" uri="imports/gone_import.owl"/>
+    <uri id="mine" name="http://example.org/elsewhere.owl" uri="local/elsewhere.owl"/>
+    <group id="odk-managed-catalog" prefer="public">
+        <uri name="http://example.org/obo/sink/imports/gone_import.owl" uri="imports/gone_import.owl"/>
+    </group>
+    <group id="Folder Repository, directory=, recursive=true, Auto-Update=true, version=2" prefer="public" xml:base="">
+        <uri id="Automatically generated entry, Timestamp=1" name="http://example.org/a&amp;b.owl" uri="a b.owl"/>
+    </group>
+</catalog>

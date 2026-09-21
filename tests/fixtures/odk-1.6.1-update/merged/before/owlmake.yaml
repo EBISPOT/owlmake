@@ -1,0 +1,18 @@
+emulate_odk_version: 1.6.1
+id: mrg
+uribase: http://example.org/obo
+uribase_suffix: merged-one
+edit_format: obo
+namespaces:
+  - http://example.org/obo/MRG_
+  - http://example.org/obo/OTHER_
+import_group:
+  use_base_merging: true
+  products:
+    - id: ro
+    - id: pato
+components:
+  products:
+    - filename: part.owl
+robot_report:
+  fail_on: ERROR

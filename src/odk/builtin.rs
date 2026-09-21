@@ -178,6 +178,19 @@ pub struct Config {
     /// Generate classes from design patterns and their data tables.
     #[serde(default)]
     pub use_dosdps: bool,
+    /// The edit file imports `pattern.owl` beside the pattern definitions.
+    #[serde(default)]
+    pub import_pattern_ontology: bool,
+    /// The repository keeps its OBO registry metadata, in `src/metadata`.
+    #[serde(default = "yes")]
+    pub create_obo_metadata: bool,
+    /// The repository holds ROBOT templates, in `src/templates`.
+    #[serde(default)]
+    pub use_templates: bool,
+    /// `update_repo` keeps the edit file's import declarations and the XML
+    /// catalog in step with the imports and components stated here.
+    #[serde(default = "yes")]
+    pub manage_import_declarations: bool,
     #[serde(default = "default_dosdp_tools_options")]
     pub dosdp_tools_options: String,
     #[serde(default)]
@@ -625,6 +638,9 @@ pub struct RobotReport {
     pub ensure_owl2dl_profile: bool,
     /// Report how the ontology's classes align with this upper ontology.
     pub upper_ontology: Option<String>,
+    /// The report is configured and its checks are not: `update_repo` then
+    /// installs every check query there is, not only the ones that run.
+    pub checks_unstated: bool,
 }
 
 /// The report options as a configuration states them.
@@ -647,6 +663,7 @@ impl From<Option<StatedReport>> for RobotReport {
     fn from(stated: Option<StatedReport>) -> Self {
         let Some(s) = stated else { return RobotReport::default() };
         RobotReport {
+            checks_unstated: s.custom_sparql_checks.is_none(),
             fail_on: s.fail_on,
             use_labels: s.use_labels.unwrap_or(true),
             use_base_iris: s.use_base_iris.unwrap_or(false),
@@ -678,6 +695,7 @@ impl Default for RobotReport {
             custom_sparql_exports: default_sparql_exports(),
             ensure_owl2dl_profile: true,
             upper_ontology: None,
+            checks_unstated: false,
         }
     }
 }

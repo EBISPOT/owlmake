@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog" prefer="public">
+  <group id="odk-managed-catalog" prefer="public">
+    <uri name="http://example.org/obo/sink/imports/ro_import.owl" uri="imports/ro_import.owl" />
+    <uri name="http://example.org/obo/sink/imports/pato_import.owl" uri="imports/pato_import.owl" />
+    <uri name="http://example.org/obo/sink/components/listed.owl" uri="components/listed.owl" />
+    <uri name="http://example.org/obo/sink/components/unlisted.owl" uri="components/unlisted.owl" />
+    <uri name="http://example.org/obo/sink/components/mapped.owl" uri="components/mapped.owl" />
+    <uri name="http://example.org/obo/sink/components/fetched.owl" uri="components/fetched.owl" />
+    <uri name="http://example.org/obo/sink/components/plain.owl" uri="components/plain.owl" />
+    <uri name="http://example.org/obo/sink/patterns/definitions.owl" uri="../patterns/definitions.owl" />
+    <uri name="http://example.org/obo/sink/patterns/pattern.owl" uri="../patterns/pattern.owl" />
+  </group>
+  <uri name="http://example.org/obo/sink/imports/gone_import.owl" uri="imports/gone_import.owl" />
+  <uri id="mine" name="http://example.org/elsewhere.owl" uri="local/elsewhere.owl" />
+  <group id="Folder Repository, directory=, recursive=true, Auto-Update=true, version=2" prefer="public">
+    <uri id="Automatically generated entry, Timestamp=1" name="http://example.org/a&amp;b.owl" uri="a b.owl" />
+  </group>
+</catalog>

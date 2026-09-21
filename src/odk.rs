@@ -20,6 +20,7 @@ use anyhow::{bail, Context, Result};
 pub(crate) mod makefile;
 pub(crate) mod planner;
 pub mod builtin;
+pub mod update;
 pub(crate) mod robot;
 pub(crate) mod workflows;
 

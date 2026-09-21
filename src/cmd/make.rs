@@ -198,6 +198,8 @@ enum Kind {
     RefreshImports { exclude_large: bool },
     /// `all_imports` — rebuild every individual import module.
     AllImports,
+    /// `update_repo` — bring the repository's files into step with its options.
+    UpdateRepo,
     /// `patterns` / `dosdp` — regenerate `definitions.owl` from the DOSDP patterns.
     Patterns,
     /// One mirror, by file (`mirror/<id>.owl`) or by the phony that fetches it
@@ -346,9 +348,7 @@ fn classify(plan: &Plan, target: &str) -> Kind {
         "refresh_imports_excluding_large" => Kind::RefreshImports { exclude_large: true },
         "all_imports" => Kind::AllImports,
         "patterns" | "dosdp" => Kind::Patterns,
-        "update_repo" => Kind::Unsupported(
-            "regenerates the ODK scaffolding from a downloaded ODK release; owlmake does not manage ODK setup",
-        ),
+        "update_repo" => Kind::UpdateRepo,
         // `clean` runs from its recorded recipe like any other target: the
         // recipe's own realpath guard keeps the removals inside the repo.
         "seed" | "seed_via_docker" => {
@@ -784,6 +784,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 build::refresh_imports(repo, plan, *exclude_large, &run_opts)
             }
             Kind::AllImports => build::build_all_imports(repo, plan, &run_opts),
+            Kind::UpdateRepo => crate::odk::update::update_repo(repo),
             Kind::Patterns => {
                 if !build::regenerate_patterns(repo, plan, &run_opts)? {
                     status!("make: no DOSDP patterns configured");
@@ -930,6 +931,11 @@ pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
 /// `all-imports`: rebuild every individual import module from upstream.
 pub fn all_imports(a: &RepoArgs) -> Result<()> {
     make_target(&a.repo, "all_imports", &a.assignments, &a.common, |_| {})
+}
+
+/// `update-repo`: bring the repository's files into step with its options.
+pub fn update_repo(a: &RepoArgs) -> Result<()> {
+    make_target(&a.repo, "update_repo", &a.assignments, &a.common, |_| {})
 }
 
 /// `test`: run the repository's own QC target, from the plan.

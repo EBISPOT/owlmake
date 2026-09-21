@@ -1,0 +1,67 @@
+emulate_odk_version: 1.6.1
+id: sink
+title: "Kitchen sink"
+github_org: example
+repo: sink
+uribase: http://example.org/obo
+release_artefacts:
+  - base
+  - full
+  - basic
+primary_release: full
+export_formats:
+  - owl
+  - obo
+import_group:
+  products:
+    - id: ro
+    - id: pato
+use_templates: true
+use_mappings: true
+use_translations: true
+use_dosdps: true
+import_pattern_ontology: true
+use_context: true
+use_custom_import_module: true
+components:
+  products:
+    - filename: listed.owl
+      use_template: true
+      templates:
+        - one.tsv
+        - two.csv
+    - filename: unlisted.owl
+      use_template: true
+    - filename: mapped.owl
+      use_mappings: true
+      mappings:
+        - sink-xrefs.sssom.tsv
+    - filename: fetched.owl
+      source: https://example.org/fetched.owl
+    - filename: plain.owl
+sssom_mappingset_group:
+  products:
+    - id: sink-xrefs
+babelon_translation_group:
+  products:
+    - id: sink-fr
+      language: fr
+      include_robot_template_synonyms: true
+pattern_pipelines_group:
+  products:
+    - id: extra
+robot_report:
+  custom_sparql_checks:
+    - owldef-self-reference
+    - iri-range
+    - label-with-iri
+    - multiple-replaced_by
+    - dc-properties
+    - illegal-date
+    - term-tracker-uri
+    - taxon-range
+    - redundant-subClassOf
+    - iri-range-advanced
+  custom_sparql_exports:
+    - basic-report
+    - terms

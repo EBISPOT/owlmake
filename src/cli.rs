@@ -178,6 +178,11 @@ pub enum Command {
     AllImports(cmd::make::RepoArgs),
     /// Run the repository's QC checks (`test`).
     Test(cmd::make::RepoArgs),
+    /// Bring the repository's files into step with the options in its
+    /// `owlmake.yaml`: the edit file's imports, the XML catalog, and the files the
+    /// build reads (`update_repo`).
+    #[command(visible_alias = "update_repo")]
+    UpdateRepo(cmd::make::RepoArgs),
     /// Scaffold a starter `owlmake.json` for a new ontology.
     Seed(cmd::seed::Args),
     /// Print the JSON Schema for `owlmake.json` (for editor/CI validation).
@@ -1125,6 +1130,10 @@ fn dispatch(state: Option<Model>, command: Command) -> Result<Option<Model>> {
         }
         Command::Test(a) => {
             cmd::make::test(&a)?;
+            None
+        }
+        Command::UpdateRepo(a) => {
+            cmd::make::update_repo(&a)?;
             None
         }
         Command::Seed(a) => cmd::seed::step(state, &a)?,
