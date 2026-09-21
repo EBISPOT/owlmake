@@ -15,10 +15,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 pub(crate) mod makefile;
 pub(crate) mod planner;
+pub mod builtin;
 pub(crate) mod robot;
 pub(crate) mod workflows;
 
@@ -183,7 +184,55 @@ fn parse_configuration(
     Ok(make)
 }
 
+/// Resolve a repository's build configuration from owlmake's built-in rules: the
+/// standard build its configuration implies, then the rules the repository wrote
+/// itself, which win — the same two layers, in the same order, as
+/// [`parse_configuration`] reads from files.
+fn builtin_configuration(
+    config: &builtin::Config,
+    dir: &Path,
+    seeded: &[(String, String)],
+    flags: &[(&str, &str)],
+) -> Result<makefile::MakeModel> {
+    let mut make = builtin::model(config, dir, seeded, flags);
+    let own_rules = dir.join(format!("{}.Makefile", config.id));
+    if own_rules.exists() {
+        make.overlay_file(&own_rules)?;
+    }
+    make.bind_release_version();
+    Ok(make)
+}
+
 impl OdkRepo {
+    /// [`load`](Self::load), with the standard build taken from owlmake's built-in
+    /// rules rather than read from a generated Makefile. `path` is the repository
+    /// root or its ontology directory.
+    pub fn load_with_builtin_rules(path: &Path) -> Result<OdkRepo> {
+        let dir = resolve_ontology_dir(path)?;
+        let yaml_path = find_odk_yaml(&dir)?;
+        let text = std::fs::read_to_string(&yaml_path)?;
+        let config = builtin::Config::parse(&text)
+            .with_context(|| format!("reading {}", yaml_path.display()))?;
+        let make = builtin_configuration(&config, &dir, &[], &[])?;
+        let mut yaml: OdkYaml = serde_yaml::from_str(&text)?;
+        if yaml.release_artefacts.is_empty() {
+            yaml.release_artefacts = vec!["base".to_string(), "full".to_string()];
+        }
+        let root = repo_root(&dir);
+        Ok(OdkRepo {
+            built: Default::default(),
+            failed: Default::default(),
+            dir,
+            root,
+            yaml,
+            make,
+            edit_file: None,
+            seeded: false,
+            seeded_vars: Vec::new(),
+            spec: None,
+        })
+    }
+
     /// Locate and load an ODK repo from a path that is either the repo root,
     /// the `src/ontology` directory, or the `-odk.yaml` file itself.
     pub fn load(path: &Path) -> Result<OdkRepo> {

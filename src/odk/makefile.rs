@@ -232,11 +232,14 @@ impl MakeModel {
         }
     }
 
-    fn parse_impl(
-        path: &Path,
+    /// A model holding no rules yet, with the run's switches and assignments bound
+    /// as they must be before any rule is added: a switch the run does not set is
+    /// on, and what the run does set outranks every later assignment.
+    pub fn with_flags(
+        dir: &Path,
         overrides: &[(String, String)],
         flags: &[(&str, &str)],
-    ) -> Result<MakeModel> {
+    ) -> MakeModel {
         let mut m = MakeModel::default();
         for f in Self::WORKFLOW_FLAGS {
             match flags.iter().find(|(k, _)| *k == f) {
@@ -276,7 +279,7 @@ impl MakeModel {
         // process happens to have been launched from — and a repo planned from
         // its root would lose every DOSDP pattern named
         // `$(wildcard ../patterns/data/default/*.tsv)`.
-        m.base_dir = path.parent().map(|d| d.to_path_buf());
+        m.base_dir = Some(dir.to_path_buf());
         for (k, v) in overrides {
             // A run input on the command line does NOT reach the parse: a
             // workflow flag would change which rules exist, and the release
@@ -289,6 +292,15 @@ impl MakeModel {
             m.vars.insert(k.clone(), v.clone());
             m.command_line_vars.insert(k.clone());
         }
+        m
+    }
+
+    fn parse_impl(
+        path: &Path,
+        overrides: &[(String, String)],
+        flags: &[(&str, &str)],
+    ) -> Result<MakeModel> {
+        let mut m = Self::with_flags(path.parent().unwrap_or(Path::new("")), overrides, flags);
         m.ingest(&std::fs::read_to_string(path)?)?;
         Ok(m)
     }
