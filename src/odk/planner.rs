@@ -631,16 +631,17 @@ fn drop_inert_targets(plan: &mut Plan) {
     let inert = |a: &ArtefactPlan| {
         SELF_MANAGEMENT.contains(&a.target.as_str()) || a.target.ends_with(".jar")
     };
+    // The names themselves go too, whether or not this plan has the target: a
+    // repository's own rule may wait on `all_robot_plugins`, and that wait means
+    // nothing here however the standard rules were obtained.
     let dropped: std::collections::HashSet<String> = plan
         .prerequisites
         .iter()
         .chain(plan.artefacts.iter())
         .filter(|a| inert(a))
         .map(|a| a.target.clone())
+        .chain(SELF_MANAGEMENT.iter().map(|n| n.to_string()))
         .collect();
-    if dropped.is_empty() {
-        return;
-    }
     let keep = |t: &String| !dropped.contains(t);
     plan.prerequisites.retain(|a| keep(&a.target));
     plan.artefacts.retain(|a| keep(&a.target));

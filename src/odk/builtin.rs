@@ -33,7 +33,6 @@ const UNPORTED: &[&str] = &[
     "babelon_translation_group",
     "use_custom_import_module",
     "custom_makefile_header",
-    "robot_plugins",
 ];
 
 /// The release artefacts the standard build knows how to make.
@@ -871,8 +870,6 @@ pub fn model(
 ) -> MakeModel {
     let mut m = MakeModel::with_flags(dir, overrides, flags);
     let mut b = Build { m: &mut m };
-    let id = config.id.as_str();
-
     variables(&mut b, config);
 
     // --- Top level -----------------------------------------------------------
@@ -980,6 +977,10 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("SPARQLDIR", "../sparql");
     b.var("COMPONENTSDIR", "components");
     b.var("EXTENDED_PREFIX_MAP", "$(TMPDIR)/obo.epm.json");
+    // Where a reasoner tool would look for plugins. owlmake loads none — every
+    // command one supplies is its own — so `robot_plugins` adds no rules; the
+    // variable stays for a repository's rules that name it.
+    b.var("ROBOT_PLUGINS_DIRECTORY", "$(TMPDIR)/plugins");
     b.var("REPORT_FAIL_ON", c.robot_report.fail_on.as_deref().unwrap_or("None"));
     b.var("REPORT_LABEL", if c.robot_report.use_labels { "-l true" } else { "" });
     // A repository's own report profile, kept beside the edit file.
@@ -1037,59 +1038,50 @@ fn variables(b: &mut Build, c: &Config) {
     }
     b.var("SIMPLESEED", "$(TMPDIR)/simple_seed.txt");
 
-    // The lists every group is written against, in the order the build makes
-    // them: sorted, as a release's file listing is.
-    let mut formats = c.export_formats.clone();
-    formats.push("owl".into());
-    formats.sort();
-    formats.dedup();
-    let mut formats_tsv = formats.clone();
-    formats_tsv.push("tsv".into());
-    formats_tsv.sort();
-    formats_tsv.dedup();
-    let mut release_artefacts: Vec<String> = c.release_artefacts.iter().map(|a| artefact_root(id, a)).collect();
-    release_artefacts.sort();
-    release_artefacts.dedup();
-    let mut main_products = release_artefacts.clone();
-    main_products.push(id.to_string());
-    main_products.sort();
-    main_products.dedup();
-    let cross = |roots: &[String], exts: &[String]| -> String {
-        roots
-            .iter()
-            .flat_map(|r| exts.iter().map(move |e| format!("{r}.{e}")))
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-    b.var("FORMATS", formats.join(" "));
-    b.var("FORMATS_INCL_TSV", formats_tsv.join(" "));
-    b.var("RELEASE_ARTEFACTS", release_artefacts.join(" "));
-    b.var("MAIN_PRODUCTS", main_products.join(" "));
+    // The lists every group is written against. Each is defined in terms of the
+    // one before and expanded only when a rule reads it, so a repository's own
+    // rules can add an artefact or an import and every list that follows from it
+    // follows.
+    b.var("FORMATS", format!("$(sort {} owl)", c.export_formats.join(" ")));
+    b.var("FORMATS_INCL_TSV", "$(sort $(FORMATS) tsv)");
+    let roots: Vec<String> = c
+        .release_artefacts
+        .iter()
+        .map(|a| match a.strip_prefix("custom-") {
+            Some(name) => name.to_string(),
+            None => format!("$(ONT)-{a}"),
+        })
+        .collect();
+    b.var("RELEASE_ARTEFACTS", format!("$(sort {})", roots.join(" ")));
+    b.var("MAIN_PRODUCTS", "$(sort $(foreach r,$(RELEASE_ARTEFACTS), $(r)) $(ONT))");
     if c.gzip_main {
         b.var("MAIN_GZIPPED", "$(foreach f,$(FORMATS), $(ONT).$(f).gz)");
     } else {
         b.var("MAIN_GZIPPED", "");
     }
-    b.var("MAIN_FILES", format!("{} $(MAIN_GZIPPED)", cross(&main_products, &formats)));
+    b.var(
+        "MAIN_FILES",
+        "$(foreach n,$(MAIN_PRODUCTS), $(foreach f,$(FORMATS), $(n).$(f))) $(MAIN_GZIPPED)",
+    );
     if c.makes("basic") {
         b.var("KEEPRELATIONS", "keeprelations.txt");
     }
     b.var("SHARED_ROBOT_COMMANDS", if c.remove_owl_nothing { "remove --term owl:Nothing" } else { "" });
 
     let import_ids: Vec<String> = c.imports().iter().map(|p| p.id.clone()).collect();
-    let import_roots: Vec<String> =
-        import_ids.iter().map(|i| format!("$(IMPORTDIR)/{i}_import")).collect();
     let group = c.import_group.as_ref();
-    let import_roots = if group.is_some_and(|g| g.use_base_merging) {
-        strings(&["$(IMPORTDIR)/merged_import"])
-    } else {
-        import_roots
-    };
     b.var("IMPORTS", import_ids.join(" "));
-    b.var("IMPORT_ROOTS", import_roots.join(" "));
-    b.var("IMPORT_OWL_FILES", cross(&import_roots, &strings(&["owl"])));
+    b.var(
+        "IMPORT_ROOTS",
+        if group.is_some_and(|g| g.use_base_merging) {
+            "$(IMPORTDIR)/merged_import"
+        } else {
+            "$(patsubst %, $(IMPORTDIR)/%_import, $(IMPORTS))"
+        },
+    );
+    b.var("IMPORT_OWL_FILES", "$(foreach n,$(IMPORT_ROOTS), $(n).owl)");
     if group.is_some_and(|g| g.export_obo) {
-        b.var("IMPORT_OBO_FILES", cross(&import_roots, &strings(&["obo"])));
+        b.var("IMPORT_OBO_FILES", "$(foreach n,$(IMPORT_ROOTS), $(n).obo)");
         b.var("IMPORT_FILES", "$(IMPORT_OWL_FILES) $(IMPORT_OBO_FILES)");
     } else {
         b.var("IMPORT_FILES", "$(IMPORT_OWL_FILES)");
@@ -1099,11 +1091,9 @@ fn variables(b: &mut Build, c: &Config) {
     }
 
     let subset_ids: Vec<String> = c.subsets().iter().map(|p| p.id.clone()).collect();
-    let subset_roots: Vec<String> =
-        subset_ids.iter().map(|s| format!("$(SUBSETDIR)/{s}")).collect();
     b.var("SUBSETS", subset_ids.join(" "));
-    b.var("SUBSET_ROOTS", subset_roots.join(" "));
-    b.var("SUBSET_FILES", cross(&subset_roots, &formats_tsv));
+    b.var("SUBSET_ROOTS", "$(patsubst %, $(SUBSETDIR)/%, $(SUBSETS))");
+    b.var("SUBSET_FILES", "$(foreach n,$(SUBSET_ROOTS), $(foreach f,$(FORMATS_INCL_TSV), $(n).$(f)))");
 
     let mapping_group = c.sssom_mappingset_group.as_ref();
     if c.use_mappings {
@@ -1162,15 +1152,11 @@ fn variables(b: &mut Build, c: &Config) {
         format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES){released_reports}"),
     );
     b.var("CLEANFILES", "$(MAIN_FILES) $(SRCMERGED) $(EDIT_PREPROCESSED)");
-    let mut released: Vec<String> = b
-        .words("$(RELEASE_ASSETS)")
-        .iter()
-        .map(|n| format!("$(RELEASEDIR)/{n}"))
-        .collect();
+    let mut released = "$(foreach n,$(RELEASE_ASSETS), $(RELEASEDIR)/$(n))".to_string();
     if b.m.vars.contains_key("RELEASED_MAPPINGS") {
-        released.push("$(foreach n,$(RELEASED_MAPPINGS), $(RELEASEDIR)/mappings/$(n).sssom.tsv)".into());
+        released.push_str(" $(foreach n,$(RELEASED_MAPPINGS), $(RELEASEDIR)/mappings/$(n).sssom.tsv)");
     }
-    b.var("RELEASE_ASSETS_AFTER_RELEASE", released.join(" "));
+    b.var("RELEASE_ASSETS_AFTER_RELEASE", released);
     b.var("CURRENT_RELEASE", "$(ONTBASE).owl");
     b.var("TSV", "");
     let mut tables: Vec<String> = Vec::new();
@@ -1277,12 +1263,13 @@ fn checks(b: &mut Build, c: &Config) {
         &[if c.extra_rdfxml_checks { "@check-rdfxml --jena --rdflib $<" } else { "@check-rdfxml $<" }],
         &[],
     );
-    let products: Vec<String> = b
-        .words("$(MAIN_PRODUCTS)")
-        .iter()
-        .map(|p| format!("check_rdfxml_{p}.owl"))
-        .collect();
-    b.phony("check_rdfxml_assets", &products.join(" "), "", &[], &[]);
+    b.phony(
+        "check_rdfxml_assets",
+        "$(foreach product,$(MAIN_PRODUCTS),check_rdfxml_$(product).owl)",
+        "",
+        &[],
+        &[],
+    );
 
     let exports: &[&str] = if c.robot_report.custom_sparql_exports.is_empty() {
         &[]
