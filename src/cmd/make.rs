@@ -1005,7 +1005,7 @@ fn obtain_plan(
     today: Option<&str>,
     clock: Option<&str>,
 ) -> Result<Plan> {
-    let plan = if repo.spec.is_some() {
+    let plan = if repo.built_from_its_plan_file() {
         repo.plan(&[])?
     } else {
         regen_plan(repo, format, write)?
@@ -1070,7 +1070,7 @@ fn bind_run_version(
 fn regen_plan(repo: &OdkRepo, format: spec::PlanFormat, write: PlanWrite) -> Result<Plan> {
     let plan_path = repo.root.join(format.file_name());
     let full = repo.plan(&[])?;
-    let spec = OwlmakeSpec::from_plan(&full);
+    let spec = repo.plan_file(&full);
     if write == PlanWrite::Check && plan_path.is_file() {
         check_committed_plan(&plan_path, &spec)?;
         return Ok(full);

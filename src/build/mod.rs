@@ -3206,6 +3206,11 @@ fn run_shell_step_in_pipeline(
     // would hand that perl owlmake's OBO output instead of the first perl's.
     model_on_disk: bool,
     pipeline_input: Option<&Path>,
+    // The format the recipe writes its target in. A command that edits the target
+    // in place was written against THAT text — `sed` over functional syntax finds
+    // nothing in RDF/XML — so the target is put on disk for it in that format, not
+    // in whichever one its file name suggests.
+    format: Option<crate::io::Format>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
     // A chained command step threads the model rather than touching files.
@@ -3252,7 +3257,10 @@ fn run_shell_step_in_pipeline(
         std::fs::create_dir_all(parent)?;
     }
     if !model_on_disk {
-        crate::io::save(&mut model, &path)?;
+        match format {
+            Some(f) => crate::io::save_as(&mut model, &path, f)?,
+            None => crate::io::save(&mut model, &path)?,
+        }
     }
     run_shell_step(repo, step)?;
     // The command may have rewritten the target in place; if it did not, this
@@ -3491,7 +3499,14 @@ fn run_steps(
             }
             s if is_shell_step(s) => {
                 model = run_shell_step_in_pipeline(
-                    repo, s, model, target, work, model_on_disk, pipeline_input,
+                    repo,
+                    s,
+                    model,
+                    target,
+                    work,
+                    model_on_disk,
+                    pipeline_input,
+                    target.and_then(|t| steps_format(t, steps)),
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;
@@ -4717,6 +4732,7 @@ fn run_artefact(
                     work,
                     model_on_disk,
                     threaded_from.as_deref(),
+                    recipe_format(a),
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;

@@ -99,33 +99,22 @@ impl CommonArgs {
         resolve_imports_auto(model, None, input)
     }
 
-    /// Apply prefix-affecting options to a freshly loaded model: they land after
-    /// loading, on top of the document's own prefixes (`--noprefixes` clears the
-    /// built-in defaults first).
-    pub fn apply(&self, model: &mut Model) -> Result<()> {
-        if self.noprefixes {
-            model.prefixes = PrefixMapping::default();
-        }
+    /// The prefixes this command line supplies, in the order given: those of each
+    /// `--prefixes`/`--add-prefixes` context file (both JSON-LD forms, a bare
+    /// namespace string and `{"@id": …, "@prefix": true}`), then each
+    /// `--prefix "name: iri"`. The flag says whether one came from a file.
+    pub fn given_prefixes(&self) -> Result<Vec<(String, String, bool)>> {
+        let mut out = Vec::new();
         for file in self.prefixes.iter().chain(self.add_prefixes.iter()) {
             let text = std::fs::read_to_string(file)
                 .with_context(|| format!("reading prefixes file {}", file.display()))?;
             let json: serde_json::Value = serde_json::from_str(&text)
                 .with_context(|| format!("parsing prefixes JSON {}", file.display()))?;
             let ctx = json.get("@context").unwrap_or(&json);
-            if let Some(map) = ctx.as_object() {
-                for (k, v) in map {
-                    // JSON-LD context values are either a bare namespace string or a
-                    // `{"@id": "...", "@prefix": true}` object (mondo's config uses
-                    // both forms).
-                    let ns = v.as_str().or_else(|| v.get("@id").and_then(|x| x.as_str()));
-                    if let Some(ns) = ns {
-                        let _ = model.prefixes.add_prefix(k, ns);
-                        // Track explicitly-provided prefixes so the OBO writer emits
-                        // an `idspace:` for each — regardless of use.
-                        if !model.explicit_prefixes.iter().any(|(p, _)| p == k) {
-                            model.explicit_prefixes.push((k.clone(), ns.to_string()));
-                        }
-                    }
+            for (k, v) in ctx.as_object().into_iter().flatten() {
+                let ns = v.as_str().or_else(|| v.get("@id").and_then(|x| x.as_str()));
+                if let Some(ns) = ns {
+                    out.push((k.clone(), ns.to_string(), true));
                 }
             }
         }
@@ -133,7 +122,25 @@ impl CommonArgs {
             let (name, ns) = spec
                 .split_once(':')
                 .with_context(|| format!("bad --add-prefix (want \"name: iri\"): {spec}"))?;
-            let _ = model.prefixes.add_prefix(name.trim(), ns.trim());
+            out.push((name.trim().to_string(), ns.trim().to_string(), false));
+        }
+        Ok(out)
+    }
+
+    /// Apply prefix-affecting options to a freshly loaded model: they land after
+    /// loading, on top of the document's own prefixes (`--noprefixes` clears the
+    /// built-in defaults first).
+    pub fn apply(&self, model: &mut Model) -> Result<()> {
+        if self.noprefixes {
+            model.prefixes = PrefixMapping::default();
+        }
+        for (name, ns, from_file) in self.given_prefixes()? {
+            let _ = model.prefixes.add_prefix(&name, &ns);
+            // A prefix from a context FILE gets an `idspace:` line in OBO output
+            // whether or not it shortens anything, so those are kept apart.
+            if from_file && !model.explicit_prefixes.iter().any(|(p, _)| *p == name) {
+                model.explicit_prefixes.push((name, ns));
+            }
         }
         Ok(())
     }

@@ -910,6 +910,113 @@ impl Config {
     }
 }
 
+// === Agreement with a generated file ==========================================
+
+/// A plan as comparable data: every top-level field, with its targets keyed by
+/// name so that a difference names the target it is in.
+pub fn comparable(plan: &crate::plan::Plan) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let spec = serde_json::to_value(crate::spec::OwlmakeSpec::from_plan(plan)).unwrap_or_default();
+    let mut out = std::collections::BTreeMap::new();
+    for (key, value) in spec.as_object().into_iter().flatten() {
+        match (key.as_str(), value) {
+            ("prerequisites" | "artefacts", serde_json::Value::Array(targets)) => {
+                for t in targets {
+                    let name = t.get("target").and_then(|n| n.as_str()).unwrap_or_default();
+                    out.insert(format!("target {name}"), t.clone());
+                }
+            }
+            _ => {
+                out.insert(format!("field {key}"), value.clone());
+            }
+        }
+    }
+    out.values_mut().for_each(plain);
+    out
+}
+
+/// Text a shell reads is the same text however its words are spaced, and a path
+/// is the same path with or without a `./` in it. A generated file pads its
+/// lists with runs of blanks; writing a plan to a file keeps neither.
+fn plain(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Object(m) => {
+            for (k, v) in m.iter_mut() {
+                match (k.as_str(), &mut *v) {
+                    ("command" | "message", serde_json::Value::String(s)) => {
+                        *s = s
+                            .split_whitespace()
+                            .map(|w| w.replace("/./", "/"))
+                            .map(|w| w.strip_prefix("./").map(str::to_string).unwrap_or(w))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                    }
+                    _ => plain(v),
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(plain),
+        _ => {}
+    }
+}
+
+/// How two plans differ, each difference named. `a` and `b` say which is which.
+pub fn differences(
+    want: &std::collections::BTreeMap<String, serde_json::Value>,
+    got: &std::collections::BTreeMap<String, serde_json::Value>,
+    (a, b): (&str, &str),
+) -> Vec<String> {
+    let show = |v: &serde_json::Value| serde_yaml::to_string(v).unwrap_or_default();
+    let mut out = Vec::new();
+    for (name, w) in want {
+        match got.get(name) {
+            None => out.push(format!("MISSING from {b}: {name}")),
+            Some(g) if g != w => {
+                out.push(format!("DIFFERS: {name}\n--- {a}\n{}--- {b}\n{}", show(w), show(g)))
+            }
+            Some(_) => {}
+        }
+    }
+    out.extend(got.keys().filter(|n| !want.contains_key(*n)).map(|n| format!("ONLY in {b}: {n}")));
+    out
+}
+
+/// How the plan read from a repository's GENERATED build file differs from the
+/// plan the built-in rules give for the same configuration. Empty means the
+/// generated file says nothing the configuration does not, which is what lets a
+/// repository commit its options in place of the file.
+///
+/// Three things a generated file holds have no counterpart in rules built as
+/// data, and are set aside: its launcher is spelled `robot …` where the rules
+/// spell `om …` (the executor runs owlmake for either); it declares `.FORCE`;
+/// and it wraps recipes in emptiness tests, which the rules decide as they are
+/// built, so only switches gate them.
+pub fn differences_from_generated(
+    generated: &crate::plan::Plan,
+    builtin: &crate::plan::Plan,
+) -> Vec<String> {
+    fn relaunch(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::String(s) if s.starts_with("robot --catalog ") => {
+                *s = format!("om{}", &s["robot".len()..]);
+            }
+            serde_json::Value::Object(m) => m.values_mut().for_each(relaunch),
+            serde_json::Value::Array(items) => items.iter_mut().for_each(relaunch),
+            _ => {}
+        }
+    }
+    let (mut theirs, ours) = (comparable(generated), comparable(builtin));
+    theirs.values_mut().for_each(relaunch);
+    if let Some(serde_json::Value::Array(phony)) = theirs.get_mut("field phony") {
+        phony.retain(|t| t.as_str() != Some(".FORCE"));
+    }
+    if let (Some(serde_json::Value::Object(flags)), Some(serde_json::Value::Object(switches))) =
+        (theirs.get_mut("field gating_flags"), ours.get("field gating_flags"))
+    {
+        flags.retain(|k, _| switches.contains_key(k));
+    }
+    differences(&theirs, &ours, ("the generated file", "the built-in rules"))
+}
+
 // === The rules ==============================================================
 
 /// A rule under construction. Targets and prerequisites are expanded against the

@@ -72,7 +72,7 @@ struct Graph {
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     meta: Option<GraphMeta>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<Node>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     edges: Vec<Edge>,

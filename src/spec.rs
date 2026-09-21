@@ -182,9 +182,10 @@ pub struct OwlmakeSpec {
     /// Reasoner backend (`ELK`, `whelk`, …).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reasoner: String,
-    /// The repository's options for the standard build, held as written.
+    /// The repository's options for the standard build, held as written and in the
+    /// order they were written.
     #[serde(flatten)]
-    pub options: std::collections::BTreeMap<String, serde_json::Value>,
+    pub options: serde_json::Map<String, serde_json::Value>,
     /// Whether imports are squashed into a single base-merged module.
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_base_merging: bool,
@@ -2565,22 +2566,16 @@ fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase,
     }
 }
 
-/// Lift the standard-build options out of a document while its paths are
-/// rebased. An option is a setting, not a path: a template is named `GWAS.csv`
+/// Rebase the paths of a whole document, leaving the standard-build options as
+/// written. An option is a setting, not a path: a template is named `GWAS.csv`
 /// whichever directory the file is read from.
-fn take_options(value: &mut serde_json::Value) -> Vec<(String, serde_json::Value)> {
-    let Some(map) = value.as_object_mut() else { return Vec::new() };
-    let names: Vec<String> = map
-        .keys()
-        .filter(|k| crate::odk::builtin::is_option(k) && !OwlmakeSpec::is_plan_key(k))
-        .cloned()
-        .collect();
-    names.into_iter().filter_map(|k| map.remove(&k).map(|v| (k, v))).collect()
-}
-
-fn put_options(value: &mut serde_json::Value, options: Vec<(String, serde_json::Value)>) {
-    if let Some(map) = value.as_object_mut() {
-        map.extend(options);
+fn relocate_document(value: &mut serde_json::Value, from: &Path, to: &Path, known: &KnownDirs) {
+    let Some(map) = value.as_object_mut() else { return };
+    for (key, v) in map.iter_mut() {
+        if crate::odk::builtin::is_option(key) && !OwlmakeSpec::is_plan_key(key) {
+            continue;
+        }
+        relocate(v, from, to, Rebase::Field, known);
     }
 }
 
@@ -2643,10 +2638,8 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
         // The declared paths that vouch for free-text tokens are read from the
         // SAME document being relocated, so they are in the same base its
         // strings are.
-        let options = take_options(&mut value);
         let known = KnownDirs::of(&value);
-        relocate(&mut value, &file_dir, &exec, Rebase::Field, &known);
-        put_options(&mut value, options);
+        relocate_document(&mut value, &file_dir, &exec, &known);
     }
     let spec: OwlmakeSpec = serde_json::from_value(value)
         .with_context(|| format!("interpreting {}", path.display()))?;
@@ -2820,10 +2813,8 @@ pub fn to_value(spec: &OwlmakeSpec, path: &Path) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(spec)?;
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        let options = take_options(&mut value);
         let known = KnownDirs::of(&value);
-        relocate(&mut value, &exec, &file_dir, Rebase::Field, &known);
-        put_options(&mut value, options);
+        relocate_document(&mut value, &exec, &file_dir, &known);
     }
     Ok(value)
 }

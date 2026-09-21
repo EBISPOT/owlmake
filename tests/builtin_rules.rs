@@ -21,112 +21,18 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use owlmake::odk::OdkRepo;
-use owlmake::spec::OwlmakeSpec;
 
-/// Text a shell reads is the same text however its words are spaced, and a
-/// generated file pads its lists with runs of blanks.
-fn squeeze(v: &mut serde_yaml::Value) {
-    match v {
-        serde_yaml::Value::Mapping(m) => {
-            for (k, v) in m.iter_mut() {
-                match (k.as_str(), &mut *v) {
-                    // …and a path is the same path with or without a `./` in
-                    // it, which writing a plan to a file does not keep.
-                    (Some("command" | "message"), serde_yaml::Value::String(s)) => {
-                        *s = s
-                            .split_whitespace()
-                            .map(|w| w.replace("/./", "/"))
-                            .map(|w| w.strip_prefix("./").map(str::to_string).unwrap_or(w))
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                    }
-                    _ => squeeze(v),
-                }
-            }
-        }
-        serde_yaml::Value::Sequence(items) => items.iter_mut().for_each(squeeze),
-        _ => {}
-    }
-}
-
-/// Spell a generated file's launcher as the built-in rules spell theirs.
-fn relaunch(v: &mut serde_yaml::Value) {
-    match v {
-        serde_yaml::Value::String(s) if s.starts_with("robot --catalog ") => {
-            *s = format!("om{}", &s["robot".len()..]);
-        }
-        serde_yaml::Value::Mapping(m) => m.iter_mut().for_each(|(_, v)| relaunch(v)),
-        serde_yaml::Value::Sequence(items) => items.iter_mut().for_each(relaunch),
-        _ => {}
-    }
-}
-
-/// A plan as comparable data: every top-level field, with the two target lists
-/// re-keyed by target name so a difference names the target it is in.
-fn resolved(repo: &OdkRepo) -> BTreeMap<String, serde_yaml::Value> {
-    let plan = repo.plan(&[]).expect("planning");
-    let spec = serde_yaml::to_value(OwlmakeSpec::from_plan(&plan)).expect("serializing");
-    let serde_yaml::Value::Mapping(fields) = spec else { panic!("a plan is a mapping") };
-    let mut out = BTreeMap::new();
-    for (key, value) in fields {
-        let key = key.as_str().expect("string key").to_string();
-        match (key.as_str(), value) {
-            ("prerequisites" | "artefacts", serde_yaml::Value::Sequence(targets)) => {
-                for t in targets {
-                    let name = t
-                        .get("target")
-                        .and_then(|n| n.as_str())
-                        .expect("a target has a name")
-                        .to_string();
-                    out.insert(format!("target {name}"), t);
-                }
-            }
-            (_, value) => {
-                out.insert(format!("field {key}"), value);
-            }
-        }
-    }
-    out
+fn resolved(repo: &OdkRepo) -> BTreeMap<String, serde_json::Value> {
+    owlmake::odk::builtin::comparable(&repo.plan(&[]).expect("planning"))
 }
 
 fn compare(root: &Path) -> Vec<String> {
-    let mut ingested = resolved(&OdkRepo::load(root).expect("loading the generated Makefile"));
-    let mut builtin =
-        resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading the built-in rules"));
-    ingested.values_mut().chain(builtin.values_mut()).for_each(squeeze);
-    // A command the planner has no op for stays a command line, spelled with the
-    // configuration's launcher — `robot …` in a generated file, `om …` in the
-    // built-in rules. The executor runs owlmake for either.
-    ingested.values_mut().for_each(relaunch);
-    // What a generated file holds that rules built as data have no counterpart
-    // for: the `.FORCE` idiom, and the emptiness tests it wraps recipes in — the
-    // built-in rules decide those as they are built, so only SWITCHES gate them.
-    if let Some(serde_yaml::Value::Sequence(phony)) = ingested.get_mut("field phony") {
-        phony.retain(|t| t.as_str() != Some(".FORCE"));
-    }
-    if let (Some(serde_yaml::Value::Mapping(theirs)), Some(serde_yaml::Value::Mapping(ours))) =
-        (ingested.get_mut("field gating_flags"), builtin.get("field gating_flags"))
-    {
-        let switches: Vec<serde_yaml::Value> = ours.keys().cloned().collect();
-        theirs.retain(|k, _| switches.contains(k));
-    }
-    let mut problems = Vec::new();
-    let show = |v: &serde_yaml::Value| serde_yaml::to_string(v).unwrap_or_default();
-    for (name, want) in &ingested {
-        match builtin.get(name) {
-            None => problems.push(format!("MISSING from the built-in rules: {name}")),
-            Some(got) if got != want => problems.push(format!(
-                "DIFFERS: {name}\n--- ingested\n{}--- built-in\n{}",
-                show(want),
-                show(got)
-            )),
-            Some(_) => {}
-        }
-    }
-    for name in builtin.keys().filter(|n| !ingested.contains_key(*n)) {
-        problems.push(format!("ONLY in the built-in rules: {name}"));
-    }
-    problems
+    let generated = OdkRepo::load(root).expect("loading the generated Makefile");
+    let builtin = OdkRepo::load_with_builtin_rules(root).expect("loading the built-in rules");
+    owlmake::odk::builtin::differences_from_generated(
+        &generated.plan(&[]).expect("planning"),
+        &builtin.plan(&[]).expect("planning"),
+    )
 }
 
 /// Lay a fixture out as the repository it describes and return its root. `test`
@@ -195,30 +101,7 @@ fn builtin_rules_resolve_to_what_odk_generates() {
     assert!(failed.is_empty(), "fixtures whose plans differ: {failed:?}");
 }
 
-/// The differences between two resolved plans, named.
-fn differences(
-    want: &BTreeMap<String, serde_yaml::Value>,
-    got: &BTreeMap<String, serde_yaml::Value>,
-    (wanted, gotten): (&str, &str),
-) -> Vec<String> {
-    let show = |v: &serde_yaml::Value| serde_yaml::to_string(v).unwrap_or_default();
-    let mut problems = Vec::new();
-    for (name, w) in want {
-        match got.get(name) {
-            None => problems.push(format!("MISSING from {gotten}: {name}")),
-            Some(g) if g != w => problems.push(format!(
-                "DIFFERS: {name}\n--- {wanted}\n{}--- {gotten}\n{}",
-                show(w),
-                show(g)
-            )),
-            Some(_) => {}
-        }
-    }
-    for name in got.keys().filter(|n| !want.contains_key(*n)) {
-        problems.push(format!("ONLY in {gotten}: {name}"));
-    }
-    problems
-}
+use owlmake::odk::builtin::differences;
 
 /// **The acceptance test for `owlmake.yaml`.** Write the file a repository
 /// commits, take its Makefile, its own rules and its configuration OUT of the
@@ -311,7 +194,7 @@ fn a_standard_file_alone_resolves_a_real_repository() {
     };
     let mut failed = false;
     for root in repos.split(':').filter(|r| !r.is_empty()).map(Path::new) {
-        let mut before = resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading"));
+        let before = resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading"));
         let spec = OdkRepo::standard_spec(root).expect("writing the standard file");
         let scratch = without_build_files(root);
         let file = scratch.join("owlmake.yaml");
@@ -322,8 +205,7 @@ fn a_standard_file_alone_resolves_a_real_repository() {
             let name = root.file_name().unwrap().to_string_lossy();
             let _ = std::fs::copy(&file, Path::new(&dir).join(format!("{name}.owlmake.yaml")));
         }
-        let mut after = resolved(&OdkRepo::load(&scratch).expect("loading from owlmake.yaml alone"));
-        before.values_mut().chain(after.values_mut()).for_each(squeeze);
+        let after = resolved(&OdkRepo::load(&scratch).expect("loading from owlmake.yaml alone"));
         let problems = differences(&before, &after, ("with its build files", "from owlmake.yaml alone"));
         eprintln!("== standard file {}: {lines} lines, {} difference(s)", root.display(), problems.len());
         for p in &problems {

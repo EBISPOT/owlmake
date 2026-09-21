@@ -100,44 +100,43 @@ fn resolve_format(explicit: Option<&str>, output: Option<&Path>) -> String {
 ///
 /// Without `--labels` an entity is a CURIE over the BUILT-IN OBO context, not the
 /// input document's prefix map — so the report says `dc:title` where the
-/// document's own map would give `terms:title`. The document's prefixes are only
-/// a fallback for IRIs the context cannot shorten at all, so a document can never
-/// re-spell an IRI the context already covers. With `--labels` a label REPLACES
+/// document's own map would give `terms:title`, and an IRI in a namespace only
+/// the document declares is written in full. Prefixes GIVEN TO THE COMMAND
+/// (`--prefix`, `--prefixes`) are a fallback for IRIs the context cannot shorten
+/// at all, so they never re-spell one it covers. With `--labels` a label REPLACES
 /// the CURIE (in every column, not just the subject), and the CURIE is the
 /// fallback for an entity that has no label.
 struct ShortForm {
     /// The built-in OBO context: (prefix, namespace), longest namespace first, so
     /// the first match is the most specific one.
     context: Vec<(String, String)>,
-    /// The document's own prefixes, consulted ONLY for an IRI the built-in context
-    /// cannot shorten at all. `--prefix`/`--prefixes` are folded into the document
-    /// map, so this second pass is what keeps them working. It must stay a
-    /// fallback and never join the first list: CL's
-    /// `http://purl.obolibrary.org/obo/cl#…` has a LONGER match in the document
-    /// (`cl:`) than in the context (`obo:`), and released CL reports carry
+    /// The prefixes given to the command, consulted ONLY for an IRI the built-in
+    /// context cannot shorten at all. They must stay a fallback and never join the
+    /// first list: a prefix for `http://purl.obolibrary.org/obo/cl#…` is a LONGER
+    /// match than the context's `obo:`, and released CL reports carry
     /// `obo:cl#cellxgene_subset`.
-    document: Vec<(String, String)>,
+    given: Vec<(String, String)>,
     labels: Option<HashMap<String, String>>,
     ontology_iri: Option<String>,
 }
 
 impl ShortForm {
-    fn new(model: &crate::model::Model, labels: Option<HashMap<String, String>>) -> Self {
+    fn new(
+        model: &crate::model::Model,
+        given: Vec<(String, String)>,
+        labels: Option<HashMap<String, String>>,
+    ) -> Self {
         let mut context = report::obo_context_prefixes();
         context.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-        let mut document: Vec<(String, String)> = model
-            .prefixes
-            .mappings()
-            .filter(|(p, _)| !p.is_empty())
-            .map(|(p, ns)| (p.to_string(), ns.to_string()))
-            .collect();
-        document.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-        ShortForm { context, document, labels, ontology_iri: ontology_iri(model) }
+        let mut given: Vec<(String, String)> =
+            given.into_iter().filter(|(p, _)| !p.is_empty()).collect();
+        given.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        ShortForm { context, given, labels, ontology_iri: ontology_iri(model) }
     }
 
     /// The CURIE for an IRI, or the IRI itself when no namespace matches.
     fn curie(&self, iri: &str) -> String {
-        for map in [&self.context, &self.document] {
+        for map in [&self.context, &self.given] {
             for (prefix, ns) in map {
                 if iri.starts_with(ns.as_str()) {
                     // A substitution, not a prefix strip: every occurrence of the
@@ -170,7 +169,7 @@ impl ShortForm {
         // A bare value that names a declared prefix resolves to that prefix's
         // namespace and renders as the contracted `prefix:` — a synonym reading
         // exactly "MF" prints as "MF:" wherever MF: is declared.
-        for map in [&self.context, &self.document] {
+        for map in [&self.context, &self.given] {
             if map.iter().any(|(prefix, _)| prefix == value) {
                 return format!("{value}:");
             }
@@ -380,7 +379,9 @@ pub fn step(
     // Render entities LAST: `--base-iri` above keys on the full IRI, and the HTML
     // renderer needs it for each cell's link.
     let labels = if args.labels.unwrap_or(false) { Some(label_map(&model)?) } else { None };
-    let short = ShortForm::new(&model, labels);
+    let given: Vec<(String, String)> =
+        args.common.given_prefixes()?.into_iter().map(|(p, ns, _)| (p, ns)).collect();
+    let short = ShortForm::new(&model, given, labels);
     let mut links: Vec<[Option<String>; 3]> = Vec::with_capacity(result.rows.len());
     for row in &mut result.rows {
         let link = |v: &str| {

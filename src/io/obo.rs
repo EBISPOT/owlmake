@@ -2004,8 +2004,12 @@ impl Ctx {
         // `idspaces` is populated (it may carry the OWL xmlns fallback set,
         // which is NOT the OBO idspace set). A plain RDF/XML model (cl/uberon) with
         // no explicit prefixes keeps using its scanned `idspaces`.
+        // An OWL document that was read has an xmlns map, however few prefixes
+        // it declares: one declaring none beyond the built-in ones abbreviates
+        // nothing, and its IRIs outside those namespaces stay full.
+        let scanned = !model.idspaces.is_empty() || !model.rdf_prefixes.is_empty();
         let mut idspaces: Vec<(String, String)> =
-            if !model.idspaces.is_empty() && model.explicit_prefixes.is_empty() {
+            if scanned && model.explicit_prefixes.is_empty() {
                 model.idspaces.clone()
         } else if model.obo_source && model.explicit_prefixes.is_empty() {
             // An OBO document's only prefix declarations are its `idspace:`
@@ -3161,8 +3165,12 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     // The trailing space is deliberate: `idspace:` has an optional third
     // (quoted description) field, and its separator is always emitted.
     let used = ctx.used.borrow();
-    let mut idspaces: Vec<(String, String)> = if model.idspaces.is_empty()
-        || !model.explicit_prefixes.is_empty()
+    // An OWL document that was read has an xmlns map (`rdf_prefixes`), however few
+    // prefixes it declares; one that declares none beyond the built-in ones has
+    // been scanned and found to list nothing, which is not the same as there
+    // having been no document to scan.
+    let scanned = !model.idspaces.is_empty() || !model.rdf_prefixes.is_empty();
+    let mut idspaces: Vec<(String, String)> = if !scanned || !model.explicit_prefixes.is_empty()
     {
         // No scanned prefix map (an obo→obo trip, or a pipeline-built model). An
         // `idspace:` line belongs only to a prefix that actually *shortened an id*
