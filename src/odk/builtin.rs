@@ -20,10 +20,27 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use serde::de::IgnoredAny;
 use serde::Deserialize;
 
 use super::makefile::{MakeModel, Rule};
+
+/// Options that change the standard build and have no built-in rules yet, as
+/// paths into the configuration. A configuration that sets one is refused: built
+/// without it, the result would differ from what the repository asked for, and
+/// nothing would say so.
+const UNPORTED: &[&str] = &[
+    "use_mappings",
+    "sssom_mappingset_group",
+    "use_translations",
+    "babelon_translation_group",
+    "use_custom_import_module",
+    "custom_makefile_header",
+    "public_release",
+    "public_release_assets",
+    "robot_plugins",
+    "robot_report.upper_ontology",
+    "robot_report.ensure_owl2dl_profile",
+];
 
 /// The release artefacts the standard build knows how to make.
 const VARIANTS: &[&str] = &[
@@ -43,14 +60,13 @@ pub const BEHAVIOUR_SET: &str = "1.6.1";
 
 // === Configuration ==========================================================
 
-/// A repository's build configuration: the options the built-in rules cover.
+/// A repository's build configuration, as far as it decides what is built.
 ///
-/// Unknown fields are an error, which is what makes an uncovered option fail by
-/// name. The fields held as [`IgnoredAny`] are accepted because they describe the
-/// repository (its title, where it is hosted, how its documentation is built)
-/// and change nothing about what the build produces.
+/// Read as ODK reads it: a key that is not an option is ignored, and so is an
+/// option that shapes something other than the build (the repository's title, its
+/// CI workflows, how its container is run). An option that DOES shape the build
+/// and that these rules do not cover yet is refused by name — see [`UNPORTED`].
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Config {
     pub id: String,
     #[serde(default = "default_uribase")]
@@ -144,32 +160,14 @@ pub struct Config {
     pub repo: String,
     #[serde(default = "default_git_main_branch")]
     pub git_main_branch: String,
+    /// How the documentation is built. Only whether it is configured matters here.
+    #[serde(default)]
+    pub documentation: Option<serde_yaml::Value>,
 
-    // Describes the repository; no effect on what is built.
-    #[serde(default)]
-    title: Option<IgnoredAny>,
-    #[serde(default)]
-    description: Option<IgnoredAny>,
-    #[serde(default)]
-    license: Option<IgnoredAny>,
-    #[serde(default)]
-    contact: Option<IgnoredAny>,
-    #[serde(default)]
-    creators: Option<IgnoredAny>,
-    #[serde(default)]
-    documentation: Option<IgnoredAny>,
-    #[serde(default)]
-    ci: Option<IgnoredAny>,
-    #[serde(default)]
-    workflows: Option<IgnoredAny>,
-    /// Memory for a JVM owlmake does not start.
-    #[serde(default)]
-    robot_java_args: Option<IgnoredAny>,
 }
 
 /// The pattern data directories beyond `default`, each generated on its own.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PatternPipelineGroup {
     #[serde(default)]
     pub products: Vec<PatternPipeline>,
@@ -179,28 +177,15 @@ pub struct PatternPipelineGroup {
     pub matches: Option<Vec<PatternPipeline>>,
     #[serde(default)]
     pub ids: Vec<String>,
-    #[serde(default)]
-    disabled: Option<IgnoredAny>,
-    #[serde(default)]
-    rebuild_if_source_changes: Option<IgnoredAny>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PatternPipeline {
     pub id: String,
     #[serde(default = "default_dosdp_tools_options")]
     pub dosdp_tools_options: String,
     #[serde(default = "default_pipeline_ontology")]
     pub ontology: String,
-    #[serde(default)]
-    description: Option<IgnoredAny>,
-    #[serde(default)]
-    maintenance: Option<IgnoredAny>,
-    #[serde(default)]
-    rebuild_if_source_changes: Option<IgnoredAny>,
-    #[serde(default)]
-    robot_settings: Option<IgnoredAny>,
 }
 
 impl PatternPipelineGroup {
@@ -211,10 +196,6 @@ impl PatternPipelineGroup {
                     id,
                     dosdp_tools_options: default_dosdp_tools_options(),
                     ontology: default_pipeline_ontology(),
-                    description: None,
-                    maintenance: None,
-                    rebuild_if_source_changes: None,
-                    robot_settings: None,
                 });
             }
         }
@@ -224,7 +205,6 @@ impl PatternPipelineGroup {
 /// The import modules, and what holds for all of them unless a product says
 /// otherwise.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ImportGroup {
     #[serde(default)]
     pub products: Vec<ImportProduct>,
@@ -267,14 +247,9 @@ pub struct ImportGroup {
     #[serde(default = "yes")]
     pub scan_signature: bool,
 
-    #[serde(default)]
-    disabled: Option<IgnoredAny>,
-    #[serde(default)]
-    rebuild_if_source_changes: Option<IgnoredAny>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ImportProduct {
     pub id: String,
     #[serde(default)]
@@ -309,12 +284,6 @@ pub struct ImportProduct {
     #[serde(default)]
     pub mirror_type: Option<String>,
 
-    #[serde(default)]
-    maintenance: Option<IgnoredAny>,
-    #[serde(default)]
-    rebuild_if_source_changes: Option<IgnoredAny>,
-    #[serde(default)]
-    robot_settings: Option<IgnoredAny>,
 }
 
 impl ImportProduct {
@@ -333,9 +302,6 @@ impl ImportProduct {
             make_base: false,
             use_gzipped: false,
             mirror_type: None,
-            maintenance: None,
-            rebuild_if_source_changes: None,
-            robot_settings: None,
         }
     }
 
@@ -369,8 +335,6 @@ impl ImportGroup {
             strip_annotation_properties: true,
             annotate_defined_by: false,
             scan_signature: true,
-            disabled: None,
-            rebuild_if_source_changes: None,
         }
     }
 
@@ -408,27 +372,20 @@ impl ImportGroup {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SubsetGroup {
     #[serde(default)]
     pub products: Vec<SubsetProduct>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SubsetProduct {
     pub id: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ComponentGroup {
     #[serde(default)]
     pub products: Vec<ComponentProduct>,
-    #[serde(default)]
-    disabled: Option<IgnoredAny>,
-    #[serde(default)]
-    rebuild_if_source_changes: Option<IgnoredAny>,
 }
 
 impl ComponentGroup {
@@ -447,7 +404,6 @@ impl ComponentGroup {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ComponentProduct {
     pub filename: String,
     /// Fetch the component from here.
@@ -476,7 +432,6 @@ pub struct ComponentProduct {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct RobotReport {
     #[serde(default)]
     pub fail_on: Option<String>,
@@ -605,8 +560,20 @@ fn default_sparql_exports() -> Vec<String> {
 impl Config {
     /// Read a configuration, refusing any option the built-in rules do not cover.
     pub fn parse(text: &str) -> Result<Config> {
-        let mut config: Config = serde_yaml::from_str(text)
-            .context("this configuration uses an option owlmake has no built-in rules for")?;
+        let raw: serde_yaml::Value = serde_yaml::from_str(text).context("not a YAML document")?;
+        for path in UNPORTED {
+            let set = path.split('.').try_fold(&raw, |v, key| v.get(key));
+            // An option spelled out at the value that leaves the build alone is
+            // not a request for anything.
+            let inert = |v: &serde_yaml::Value| {
+                v.is_null() || v.as_bool() == Some(false) || v.as_str() == Some("")
+            };
+            if set.is_some_and(|v| !inert(v)) {
+                bail!("the configuration sets `{path}`, which owlmake has no built-in rules for yet");
+            }
+        }
+        let mut config: Config =
+            serde_yaml::from_value(raw).context("reading the build configuration")?;
         if let Some(g) = &mut config.import_group {
             g.derive();
         }
