@@ -31,44 +31,6 @@ cd bio-attribute-ontology
 om
 ```
 
-### `owlmake.yaml`
-
-Once a repository has an `owlmake.yaml` it no longer needs its `Makefile`, its `<id>.Makefile` or its `<id>-odk.yaml`: delete them and `om` builds from the file alone.
-
-The file holds what the repository decided and nothing else. Its top-level keys are the repository's options — the ones an ODK configuration has (`release_artefacts`, `import_group`, `components`, `subset_group`, `robot_report`, `use_dosdps`, …) — and everything those options imply is owlmake's standard build, built in. Only what the repository builds in a way of its own is written out, under `targets`:
-
-```yaml
-min_owlmake_version: 0.3.0
-emulate_odk_version: 1.6.1        # the standard build this file is written against
-id: coho
-uribase: http://www.ebi.ac.uk
-release_artefacts: [base, full, simple]
-primary_release: full
-export_formats: [owl, obo, json]
-import_group:
-  products:
-  - id: ro
-  - id: omo
-    module_type: mirror
-targets:
-- target: src/ontology/components/GWAS.owl     # replaces the standard target of that name
-  when: [COMP]                                 # exists only while COMP is on, as the standard one does
-  needs: [src/templates/GWAS.csv]
-  steps:
-  - op: template
-    templates: [src/templates/GWAS.csv]
-    prefixes: ['COHO: http://www.ebi.ac.uk/coho/COHO_']
-  - op: convert
-    format: ofn
-- target: test                                 # adds a check to the standard `test`
-  extends: true
-  needs: [my_check]
-```
-
-An import, its mirror, or the pattern products that a repository builds its own way are recorded under `imports` and `dosdp`, because owlmake builds those with its own engines rather than as targets. `om make --plan-only` prints the whole resolved plan — every target the file and the standard build amount to.
-
-`om` writes this file for a repository whose generated `Makefile` is what ODK 1.6.1 generates for its configuration. Where it is not — another ODK release generated it, or the repository has no ODK configuration and its build is all its own (EFO) — `om` says what differs and writes the whole plan instead: every target, step and switch, in the same file. The two are told apart by whether the file states the ontology's `version` and `ontology_iri`, which only a whole plan has to.
-
 **Much of the existing ODK is functionally mirrored by the `om` binary itself (the majority of `robot`, `sssom`, `owltools`, `dosdp-tools`), so for many existing ontologies there are no environmental dependencies.** You can build ontologies like EFO, CL, and UBERON out of the box without Docker, Java, or Python.
 
 Notable exceptions are ontologies using Python scripts as part of their build, e.g. uPheno which uses Python and Pandas which are not supplied as part of the single `om` binary. For this reason Docker images are also provided, as a compact alternative to the ODK image (2.81 GB for `odkfull`):
