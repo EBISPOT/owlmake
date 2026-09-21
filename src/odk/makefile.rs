@@ -513,112 +513,123 @@ impl MakeModel {
                     recipe,
                     guards: rule_guards,
                 };
-                // `.PHONY: a b c` declares targets that name no file, so they are
-                // always out of date. Recorded so the plan can carry the set and
-                // execution can apply the staleness rule to the rest instead of
-                // rebuilding the whole release path on every QC run.
-                if targets.iter().any(|t| t == ".PHONY") {
-                    self.phony.extend(rule.prereqs.iter().cloned());
+                self.add_rule(rule);
+            }
+        }
+        Ok(())
+    }
+
+    /// Add one rule to the model: a `.PHONY` declaration extends the phony set, a
+    /// pattern rule joins the pattern rules, and an explicit rule is merged into
+    /// what the model already holds for each of its targets. The first explicit
+    /// target becomes the default goal.
+    ///
+    /// The one way a rule enters a model, whether it was read from a file or
+    /// built as data, so both mean the same thing.
+    pub fn add_rule(&mut self, rule: Rule) {
+        // `.PHONY: a b c` declares targets that name no file, so they are
+        // always out of date. Recorded so the plan can carry the set and
+        // execution can apply the staleness rule to the rest instead of
+        // rebuilding the whole release path on every QC run.
+        if rule.targets.iter().any(|t| t == ".PHONY") {
+            self.phony.extend(rule.prereqs.iter().cloned());
+        }
+        if rule.targets.iter().any(|t| t.contains('%')) {
+            self.pattern_rules.push(rule);
+        } else {
+            for t in &rule.targets.clone() {
+                // The default goal is the first target of the first
+                // explicit rule. A dot-target is skipped only when it
+                // ALSO contains no slash, so `.PHONY` is skipped but
+                // `../patterns/foo.owl` is not.
+                if self.default_goal.is_none()
+                    && !(t.starts_with('.') && !t.contains('/'))
+                {
+                    self.default_goal = Some(t.clone());
                 }
-                if targets.iter().any(|t| t.contains('%')) {
-                    self.pattern_rules.push(rule);
-                } else {
-                    for t in &targets {
-                        // The default goal is the first target of the first
-                        // explicit rule. A dot-target is skipped only when it
-                        // ALSO contains no slash, so `.PHONY` is skipped but
-                        // `../patterns/foo.owl` is not.
-                        if self.default_goal.is_none()
-                            && !(t.starts_with('.') && !t.contains('/'))
-                        {
-                            self.default_goal = Some(t.clone());
-                        }
-                        // MERGE, do not replace. Prerequisites accumulate across
-                        // every explicit rule for a target, and a single recipe
-                        // is kept ("last one wins", with a warning). Every ODK
-                        // Makefile ends with `include <ont>.Makefile`, and those
-                        // override files extend `test:` with repo checks — OBA's
-                        // adds one line, `test: check_children_oba`. Replacing
-                        // would let that line DELETE the whole seven-member ODK
-                        // QC pipeline from the plan, leaving `om test` to run two
-                        // repo greps and report success.
-                        match self.rules.entry(t.clone()) {
-                            std::collections::hash_map::Entry::Vacant(e) => {
-                                e.insert(rule.clone());
+                // MERGE, do not replace. Prerequisites accumulate across
+                // every explicit rule for a target, and a single recipe
+                // is kept ("last one wins", with a warning). Every ODK
+                // Makefile ends with `include <ont>.Makefile`, and those
+                // override files extend `test:` with repo checks — OBA's
+                // adds one line, `test: check_children_oba`. Replacing
+                // would let that line DELETE the whole seven-member ODK
+                // QC pipeline from the plan, leaving `om test` to run two
+                // repo greps and report success.
+                match self.rules.entry(t.clone()) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(rule.clone());
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        let old = e.get_mut();
+                        // Which END the later rule's prerequisites join
+                        // depends on whether it also carries a RECIPE.
+                        // For `t: a a2` followed by `t: b b2`:
+                        //   later rule has a recipe  → `$^ = b b2 a a2`
+                        //   later rule has none      → `$^ = a a2 b b2`
+                        // An overriding recipe relinks the target and its
+                        // own prerequisites lead; a bare prerequisite line
+                        // just accumulates in the order the file is read.
+                        //
+                        // Both halves matter here. Prepending is what makes
+                        // `$<` for HPO's `hp.owl` the edit file rather
+                        // than the earlier rule's
+                        // `hp-simple-non-classified.owl`, so the release
+                        // is built from the whole edit file and not from a
+                        // reduced subset. And appending is what keeps
+                        // `test:` in ODK order, so the profile check
+                        // builds `hp.owl` BEFORE `test_obo` writes
+                        // `hp.obo`; reversed, `hp.obo` is older than
+                        // `hp.owl`, the release rule re-makes it, and the
+                        // shipped file is the release conversion instead
+                        // of the `test_obo` product the ODK actually
+                        // publishes.
+                        let overrides = !rule.recipe.is_empty();
+                        let join = |mut lead: Vec<String>, rest: Vec<String>| {
+                            for p in rest {
+                                if !lead.contains(&p) {
+                                    lead.push(p);
+                                }
                             }
-                            std::collections::hash_map::Entry::Occupied(mut e) => {
-                                let old = e.get_mut();
-                                // Which END the later rule's prerequisites join
-                                // depends on whether it also carries a RECIPE.
-                                // For `t: a a2` followed by `t: b b2`:
-                                //   later rule has a recipe  → `$^ = b b2 a a2`
-                                //   later rule has none      → `$^ = a a2 b b2`
-                                // An overriding recipe relinks the target and its
-                                // own prerequisites lead; a bare prerequisite line
-                                // just accumulates in the order the file is read.
-                                //
-                                // Both halves matter here. Prepending is what makes
-                                // `$<` for HPO's `hp.owl` the edit file rather
-                                // than the earlier rule's
-                                // `hp-simple-non-classified.owl`, so the release
-                                // is built from the whole edit file and not from a
-                                // reduced subset. And appending is what keeps
-                                // `test:` in ODK order, so the profile check
-                                // builds `hp.owl` BEFORE `test_obo` writes
-                                // `hp.obo`; reversed, `hp.obo` is older than
-                                // `hp.owl`, the release rule re-makes it, and the
-                                // shipped file is the release conversion instead
-                                // of the `test_obo` product the ODK actually
-                                // publishes.
-                                let overrides = !rule.recipe.is_empty();
-                                let join = |mut lead: Vec<String>, rest: Vec<String>| {
-                                    for p in rest {
-                                        if !lead.contains(&p) {
-                                            lead.push(p);
-                                        }
-                                    }
-                                    lead
-                                };
-                                let (a, b) = (rule.prereqs.clone(), old.prereqs.split_off(0));
-                                old.prereqs = if overrides { join(a, b) } else { join(b, a) };
-                                let (a, b) = (rule.order_only.clone(), old.order_only.split_off(0));
-                                old.order_only = if overrides { join(a, b) } else { join(b, a) };
-                                // The guards follow the RECIPE. When a later rule
-                                // overrides the recipe from inside a guarded
-                                // block, the recipe the plan will run exists only
-                                // under that flag — UBERON's base rule for
-                                // `../mappings/biomappings.sssom.tsv` is an
-                                // unguarded `test -f $@`, and its override file
-                                // replaces it with a fetch pipeline inside
-                                // `ifeq ($(strip $(MIR)),true)`. A prerequisite-
-                                // only line changes no recipe and so no guard.
-                                if overrides {
-                                    old.guards = rule.guards.clone();
-                                }
-                                if !rule.recipe.is_empty() {
-                                    // Dot-targets (`.PHONY`, `.PRECIOUS`) are
-                                    // declarations, repeated freely throughout a
-                                    // Makefile; only a real target's recipe being
-                                    // replaced is worth reporting.
-                                    if !old.recipe.is_empty() && !t.starts_with('.') {
-                                        status!(
-                                            "make: warning: overriding recipe for target `{t}`"
-                                        );
-                                    }
-                                    old.recipe = rule.recipe.clone();
-                                }
-                                for tg in &rule.targets {
-                                    if !old.targets.contains(tg) {
-                                        old.targets.push(tg.clone());
-                                    }
-                                }
+                            lead
+                        };
+                        let (a, b) = (rule.prereqs.clone(), old.prereqs.split_off(0));
+                        old.prereqs = if overrides { join(a, b) } else { join(b, a) };
+                        let (a, b) = (rule.order_only.clone(), old.order_only.split_off(0));
+                        old.order_only = if overrides { join(a, b) } else { join(b, a) };
+                        // The guards follow the RECIPE. When a later rule
+                        // overrides the recipe from inside a guarded
+                        // block, the recipe the plan will run exists only
+                        // under that flag — UBERON's base rule for
+                        // `../mappings/biomappings.sssom.tsv` is an
+                        // unguarded `test -f $@`, and its override file
+                        // replaces it with a fetch pipeline inside
+                        // `ifeq ($(strip $(MIR)),true)`. A prerequisite-
+                        // only line changes no recipe and so no guard.
+                        if overrides {
+                            old.guards = rule.guards.clone();
+                        }
+                        if !rule.recipe.is_empty() {
+                            // Dot-targets (`.PHONY`, `.PRECIOUS`) are
+                            // declarations, repeated freely throughout a
+                            // Makefile; only a real target's recipe being
+                            // replaced is worth reporting.
+                            if !old.recipe.is_empty() && !t.starts_with('.') {
+                                status!(
+                                    "make: warning: overriding recipe for target `{t}`"
+                                );
+                            }
+                            old.recipe = rule.recipe.clone();
+                        }
+                        for tg in &rule.targets {
+                            if !old.targets.contains(tg) {
+                                old.targets.push(tg.clone());
                             }
                         }
                     }
                 }
             }
         }
-        Ok(())
     }
 
     /// Evaluate a parsed conditional operand against the current variable table.
