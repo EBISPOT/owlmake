@@ -38,8 +38,6 @@ const UNPORTED: &[&str] = &[
     "public_release",
     "public_release_assets",
     "robot_plugins",
-    "robot_report.upper_ontology",
-    "robot_report.ensure_owl2dl_profile",
 ];
 
 /// The release artefacts the standard build knows how to make.
@@ -431,26 +429,67 @@ pub struct ComponentProduct {
     pub make_base: bool,
 }
 
+/// How the QC report and the SPARQL checks are run.
+///
+/// A configuration that says nothing about the report gets every default below.
+/// One that says ANYTHING gets defaults only for the options the build falls back
+/// on by itself: the rest read as unset, so `use_base_iris` is off unless stated
+/// and the default checks are the four that do not include `dc-properties`.
 #[derive(Debug, Deserialize)]
+#[serde(from = "Option<StatedReport>")]
 pub struct RobotReport {
-    #[serde(default)]
     pub fail_on: Option<String>,
-    #[serde(default = "yes")]
     pub use_labels: bool,
-    #[serde(default = "yes")]
     pub use_base_iris: bool,
-    #[serde(default)]
+    /// A repository's own report profile, `profile.txt`.
     pub custom_profile: bool,
-    #[serde(default)]
+    /// Publish the reports with the release.
     pub release_reports: bool,
-    #[serde(default = "default_on_edit")]
     pub report_on: Vec<String>,
-    #[serde(default = "default_on_edit")]
     pub sparql_test_on: Vec<String>,
-    #[serde(default = "default_sparql_checks")]
     pub custom_sparql_checks: Vec<String>,
-    #[serde(default = "default_sparql_exports")]
     pub custom_sparql_exports: Vec<String>,
+    /// Check the released ontology against the OWL 2 DL profile as part of `test`.
+    pub ensure_owl2dl_profile: bool,
+    /// Report how the ontology's classes align with this upper ontology.
+    pub upper_ontology: Option<String>,
+}
+
+/// The report options as a configuration states them.
+#[derive(Debug, Deserialize)]
+struct StatedReport {
+    fail_on: Option<String>,
+    use_labels: Option<bool>,
+    use_base_iris: Option<bool>,
+    custom_profile: Option<bool>,
+    release_reports: Option<bool>,
+    report_on: Option<Vec<String>>,
+    sparql_test_on: Option<Vec<String>>,
+    custom_sparql_checks: Option<Vec<String>>,
+    custom_sparql_exports: Option<Vec<String>>,
+    ensure_owl2dl_profile: Option<bool>,
+    upper_ontology: Option<String>,
+}
+
+impl From<Option<StatedReport>> for RobotReport {
+    fn from(stated: Option<StatedReport>) -> Self {
+        let Some(s) = stated else { return RobotReport::default() };
+        RobotReport {
+            fail_on: s.fail_on,
+            use_labels: s.use_labels.unwrap_or(true),
+            use_base_iris: s.use_base_iris.unwrap_or(false),
+            custom_profile: s.custom_profile.unwrap_or(false),
+            release_reports: s.release_reports.unwrap_or(false),
+            report_on: s.report_on.unwrap_or_else(default_on_edit),
+            sparql_test_on: s.sparql_test_on.unwrap_or_else(default_on_edit),
+            custom_sparql_checks: s.custom_sparql_checks.unwrap_or_else(|| {
+                strings(&["owldef-self-reference", "iri-range", "label-with-iri", "multiple-replaced_by"])
+            }),
+            custom_sparql_exports: s.custom_sparql_exports.unwrap_or_else(default_sparql_exports),
+            ensure_owl2dl_profile: s.ensure_owl2dl_profile.unwrap_or(true),
+            upper_ontology: s.upper_ontology,
+        }
+    }
 }
 
 impl Default for RobotReport {
@@ -465,6 +504,8 @@ impl Default for RobotReport {
             sparql_test_on: default_on_edit(),
             custom_sparql_checks: default_sparql_checks(),
             custom_sparql_exports: default_sparql_exports(),
+            ensure_owl2dl_profile: true,
+            upper_ontology: None,
         }
     }
 }
@@ -617,12 +658,6 @@ impl Config {
                 }
             }
         }
-        if self.robot_report.custom_profile {
-            bail!("robot_report.custom_profile has no built-in rules yet");
-        }
-        if self.robot_report.release_reports {
-            bail!("robot_report.release_reports has no built-in rules yet");
-        }
         Ok(())
     }
 
@@ -767,9 +802,13 @@ pub fn model(
     b.phony(
         "test",
         &format!(
-            "validate_idranges {}reason_test sparql_test robot_reports \
-             $(REPORTDIR)/validate_profile_owl2dl_$(ONT).owl.txt",
-            if config.use_dosdps { "dosdp_validation " } else { "" }
+            "validate_idranges {}reason_test sparql_test robot_reports {}",
+            if config.use_dosdps { "dosdp_validation " } else { "" },
+            if config.robot_report.ensure_owl2dl_profile {
+                "$(REPORTDIR)/validate_profile_owl2dl_$(ONT).owl.txt"
+            } else {
+                ""
+            }
         ),
         "",
         &["echo \"Finished running all tests successfully.\""],
@@ -853,7 +892,13 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("EXTENDED_PREFIX_MAP", "$(TMPDIR)/obo.epm.json");
     b.var("REPORT_FAIL_ON", c.robot_report.fail_on.as_deref().unwrap_or("None"));
     b.var("REPORT_LABEL", if c.robot_report.use_labels { "-l true" } else { "" });
-    b.var("REPORT_PROFILE_OPTS", "");
+    // A repository's own report profile, kept beside the edit file.
+    if c.robot_report.custom_profile {
+        b.var("ROBOT_PROFILE", "profile.txt");
+        b.var("REPORT_PROFILE_OPTS", "--profile $(ROBOT_PROFILE)");
+    } else {
+        b.var("REPORT_PROFILE_OPTS", "");
+    }
     b.var("OBO_FORMAT_OPTIONS", c.obo_format_options.as_str());
     b.var("SPARQL_VALIDATION_CHECKS", c.robot_report.custom_sparql_checks.join(" "));
     b.var("SPARQL_EXPORTS", c.robot_report.custom_sparql_exports.join(" "));
@@ -976,12 +1021,13 @@ fn variables(b: &mut Build, c: &Config) {
     let report_of = |x: &String| if x == "edit" { "$(SRC)".to_string() } else { x.clone() };
     let obo_reports: Vec<String> =
         c.robot_report.report_on.iter().map(|x| format!("{}-obo-report", report_of(x))).collect();
+    let align_reports: Vec<String> =
+        c.robot_report.report_on.iter().map(|x| format!("{}-align-report", report_of(x))).collect();
+    let aligned = c.robot_report.upper_ontology.as_deref().is_some_and(|u| !u.is_empty());
     b.var("OBO_REPORT", obo_reports.join(" "));
-    b.var("REPORTS", "$(OBO_REPORT)");
-    b.var(
-        "REPORT_FILES",
-        obo_reports.iter().map(|r| format!("$(REPORTDIR)/{r}.tsv")).collect::<Vec<_>>().join(" "),
-    );
+    b.var("ALIGNMENT_REPORT", align_reports.join(" "));
+    b.var("REPORTS", if aligned { "$(OBO_REPORT) $(ALIGNMENT_REPORT)" } else { "$(OBO_REPORT)" });
+    b.var("REPORT_FILES", "$(patsubst %, $(REPORTDIR)/%.tsv, $(REPORTS))");
     b.var(
         "SPARQL_VALIDATION_QUERIES",
         c.robot_report
@@ -1007,7 +1053,11 @@ fn variables(b: &mut Build, c: &Config) {
     );
     let released_imports =
         if group.is_some_and(|g| g.release_imports) { "$(IMPORT_FILES) " } else { "" };
-    b.var("RELEASE_ASSETS", format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES)"));
+    let released_reports = if c.robot_report.release_reports { " $(REPORT_FILES)" } else { "" };
+    b.var(
+        "RELEASE_ASSETS",
+        format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES){released_reports}"),
+    );
     b.var("CLEANFILES", "$(MAIN_FILES) $(SRCMERGED) $(EDIT_PREPROCESSED)");
     let released: Vec<String> = b
         .words("$(RELEASE_ASSETS)")
@@ -1083,6 +1133,14 @@ fn checks(b: &mut Build, c: &Config) {
     );
     b.rule("$(REPORTDIR)/$(SRC)-obo-report.tsv", "$(SRCMERGED)", "$(REPORTDIR)", &[&report], &[]);
     b.rule("$(REPORTDIR)/%-obo-report.tsv", "%", "$(REPORTDIR)", &[&report], &[]);
+    if let Some(upper) = c.robot_report.upper_ontology.as_deref().filter(|u| !u.is_empty()) {
+        let align = format!(
+            "$(ROBOT) odk:check-align -i $< --reasoner $(REASONER) --upper-ontology-iri {upper} \
+             {base_iris}--report-output $@"
+        );
+        b.rule("$(REPORTDIR)/$(SRC)-align-report.tsv", "$(SRCMERGED)", "$(REPORTDIR)", &[&align], &[]);
+        b.rule("$(REPORTDIR)/%-align-report.tsv", "%", "$(REPORTDIR)", &[&align], &[]);
+    }
     b.phony("robot_reports", "$(REPORT_FILES)", "", &[], &[]);
     b.phony("all_reports", "custom_reports robot_reports", "", &[], &[]);
 
@@ -1098,6 +1156,7 @@ fn checks(b: &mut Build, c: &Config) {
         ],
         &[],
     );
+    b.precious("$(REPORTDIR)/validate_profile_owl2dl_%.txt");
     b.rule(
         "validate_profile_%",
         "$(REPORTDIR)/validate_profile_owl2dl_%.txt",
