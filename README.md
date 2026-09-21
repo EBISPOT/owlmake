@@ -92,7 +92,7 @@ Any other target defined in the repo's Makefile is dispatched too — `om <targe
 om seed --id myont
 ```
 
-This writes a buildable whole plan (primary + base products and obo/json exports, built merge → reason → relax → reduce → annotate over `myont-edit.obo`). A repo defined only by its `owlmake.yaml` — no ODK Makefile or yaml — builds straight from it: `om` reads the file as the source of truth (it is not regenerated). The plan is YAML by default; `om make --plan-format json` writes `owlmake.json` instead, and either spelling is accepted when building (commit both and they must describe the same build). Validate a plan against its schema with `om schema`.
+This writes a buildable whole plan (primary + base products and obo/json exports, built merge → reason → relax → reduce → annotate over `myont-edit.obo` into `owlmake.yaml`.
 
 ### As a ROBOT implementation
 
