@@ -810,7 +810,7 @@ impl Config {
             }
         }
         let kinds = ["slme", "minimal", "mirror", "filter", "custom"];
-        for g in &self.import_group {
+        if let Some(g) = &self.import_group {
             if !kinds.contains(&g.module_type.as_str()) {
                 bail!("import_group.module_type `{}` is not one of {kinds:?}", g.module_type);
             }
@@ -869,15 +869,6 @@ impl Config {
     }
     fn component_products(&self) -> &[ComponentProduct] {
         self.components.as_ref().map(|g| g.products.as_slice()).unwrap_or(&[])
-    }
-}
-
-/// The file stem of a release artefact: `<id>-<variant>`, or the name a
-/// `custom-<name>` artefact gives itself.
-fn artefact_root(id: &str, artefact: &str) -> String {
-    match artefact.strip_prefix("custom-") {
-        Some(name) => name.to_string(),
-        None => format!("{id}-{artefact}"),
     }
 }
 
