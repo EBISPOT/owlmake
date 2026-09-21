@@ -2875,6 +2875,11 @@ fn default_ofn_prefixes(model: &Model) -> PrefixMapping {
     ] {
         let _ = out.add_prefix(p, ns);
     }
+    // What the ontology's own construction bound is declared all the same (see
+    // `Model::built_prefixes`).
+    for (p, ns) in &model.built_prefixes {
+        let _ = out.add_prefix(p, ns);
+    }
     out
 }
 

@@ -1,0 +1,20 @@
+#curie_map:
+#  EX: http://example.org/EX_
+#  OT: http://example.org/OT_
+#  orcid: https://orcid.org/
+#mapping_set_id: https://example.org/maps2
+#mapping_set_title: Second set
+#mapping_set_version: "1.2"
+#license: https://creativecommons.org/publicdomain/zero/1.0/
+#creator_id:
+#  - orcid:0000-0000-0000-0001
+#  - orcid:0000-0000-0000-0002
+#mapping_date: 2026-01-02
+#subject_source: EX:src
+subject_id	subject_label	predicate_id	object_id	mapping_justification	author_id	confidence	mapping_date	see_also	mapping_source	similarity_score	predicate_type
+EX:1	one	skos:exactMatch	OT:1	semapv:ManualMappingCuration	orcid:0000-0000-0000-0001|orcid:0000-0000-0000-0002	1	2025-12-31	http://see.org/a|http://see.org/b	EX:src	0.75	
+EX:2	two	skos:narrowMatch	OT:2	semapv:LexicalMatching		0.5				1e-9	
+EX:3	three	EX:rel	OT:3	semapv:LexicalMatching							owl object property
+EX:4	four	EX:ap	OT:4	semapv:LexicalMatching							owl annotation property
+EX:5	five	EX:unknown	OT:5	semapv:LexicalMatching							
+EX:6	six	rdfs:subClassOf	OT:6	semapv:LexicalMatching		0.123456789					

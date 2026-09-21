@@ -154,7 +154,9 @@ pub struct Model {
     /// prefixes: the table's own CURIEs are bindings, and the document declares
     /// them. `babelon convert` is the case — `HP:0000001` binds
     /// `HP` to `http://purl.obolibrary.org/obo/HP_`, and the translation ontologies
-    /// open `xmlns:HP="http://purl.obolibrary.org/obo/HP_"`. Only bindings the
+    /// open `xmlns:HP="http://purl.obolibrary.org/obo/HP_"`. A prefix ADDED on the
+    /// command line (`--add-prefix`, `--add-prefixes`) is one too, used or not: it
+    /// is how the mapping components ODK builds come to declare `sssom:`. Only bindings the
     /// built-in namespaces do not already cover are recorded; the writer sorts the
     /// whole block by prefix length, so where they land is not this field's
     /// business.

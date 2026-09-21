@@ -6344,7 +6344,7 @@ fn apply_op(
             // nothing else.
             if !spec.prefixes.is_empty() {
                 let common = cmd::CommonArgs {
-                    add_prefix: spec.prefixes.clone(),
+                    prefix: spec.prefixes.clone(),
                     ..Default::default()
                 };
                 common.apply(&mut model)?;
@@ -6383,7 +6383,7 @@ fn apply_op(
             // The recipe's `--prefix` bindings resolve the template's header
             // CURIEs, so they have to reach the command that reads the header.
             let common =
-                cmd::CommonArgs { add_prefix: prefixes.clone(), ..Default::default() };
+                cmd::CommonArgs { prefix: prefixes.clone(), ..Default::default() };
             let targs = cmd::template::Args {
                 template: templates.iter().map(|t| rp(t)).collect(),
                 input: None,

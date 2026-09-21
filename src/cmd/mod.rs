@@ -27,9 +27,14 @@ pub struct CommonArgs {
     #[arg(short = 'P', long = "prefixes", value_name = "FILE")]
     pub prefixes: Option<std::path::PathBuf>,
 
-    /// Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`;
-    /// repeatable). The `-p` short is bound per-command, where it is free.
-    #[arg(long = "prefix", visible_alias = "add-prefix", value_name = "PREFIX")]
+    /// Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p`
+    /// short is bound per-command, where it is free.
+    #[arg(long = "prefix", value_name = "PREFIX")]
+    pub prefix: Vec<String>,
+
+    /// Bind a prefix as `--prefix` does, and declare it in the output as well
+    /// (repeatable).
+    #[arg(long = "add-prefix", value_name = "PREFIX")]
     pub add_prefix: Vec<String>,
 
     /// Add prefixes from a JSON-LD context file (repeatable).
@@ -118,13 +123,18 @@ impl CommonArgs {
                 }
             }
         }
-        for spec in &self.add_prefix {
-            let (name, ns) = spec
-                .split_once(':')
-                .with_context(|| format!("bad --add-prefix (want \"name: iri\"): {spec}"))?;
-            out.push((name.trim().to_string(), ns.trim().to_string(), false));
+        for spec in self.prefix.iter().chain(&self.add_prefix) {
+            let (name, ns) = Self::binding(spec)?;
+            out.push((name, ns, false));
         }
         Ok(out)
+    }
+
+    fn binding(spec: &str) -> Result<(String, String)> {
+        let (name, ns) = spec
+            .split_once(':')
+            .with_context(|| format!("bad --prefix (want \"name: iri\"): {spec}"))?;
+        Ok((name.trim().to_string(), ns.trim().to_string()))
     }
 
     /// Apply prefix-affecting options to a freshly loaded model: they land after
@@ -140,6 +150,22 @@ impl CommonArgs {
             // whether or not it shortens anything, so those are kept apart.
             if from_file && !model.explicit_prefixes.iter().any(|(p, _)| *p == name) {
                 model.explicit_prefixes.push((name, ns));
+            }
+        }
+        // An ADDED prefix is declared by whatever is written next, used or not,
+        // even by an ontology built from nothing, which declares no other. A
+        // `--prefix` is for reading CURIEs only.
+        let mut added = Vec::new();
+        for file in &self.add_prefixes {
+            let only = CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
+            added.extend(only.given_prefixes()?.into_iter().map(|(name, ns, _)| (name, ns)));
+        }
+        for spec in &self.add_prefix {
+            added.push(Self::binding(spec)?);
+        }
+        for (name, ns) in added {
+            if !model.built_prefixes.iter().any(|(p, _)| *p == name) {
+                model.built_prefixes.push((name, ns));
             }
         }
         Ok(())

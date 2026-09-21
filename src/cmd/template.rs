@@ -262,6 +262,9 @@ pub fn step(
         }
         model
     } else {
+        // The prefixes the command line ADDED are declared by whatever is
+        // written, and what is written is this ontology, not the input.
+        out.built_prefixes = std::mem::take(&mut model.built_prefixes);
         out
     };
 

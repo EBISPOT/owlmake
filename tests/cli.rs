@@ -3050,3 +3050,62 @@ fn check_align_reports_unaligned_classes() {
         let _ = std::fs::remove_file(f);
     }
 }
+
+/// `sssom:inject --create --direct` — a mapping set exported as an ontology, in
+/// the recipe ODK builds a mappings component with. The expected files are what
+/// ROBOT 1.9.7 with the sssom plugin (1.10.0) writes for the same command: one set
+/// read as SSSOM 1.0, where `predicate_type` is not a slot and decides nothing,
+/// and one declaring 1.1, with every enumerated value and propagated set slots.
+#[test]
+fn sssom_inject_exports_a_mapping_set() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sssom-export");
+    for version in ["v1.0", "v1.1"] {
+        let written = tmp(&format!("sssom-export-{version}.ofn"));
+        let out = bin()
+            .args(["--add-prefix", "sssom: https://w3id.org/sssom/"])
+            .args(["--add-prefix", "semapv: http://w3id.org/semapv/vocab/"])
+            .args(["sssom:inject", "--sssom"])
+            .arg(fixtures.join(format!("{version}.sssom.tsv")))
+            .args(["--create", "--direct", "annotate"])
+            .args(["--ontology-iri", "http://purl.obolibrary.org/obo/x/components/m.owl"])
+            .args(["--version-iri", "http://purl.obolibrary.org/obo/x/releases/2026-09-21/components/m.owl"])
+            .args(["convert", "-f", "ofn", "--output"])
+            .arg(&written)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&written).unwrap(),
+            std::fs::read_to_string(fixtures.join(format!("{version}.ofn"))).unwrap(),
+            "{version}"
+        );
+    }
+}
+
+/// A prefix ADDED on the command line is declared by an ontology built from
+/// nothing, used or not; one given with `--prefix` only reads CURIEs. As ROBOT
+/// 1.9.7 writes them.
+#[test]
+fn an_added_prefix_is_declared_by_a_new_ontology() {
+    let table = tmp("added-prefix.tsv");
+    std::fs::write(&table, "ID\tLabel\nID\tA rdfs:label\nzz:A\ta\n").unwrap();
+    let run = |option: &str, format: &str| {
+        let written = tmp(&format!("added-prefix{option}.{format}"));
+        let out = bin()
+            .args([option, "zz: http://example.org/", "template", "--template"])
+            .arg(&table)
+            .arg("-o")
+            .arg(&written)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        std::fs::read_to_string(&written).unwrap()
+    };
+    let added = run("--add-prefix", "ofn");
+    assert!(added.contains("Prefix(zz:=<http://example.org/>)"), "{added}");
+    assert!(added.contains("Declaration(Class(zz:A))"), "{added}");
+    assert!(run("--add-prefix", "owl").contains("xmlns:zz=\"http://example.org/\""));
+    let read_only = run("--prefix", "ofn");
+    assert!(!read_only.contains("Prefix(zz:"), "{read_only}");
+    assert!(read_only.contains("Declaration(Class(<http://example.org/A>))"), "{read_only}");
+}

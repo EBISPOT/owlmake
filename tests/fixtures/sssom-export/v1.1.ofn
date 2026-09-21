@@ -1,0 +1,38 @@
+Prefix(:=<http://purl.obolibrary.org/obo/x/components/m.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(sssom:=<https://w3id.org/sssom/>)
+Prefix(semapv:=<http://w3id.org/semapv/vocab/>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/x/components/m.owl>
+<http://purl.obolibrary.org/obo/x/releases/2026-09-21/components/m.owl>
+Annotation(<http://purl.org/dc/terms/license> "https://creativecommons.org/publicdomain/zero/1.0/"^^xsd:anyURI)
+Annotation(sssom:mapping_set_confidence "0.8"^^xsd:double)
+
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/license>))
+Declaration(AnnotationProperty(<http://www.w3.org/2004/02/skos/core#exactMatch>))
+Declaration(AnnotationProperty(sssom:mapping_justification))
+Declaration(AnnotationProperty(sssom:mapping_set_confidence))
+Declaration(AnnotationProperty(sssom:mapping_tool))
+Declaration(AnnotationProperty(sssom:predicate_modifier))
+Declaration(AnnotationProperty(sssom:record_id))
+Declaration(AnnotationProperty(sssom:similarity_measure))
+Declaration(AnnotationProperty(sssom:subject_type))
+
+
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:predicate_modifier sssom:NegatedPredicate) Annotation(sssom:record_id <http://example.org/EX_rec0>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type owl:Class) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_0> <http://example.org/OT_0>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec1>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type owl:ObjectProperty) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_1> <http://example.org/OT_1>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec10>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type rdf:Property) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_10> <http://example.org/OT_10>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec11>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type sssom:ComposedEntityExpression) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_11> <http://example.org/OT_11>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec2>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type owl:DataProperty) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_2> <http://example.org/OT_2>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec3>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type owl:AnnotationProperty) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_3> <http://example.org/OT_3>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec4>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type owl:NamedIndividual) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_4> <http://example.org/OT_4>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec5>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type <http://www.w3.org/2004/02/skos/core#Concept>) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_5> <http://example.org/OT_5>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec6>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type rdfs:Resource) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_6> <http://example.org/OT_6>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec7>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type rdfs:Class) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_7> <http://example.org/OT_7>)
+AnnotationAssertion(Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:mapping_tool "tool") Annotation(sssom:record_id <http://example.org/EX_rec9>) Annotation(sssom:similarity_measure "cosine") Annotation(sssom:subject_type rdfs:Datatype) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_9> <http://example.org/OT_9>)
+)

@@ -3,9 +3,12 @@
 //!
 //! - `sssom:xref-extract` — harvest `oboInOwl:hasDbXref` annotations into a SSSOM
 //!   mapping set, written to `--mapping-file`.
-//! - `sssom:inject` — generate OWL axioms from a mapping set by interpreting a
-//!   SSSOM/T ruleset (the transformation language), optionally dispatching the
-//!   generated axioms to per-file bridge ontologies via a dispatch table.
+//! - `sssom:inject` — generate OWL axioms from a mapping set, either by
+//!   interpreting a SSSOM/T ruleset (the transformation language) or, with
+//!   `--direct`, by the standard translation of each mapping; optionally
+//!   dispatching them to per-file bridge ontologies via a dispatch table. With
+//!   `--create` they go into a new ontology rather than the one in flight, and
+//!   `--create --direct` together export the mapping set as an ontology.
 //!
 //! - `sssom:rename` — rewrite entity IRIs from a mapping set's
 //!   `subject_id → object_id` pairs.
@@ -38,7 +41,18 @@ const MAPPING_JUSTIFICATION: &str = "https://w3id.org/semapv/vocab/UnspecifiedMa
 pub fn chain_step(model: Option<Model>, sub: &str, args: &[String]) -> Result<()> {
     match sub {
         "xref-extract" => xref_extract(model, args),
-        "inject" => inject(model, args),
+        "inject" => {
+            let mut m = inject(model, args)?;
+            let opts = parse_opts(args, &[("output", &["-o", "--output"]), ("format", &["--format"])]);
+            // A dispatch table writes its own files and nothing else.
+            if let (Some(o), false) = (opts.one("output"), args.iter().any(|a| a == "--dispatch-table")) {
+                match opts.one("format") {
+                    Some(f) => crate::io::save_as(&mut m, Path::new(o), crate::io::Format::from_name(f)?)?,
+                    None => crate::io::save(&mut m, Path::new(o))?,
+                }
+            }
+            Ok(())
+        }
         "rename" => {
             // Terminal `sssom:rename` with its own `-o`. (When followed by more
             // chain commands it is handled as a *producing* step in `run_chain`.)
@@ -114,7 +128,25 @@ const SHARED_OPTS: &[(&str, &[&str])] = &[
     ("input", &["-i", "--input"]),
     ("input_iri", &["-I", "--input-iri"]),
     ("catalog", &["--catalog"]),
+    ("prefixes", &["-P", "--prefixes"]),
+    ("prefix", &["--prefix"]),
+    ("add_prefix", &["--add-prefix"]),
+    ("add_prefixes", &["--add-prefixes"]),
 ];
+
+/// The global options a step was given (`om --add-prefix … sssom:inject …` puts
+/// them on the step), as every other command reads them.
+fn common_args(opts: &Opts) -> crate::cmd::CommonArgs {
+    crate::cmd::CommonArgs {
+        catalog: opts.one("catalog").map(PathBuf::from),
+        prefixes: opts.one("prefixes").map(PathBuf::from),
+        prefix: opts.many("prefix").to_vec(),
+        add_prefix: opts.many("add_prefix").to_vec(),
+        add_prefixes: opts.many("add_prefixes").iter().map(PathBuf::from).collect(),
+        noprefixes: opts.has("noprefixes"),
+        ..Default::default()
+    }
+}
 
 /// Parse `args`. `valued` lists `(canonical, &[aliases])` flags that take a value.
 fn parse_opts(args: &[String], valued: &[(&str, &[&str])]) -> Opts {
@@ -155,13 +187,11 @@ fn load_model(model: Option<Model>, opts: &Opts) -> Result<Model> {
     // when it builds `zfa.sssom.tsv`, straight from an IRI
     // (`sssom:xref-extract -I http://…/zfa.owl`). Either way the import closure is
     // resolved as it is for every other command, honouring `--catalog`.
-    let common = crate::cmd::CommonArgs {
-        catalog: opts.one("catalog").map(PathBuf::from),
-        ..Default::default()
-    };
+    let common = common_args(opts);
     if let Some(iri) = opts.one("input_iri") {
         let mut m = crate::io::load_iri(iri, None)?;
         common.apply_catalog(&mut m, None)?;
+        common.apply(&mut m)?;
         return Ok(m);
     }
     let input = opts
@@ -170,6 +200,7 @@ fn load_model(model: Option<Model>, opts: &Opts) -> Result<Model> {
     let path = Path::new(input);
     let mut m = crate::io::load_with(path, None)?;
     common.apply_catalog(&mut m, Some(path))?;
+    common.apply(&mut m)?;
     Ok(m)
 }
 
@@ -583,7 +614,10 @@ fn drop_duplicates(ms: &mut MappingSet) {
 
 // ───────────────────────────── SSSOM/T inject ───────────────────────────────
 
-fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
+/// Apply `sssom:inject` and return the ontology it leaves in flight: the input
+/// with the generated axioms in it, or without them under `--no-merge`. A bridge
+/// file and dispatched files are written on the way; the caller writes `-o`.
+pub fn inject(model: Option<Model>, args: &[String]) -> Result<Model> {
     let opts = parse_opts(
         args,
         &[
@@ -609,7 +643,16 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
             ("version", &["--version"]),
         ],
     );
-    let model = load_model(model, &opts)?;
+    // `--create`: the axioms go into an ontology of their own, which starts with
+    // nothing in it and no prefixes but the ones its axioms turn out to need.
+    let model = if opts.has("create") {
+        let mut fresh = Model::new();
+        fresh.format_prefixes_cleared = true;
+        common_args(&opts).apply(&mut fresh)?;
+        fresh
+    } else {
+        load_model(model, &opts)?
+    };
 
     // Load and concatenate the mapping sets.
     let mut ms = MappingSet::new();
@@ -619,13 +662,23 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
         for (p, b) in &part.curie_map {
             ms.curie_map.entry(p.clone()).or_insert_with(|| b.clone());
         }
+        for (k, v) in part.metadata {
+            ms.metadata.entry(k).or_insert(v);
+        }
         ms.mappings.extend(part.mappings);
     }
 
-    let ruleset_path = opts.one("ruleset").context("sssom:inject requires --ruleset")?;
-    let rules_text = std::fs::read_to_string(ruleset_path)
-        .with_context(|| format!("reading ruleset {ruleset_path}"))?;
-    let ruleset = parse_ruleset(&rules_text)?;
+    let direct = opts.has("direct");
+    if direct {
+        as_read_for_export(&mut ms);
+    }
+    let ruleset = match opts.one("ruleset") {
+        Some(path) => parse_ruleset(
+            &std::fs::read_to_string(path).with_context(|| format!("reading ruleset {path}"))?,
+        )?,
+        None if direct => parse_ruleset("")?,
+        None => bail!("sssom:inject requires --ruleset, or --direct"),
+    };
 
     // Effective prefix map: ruleset declarations win over the mapping set's.
     let mut prefixes = ms.effective_prefixes();
@@ -643,6 +696,9 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
         let engine = Engine::new(&model, &prefixes);
         engine.run(&ms, &ruleset, &exclude)?
     };
+    if direct {
+        out.entry(String::new()).or_default().extend(direct_axioms(&ms, &prefixes, &model));
+    }
 
     // `--bridge-file` writes the generated axioms as a standalone ontology, the
     // way `--dispatch-table` does per tag but into one file. UBERON's mappings
@@ -700,22 +756,295 @@ fn inject(model: Option<Model>, args: &[String]) -> Result<()> {
             .map(str::to_string)
             .unwrap_or_else(crate::plan::today);
         write_dispatched(&prefixes, &mut out, &table, &dir, &version)?;
-    } else if let Some(o) = opts.one("output") {
-        // `sssom:inject` injects the generated axioms INTO the in-flight
-        // ontology; the output is the input plus those axioms.
-        let mut m = model;
-        for (_, axs) in out.iter_mut() {
-            for ax in axs.drain(..) {
-                m.ont.insert(ax);
-            }
-        }
-        copy_prefixes(&prefixes, &mut m);
-        match opts.one("format") {
-            Some(f) => crate::io::save_as(&mut m, Path::new(o), crate::io::Format::from_name(f)?)?,
-            None => crate::io::save(&mut m, Path::new(o))?,
+        return Ok(model);
+    }
+    // The generated axioms go INTO the ontology in flight: what comes out is the
+    // input plus those axioms.
+    let mut m = model;
+    let generated = out.iter().any(|(_, axs)| !axs.is_empty());
+    for (_, axs) in out.iter_mut() {
+        for ax in axs.drain(..) {
+            m.ont.insert(ax);
         }
     }
-    Ok(())
+    // A mapping set exported as an ontology is that set: its id is the ontology's
+    // IRI and what it says of itself annotates the ontology.
+    if generated && direct && opts.has("create") {
+        describe_as(&ms, &prefixes, &mut m);
+    } else {
+        copy_prefixes(&prefixes, &mut m);
+    }
+    Ok(m)
+}
+
+// ─────────────────────── the direct translation of a mapping ───────────────────
+
+/// Predicates a mapping asserts as an annotation on its subject, whatever the
+/// ontology in flight says of them.
+const ANNOTATION_PREDICATES: &[&str] = &[
+    "http://www.geneontology.org/formats/oboInOwl#hasDbXref",
+    "http://www.w3.org/2000/01/rdf-schema#seeAlso",
+    "http://www.w3.org/2004/02/skos/core#exactMatch",
+    "http://www.w3.org/2004/02/skos/core#closeMatch",
+    "http://www.w3.org/2004/02/skos/core#relatedMatch",
+    "http://www.w3.org/2004/02/skos/core#narrowMatch",
+    "http://www.w3.org/2004/02/skos/core#broadMatch",
+    "https://w3id.org/semapv/vocab/crossSpeciesExactMatch",
+    "https://w3id.org/semapv/vocab/crossSpeciesCloseMatch",
+    "https://w3id.org/semapv/vocab/crossSpeciesNarrowMatch",
+    "https://w3id.org/semapv/vocab/crossSpeciesBroadMatch",
+];
+
+/// The namespaces the slot properties are written in.
+const SLOT_PROPERTY_PREFIXES: [(&str, &str); 6] = [
+    ("sssom", "https://w3id.org/sssom/"),
+    ("dcterms", "http://purl.org/dc/terms/"),
+    ("pav", "http://purl.org/pav/"),
+    ("prov", "http://www.w3.org/ns/prov#"),
+    ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
+    ("owl", "http://www.w3.org/2002/07/owl#"),
+];
+
+/// Bring a mapping set to what a reader of the standard makes of it, which is
+/// what gets exported.
+///
+/// A set is read at the version it declares, 1.0 if it declares none, and a slot
+/// that version does not have is not read: `predicate_type` in a set that does
+/// not say it is 1.1 decides nothing. And what the set says of all its mappings
+/// is said of each of them instead, unless some mapping speaks for itself.
+fn as_read_for_export(ms: &mut MappingSet) {
+    use super::conformance::{SET_SLOTS_ADDED_1_1, SLOTS_ADDED_1_1, SSSOM_VERSION_1_1};
+    let declared = ms.metadata.get("sssom_version").map(super::value_to_cell);
+    if declared.as_deref() != Some(SSSOM_VERSION_1_1) {
+        for slot in SLOTS_ADDED_1_1 {
+            ms.metadata.remove(*slot);
+            for m in &mut ms.mappings {
+                m.remove(*slot);
+            }
+        }
+        for slot in SET_SLOTS_ADDED_1_1 {
+            ms.metadata.remove(*slot);
+        }
+    }
+    let propagated: Vec<&str> = super::PROPAGATABLE_SLOTS
+        .iter()
+        .copied()
+        .filter(|slot| ms.metadata.contains_key(*slot) && !ms.mappings.iter().any(|m| m.contains_key(*slot)))
+        .collect();
+    ms.propagate();
+    for slot in propagated {
+        ms.metadata.remove(slot);
+    }
+}
+
+/// What an enumerated slot value is the name of.
+fn enumerated_iri(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "owl class" => "http://www.w3.org/2002/07/owl#Class",
+        "owl object property" => "http://www.w3.org/2002/07/owl#ObjectProperty",
+        "owl data property" => "http://www.w3.org/2002/07/owl#DataProperty",
+        "owl annotation property" => "http://www.w3.org/2002/07/owl#AnnotationProperty",
+        "owl named individual" => "http://www.w3.org/2002/07/owl#NamedIndividual",
+        "skos concept" => "http://www.w3.org/2004/02/skos/core#Concept",
+        "rdfs resource" => "http://www.w3.org/2000/01/rdf-schema#Resource",
+        "rdfs class" => "http://www.w3.org/2000/01/rdf-schema#Class",
+        "rdfs literal" => "http://www.w3.org/2000/01/rdf-schema#Literal",
+        "rdfs datatype" => "http://www.w3.org/2000/01/rdf-schema#Datatype",
+        "rdf property" => "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property",
+        "composed entity expression" => "https://w3id.org/sssom/ComposedEntityExpression",
+        "Not" => "https://w3id.org/sssom/NegatedPredicate",
+        _ => return None,
+    })
+}
+
+/// A number as Java's `Double.toString` writes it: always with a fraction, and in
+/// scientific notation below a thousandth and from ten million up.
+fn java_double(n: f64) -> String {
+    if n == 0.0 || (1e-3..1e7).contains(&n.abs()) {
+        return if n.fract() == 0.0 { format!("{n:.1}") } else { n.to_string() };
+    }
+    let text = format!("{n:E}");
+    match text.split_once('E') {
+        Some((mantissa, exponent)) if !mantissa.contains('.') => format!("{mantissa}.0E{exponent}"),
+        _ => text,
+    }
+}
+
+/// The annotation property a slot is written with.
+fn slot_property(slot: &str) -> String {
+    let curie = super::slot_predicate(slot);
+    match curie.split_once(':') {
+        Some((p, local)) => match SLOT_PROPERTY_PREFIXES.iter().find(|(prefix, _)| *prefix == p) {
+            Some((_, ns)) => format!("{ns}{local}"),
+            None => curie,
+        },
+        None => curie,
+    }
+}
+
+/// A slot's value(s) as annotations: an entity reference is an IRI, a URI an
+/// `xsd:anyURI`, a number an `xsd:double`, a date an `xsd:date`, anything else a
+/// plain literal. A multivalued slot gives one annotation per value.
+fn slot_annotations(
+    slot: &str,
+    values: &[String],
+    prefixes: &BTreeMap<String, String>,
+) -> Vec<Annotation<Str>> {
+    let build = horned_owl::model::Build::new();
+    let property = build.annotation_property(slot_property(slot));
+    let typed = |literal: String, datatype: &str| Literal::Datatype {
+        literal,
+        datatype_iri: build.iri(format!("http://www.w3.org/2001/XMLSchema#{datatype}")),
+    };
+    values
+        .iter()
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            let enumerated = matches!(slot, "subject_type" | "object_type" | "predicate_type" | "predicate_modifier");
+            let av = if let Some(iri) = enumerated.then(|| enumerated_iri(v)).flatten() {
+                AnnotationValue::IRI(build.iri(iri))
+            } else if super::is_entity_reference(slot) {
+                AnnotationValue::IRI(build.iri(expand(prefixes, v)))
+            } else if super::URI_SLOTS.contains(&slot) {
+                AnnotationValue::Literal(typed(v.clone(), "anyURI"))
+            } else if super::NUMERIC_SLOTS.contains(&slot) {
+                let text = v.parse::<f64>().map(java_double).unwrap_or_else(|_| v.clone());
+                AnnotationValue::Literal(typed(text, "double"))
+            } else if matches!(slot, "mapping_date" | "publication_date" | "review_date") {
+                AnnotationValue::Literal(typed(v.clone(), "date"))
+            } else {
+                AnnotationValue::Literal(Literal::Simple { literal: v.clone() })
+            };
+            Annotation { ann: Default::default(), ap: property.clone(), av }
+        })
+        .collect()
+}
+
+/// Each mapping as the axiom the standard says it is, annotated with the
+/// mapping's metadata.
+///
+/// What kind of axiom follows from the predicate: what the mapping says its
+/// `predicate_type` is; else `owl:equivalentClass`, `rdfs:subClassOf` and the
+/// [`ANNOTATION_PREDICATES`]; else what the ontology in flight declares the
+/// predicate to be. An annotation property asserts `predicate(subject, object)`;
+/// an object property `subject ⊑ predicate some object`. A mapping whose predicate
+/// is none of these produces nothing.
+///
+/// An `owl:equivalentClass` mapping states the object equivalent to ITSELF, not to
+/// the subject, in the plugin ODK runs (sssom-java 1.10.0). That says nothing, and
+/// no file the plugin writes carries it; what is left is that the object is
+/// declared a class. The one trace this does not reproduce is in the functional
+/// syntax written in the same run, which heads an empty section with the class's
+/// name: a comment and three blank lines.
+fn direct_axioms(
+    ms: &MappingSet,
+    prefixes: &BTreeMap<String, String>,
+    model: &Model,
+) -> Vec<AnnotatedComponent<Str>> {
+    use crate::sig::kind;
+    let build = horned_owl::model::Build::new();
+    let declared: HashSet<(u8, String)> = model
+        .ont
+        .iter()
+        .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+        .collect();
+    let mut out = Vec::new();
+    for m in &ms.mappings {
+        let field = |slot: &str| m.get(slot).filter(|v| !v.is_empty());
+        let (Some(subject), Some(predicate), Some(object)) =
+            (field("subject_id"), field("predicate_id"), field("object_id"))
+        else {
+            continue;
+        };
+        let (subject, predicate, object) =
+            (expand(prefixes, subject), expand(prefixes, predicate), expand(prefixes, object));
+        let asserts = || {
+            Component::AnnotationAssertion(AnnotationAssertion {
+                subject: AnnotationSubject::IRI(build.iri(subject.as_str())),
+                ann: Annotation {
+                    ann: Default::default(),
+                    ap: build.annotation_property(predicate.as_str()),
+                    av: AnnotationValue::IRI(build.iri(object.as_str())),
+                },
+            })
+        };
+        let relates = || {
+            Component::SubClassOf(SubClassOf {
+                sub: CE::Class(build.class(subject.as_str())),
+                sup: CE::ObjectSomeValuesFrom {
+                    ope: horned_owl::model::ObjectPropertyExpression::ObjectProperty(
+                        build.object_property(predicate.as_str()),
+                    ),
+                    bce: Box::new(CE::Class(build.class(object.as_str()))),
+                },
+            })
+        };
+        let component = match field("predicate_type").map(String::as_str) {
+            Some("owl annotation property") => asserts(),
+            Some("owl object property") => relates(),
+            _ if predicate == "http://www.w3.org/2002/07/owl#equivalentClass" => {
+                Component::DeclareClass(horned_owl::model::DeclareClass(build.class(object.as_str())))
+            }
+            _ if predicate == "http://www.w3.org/2000/01/rdf-schema#subClassOf" => {
+                Component::SubClassOf(SubClassOf {
+                    sub: CE::Class(build.class(subject.as_str())),
+                    sup: CE::Class(build.class(object.as_str())),
+                })
+            }
+            _ if ANNOTATION_PREDICATES.contains(&predicate.as_str()) => asserts(),
+            _ if declared.contains(&(kind::ANNOTATION_PROPERTY, predicate.clone())) => asserts(),
+            _ if declared.contains(&(kind::OBJECT_PROPERTY, predicate.clone())) => relates(),
+            _ => continue,
+        };
+        let mut axiom = AnnotatedComponent::from(component);
+        // A declaration is not a statement the mapping's metadata could be about.
+        if !matches!(axiom.component, Component::DeclareClass(_)) {
+            for slot in super::SLOT_ORDER {
+                if matches!(*slot, "subject_id" | "predicate_id" | "object_id" | "mapping_cardinality") {
+                    continue;
+                }
+                let Some(cell) = field(slot) else { continue };
+                let values: Vec<String> = if super::MULTIVALUED_SLOTS.contains(slot) {
+                    cell.split('|').map(|v| v.trim().to_string()).collect()
+                } else {
+                    vec![cell.clone()]
+                };
+                axiom.ann.extend(slot_annotations(slot, &values, prefixes));
+            }
+        }
+        out.push(axiom);
+    }
+    out
+}
+
+/// Make `m` the mapping set as an ontology: the set's id is its IRI, and
+/// everything else the set says of itself annotates it.
+fn describe_as(ms: &MappingSet, prefixes: &BTreeMap<String, String>, m: &mut Model) {
+    let build = horned_owl::model::Build::new();
+    for (slot, value) in &ms.metadata {
+        // The version is how the set is to be read, not something it says.
+        if matches!(slot.as_str(), "mapping_set_id" | "curie_map" | "extension_definitions" | "sssom_version") {
+            continue;
+        }
+        let values: Vec<String> = match value {
+            serde_yaml::Value::Sequence(items) => items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string).or_else(|| serde_yaml::to_string(v).ok()))
+                .map(|v| v.trim().to_string())
+                .collect(),
+            serde_yaml::Value::String(v) => vec![v.clone()],
+            other => serde_yaml::to_string(other).map(|v| vec![v.trim().to_string()]).unwrap_or_default(),
+        };
+        for ann in slot_annotations(slot, &values, prefixes) {
+            m.ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(ann)));
+        }
+    }
+    if let Some(id) = ms.metadata.get("mapping_set_id").and_then(|v| v.as_str()) {
+        m.ont.insert(Component::OntologyID(horned_owl::model::OntologyID {
+            iri: Some(build.iri(id)),
+            viri: None,
+        }));
+    }
 }
 
 fn copy_prefixes(prefixes: &BTreeMap<String, String>, m: &mut Model) {

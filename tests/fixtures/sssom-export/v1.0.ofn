@@ -1,0 +1,49 @@
+Prefix(:=<http://purl.obolibrary.org/obo/x/components/m.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(sssom:=<https://w3id.org/sssom/>)
+Prefix(semapv:=<http://w3id.org/semapv/vocab/>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/x/components/m.owl>
+<http://purl.obolibrary.org/obo/x/releases/2026-09-21/components/m.owl>
+Annotation(<http://purl.org/dc/terms/created> "2026-01-02"^^xsd:date)
+Annotation(<http://purl.org/dc/terms/creator> <https://orcid.org/0000-0000-0000-0001>)
+Annotation(<http://purl.org/dc/terms/creator> <https://orcid.org/0000-0000-0000-0002>)
+Annotation(<http://purl.org/dc/terms/license> "https://creativecommons.org/publicdomain/zero/1.0/"^^xsd:anyURI)
+Annotation(<http://purl.org/dc/terms/title> "Second set")
+Annotation(owl:versionInfo "1.2")
+
+Declaration(Class(<http://example.org/EX_6>))
+Declaration(Class(<http://example.org/OT_6>))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/created>))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/creator>))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/license>))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/title>))
+Declaration(AnnotationProperty(<http://purl.org/pav/authoredBy>))
+Declaration(AnnotationProperty(<http://www.w3.org/2004/02/skos/core#exactMatch>))
+Declaration(AnnotationProperty(<http://www.w3.org/2004/02/skos/core#narrowMatch>))
+Declaration(AnnotationProperty(sssom:confidence))
+Declaration(AnnotationProperty(sssom:mapping_justification))
+Declaration(AnnotationProperty(sssom:mapping_source))
+Declaration(AnnotationProperty(sssom:similarity_score))
+Declaration(AnnotationProperty(sssom:subject_label))
+Declaration(AnnotationProperty(sssom:subject_source))
+Declaration(Datatype(xsd:date))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/EX_6> (<http://example.org/EX_6>)
+
+SubClassOf(Annotation(sssom:confidence "0.123456789"^^xsd:double) Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:subject_label "six") Annotation(sssom:subject_source <http://example.org/EX_src>) <http://example.org/EX_6> <http://example.org/OT_6>)
+
+
+AnnotationAssertion(Annotation(<http://purl.org/dc/terms/created> "2025-12-31"^^xsd:date) Annotation(<http://purl.org/pav/authoredBy> <https://orcid.org/0000-0000-0000-0001>) Annotation(<http://purl.org/pav/authoredBy> <https://orcid.org/0000-0000-0000-0002>) Annotation(rdfs:seeAlso "http://see.org/a"^^xsd:anyURI) Annotation(rdfs:seeAlso "http://see.org/b"^^xsd:anyURI) Annotation(sssom:confidence "1.0"^^xsd:double) Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/ManualMappingCuration>) Annotation(sssom:mapping_source <http://example.org/EX_src>) Annotation(sssom:similarity_score "0.75"^^xsd:double) Annotation(sssom:subject_label "one") Annotation(sssom:subject_source <http://example.org/EX_src>) <http://www.w3.org/2004/02/skos/core#exactMatch> <http://example.org/EX_1> <http://example.org/OT_1>)
+AnnotationAssertion(Annotation(sssom:confidence "0.5"^^xsd:double) Annotation(sssom:mapping_justification <https://w3id.org/semapv/vocab/LexicalMatching>) Annotation(sssom:similarity_score "1.0E-9"^^xsd:double) Annotation(sssom:subject_label "two") Annotation(sssom:subject_source <http://example.org/EX_src>) <http://www.w3.org/2004/02/skos/core#narrowMatch> <http://example.org/EX_2> <http://example.org/OT_2>)
+)
