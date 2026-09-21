@@ -15,7 +15,17 @@ const SUBCOMMANDS: &[&str] = &[
     "rename", "expand", "collapse", "unmerge", "diff", "explain", "validate-profile", "reduce",
     "mireot", "rdfxml-to-json", "python",
     // owlmake's own names for the commands a recipe may also spell `odk:<name>`.
-    "normalize", "subset",
+    "normalize", "subset", "check-align",
+];
+
+/// Commands that read their own inputs and write an output that is not the
+/// ontology flowing through the chain — a report, a table, a prefix map, a mirror
+/// directory — so running the command line IS the operation. A command that
+/// threads a model on (`mint`) has to be a pipeline op instead, or the chain it
+/// sits in loses the model.
+const TERMINAL_COMMANDS: &[&str] = &[
+    "report", "verify", "validate-profile", "measure", "diff", "export", "export-prefixes",
+    "explain", "mirror", "check-align",
 ];
 
 const BENIGN_SHELL: &[&str] = &[
@@ -1178,8 +1188,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             // entry is a claim that the command reads its own inputs and writes
             // its own output — a command that THREADS a model (`mint`) must be a
             // real op instead, or the chain it sits in loses the model.
-            "report" | "verify" | "validate-profile" | "measure" | "diff" | "export"
-            | "export-prefixes" | "explain" | "mirror" => {
+            name if TERMINAL_COMMANDS.contains(&name) => {
                 Step::OwlmakeCli { name: name.to_string(), args: argv() }
             }
             _ => Step::UnsupportedSubcommand(name.to_string()),
@@ -1449,8 +1458,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
         // output (a report, a table, a prefix map, a mirror directory), leaving
         // the ontology untouched — so dispatching a fresh `om` subcommand IS the
         // operation, and no model has to thread through.
-        "report" | "verify" | "validate-profile" | "measure" | "diff" | "export"
-        | "export-prefixes" | "explain" | "mirror" => {
+        name if TERMINAL_COMMANDS.contains(&name) => {
             Step::OwlmakeCli { name: name.to_string(), args: argv() }
         }
         other => Step::UnsupportedSubcommand(other.to_string()),

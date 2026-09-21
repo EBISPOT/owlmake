@@ -2970,3 +2970,83 @@ fn output_to_dev_null_is_a_discard() {
     assert!(!err.contains("cannot infer ontology format"), "{err}");
     let _ = std::fs::remove_file(&ont);
 }
+
+/// `check-align`: a class is aligned when the reasoner puts it under a class of
+/// the upper ontology. An unaligned class takes its ancestors with it; an obsolete
+/// class is never checked; `--detail` picks which of them the report lists; and
+/// any unaligned class fails the command unless `--fail false`. The expected
+/// reports are the ones the `odk:check-align` plugin (0.3.1) writes for the same
+/// input.
+#[test]
+fn check_align_reports_unaligned_classes() {
+    let upper = tmp("align-upper.ofn");
+    std::fs::write(
+        &upper,
+        "Prefix(:=<http://example.org/upper/>)\n\
+         Ontology(<http://example.org/upper.owl>\n\
+         Declaration(Class(:U1))\nDeclaration(Class(:U2))\nSubClassOf(:U2 :U1)\n)\n",
+    )
+    .unwrap();
+    let ont = tmp("align.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/t/T_>)\n\
+         Prefix(o:=<http://example.org/other/O_>)\n\
+         Prefix(u:=<http://example.org/upper/>)\n\
+         Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+         Ontology(<http://example.org/t.owl>\n\
+         Declaration(Class(:A))\nDeclaration(Class(:B))\nDeclaration(Class(:C))\nDeclaration(Class(:D))\n\
+         Declaration(Class(:E))\nDeclaration(Class(:F))\nDeclaration(Class(:G))\nDeclaration(Class(o:H))\n\
+         Declaration(Class(:I))\nDeclaration(ObjectProperty(:r))\n\
+         SubClassOf(:A u:U1)\nSubClassOf(:B :A)\n\
+         AnnotationAssertion(rdfs:label :C \"unaligned root\")\n\
+         SubClassOf(:D :C)\nSubClassOf(:D ObjectSomeValuesFrom(:r :G))\n\
+         EquivalentClasses(:E u:U2)\n\
+         AnnotationAssertion(owl:deprecated :F \"true\"^^xsd:boolean)\n\
+         SubClassOf(o:H :C)\nSubClassOf(:I o:H)\n)\n",
+    )
+    .unwrap();
+    let report = tmp("align-report.txt");
+    let run = |extra: &[&str]| {
+        let _ = std::fs::remove_file(&report);
+        let out = bin()
+            .args(["check-align", "-i"])
+            .arg(&ont)
+            .arg("-u")
+            .arg(&upper)
+            .arg("--report-output")
+            .arg(&report)
+            .args(extra)
+            .output()
+            .unwrap();
+        (out.status.success(), std::fs::read_to_string(&report).unwrap_or_default())
+    };
+    let t = |n: &str| format!("http://example.org/t/T_{n}\n");
+
+    // By default only the classes with nothing above them: C heads the unaligned
+    // branch, G is only ever mentioned. F is obsolete, E sits under U1 through U2.
+    let (ok, said) = run(&[]);
+    assert!(!ok, "an unaligned class fails the command");
+    assert_eq!(said, format!("{}{}", t("C"), t("G")));
+
+    // Every unaligned class, the out-of-base one included.
+    let (_, said) = run(&["--detail", "all"]);
+    assert_eq!(
+        said,
+        format!("http://example.org/other/O_H\n{}{}{}{}", t("C"), t("D"), t("G"), t("I"))
+    );
+
+    // A class nothing is said about is skipped on request.
+    let (_, said) = run(&["--detail", "all", "--ignore-dangling", "true"]);
+    assert!(!said.contains("T_G") && said.contains("T_C"), "{said}");
+
+    // Reported, not failed.
+    let (ok, said) = run(&["--fail", "false"]);
+    assert!(ok && said == format!("{}{}", t("C"), t("G")), "{said}");
+
+    for f in [&upper, &ont, &report] {
+        let _ = std::fs::remove_file(f);
+    }
+}

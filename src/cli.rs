@@ -67,6 +67,9 @@ pub enum Command {
     Materialize(cmd::materialize::Args),
     /// Inject subset / synonym-type subproperty declarations (`odk:normalize`).
     Normalize(cmd::normalize::Args),
+    /// Check that the ontology's classes sit under an upper ontology
+    /// (`odk:check-align`).
+    CheckAlign(cmd::check_align::Args),
     /// Convert a Babelon translation TSV into OWL annotation axioms.
     Babelon(cmd::babelon::Args),
     /// Regenerate textual definitions (FlyBase `rewrite-def`: DOT/SUB definitions).
@@ -1051,6 +1054,7 @@ fn dispatch(state: Option<Model>, command: Command) -> Result<Option<Model>> {
         Command::Relax(a) => cmd::relax::step(state, &a)?,
         Command::Materialize(a) => cmd::materialize::step(state, &a)?,
         Command::Normalize(a) => cmd::normalize::step(state, &a)?,
+        Command::CheckAlign(a) => cmd::check_align::step(state, &a)?,
         Command::Babelon(a) => cmd::babelon::step(state, &a)?,
         Command::RewriteDef(a) => cmd::rewrite_def::step(state, &a)?,
         Command::Diff(a) => cmd::diff::step(state, &a)?,

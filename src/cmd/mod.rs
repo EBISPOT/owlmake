@@ -823,6 +823,7 @@ pub mod collapse;
 // (`<ont>-idranges.owl`) and DOSDP-pattern validation, RDF/XML parseability of
 // each product, the build's tool inventory, and checksums. See each module's
 // header for what it checks.
+pub mod check_align;
 pub mod check_rdfxml;
 pub mod pattern_tester;
 pub mod config_check;
