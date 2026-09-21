@@ -2714,6 +2714,17 @@ fn build_one_import(
 
     let src_path = ensure_mirror(repo, imp, repo.refresh_mirrors)?;
 
+    // A term file the pipeline reads may be one the plan builds — the seed queried
+    // from the merged edit file — rather than a committed list. Bring each of
+    // those up to date before anything is extracted against it.
+    let mut seen = std::collections::HashSet::new();
+    for term_file in imp.seed_term_files() {
+        if repo.target(&term_file).is_some() {
+            run_target_recipe_inner(repo, &term_file, &mut seen)
+                .with_context(|| format!("import `{}`: building its seed {term_file}", imp.id))?;
+        }
+    }
+
     let mut model = crate::io::load(&src_path)?;
 
     // Drop globally-excluded IRIs (the plan's `exclude_iri_patterns`, e.g.
@@ -2739,7 +2750,11 @@ fn build_one_import(
     model = run_steps(repo, &steps, model, catalog, work, Some(&imp.output), true, Some(&src_path))
         .with_context(|| format!("building import {}", imp.id))?;
 
-    crate::io::save_as(&mut model, &out, crate::io::Format::RdfXml)?;
+    // The module is written in the format its pipeline converts to; one that
+    // names none is RDF/XML.
+    let format = steps_format(&imp.output, &steps).unwrap_or(crate::io::Format::RdfXml);
+    crate::io::save_as(&mut model, &out, format)?;
+    clear_staging_of(repo, &imp.output, &steps);
     // The stage files this pipeline threaded the model through carried it from
     // one step to the next and nothing reads them again; the built tree holds the
     // module, not the ⊥-module it was filtered from.
@@ -5884,9 +5899,15 @@ fn names_target(op: &recipe::FileOp, target: Option<&str>) -> bool {
 /// never names it. Matching file names alone would write every such artefact as
 /// RDF/XML.
 fn recipe_format(a: &crate::plan::ArtefactPlan) -> Option<crate::io::Format> {
+    steps_format(&a.target, &a.steps)
+}
+
+/// [`recipe_format`] for any recorded pipeline: the format `steps` write `target`
+/// in.
+fn steps_format(target: &str, steps: &[Step]) -> Option<crate::io::Format> {
     let name_of = |p: &str| Path::new(p).file_name().map(|s| s.to_os_string());
-    let mut built: Vec<Option<std::ffi::OsString>> = vec![name_of(&a.target)];
-    for s in &a.steps {
+    let mut built: Vec<Option<std::ffi::OsString>> = vec![name_of(target)];
+    for s in steps {
         let Step::File(recipe::FileOp::Copy { src, dst, .. } | recipe::FileOp::Move { src, dst }) =
             s
         else {
@@ -5896,7 +5917,7 @@ fn recipe_format(a: &crate::plan::ArtefactPlan) -> Option<crate::io::Format> {
             built.extend(src.iter().map(|p| name_of(p)));
         }
     }
-    a.steps.iter().rev().find_map(|s| match s {
+    steps.iter().rev().find_map(|s| match s {
         Step::Op(Op::Convert { format: Some(f), output, .. })
             if output.is_none()
                 || built.contains(&output.as_deref().and_then(|o| name_of(o))) =>
@@ -5913,9 +5934,14 @@ fn recipe_format(a: &crate::plan::ArtefactPlan) -> Option<crate::io::Format> {
 /// NOTHING at the source, and the staging file is still there from the step's own
 /// `-o`. Removing it is what the recipe asks for.
 fn clear_staging(repo: &Repo, a: &crate::plan::ArtefactPlan) {
-    for step in &a.steps {
+    clear_staging_of(repo, &a.target, &a.steps)
+}
+
+/// [`clear_staging`] for any recorded pipeline that builds `target`.
+fn clear_staging_of(repo: &Repo, target: &str, steps: &[Step]) {
+    for step in steps {
         let Step::File(recipe::FileOp::Move { src, dst }) = step else { continue };
-        if Path::new(&a.target).file_name() != Path::new(dst).file_name() {
+        if Path::new(target).file_name() != Path::new(dst).file_name() {
             continue;
         }
         for s in src {
