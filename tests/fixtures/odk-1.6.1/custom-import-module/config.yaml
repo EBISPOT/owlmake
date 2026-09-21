@@ -1,0 +1,16 @@
+id: cim
+use_custom_import_module: true
+use_context: true
+use_dosdps: true
+import_component_format: owl
+export_formats:
+  - owl
+  - ttl
+subset_group:
+  ids:
+    - slim_a
+  products:
+    - id: slim_b
+import_group:
+  products:
+    - id: ro

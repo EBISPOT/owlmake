@@ -1,0 +1,5 @@
+id: intld
+use_translations: true
+babelon_translation_group:
+  products:
+    - id: intld-nl

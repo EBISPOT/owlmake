@@ -1,0 +1,7 @@
+id: hdr
+custom_makefile_header: |
+  ### Workflow
+  #
+  # Tasks to edit and release HDR.
+  HDR_EXTRA = extra-value
+  REASONER = WHELK

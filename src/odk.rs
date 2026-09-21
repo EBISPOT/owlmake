@@ -198,7 +198,7 @@ fn builtin_configuration(
     seeded: &[(String, String)],
     flags: &[(&str, &str)],
 ) -> Result<makefile::MakeModel> {
-    let mut make = builtin::model(config, dir, seeded, flags);
+    let mut make = builtin::model(config, dir, seeded, flags)?;
     let own_rules = dir.join(format!("{}.Makefile", config.id));
     if own_rules.exists() {
         make.overlay_file(&own_rules)?;

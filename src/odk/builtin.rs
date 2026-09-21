@@ -28,12 +28,7 @@ use super::makefile::{MakeModel, Rule};
 /// paths into the configuration. A configuration that sets one is refused: built
 /// without it, the result would differ from what the repository asked for, and
 /// nothing would say so.
-const UNPORTED: &[&str] = &[
-    "use_translations",
-    "babelon_translation_group",
-    "use_custom_import_module",
-    "custom_makefile_header",
-];
+const UNPORTED: &[&str] = &[];
 
 /// The release artefacts the standard build knows how to make.
 const VARIANTS: &[&str] = &[
@@ -136,6 +131,17 @@ pub struct Config {
     #[serde(default)]
     pub owltools_memory: String,
 
+    /// Maintain translations of the ontology's labels and definitions.
+    #[serde(default)]
+    pub use_translations: bool,
+    #[serde(default)]
+    pub babelon_translation_group: Option<TranslationGroup>,
+    /// Import terms listed in a table the repository keeps, as a module of its own.
+    #[serde(default)]
+    pub use_custom_import_module: bool,
+    /// Assignments and rules the repository wants ahead of the standard ones.
+    #[serde(default)]
+    pub custom_makefile_header: String,
     /// Maintain mapping sets alongside the ontology.
     #[serde(default)]
     pub use_mappings: bool,
@@ -169,6 +175,55 @@ pub struct Config {
     #[serde(default)]
     pub documentation: Option<serde_yaml::Value>,
 
+}
+
+/// The translations, one product per language.
+#[derive(Debug, Deserialize)]
+pub struct TranslationGroup {
+    /// Publish every translation merged into one table.
+    #[serde(default)]
+    pub release_merged_translations: bool,
+    /// The properties whose values are translated.
+    #[serde(default)]
+    pub predicates: Option<Vec<String>>,
+    #[serde(default)]
+    pub oak_adapter: Option<String>,
+    #[serde(default)]
+    pub translate_ontology: Option<String>,
+    #[serde(default)]
+    pub products: Option<Vec<Translation>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Translation {
+    pub id: String,
+    /// `manual`, or `mirror` to fetch the table.
+    #[serde(default = "default_maintenance")]
+    pub maintenance: String,
+    #[serde(default)]
+    pub mirror_babelon_from: Option<String>,
+    #[serde(default)]
+    pub mirror_synonyms_from: Option<String>,
+    /// The language also has a table of synonyms, built as a template.
+    #[serde(default)]
+    pub include_robot_template_synonyms: bool,
+    #[serde(default = "default_language")]
+    pub language: String,
+    #[serde(default)]
+    pub include_not_translated: bool,
+    #[serde(default = "yes")]
+    pub update_translation_status: bool,
+    #[serde(default = "yes")]
+    pub drop_unknown_columns: bool,
+    /// Fill in what is not yet translated by machine.
+    #[serde(default)]
+    pub auto_translate: bool,
+}
+
+impl TranslationGroup {
+    fn languages(&self) -> &[Translation] {
+        self.products.as_deref().unwrap_or(&[])
+    }
 }
 
 /// The mapping sets, each kept up to date in the way its `maintenance` says.
@@ -449,6 +504,19 @@ impl ImportGroup {
 pub struct SubsetGroup {
     #[serde(default)]
     pub products: Vec<SubsetProduct>,
+    /// Subset ids given bare.
+    #[serde(default)]
+    pub ids: Vec<String>,
+}
+
+impl SubsetGroup {
+    fn derive(&mut self) {
+        for id in std::mem::take(&mut self.ids) {
+            if !self.products.iter().any(|p| p.id == id) {
+                self.products.push(SubsetProduct { id });
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -604,6 +672,9 @@ fn default_dosdp_tools_options() -> String {
 fn default_pipeline_ontology() -> String {
     "$(SRC)".into()
 }
+fn default_language() -> String {
+    "en".into()
+}
 fn default_mapping_extractor() -> String {
     "sssom-py".into()
 }
@@ -703,6 +774,9 @@ impl Config {
         if let Some(g) = &mut config.import_group {
             g.derive();
         }
+        if let Some(g) = &mut config.subset_group {
+            g.derive();
+        }
         if let Some(g) = &mut config.components {
             g.derive(&config.uribase, &config.id);
         }
@@ -761,6 +835,11 @@ impl Config {
             Some(ns) => ns.iter().map(|i| format!("--base-iri {i} ")).collect(),
             None => format!("--base-iri $(URIBASE)/{} ", self.id.to_uppercase()),
         }
+    }
+
+    /// Whether the import modules are seeded from what the edit file refers to.
+    fn scans_signature(&self) -> bool {
+        self.import_group.as_ref().is_some_and(|g| g.scan_signature)
     }
 
     fn pipelines(&self) -> &[PatternPipeline] {
@@ -867,9 +946,13 @@ pub fn model(
     dir: &Path,
     overrides: &[(String, String)],
     flags: &[(&str, &str)],
-) -> MakeModel {
+) -> Result<MakeModel> {
     let mut m = MakeModel::with_flags(dir, overrides, flags);
     let mut b = Build { m: &mut m };
+    // What the repository wants said before anything else.
+    if !config.custom_makefile_header.trim().is_empty() {
+        b.m.overlay_text(&config.custom_makefile_header)?;
+    }
     variables(&mut b, config);
 
     // --- Top level -----------------------------------------------------------
@@ -927,12 +1010,13 @@ pub fn model(
     imports(&mut b, config);
     components(&mut b, config);
     mirrors(&mut b, config);
-    subsets(&mut b);
+    subsets(&mut b, config);
     patterns(&mut b, config);
     mappings(&mut b, config);
+    translations(&mut b, config);
     artefacts(&mut b, config);
     utilities(&mut b, config);
-    m
+    Ok(m)
 }
 
 fn variables(b: &mut Build, c: &Config) {
@@ -1031,8 +1115,15 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("SRCMERGED", "$(TMPDIR)/merged-$(ONT)-edit.ofn");
     // A seed the configuration turns off is not an empty file but no file: the
     // recipes that name it then name nothing.
-    if c.import_group.as_ref().is_some_and(|g| g.scan_signature) {
+    if c.scans_signature() {
         b.var("PRESEED", "$(TMPDIR)/pre_seed.txt");
+    }
+    if c.use_custom_import_module {
+        b.var("IMPORT_MODULE_TEMPLATE", "$(TEMPLATEDIR)/external_import.tsv");
+        b.var("IMPORT_MODULE_SIGNATURE", "$(TMPDIR)/external_import_terms.txt");
+        b.var("IMPORT_MODULE", "$(IMPORTDIR)/external_import.owl");
+    }
+    if c.scans_signature() || c.use_custom_import_module {
         b.var("IMPORTSEED", "$(TMPDIR)/seed.txt");
         b.var("T_IMPORTSEED", "--term-file $(IMPORTSEED)");
     }
@@ -1095,6 +1186,42 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("SUBSET_ROOTS", "$(patsubst %, $(SUBSETDIR)/%, $(SUBSETS))");
     b.var("SUBSET_FILES", "$(foreach n,$(SUBSET_ROOTS), $(foreach f,$(FORMATS_INCL_TSV), $(n).$(f)))");
 
+    if c.use_translations {
+        let languages = c.babelon_translation_group.as_ref().map(|g| g.languages()).unwrap_or(&[]);
+        b.var("TRANSLATIONSDIR", "../translations");
+        b.var("BABELONPY", "babelon -q");
+        b.var(
+            "TRANSLATIONS_OWL",
+            languages
+                .iter()
+                .map(|t| {
+                    let synonyms = if t.include_robot_template_synonyms {
+                        format!(" $(TRANSLATIONSDIR)/{}.synonyms.owl", t.id)
+                    } else {
+                        String::new()
+                    };
+                    format!("$(TRANSLATIONSDIR)/{}.babelon.owl{synonyms}", t.id)
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        b.var(
+            "TRANSLATIONS_TSV",
+            languages
+                .iter()
+                .map(|t| format!("$(TRANSLATIONSDIR)/{}-preprocessed.babelon.tsv", t.id))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        b.var(
+            "TRANSLATION_FILES",
+            if c.babelon_translation_group.as_ref().is_some_and(|g| g.release_merged_translations) {
+                "$(TRANSLATIONSDIR)/$(ONT)-all.babelon.tsv $(TRANSLATIONSDIR)/$(ONT)-all.babelon.json"
+            } else {
+                ""
+            },
+        );
+    }
     let mapping_group = c.sssom_mappingset_group.as_ref();
     if c.use_mappings {
         b.var("MAPPINGDIR", "../mappings");
@@ -1140,9 +1267,12 @@ fn variables(b: &mut Build, c: &Config) {
             .join(" "),
     );
     let pattern_files = if c.use_dosdps { "$(PATTERN_RELEASE_FILES) " } else { "" };
+    let translation_files = if c.use_translations { "$(TRANSLATION_FILES) " } else { "" };
     b.var(
         "ASSETS",
-        format!("$(IMPORT_FILES) $(MAIN_FILES) {pattern_files}$(REPORT_FILES) $(SUBSET_FILES) $(MAPPING_FILES)"),
+        format!(
+            "$(IMPORT_FILES) $(MAIN_FILES) {pattern_files}{translation_files}$(REPORT_FILES) $(SUBSET_FILES) $(MAPPING_FILES)"
+        ),
     );
     let released_imports =
         if group.is_some_and(|g| g.release_imports) { "$(IMPORT_FILES) " } else { "" };
@@ -1434,7 +1564,7 @@ fn seeds(b: &mut Build, c: &Config) {
     );
     // Import modules are cut against everything the edit file and its components
     // refer to; a repository with no imports has no use for that list.
-    if c.import_group.as_ref().is_some_and(|g| g.scan_signature) {
+    if c.scans_signature() {
         b.rule(
             "$(PRESEED)",
             "$(SRCMERGED)",
@@ -1442,14 +1572,22 @@ fn seeds(b: &mut Build, c: &Config) {
             &["$(ROBOT) query --input $< --format --csv --query $(SPARQLDIR)/terms.sparql $@"],
             &[],
         );
-        // The terms the patterns refer to are imported along with the edit file's.
-        b.rule(
-            "$(IMPORTSEED)",
-            if c.use_dosdps { "$(PRESEED) $(TMPDIR)/all_pattern_terms.txt" } else { "$(PRESEED)" },
-            "$(TMPDIR)",
-            &["cat $^ | sort | uniq > $@"],
-            &[],
-        );
+    }
+    // The seed is everything the modules must cover beyond their own term lists:
+    // what the edit file refers to, what the patterns refer to, and what the
+    // repository's own import table lists.
+    if c.scans_signature() || c.use_custom_import_module {
+        let mut from: Vec<&str> = Vec::new();
+        if c.scans_signature() {
+            from.push("$(PRESEED)");
+            if c.use_dosdps {
+                from.push("$(TMPDIR)/all_pattern_terms.txt");
+            }
+        }
+        if c.use_custom_import_module {
+            from.push("$(IMPORT_MODULE_SIGNATURE)");
+        }
+        b.rule("$(IMPORTSEED)", &from.join(" "), "$(TMPDIR)", &["cat $^ | sort | uniq > $@"], &[]);
     }
     b.rule(
         "$(ONTOLOGYTERMS)",
@@ -1458,6 +1596,30 @@ fn seeds(b: &mut Build, c: &Config) {
         &["$(ROBOT) query -f csv -i $< --query ../sparql/$(ONT)_terms.sparql $@"],
         &[],
     );
+    // Terms listed in a table of the repository's own, imported as a module that
+    // is built from the table and seeds the other modules.
+    if c.use_custom_import_module {
+        let context = if c.use_context { "--add-prefixes $(CONTEXT_FILE) " } else { "" };
+        b.rule(
+            "$(IMPORT_MODULE)",
+            "$(IMPORT_MODULE_TEMPLATE)",
+            "$(TMPDIR)",
+            &[&format!(
+                "$(ROBOT) template --template $< {context}\
+                 --ontology-iri \"$(ONTBASE)/external_import.owl\" \
+                 convert -f {} --output $@",
+                c.import_component_format
+            )],
+            &[],
+        );
+        b.rule(
+            "$(IMPORT_MODULE_SIGNATURE)",
+            "$(IMPORT_MODULE)",
+            "$(TMPDIR)",
+            &["$(ROBOT) query -f csv -i $< --query ../sparql/terms.sparql $@.tmp && cat $@.tmp | sort | uniq >  $@"],
+            &[],
+        );
+    }
     // The ontology's own terms and what they need, which only the artefacts cut
     // down to them read.
     if !["basic", "simple", "simple-non-classified"].iter().any(|v| c.makes(v)) {
@@ -2192,6 +2354,119 @@ fn patterns(b: &mut Build, c: &Config) {
     );
 }
 
+/// Translations of the ontology's labels and definitions: each language's table
+/// brought up to date against the ontology, then turned into an ontology of its
+/// own for the international artefact.
+fn translations(b: &mut Build, c: &Config) {
+    if !c.use_translations {
+        return;
+    }
+    if let Some(g) = c.babelon_translation_group.as_ref() {
+        b.var("TRANSLATIONS_ADAPTER", g.oak_adapter.as_deref().unwrap_or("pronto:$(ONT).obo"));
+        b.var("TRANSLATIONS_ONTOLOGY", g.translate_ontology.as_deref().unwrap_or("$(ONT).obo"));
+        let predicates = match &g.predicates {
+            Some(p) if !p.is_empty() => p.join(" "),
+            _ => "IAO:0000115 rdfs:label".to_string(),
+        };
+        b.var("TRANSLATE_PREDICATES", predicates);
+        for t in g.languages() {
+            let id = t.id.as_str();
+            let table = format!("$(TRANSLATIONSDIR)/{id}.babelon.tsv");
+            let synonyms = format!("$(TRANSLATIONSDIR)/{id}.synonyms.tsv");
+            // Fetched, or curated by hand and only required to be there.
+            if t.maintenance == "mirror" {
+                let from = |u: &Option<String>| u.clone().unwrap_or_else(|| "None".into());
+                b.rule(&table, "", "", &[&format!("wget \"{}\" -O $@", from(&t.mirror_babelon_from))], &[]);
+                if t.include_robot_template_synonyms {
+                    b.rule(&synonyms, "", "", &[&format!("wget \"{}\" -O $@", from(&t.mirror_synonyms_from))], &[]);
+                }
+            } else {
+                b.rule(&table, "", "", &["test -f $@"], &[]);
+                if t.include_robot_template_synonyms {
+                    b.rule(&synonyms, "", "", &["test -f $@"], &[]);
+                }
+            }
+            let mut recipe: Vec<String> = Vec::new();
+            if t.auto_translate {
+                recipe.push(
+                    "@if [ -z \"$(OPENAI_API_KEY)\" ]; then echo \"OPENAI_API_KEY must be set as as part of the make command, \
+                     e.g. sh run.sh make OPENAI_API_KEY=\\\"sk-123\\\" my_command\" && exit 1; fi"
+                        .to_string(),
+                );
+            }
+            recipe.push(format!(
+                "$(BABELONPY) prepare-translation $(TRANSLATIONSDIR)/{id}.babelon.tsv \
+                 --oak-adapter $(TRANSLATIONS_ADAPTER) --language-code {} \
+                 $(foreach n,$(TRANSLATE_PREDICATES), --field $(n)) \
+                 --output-source-changed $(TRANSLATIONSDIR)/{id}-changed.babelon.tsv \
+                 --output-not-translated $(TRANSLATIONSDIR)/{id}-not-translated.babelon.tsv \
+                 --include-not-translated {} --update-translation-status {} --drop-unknown-columns {} -o $@",
+                t.language, t.include_not_translated, t.update_translation_status, t.drop_unknown_columns
+            ));
+            if t.auto_translate {
+                recipe.push("echo \"Warning: By default, the toolkit employs LLM-mediated translations using the OpenAI API. This default may change at any time\"".into());
+                recipe.push("echo \"Warning: Never store API keys or other secrets in Makefiles or scripts you have in version control.\"".into());
+                recipe.push(format!(
+                    "export OPENAI_API_KEY=\"$(OPENAI_API_KEY)\" && \
+                     $(BABELONPY) translate $(TRANSLATIONSDIR)/{id}-not-translated.babelon.tsv -o $(TRANSLATIONSDIR)/{id}-translated.babelon.tsv"
+                ));
+                recipe.push(format!(
+                    "$(BABELONPY) merge $(TRANSLATIONSDIR)/{id}-preprocessed.babelon.tsv $(TRANSLATIONSDIR)/{id}-translated.babelon.tsv -o $@"
+                ));
+            }
+            let lines: Vec<&str> = recipe.iter().map(String::as_str).collect();
+            b.rule(
+                &format!("$(TRANSLATIONSDIR)/{id}-preprocessed.babelon.tsv"),
+                &format!("$(TRANSLATIONS_ONTOLOGY) {table}"),
+                "",
+                &lines,
+                &[],
+            );
+        }
+    }
+    let stamp = |what: &str| {
+        format!(
+            "annotate --ontology-iri $(ONTBASE)/translations/$*.{what}.owl \
+             -V $(ONTBASE)/releases/$(VERSION)/translations/$*.{what}.owl \
+             --annotation owl:versionInfo $(VERSION) convert -f owl --output $@"
+        )
+    };
+    b.rule(
+        "$(TRANSLATIONSDIR)/%.synonyms.owl",
+        "$(TRANSLATIONSDIR)/%.synonyms.tsv",
+        "",
+        &[&format!("$(ROBOT) template --template $< {}", stamp("synonyms"))],
+        &[],
+    );
+    b.precious("$(TRANSLATIONSDIR)/%.synonyms.owl");
+    b.rule(
+        "$(TRANSLATIONSDIR)/%.babelon.owl",
+        "$(TRANSLATIONSDIR)/%-preprocessed.babelon.tsv",
+        "",
+        &[
+            "$(BABELONPY) convert $< --output-format owl -o $@.tmp",
+            &format!("$(ROBOT) merge -i $@.tmp {}", stamp("babelon")),
+            "@rm $@.tmp",
+        ],
+        &[],
+    );
+    b.precious("$(TRANSLATIONSDIR)/%.babelon.owl");
+    b.rule(
+        "$(TRANSLATIONSDIR)/$(ONT)-all.babelon.tsv",
+        "$(TRANSLATIONS_TSV)",
+        "",
+        &["$(BABELONPY) merge $^ -o $@"],
+        &[],
+    );
+    b.rule(
+        "$(TRANSLATIONSDIR)/%.babelon.json",
+        "$(TRANSLATIONSDIR)/%.babelon.tsv",
+        "",
+        &["$(BABELONPY) convert $< --output-format json -o $@"],
+        &[],
+    );
+}
+
 /// The mapping sets: checked, normalised, and each kept up to date in its own way.
 fn mappings(b: &mut Build, c: &Config) {
     if !c.use_mappings {
@@ -2296,7 +2571,8 @@ fn mappings(b: &mut Build, c: &Config) {
 
 /// A subset is the slice of the release tagged with it, in every export format
 /// and as a table of its classes.
-fn subsets(b: &mut Build) {
+fn subsets(b: &mut Build, c: &Config) {
+    let has = |f: &str| c.export_formats.iter().any(|x| x == f);
     b.rule(
         "$(SUBSETDIR)/%.tsv",
         "$(SUBSETDIR)/%.owl",
@@ -2312,20 +2588,28 @@ fn subsets(b: &mut Build) {
            annotate --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) -o $@"],
         &[],
     );
-    b.rule(
-        "$(SUBSETDIR)/%.obo",
-        "$(SUBSETDIR)/%.owl",
-        "",
-        &["$(ROBOT) convert --input $< --check false -f obo $(OBO_FORMAT_OPTIONS) -o $@"],
-        &[],
-    );
-    b.rule(
-        "$(SUBSETDIR)/%.json",
-        "$(SUBSETDIR)/%.owl",
-        "",
-        &["$(ROBOT) convert --input $< --check false -f json -o $@"],
-        &[],
-    );
+    b.precious("$(SUBSETDIR)/%.tsv");
+    b.precious("$(SUBSETDIR)/%.owl");
+    if has("obo") {
+        b.rule(
+            "$(SUBSETDIR)/%.obo",
+            "$(SUBSETDIR)/%.owl",
+            "",
+            &["$(ROBOT) convert --input $< --check false -f obo $(OBO_FORMAT_OPTIONS) -o $@"],
+            &[],
+        );
+    }
+    for format in ["ttl", "json"] {
+        if has(format) {
+            b.rule(
+                &format!("$(SUBSETDIR)/%.{format}"),
+                "$(SUBSETDIR)/%.owl",
+                "",
+                &[&format!("$(ROBOT) convert --input $< --check false -f {format} -o $@")],
+                &[],
+            );
+        }
+    }
 }
 
 /// The release artefacts and their export formats.

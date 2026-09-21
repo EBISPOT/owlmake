@@ -1,0 +1,6 @@
+id: cimn
+use_custom_import_module: true
+import_group:
+  scan_signature: false
+  products:
+    - id: ro

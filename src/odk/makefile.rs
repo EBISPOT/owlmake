@@ -309,6 +309,13 @@ impl MakeModel {
         self.ingest(&std::fs::read_to_string(path)?)
     }
 
+    /// Add rules and assignments a repository wrote itself and keeps somewhere
+    /// other than a file of its own — in its configuration, say. They are read as
+    /// any of its rules are.
+    pub fn overlay_text(&mut self, text: &str) -> Result<()> {
+        self.ingest(text)
+    }
+
     fn ingest(&mut self, text: &str) -> Result<()> {
         let logical = join_continuations(text);
         // Makefile conditional directives (`ifeq`/`ifneq`/`ifdef`/`ifndef` …
