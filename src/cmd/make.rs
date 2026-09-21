@@ -784,7 +784,10 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 build::refresh_imports(repo, plan, *exclude_large, &run_opts)
             }
             Kind::AllImports => build::build_all_imports(repo, plan, &run_opts),
+            #[cfg(not(target_arch = "wasm32"))]
             Kind::UpdateRepo => crate::odk::update::update_repo(repo),
+            #[cfg(target_arch = "wasm32")]
+            Kind::UpdateRepo => bail!("`update_repo` rewrites a repository's files, which the wasm build has none of"),
             Kind::Patterns => {
                 if !build::regenerate_patterns(repo, plan, &run_opts)? {
                     status!("make: no DOSDP patterns configured");

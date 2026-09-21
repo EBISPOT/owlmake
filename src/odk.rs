@@ -20,6 +20,8 @@ use anyhow::{bail, Context, Result};
 pub(crate) mod makefile;
 pub(crate) mod planner;
 pub mod builtin;
+// Rewrites a repository's files on disk, and reads its XML catalog to do it.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod update;
 pub(crate) mod robot;
 pub(crate) mod workflows;
