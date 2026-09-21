@@ -109,6 +109,82 @@ that changes output is a bug.
 **P5 — Honesty.** No silent skip. A check that cannot run **fails**. A step in
 the plan **runs**. A declared file that is missing is an **error**, not a filter.
 
+## What goes in `owlmake.yaml`
+
+**A repository's `owlmake.yaml` holds what that repository decided, and nothing
+else.**
+
+The test for anything in the file:
+
+- Is it explicit in the repo's own configuration — a setting in its
+  `<id>-odk.yaml`, or a rule the repo wrote itself in its `<id>.Makefile`? Then it
+  may be explicit in `owlmake.yaml`.
+- Otherwise it is standard behaviour — what ODK's *generated* `Makefile` does for
+  every repo with that configuration — and it is **built into owlmake**, not
+  written into the file.
+
+The generated Makefile carries no information. It is a function of the ODK yaml
+and the ODK version and of nothing else, so recording what ingest finds in it
+writes down the *expansion* of a repo's decisions in place of the decisions. The
+cohort ontology is the measure: three imports, five template components, four
+subsets and one override of the component rules came out as a 1,917-line plan, of
+which about forty lines were anything the repo had chosen. Nobody can review
+that, and nobody should be asked to commit it.
+
+Ingest recording the generated Makefile's rules into the file is the defect this
+section names. Work on the plan format is unfinished while it still does.
+
+### The file and the resolved plan
+
+"The plan" everywhere else in this document is the **resolved plan**: the
+built-in rules for the behaviour set the file names, plus what the file itself
+says, with the file's own rules winning where both name a target. That is what
+the executor obeys, and every principle above is a statement about it — it names
+every path, it records which steps exist, nothing in it is inert.
+
+`owlmake.yaml` is the resolved plan's **source**, and resolving it is a pure
+function:
+
+- The file **pins the behaviour set** it is written against
+  (`emulate_odk_version`). owlmake refuses a set it does not implement; it never
+  substitutes the nearest one. Same file, same behaviour set, same run inputs ⇒
+  same bytes, so P4 holds across owlmake versions rather than in spite of them.
+- `--plan-only` prints the resolved plan. Reviewing what a build will do never
+  requires reading owlmake's source.
+- A configuration option with no built-in rules yet **fails by name** (P5). It is
+  never skipped, and it never falls back to replaying a generated Makefile.
+
+### How built-in behaviour is built in
+
+As **rules, as data**: one function from a repo's configuration to the rule
+model the planner already consumes — targets, prerequisites, recipes — with the
+recipes written in owlmake's own command language. Where the generated Makefile
+loops over imports, components or subsets in its template, that function loops in
+Rust. Everything downstream is the one existing path: the same recipe parser, the
+same planner, the same executor.
+
+Not any of these, each of which has been proposed and turned down:
+
+- **Steps built by hand per target.** A second implementation of what the
+  planner already derives from rules, which bypasses exactly the knowledge that
+  makes builds come out identical — import seeding, mirror pinning, the rebuild
+  switches, transient targets. See "Two shapes most defects turn out to have".
+- **An embedded Makefile or template text.** The rule model is data; producing it
+  needs no Make syntax and no template language inside owlmake.
+- **Shorthand the serializer expands** — a "standard block plus deviations",
+  dropping targets that equal a default. That hides the graph in the file format
+  instead of putting the behaviour where it belongs.
+- **Shortening the replayed plan** — folding bookkeeping steps, dropping inert
+  targets, compacting argument lists. It makes a file that should not exist
+  smaller.
+
+Ingesting a generated Makefile stays, in two roles only. It is the **migration
+tool**: read a repo's ODK yaml and its own `<id>.Makefile`, write the short
+`owlmake.yaml`. And it is the **oracle**: for any configuration, the built-in
+rules must resolve to the same plan as ingesting the Makefile ODK generated for
+it. That comparison is exact, the fixtures are real repositories, and it is what
+lets the built-in rules be trusted without being re-derived by eye.
+
 ## owlmake ships nothing
 
 A repo built with owlmake has no ROBOT, no ODK, no Java, no `dicer-cli`, no
