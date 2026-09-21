@@ -504,7 +504,9 @@ pub struct ArtefactSpec {
     /// file written into it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order_only: Vec<String>,
-    /// Ordered operations applied to the input.
+    /// Ordered operations applied to the input. None for a target that only groups
+    /// others, or that `extends` a standard one.
+    #[serde(default)]
     pub steps: Vec<StepEntry>,
     /// Set when ingest found no rule for this target. It blocks the release, so
     /// it is recorded: without it the artefact loads as one with no steps and
@@ -3189,7 +3191,7 @@ mod format_floor_tests {
         // The floor moves to 0.3.0. An older build reads a standard file as a plan
         // with no artefacts and builds nothing, reporting success; that is the
         // silent case the floor exists to refuse.
-        const PLAN_SCHEMA_DIGEST: &str = "ec2bfaf5f8017d2a";
+        const PLAN_SCHEMA_DIGEST: &str = "5341ed7c18406442";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

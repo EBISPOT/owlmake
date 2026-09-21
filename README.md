@@ -23,13 +23,51 @@ mv om-macos-arm64 ~/.local/bin/om
 
 ### To build ontologies
 
-From the repository of the ontology you want to build, run `om`. Targets will be discovered from the existing ODK setup (yaml/makefiles), then a plan will be generated in `owlmake.yaml` and executed. For example, to build the [Ontology of Biological Attributes (OBA)](https://github.com/obophenotype/bio-attribute-ontology):
+From the repository of the ontology you want to build, run `om`. Targets will be discovered from the existing ODK setup (yaml/makefiles), then `owlmake.yaml` will be written and the build executed. For example, to build the [Ontology of Biological Attributes (OBA)](https://github.com/obophenotype/bio-attribute-ontology):
 
 ```
 git clone https://github.com/obophenotype/bio-attribute-ontology
 cd bio-attribute-ontology
 om
 ```
+
+### `owlmake.yaml`
+
+Once a repository has an `owlmake.yaml` it no longer needs its `Makefile`, its `<id>.Makefile` or its `<id>-odk.yaml`: delete them and `om` builds from the file alone.
+
+The file holds what the repository decided and nothing else. Its top-level keys are the repository's options — the ones an ODK configuration has (`release_artefacts`, `import_group`, `components`, `subset_group`, `robot_report`, `use_dosdps`, …) — and everything those options imply is owlmake's standard build, built in. Only what the repository builds in a way of its own is written out, under `targets`:
+
+```yaml
+min_owlmake_version: 0.3.0
+emulate_odk_version: 1.6.1        # the standard build this file is written against
+id: coho
+uribase: http://www.ebi.ac.uk
+release_artefacts: [base, full, simple]
+primary_release: full
+export_formats: [owl, obo, json]
+import_group:
+  products:
+  - id: ro
+  - id: omo
+    module_type: mirror
+targets:
+- target: src/ontology/components/GWAS.owl     # replaces the standard target of that name
+  when: [COMP]                                 # exists only while COMP is on, as the standard one does
+  needs: [src/templates/GWAS.csv]
+  steps:
+  - op: template
+    templates: [src/templates/GWAS.csv]
+    prefixes: ['COHO: http://www.ebi.ac.uk/coho/COHO_']
+  - op: convert
+    format: ofn
+- target: test                                 # adds a check to the standard `test`
+  extends: true
+  needs: [my_check]
+```
+
+An import, its mirror, or the pattern products that a repository builds its own way are recorded under `imports` and `dosdp`, because owlmake builds those with its own engines rather than as targets. `om make --plan-only` prints the whole resolved plan — every target the file and the standard build amount to.
+
+`om` writes this file for a repository whose generated `Makefile` is what ODK 1.6.1 generates for its configuration. Where it is not — another ODK release generated it, or the repository has no ODK configuration and its build is all its own (EFO) — `om` says what differs and writes the whole plan instead: every target, step and switch, in the same file. The two are told apart by whether the file states the ontology's `version` and `ontology_iri`, which only a whole plan has to.
 
 **Much of the existing ODK is functionally mirrored by the `om` binary itself (the majority of `robot`, `sssom`, `owltools`, `dosdp-tools`), so for many existing ontologies there are no environmental dependencies.** You can build ontologies like EFO, CL, and UBERON out of the box without Docker, Java, or Python.
 
@@ -92,7 +130,7 @@ Any other target defined in the repo's Makefile is dispatched too — `om <targe
 om seed --id myont
 ```
 
-This writes a buildable plan (primary + base products and obo/json exports, built merge → reason → relax → reduce → annotate over `myont-edit.obo`). A repo defined only by a committed plan — no ODK Makefile or yaml — builds straight from it: `om` reads the plan as the source of truth (it is not regenerated). The plan is YAML by default; `om make --plan-format json` writes `owlmake.json` instead, and either spelling is accepted when building (commit both and they must describe the same build). Validate a plan against its schema with `om schema`.
+This writes a buildable whole plan (primary + base products and obo/json exports, built merge → reason → relax → reduce → annotate over `myont-edit.obo`). A repo defined only by its `owlmake.yaml` — no ODK Makefile or yaml — builds straight from it: `om` reads the file as the source of truth (it is not regenerated). The plan is YAML by default; `om make --plan-format json` writes `owlmake.json` instead, and either spelling is accepted when building (commit both and they must describe the same build). Validate a plan against its schema with `om schema`.
 
 ### As a ROBOT implementation
 

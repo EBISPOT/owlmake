@@ -154,6 +154,76 @@ fn a_standard_file_alone_resolves_to_the_same_plan() {
     assert!(failed.is_empty(), "fixtures whose plan changed: {failed:?}");
 }
 
+/// A repository that has only ever had an `owlmake.yaml`: no Makefile, no
+/// configuration of any other kind, nothing to regenerate from. The standard build
+/// for its options has to BUILD — the plans agreeing is not the same as the
+/// release coming out.
+#[test]
+fn a_standard_file_builds_a_release() {
+    let mut root = std::env::temp_dir();
+    root.push(format!("owlmake_builtin_{}_builds", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "emulate_odk_version: 1.6.1\n\
+         id: tiny\n\
+         uribase: http://example.org\n\
+         edit_format: ofn\n\
+         release_artefacts:\n- base\n- full\n\
+         export_formats:\n- owl\n- obo\n\
+         robot_report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n\
+         targets:\n\
+         - target: greeting\n  steps:\n  - op: print\n    message: built-its-own-way\n\
+         - target: test\n  extends: true\n  needs:\n  - greeting\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(:=<http://example.org/tiny/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/tiny.owl>\n\
+         Declaration(Class(<http://example.org/tiny/TINY_0000001>))\n\
+         Declaration(Class(<http://example.org/tiny/TINY_0000002>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/tiny/TINY_0000001> \"thing\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/tiny/TINY_0000002> \"small thing\")\n\
+         SubClassOf(<http://example.org/tiny/TINY_0000002> <http://example.org/tiny/TINY_0000001>)\n\
+         )\n",
+    )
+    .unwrap();
+    let om = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+            .args(args)
+            .arg("-C")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+
+    let out = om(&["make", "tiny.owl", "tiny-base.owl", "tiny.obo"]);
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let full = std::fs::read_to_string(ont.join("tiny.owl")).expect("tiny.owl was built");
+    assert!(full.contains("http://example.org/tiny/TINY_0000002"), "the release holds the ontology:\n{full}");
+    assert!(
+        full.contains("http://example.org/tiny/releases/"),
+        "and is stamped with a version IRI under the configured base:\n{full}"
+    );
+    assert!(ont.join("tiny-base.owl").is_file() && ont.join("tiny.obo").is_file());
+
+    // `test` is the standard target, with the repository's own check joined to it.
+    let out = om(&["make", "test"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "the checks failed:\n{said}");
+    assert!(said.contains("built-its-own-way"), "the repository's own target ran:\n{said}");
+    assert!(said.contains("Finished running all tests successfully"), "and so did the standard ones:\n{said}");
+
+    // The file is the build: nothing rewrote it.
+    let file = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
+    assert!(file.starts_with("emulate_odk_version: 1.6.1\nid: tiny\n"), "{file}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A working repository laid out again WITHOUT its build files: every entry of
 /// its `src/` linked into a scratch tree, except the Makefile, the repository's
 /// own rules and its configuration. Real repositories are too large to copy and
