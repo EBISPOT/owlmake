@@ -1,0 +1,27 @@
+id: maps
+use_mappings: true
+sssom_mappingset_group:
+  products:
+    - id: maps-manual
+      maintenance: manual
+    - id: maps-default
+    - id: maps-extracted
+      maintenance: extract
+      sssom_tool_options: --clean-prefixes
+      release_mappings: true
+    - id: maps-extracted-from
+      maintenance: extract
+      source_file: maps-full.owl
+    - id: maps-mirrored
+      maintenance: mirror
+      mirror_from: https://example.org/maps.sssom.tsv
+      release_mappings: true
+    - id: maps-custom
+      maintenance: custom
+    - id: maps-all
+      maintenance: merged
+    - id: maps-some
+      maintenance: merged
+      source_mappings:
+        - maps-manual
+        - maps-mirrored

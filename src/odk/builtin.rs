@@ -29,8 +29,6 @@ use super::makefile::{MakeModel, Rule};
 /// without it, the result would differ from what the repository asked for, and
 /// nothing would say so.
 const UNPORTED: &[&str] = &[
-    "use_mappings",
-    "sssom_mappingset_group",
     "use_translations",
     "babelon_translation_group",
     "use_custom_import_module",
@@ -139,6 +137,11 @@ pub struct Config {
     #[serde(default)]
     pub owltools_memory: String,
 
+    /// Maintain mapping sets alongside the ontology.
+    #[serde(default)]
+    pub use_mappings: bool,
+    #[serde(default)]
+    pub sssom_mappingset_group: Option<MappingSetGroup>,
     /// Generate classes from design patterns and their data tables.
     #[serde(default)]
     pub use_dosdps: bool,
@@ -167,6 +170,75 @@ pub struct Config {
     #[serde(default)]
     pub documentation: Option<serde_yaml::Value>,
 
+}
+
+/// The mapping sets, each kept up to date in the way its `maintenance` says.
+#[derive(Debug, Deserialize)]
+pub struct MappingSetGroup {
+    /// Publish every set with the release, not only those that ask for it.
+    #[serde(default)]
+    pub release_mappings: bool,
+    /// What extracts a set from the ontology's cross-references: `sssom-py` or
+    /// `sssom-java`.
+    #[serde(default = "default_mapping_extractor")]
+    pub mapping_extractor: String,
+    #[serde(default)]
+    pub products: Option<Vec<MappingSet>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MappingSet {
+    pub id: String,
+    /// `manual`, `extract`, `merged`, `mirror` or `custom`.
+    #[serde(default = "default_maintenance")]
+    pub maintenance: String,
+    #[serde(default)]
+    pub mirror_from: Option<String>,
+    /// What an extracted set is read from. Defaults to the preprocessed edit file.
+    #[serde(default)]
+    pub source_file: Option<String>,
+    #[serde(default)]
+    pub sssom_tool_options: Option<String>,
+    #[serde(default)]
+    pub release_mappings: bool,
+    /// The sets a merged set is made of. Defaults to every set that is not merged.
+    #[serde(default)]
+    pub source_mappings: Option<Vec<String>>,
+}
+
+impl MappingSetGroup {
+    fn derive(&mut self) -> Result<()> {
+        let Some(products) = &mut self.products else { return Ok(()) };
+        let ids: Vec<String> = products.iter().map(|p| p.id.clone()).collect();
+        let unmerged: Vec<String> =
+            products.iter().filter(|p| p.maintenance != "merged").map(|p| p.id.clone()).collect();
+        for p in products.iter_mut() {
+            match p.maintenance.as_str() {
+                "merged" => match &p.source_mappings {
+                    None => p.source_mappings = Some(unmerged.clone()),
+                    Some(sources) => {
+                        if let Some(unknown) = sources.iter().find(|s| !ids.contains(s)) {
+                            bail!("mapping set `{}` merges `{unknown}`, which is not a mapping set", p.id);
+                        }
+                    }
+                },
+                "extract" => {
+                    p.source_file.get_or_insert_with(|| "$(EDIT_PREPROCESSED)".to_string());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn sets(&self) -> &[MappingSet] {
+        self.products.as_deref().unwrap_or(&[])
+    }
+
+    /// The sets published with a release.
+    fn released(&self) -> Vec<&MappingSet> {
+        self.sets().iter().filter(|p| self.release_mappings || p.release_mappings).collect()
+    }
 }
 
 /// The pattern data directories beyond `default`, each generated on its own.
@@ -533,6 +605,12 @@ fn default_dosdp_tools_options() -> String {
 fn default_pipeline_ontology() -> String {
     "$(SRC)".into()
 }
+fn default_mapping_extractor() -> String {
+    "sssom-py".into()
+}
+fn default_maintenance() -> String {
+    "manual".into()
+}
 fn default_public_release() -> String {
     "none".into()
 }
@@ -631,6 +709,9 @@ impl Config {
         }
         if let Some(g) = &mut config.pattern_pipelines_group {
             g.derive();
+        }
+        if let Some(g) = &mut config.sssom_mappingset_group {
+            g.derive()?;
         }
         // An OBO export is always cleaned; a configuration may only add to that.
         if !config.obo_format_options.contains("--clean-obo") {
@@ -851,6 +932,7 @@ pub fn model(
     mirrors(&mut b, config);
     subsets(&mut b);
     patterns(&mut b, config);
+    mappings(&mut b, config);
     artefacts(&mut b, config);
     utilities(&mut b, config);
     m
@@ -1023,8 +1105,21 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("SUBSET_ROOTS", subset_roots.join(" "));
     b.var("SUBSET_FILES", cross(&subset_roots, &formats_tsv));
 
-    b.var("MAPPINGS", "");
-    b.var("MAPPING_FILES", "");
+    let mapping_group = c.sssom_mappingset_group.as_ref();
+    if c.use_mappings {
+        b.var("MAPPINGDIR", "../mappings");
+        b.var("MAPPING_TESTER", "sssom validate");
+        b.var("SSSOMPY", "sssom");
+        b.var("MAPPING_RELEASE_FILES", "$(foreach n,$(MAPPINGS), $(MAPPINGDIR)/$(n).sssom.tsv)");
+    }
+    let set_ids = |sets: Vec<&MappingSet>| sets.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(" ");
+    b.var("MAPPINGS", set_ids(mapping_group.map(|g| g.sets().iter().collect()).unwrap_or_default()));
+    let released = mapping_group.map(|g| g.released()).unwrap_or_default();
+    if !released.is_empty() {
+        b.var("RELEASED_MAPPINGS", set_ids(released));
+    }
+    b.var("MAPPING_FILES", "$(foreach p, $(MAPPINGS), $(MAPPINGDIR)/$(p).sssom.tsv)");
+    b.var("RELEASED_MAPPING_FILES", "$(foreach p, $(RELEASED_MAPPINGS), $(MAPPINGDIR)/$(p).sssom.tsv)");
 
     let report_of = |x: &String| if x == "edit" { "$(SRC)".to_string() } else { x.clone() };
     let obo_reports: Vec<String> =
@@ -1067,11 +1162,14 @@ fn variables(b: &mut Build, c: &Config) {
         format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES){released_reports}"),
     );
     b.var("CLEANFILES", "$(MAIN_FILES) $(SRCMERGED) $(EDIT_PREPROCESSED)");
-    let released: Vec<String> = b
+    let mut released: Vec<String> = b
         .words("$(RELEASE_ASSETS)")
         .iter()
         .map(|n| format!("$(RELEASEDIR)/{n}"))
         .collect();
+    if b.m.vars.contains_key("RELEASED_MAPPINGS") {
+        released.push("$(foreach n,$(RELEASED_MAPPINGS), $(RELEASEDIR)/mappings/$(n).sssom.tsv)".into());
+    }
     b.var("RELEASE_ASSETS_AFTER_RELEASE", released.join(" "));
     b.var("CURRENT_RELEASE", "$(ONTBASE).owl");
     b.var("TSV", "");
@@ -1218,7 +1316,12 @@ fn release(b: &mut Build, _c: &Config) {
         &["$(MAKE) prepare_release IMP=false PAT=false MIR=false COMP=false"],
         &[],
     );
-    b.phony("copy_release_files", "", "", &["rsync -R $(RELEASE_ASSETS) $(RELEASEDIR)"], &[]);
+    let mut copy = vec!["rsync -R $(RELEASE_ASSETS) $(RELEASEDIR)"];
+    if b.m.vars.contains_key("RELEASED_MAPPINGS") {
+        copy.push("mkdir -p $(RELEASEDIR)/mappings");
+        copy.push("cp -rf $(RELEASED_MAPPING_FILES) $(RELEASEDIR)/mappings");
+    }
+    b.phony("copy_release_files", "", "", &copy, &[]);
     b.phony("show_release_assets", "", "", &["@echo $(RELEASE_ASSETS_AFTER_RELEASE)"], &[]);
     b.phony("release_diff", "$(REPORTDIR)/release-diff.md", "", &[], &[]);
     b.rule("$(TMPDIR)/current-release.owl", "", "", &["wget $(CURRENT_RELEASE) -O $@"], &[]);
@@ -2100,6 +2203,108 @@ fn patterns(b: &mut Build, c: &Config) {
         )],
         g,
     );
+}
+
+/// The mapping sets: checked, normalised, and each kept up to date in its own way.
+fn mappings(b: &mut Build, c: &Config) {
+    if !c.use_mappings {
+        return;
+    }
+    b.rule(
+        "validate-sssom-%",
+        "",
+        "",
+        &[
+            "tsvalid $(MAPPINGDIR)/$*.sssom.tsv --comment \"#\"",
+            "sssom validate $(MAPPINGDIR)/$*.sssom.tsv",
+        ],
+        &[],
+    );
+    b.rule(
+        "validate_mappings",
+        "",
+        "",
+        &["$(MAKE_FAST) $(foreach n,$(MAPPINGS),validate-sssom-$(n))"],
+        &[],
+    );
+    b.rule(
+        "normalize-sssom-%",
+        "",
+        "",
+        &["sssom-cli --output $(MAPPINGDIR)/$*.sssom.tsv $(MAPPINGDIR)/$*.sssom.tsv"],
+        &[],
+    );
+    b.rule(
+        "normalize_mappings",
+        "",
+        "",
+        &["$(MAKE_FAST) $(foreach n,$(MAPPINGS),normalize-sssom-$(n))"],
+        &[],
+    );
+    let Some(g) = c.sssom_mappingset_group.as_ref() else { return };
+    for p in g.sets() {
+        let id = p.id.as_str();
+        let set = format!("$(MAPPINGDIR)/{id}.sssom.tsv");
+        match p.maintenance.as_str() {
+            // Read off the ontology's own cross-references.
+            "extract" if g.mapping_extractor == "sssom-py" => {
+                let graph = format!("$(TMPDIR)/{id}.obographs.json");
+                b.rule(
+                    &graph,
+                    p.source_file.as_deref().unwrap_or_default(),
+                    "",
+                    &["$(ROBOT) annotate --input $< --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
+                       convert --check false --format json --output $@"],
+                    &[],
+                );
+                b.rule(
+                    &set,
+                    &graph,
+                    "",
+                    &[&format!(
+                        "sssom parse $< -I obographs-json {} -o $@",
+                        p.sssom_tool_options.as_deref().unwrap_or_default()
+                    )],
+                    &[],
+                );
+            }
+            "extract" if g.mapping_extractor == "sssom-java" => b.rule(
+                &set,
+                p.source_file.as_deref().unwrap_or_default(),
+                "",
+                &["$(ROBOT) sssom:xref-extract --input $< --replace --ignore-treat-xrefs --all-xrefs --mapping-file $@"],
+                &[],
+            ),
+            // Curated by hand: all the build can do is insist that it is there.
+            "manual" => b.rule(&set, "", "", &["test -f $@"], &[]),
+            "merged" => {
+                let sources: Vec<String> = p
+                    .source_mappings
+                    .iter()
+                    .flatten()
+                    .map(|s| format!("$(MAPPINGDIR)/{s}.sssom.tsv"))
+                    .collect();
+                b.rule(&set, &sources.join(" "), "", &["sssom-cli --output $@ $^"], &[]);
+            }
+            "mirror" => {
+                if b.switch("MIR") {
+                    b.rule(
+                        &set,
+                        "",
+                        "",
+                        &[&format!("wget \"{}\" -O $@", p.mirror_from.as_deref().unwrap_or("None"))],
+                        &["MIR"],
+                    );
+                }
+            }
+            "custom" => {
+                let recipe = must_be_overridden(&format!("{id} as a custom mapping set"), &c.id);
+                let lines: Vec<&str> = recipe.iter().map(String::as_str).collect();
+                b.rule(&set, "", "", &lines, &[]);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A subset is the slice of the release tagged with it, in every export format
