@@ -359,18 +359,54 @@ pub struct SubsetProduct {
 pub struct ComponentGroup {
     #[serde(default)]
     pub products: Vec<ComponentProduct>,
+    #[serde(default)]
+    disabled: Option<IgnoredAny>,
+    #[serde(default)]
+    rebuild_if_source_changes: Option<IgnoredAny>,
+}
+
+impl ComponentGroup {
+    /// Settle what a component's options imply when it does not spell them out.
+    fn derive(&mut self, uribase: &str, id: &str) {
+        for p in &mut self.products {
+            let stem = p.filename.split('.').next().unwrap_or_default().to_string();
+            p.base_iris.get_or_insert_with(|| vec![format!("{uribase}/{}", id.to_uppercase())]);
+            if p.use_template {
+                p.templates.get_or_insert_with(|| vec![format!("{stem}.tsv")]);
+            } else if p.use_mappings {
+                p.mappings.get_or_insert_with(|| vec![format!("{stem}.sssom.tsv")]);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentProduct {
     pub filename: String,
+    /// Fetch the component from here.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Build it from template tables. Defaults to `<stem>.tsv`.
     #[serde(default)]
     pub use_template: bool,
+    /// Build it from mapping sets. Defaults to `<stem>.sssom.tsv`.
     #[serde(default)]
-    pub templates: Vec<String>,
+    pub use_mappings: bool,
     #[serde(default)]
     pub template_options: Option<String>,
+    #[serde(default)]
+    pub sssom_tool_options: Option<String>,
+    #[serde(default)]
+    pub templates: Option<Vec<String>>,
+    #[serde(default)]
+    pub mappings: Option<Vec<String>>,
+    /// The namespaces that are a fetched component's own.
+    #[serde(default)]
+    pub base_iris: Option<Vec<String>>,
+    /// Cut a fetched component down to its own axioms.
+    #[serde(default)]
+    pub make_base: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -496,6 +532,9 @@ impl Config {
         if let Some(g) = &mut config.import_group {
             g.derive();
         }
+        if let Some(g) = &mut config.components {
+            g.derive(&config.uribase, &config.id);
+        }
         // An OBO export is always cleaned; a configuration may only add to that.
         if !config.obo_format_options.contains("--clean-obo") {
             if !config.obo_format_options.is_empty() {
@@ -528,11 +567,6 @@ impl Config {
                 if !kinds.contains(&p.kind()) {
                     bail!("import `{}`: module_type `{}` is not one of {kinds:?}", p.id, p.kind());
                 }
-            }
-        }
-        for c in self.components.iter().flat_map(|g| &g.products) {
-            if c.use_template && c.templates.is_empty() {
-                bail!("component `{}` sets use_template but names no templates", c.filename);
             }
         }
         if self.robot_report.custom_profile {
@@ -1400,23 +1434,87 @@ fn components(b: &mut Build, c: &Config) {
     b.rule("$(TMPDIR)/stamp-component-%.owl", "", "$(TMPDIR)", &["touch $@"], g);
     b.precious("$(TMPDIR)/stamp-component-%.owl");
 
-    for p in c.component_products().iter().filter(|p| p.use_template) {
-        let templates: Vec<String> =
-            p.templates.iter().map(|t| format!("$(TEMPLATEDIR)/{t}")).collect();
-        let args: Vec<String> = templates.iter().map(|t| format!("--template {t}")).collect();
-        let recipe = format!(
-            "$(ROBOT) template {} {} $(ANNOTATE_CONVERT_FILE)",
-            p.template_options.as_deref().unwrap_or(""),
-            args.join(" ")
-        );
-        b.rule(
-            &format!("$(COMPONENTSDIR)/{}", p.filename),
-            &format!("{} $(TMPDIR)/stamp-component-{}", templates.join(" "), p.filename),
-            "",
-            &[&recipe],
-            g,
-        );
-        b.precious(&format!("$(COMPONENTSDIR)/{}", p.filename));
+    for p in c.component_products() {
+        let file = p.filename.as_str();
+        let target = format!("$(COMPONENTSDIR)/{file}");
+        let stamp = format!("$(TMPDIR)/stamp-component-{file}");
+        if let Some(source) = &p.source {
+            // Fetched, and replaced only when what was fetched has changed.
+            if !b.switch("MIR") {
+                continue;
+            }
+            let guards = &["COMP", "MIR"];
+            let download = format!("component-download-{file}");
+            let own_axioms = if p.make_base {
+                format!(
+                    "remove {}--axioms external --preserve-structure false --trim false ",
+                    p.base_iris.iter().flatten().map(|i| format!("--base-iri {i} ")).collect::<String>()
+                )
+            } else {
+                String::new()
+            };
+            b.phony(
+                &download,
+                "",
+                "$(TMPDIR)",
+                &[&format!(
+                    "$(ROBOT) merge -I {source} {own_axioms}\
+                     annotate --annotation owl:versionInfo $(VERSION) --output $(TMPDIR)/$@.owl"
+                )],
+                guards,
+            );
+            b.rule(
+                &target,
+                &format!("{download} {stamp}"),
+                "",
+                &[&format!(
+                    "@if cmp -s $(TMPDIR)/{download}.owl $(TMPDIR)/{download}.tmp.owl ; then \
+                     echo \"Component identical.\" ; \
+                     else \
+                     echo \"Component different, updating.\" && \
+                     cp $(TMPDIR)/{download}.owl $(TMPDIR)/{download}.tmp.owl && \
+                     $(ROBOT) annotate --input $(TMPDIR)/{download}.owl \
+                     --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
+                     --output $@ ; \
+                     fi"
+                )],
+                guards,
+            );
+            b.precious(&target);
+        } else if p.use_template {
+            let templates: Vec<String> =
+                p.templates.iter().flatten().map(|t| format!("$(TEMPLATEDIR)/{t}")).collect();
+            let args: Vec<String> = templates.iter().map(|t| format!("--template {t}")).collect();
+            b.rule(
+                &target,
+                &format!("{} {stamp}", templates.join(" ")),
+                "",
+                &[&format!(
+                    "$(ROBOT) template {} {} $(ANNOTATE_CONVERT_FILE)",
+                    p.template_options.as_deref().unwrap_or(""),
+                    args.join(" ")
+                )],
+                g,
+            );
+            b.precious(&target);
+        } else if p.use_mappings {
+            let sets: Vec<String> =
+                p.mappings.iter().flatten().map(|m| format!("$(MAPPINGDIR)/{m}")).collect();
+            let args: Vec<String> = sets.iter().map(|m| format!("--sssom {m}")).collect();
+            b.rule(
+                &target,
+                &format!("{} {stamp}", sets.join(" ")),
+                "",
+                &[&format!(
+                    "$(ROBOT) --add-prefix 'sssom: https://w3id.org/sssom/' \
+                     --add-prefix 'semapv: http://w3id.org/semapv/vocab/' \
+                     sssom:inject {} --create --direct $(ANNOTATE_CONVERT_FILE)",
+                    args.join(" ")
+                )],
+                g,
+            );
+            b.precious(&target);
+        }
     }
 }
 

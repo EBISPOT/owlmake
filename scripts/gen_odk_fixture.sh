@@ -27,4 +27,9 @@ cp "$config" "$out/config.yaml"
     --with dataclasses-jsonschema --with defusedxml \
     python odk.py create-makefile -C "$out/config.yaml" -T template \
     -i template/src/ontology/Makefile.jinja2) > "$out/Makefile"
+# The generator reports a configuration it cannot handle on stderr and still
+# exits 0, leaving an empty file: that is not a fixture.
+grep -q "^ODK_VERSION_MAKEFILE" "$out/Makefile" || {
+  echo "ODK generated nothing for $config (rerun its generator by hand to see why)" >&2
+  rm -rf "$out"; exit 1; }
 echo "wrote $out ($(wc -l < "$out/Makefile") lines)"

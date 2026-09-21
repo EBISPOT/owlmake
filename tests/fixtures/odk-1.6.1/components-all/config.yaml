@@ -1,0 +1,30 @@
+id: comps
+components:
+  products:
+    - filename: manual.owl
+    - filename: tmpl_default.owl
+      use_template: true
+    - filename: tmpl.owl
+      use_template: true
+      template_options: --add-prefixes config/context.json
+      templates:
+        - one.tsv
+        - two.csv
+    - filename: fetched.owl
+      source: https://example.org/fetched.owl
+    - filename: fetched_base.owl
+      source: https://example.org/fetched_base.owl
+      make_base: true
+      base_iris:
+        - http://example.org/FB_
+        - http://example.org/fb#
+    - filename: fetched_default_base.owl
+      source: https://example.org/fdb.owl
+      make_base: true
+    - filename: maps_default.owl
+      use_mappings: true
+    - filename: maps.owl
+      use_mappings: true
+      mappings:
+        - a.sssom.tsv
+        - b.sssom.tsv

@@ -41,6 +41,18 @@ fn squeeze(v: &mut serde_yaml::Value) {
     }
 }
 
+/// Spell a generated file's launcher as the built-in rules spell theirs.
+fn relaunch(v: &mut serde_yaml::Value) {
+    match v {
+        serde_yaml::Value::String(s) if s.starts_with("robot --catalog ") => {
+            *s = format!("om{}", &s["robot".len()..]);
+        }
+        serde_yaml::Value::Mapping(m) => m.iter_mut().for_each(|(_, v)| relaunch(v)),
+        serde_yaml::Value::Sequence(items) => items.iter_mut().for_each(relaunch),
+        _ => {}
+    }
+}
+
 /// A plan as comparable data: every top-level field, with the two target lists
 /// re-keyed by target name so a difference names the target it is in.
 fn resolved(repo: &OdkRepo) -> BTreeMap<String, serde_yaml::Value> {
@@ -74,6 +86,10 @@ fn compare(root: &Path) -> Vec<String> {
     let mut builtin =
         resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading the built-in rules"));
     ingested.values_mut().chain(builtin.values_mut()).for_each(squeeze);
+    // A command the planner has no op for stays a command line, spelled with the
+    // configuration's launcher — `robot …` in a generated file, `om …` in the
+    // built-in rules. The executor runs owlmake for either.
+    ingested.values_mut().for_each(relaunch);
     // What a generated file holds that rules built as data have no counterpart
     // for: the `.FORCE` idiom, and the emptiness tests it wraps recipes in — the
     // built-in rules decide those as they are built, so only SWITCHES gate them.

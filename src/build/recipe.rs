@@ -1177,7 +1177,7 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
-    let shims: [(&str, String); 23] = [
+    let shims: [(&str, String); 24] = [
         ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
         ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
@@ -1186,6 +1186,9 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
         ("arq", format!("#!/bin/sh\nexec {exe:?} arq \"$@\"\n")),
         ("sssom", format!("#!/bin/sh\nexec {exe:?} sssom \"$@\"\n")),
         // KGX: the `<ont>_nodes.tsv`/`_edges.tsv` release artefacts.
+        // owlmake itself: a recipe that spells `om …` runs THIS binary, wherever it
+        // is installed and whatever it is called there.
+        ("om", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
         ("kgx", format!("#!/bin/sh\nexec {exe:?} kgx \"$@\"\n")),
         ("dosdp-tools", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
         ("sssom-cli", format!("#!/bin/sh\nexec {exe:?} sssom transform \"$@\"\n")),

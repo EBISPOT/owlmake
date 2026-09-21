@@ -98,6 +98,9 @@ pub(crate) fn shell_step(command: String) -> Step {
 /// as a missing external dependency, and the plan's preflight then asks the user
 /// to install something owlmake already provides.
 pub(crate) const BUNDLED: &[&str] = &[
+    // owlmake under its own name, which is how the standard build's recipes
+    // spell a command line.
+    "om",
     "robot", "jq", "arq", "sssom", "sssom-cli", "kgx", "dosdp-tools", "dosdp",
     "owltools", "sed", "grep", "comm", "gzip", "gunzip", "zcat",
     // Helper command words a recipe can spell inline. Nothing else on the machine
