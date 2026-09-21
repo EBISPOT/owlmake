@@ -382,13 +382,13 @@ pub fn model(
 
     checks(&mut b, config);
     release(&mut b, config);
-    seeds(&mut b);
+    seeds(&mut b, config);
     imports(&mut b, config);
     components(&mut b, config);
     mirrors(&mut b, config);
     subsets(&mut b);
     artefacts(&mut b, config);
-    utilities(&mut b, id);
+    utilities(&mut b, config);
     m
 }
 
@@ -694,7 +694,7 @@ fn release(b: &mut Build, _c: &Config) {
 
 /// The term lists the import modules and the simple artefact are cut against,
 /// each derived from the edit file merged with its components.
-fn seeds(b: &mut Build) {
+fn seeds(b: &mut Build, c: &Config) {
     b.rule(
         "$(EDIT_PREPROCESSED)",
         "$(SRC)",
@@ -710,14 +710,18 @@ fn seeds(b: &mut Build) {
            merge $(foreach src, $(OTHER_SRC), --input $(src)) --output $@"],
         &[],
     );
-    b.rule(
-        "$(PRESEED)",
-        "$(SRCMERGED)",
-        "",
-        &["$(ROBOT) query --input $< --format --csv --query $(SPARQLDIR)/terms.sparql $@"],
-        &[],
-    );
-    b.rule("$(IMPORTSEED)", "$(PRESEED)", "$(TMPDIR)", &["cat $^ | sort | uniq > $@"], &[]);
+    // Import modules are cut against everything the edit file and its components
+    // refer to; a repository with no imports has no use for that list.
+    if c.import_group.is_some() {
+        b.rule(
+            "$(PRESEED)",
+            "$(SRCMERGED)",
+            "",
+            &["$(ROBOT) query --input $< --format --csv --query $(SPARQLDIR)/terms.sparql $@"],
+            &[],
+        );
+        b.rule("$(IMPORTSEED)", "$(PRESEED)", "$(TMPDIR)", &["cat $^ | sort | uniq > $@"], &[]);
+    }
     b.rule(
         "$(ONTOLOGYTERMS)",
         "$(SRCMERGED)",
@@ -725,6 +729,11 @@ fn seeds(b: &mut Build) {
         &["$(ROBOT) query -f csv -i $< --query ../sparql/$(ONT)_terms.sparql $@"],
         &[],
     );
+    // The ontology's own terms and what they need, which only the artefacts cut
+    // down to them read.
+    if !c.release_artefacts.iter().any(|a| a == "simple") {
+        return;
+    }
     b.rule(
         "$(SIMPLESEED)",
         "$(SRCMERGED) $(ONTOLOGYTERMS)",
@@ -821,7 +830,7 @@ fn imports(b: &mut Build, c: &Config) {
 /// Files merged into the release whole. One built from templates has its own
 /// rule; any other is kept as committed, and created empty if it is missing.
 fn components(b: &mut Build, c: &Config) {
-    if !b.switch("COMP") {
+    if c.components.is_none() || !b.switch("COMP") {
         return;
     }
     let g = &["COMP"];
@@ -1054,7 +1063,7 @@ fn artefacts(b: &mut Build, c: &Config) {
 }
 
 /// Commands for the people editing the ontology rather than for the release.
-fn utilities(b: &mut Build, _id: &str) {
+fn utilities(b: &mut Build, c: &Config) {
     b.rule(
         "explain_unsat",
         "$(EDIT_PREPROCESSED)",
@@ -1069,7 +1078,9 @@ fn utilities(b: &mut Build, _id: &str) {
         &["$(ROBOT) convert -i $< -f ofn -o $(TMPDIR)/normalise && mv $(TMPDIR)/normalise $<"],
         &[],
     );
-    b.rule("update_docs", "", "", &["mkdocs gh-deploy --config-file ../../mkdocs.yaml"], &[]);
+    if c.documentation.is_some() {
+        b.rule("update_docs", "", "", &["mkdocs gh-deploy --config-file ../../mkdocs.yaml"], &[]);
+    }
     // The extended prefix map, for a repository's own rules to name as
     // `$(EXTENDED_PREFIX_MAP)`.
     b.rule("$(EXTENDED_PREFIX_MAP)", "/tools/obo.epm.json", "", &["cp $< $@"], &[]);

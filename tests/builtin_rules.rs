@@ -6,9 +6,15 @@
 //! difference between the two plans is a defect in the built-in rules, found
 //! without anyone having to re-derive a recipe by eye.
 //!
-//! The repositories compared are real ones. Name them in `OM_ORACLE_REPOS`
-//! (colon-separated paths, each a repository root holding `src/ontology`); with
-//! the variable unset the comparison has nothing to run over and says so.
+//! Two sources of configurations:
+//!
+//! * `tests/fixtures/odk-<version>/<name>/` — a `config.yaml`, the `Makefile`
+//!   that ODK release really generated for it, and optionally the rules a
+//!   repository wrote itself (`own.Makefile`). Add one for any option with
+//!   `scripts/gen_odk_fixture.sh`; it runs ODK's own generator, so the expected
+//!   side of the comparison is never written by hand.
+//! * real repositories, named in `OM_ORACLE_REPOS` (colon-separated roots, each
+//!   holding `src/ontology`), for the shapes only a working repository has.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -97,6 +103,55 @@ fn compare(root: &Path) -> Vec<String> {
         problems.push(format!("ONLY in the built-in rules: {name}"));
     }
     problems
+}
+
+/// Lay a fixture out as the repository it describes and return its root.
+fn repository_for(fixture: &Path) -> std::path::PathBuf {
+    let config = std::fs::read_to_string(fixture.join("config.yaml")).expect("config.yaml");
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&config).expect("a YAML configuration");
+    let id = parsed.get("id").and_then(|i| i.as_str()).expect("a configuration names its id");
+    let mut root = std::env::temp_dir();
+    root.push(format!(
+        "owlmake_builtin_{}_{}",
+        std::process::id(),
+        fixture.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    std::fs::write(ont.join(format!("{id}-odk.yaml")), config).unwrap();
+    std::fs::copy(fixture.join("Makefile"), ont.join("Makefile")).unwrap();
+    if fixture.join("own.Makefile").exists() {
+        std::fs::copy(fixture.join("own.Makefile"), ont.join(format!("{id}.Makefile"))).unwrap();
+    }
+    root
+}
+
+#[test]
+fn builtin_rules_resolve_to_what_odk_generates() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1");
+    let mut names: Vec<_> = std::fs::read_dir(&fixtures)
+        .expect("the fixture directory")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join("config.yaml").exists())
+        .collect();
+    names.sort();
+    assert!(!names.is_empty(), "no fixtures under {}", fixtures.display());
+    let mut failed = Vec::new();
+    for fixture in &names {
+        let root = repository_for(fixture);
+        let problems = compare(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        let name = fixture.file_name().unwrap().to_string_lossy().to_string();
+        eprintln!("== fixture {name}: {} difference(s)", problems.len());
+        for p in &problems {
+            eprintln!("{p}\n");
+        }
+        if !problems.is_empty() {
+            failed.push(name);
+        }
+    }
+    assert!(failed.is_empty(), "fixtures whose plans differ: {failed:?}");
 }
 
 #[test]
