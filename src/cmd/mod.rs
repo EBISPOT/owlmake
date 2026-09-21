@@ -851,6 +851,7 @@ pub mod collapse;
 // header for what it checks.
 pub mod check_align;
 pub mod check_rdfxml;
+pub mod context2csv;
 pub mod pattern_tester;
 pub mod config_check;
 pub mod convert;
@@ -911,8 +912,12 @@ pub mod select;
 // same reason `crate::semsql` is: SQLite's C has no wasm target.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod semsql;
+// `make-release-assets.py` talks to GitHub, and there is no HTTP client on wasm.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod release_assets;
 pub mod subset;
 pub mod template;
+pub mod tsvalid;
 pub mod ubergraph;
 pub mod unmerge;
 pub mod validate_id_ranges;

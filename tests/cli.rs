@@ -3109,3 +3109,151 @@ fn an_added_prefix_is_declared_by_a_new_ontology() {
     assert!(!read_only.contains("Prefix(zz:"), "{read_only}");
     assert!(read_only.contains("Declaration(Class(<http://example.org/A>))"), "{read_only}");
 }
+
+/// `tsvalid` — the table lint the standard build runs. The expected findings
+/// are what the Python tool (0.0.5) prints for the same file: on standard error,
+/// in a logger's format, failing nothing unless `--fail` is given.
+#[test]
+fn tsvalid_lints_a_table_as_the_tool_does() {
+    let table = tmp("tsvalid-bad.tsv");
+    std::fs::write(&table, "# comment\na\tb\tb\n 1\t2 \t3\n\n4\t5\r\n6\t7\t\u{e9}").unwrap();
+    let name = table.display().to_string();
+    let out = bin().arg("tsvalid").arg(&table).args(["--comment", "#", "--summary"]).output().unwrap();
+    assert!(out.status.success());
+    let expected: String = [
+        (2, 0, "ERROR", "E10", "Header row has duplicate values, line 2."),
+        (3, 1, "ERROR", "E2", "Redundant leading whitespace in column 1 at line number 3."),
+        (3, 2, "ERROR", "E3", "Redundant trailing whitespace in column 2 at line number 3."),
+        (4, 0, "ERROR", "E4", "Number of tabs in line 4 does not match tabs in header."),
+        (5, 0, "ERROR", "E4", "Number of tabs in line 5 does not match tabs in header."),
+        (5, 0, "ERROR", "E1", "Invalid line break in line 5."),
+        (4, 0, "ERROR", "E5", "Empty line 4."),
+        (6, 3, "WARNING", "W1", "Non ASCII character in column 3 at line number 6."),
+        (5, 0, "ERROR", "E9", "Last row in file should be empty."),
+    ]
+    .iter()
+    .map(|(line, column, level, code, text)| format!("{level}:root:{name}:{line}:{column}: {code}: {text}\n"))
+    .collect();
+    assert_eq!(String::from_utf8_lossy(&out.stderr), expected);
+    let summary = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(summary.starts_with("\n##### TSValid Summary #####\n\nError: duplicate Value In Header Row\n * count: 1\n * error_code: E10\n"), "{summary}");
+    assert!(summary.contains("\nError: number Of Tabs Check\n * count: 2\n * error_code: E4\n"), "{summary}");
+
+    // Skipped by code or by pattern; and `--fail` stops at the first finding.
+    let out = bin().arg("tsvalid").arg(&table).args(["--comment", "#", "--skip", "E.*"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stderr).lines().count(), 1);
+    let out = bin().arg("tsvalid").arg(&table).args(["--comment", "#", "--fail"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(err.lines().count(), 2, "{err}");
+    assert!(err.contains("tsvalid: Validation failed: {'line_number': 2, 'column': 0, "), "{err}");
+}
+
+/// `context2csv` — a JSON-LD context as the prefix table the SQL export reads.
+#[test]
+fn context2csv_writes_the_prefix_table() {
+    use std::io::Write as _;
+    let mut child = bin()
+        .arg("context2csv")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"@context": {"obo": "http://purl.obolibrary.org/obo/", "EX": "http://example.org/EX_"}}"#)
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "prefix,base\nobo,http://purl.obolibrary.org/obo/\nEX,http://example.org/EX_\n"
+    );
+}
+
+/// `make-release-assets.py` — against a stand-in for GitHub's API, which records
+/// what it is asked: an existing release and an existing asset are both replaced
+/// under `--create --force`, and the file goes to the release's upload address.
+#[test]
+fn release_assets_are_uploaded_to_a_release() {
+    use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let mut asked: Vec<String> = Vec::new();
+        for stream in listener.incoming().take(7) {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let (mut length, mut token) = (0usize, String::new());
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                let header = header.trim();
+                if header.is_empty() {
+                    break;
+                }
+                let (name, value) = header.split_once(':').unwrap();
+                match name.to_ascii_lowercase().as_str() {
+                    "content-length" => length = value.trim().parse().unwrap(),
+                    "authorization" => token = value.trim().to_string(),
+                    _ => {}
+                }
+            }
+            let mut body = vec![0u8; length];
+            reader.read_exact(&mut body).unwrap();
+            let request = request.trim().trim_end_matches(" HTTP/1.1").to_string();
+            assert_eq!(token, "token SECRET", "{request}");
+            let answer = match request.as_str() {
+                "GET /repos/org/repo/releases?per_page=100&page=1" => r#"[{"id": 7, "tag_name": "v1"}]"#.to_string(),
+                "POST /repos/org/repo/releases" => r#"{"id": 8}"#.to_string(),
+                "GET /repos/org/repo/releases/tags/v1" => format!(
+                    r#"{{"id": 8, "upload_url": "http://127.0.0.1:{port}/upload/8/assets{{?name,label}}"}}"#
+                ),
+                "GET /repos/org/repo/releases/8/assets?per_page=100&page=1" => {
+                    r#"[{"id": 3, "name": "x.owl", "size": 10, "download_count": 2}]"#.to_string()
+                }
+                "POST /upload/8/assets?name=x.owl&label=" => format!(r#"{{"name": "x.owl", "size": {length}}}"#),
+                _ => String::new(),
+            };
+            asked.push(format!("{request} [{length}]"));
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
+            )
+            .unwrap();
+        }
+        asked
+    });
+
+    let file = tmp("release-assets").join("x.owl");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "<rdf/>").unwrap();
+    let out = bin()
+        .args(["make-release-assets.py", "--api-url", &format!("http://127.0.0.1:{port}"), "-t", "SECRET", "-r", "org/repo", "--release", "v1", "-c", "-f"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let path = file.display();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("Existing assets:\nAsset: x.owl Size: 10 Downloads: 2\nUploading: {path}\nUploaded: x.owl 6 from {path}\n")
+    );
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "GET /repos/org/repo/releases?per_page=100&page=1 [0]",
+            "DELETE /repos/org/repo/releases/7 [0]",
+            "POST /repos/org/repo/releases [72]",
+            "GET /repos/org/repo/releases/tags/v1 [0]",
+            "GET /repos/org/repo/releases/8/assets?per_page=100&page=1 [0]",
+            "DELETE /repos/org/repo/releases/assets/3 [0]",
+            "POST /upload/8/assets?name=x.owl&label= [6]",
+        ]
+    );
+}

@@ -375,6 +375,15 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
         // subcommand is spelled `make`, which is also one of owlmake's, so the
         // line has to be read whole rather than split at the chaining harness.
         Some("semsql") => return crate::cmd::semsql::main(&argv[1..]),
+        // `tsvalid <table>.tsv --comment "#"` — the table lint the standard
+        // build runs over mapping sets and pattern tables.
+        Some("tsvalid") => return crate::cmd::tsvalid::main(&argv[1..]),
+        // `context2csv < context.json > prefixes.csv` — the prefix table the
+        // SQL database export reads.
+        Some("context2csv") => return crate::cmd::context2csv::main(&argv[1..]),
+        // `make-release-assets.py --release <tag> <files>` — how a repository
+        // that releases with `github_python` attaches its files.
+        Some("make-release-assets.py") => return crate::cmd::release_assets::main(&argv[1..]),
         _ => {}
     }
     // `owlmake dosdp <generate|terms|…>` uses the subcommand grammar; the bare

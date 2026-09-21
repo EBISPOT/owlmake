@@ -119,6 +119,8 @@ pub(crate) const BUNDLED: &[&str] = &[
     "simple_pattern_tester.py", "runoak",
     // The ontology SQL database (`semsql make <name>.db`).
     "semsql",
+    // Helpers of ODK's own that the standard build's recipes name.
+    "tsvalid", "context2csv", "make-release-assets.py",
 ];
 
 /// Command words in `line` that owlmake cannot vouch for, deduplicated in first

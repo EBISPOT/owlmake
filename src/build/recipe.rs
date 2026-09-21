@@ -1177,7 +1177,7 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
-    let shims: [(&str, String); 24] = [
+    let shims: [(&str, String); 27] = [
         ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
         ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
@@ -1219,6 +1219,13 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
         // The ontology SQL database (`semsql make <name>.db`), a release asset
         // for repos that publish one.
         ("semsql", format!("#!/bin/sh\nexec {exe:?} semsql \"$@\"\n")),
+        // Helpers of ODK's own that the standard build's recipes name.
+        ("tsvalid", format!("#!/bin/sh\nexec {exe:?} tsvalid \"$@\"\n")),
+        ("context2csv", format!("#!/bin/sh\nexec {exe:?} context2csv \"$@\"\n")),
+        (
+            "make-release-assets.py",
+            format!("#!/bin/sh\nexec {exe:?} make-release-assets.py \"$@\"\n"),
+        ),
     ];
     for (name, body) in shims {
         let path = dir.join(name);
@@ -1292,6 +1299,9 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
     out = replace_command_word(&out, "odk-info", &format!("{exe} odk-info"));
     out = replace_command_word(&out, "sha256sum", &format!("{exe} sha256sum"));
     out = replace_command_word(&out, "semsql", &format!("{exe} semsql"));
+    for tool in ["tsvalid", "context2csv", "make-release-assets.py"] {
+        out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
+    }
     // Recipe `sed`/`grep`/`comm` calls (in pipelines too) route to the in-binary
     // implementations, which accept the script dialect recipes are written in, so
     // builds don't rely on the machine's own text utilities (absent on Windows,
@@ -1680,7 +1690,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let first = Path::new(path.split(':').next().unwrap());
-        for tool in ["robot", "jq", "sssom", "sed", "grep", "comm", "dicer-cli", "dosdp", "check-rdfxml", "odk-info", "sha256sum"] {
+        for tool in ["robot", "jq", "sssom", "sed", "grep", "comm", "dicer-cli", "dosdp", "check-rdfxml", "odk-info", "sha256sum", "tsvalid", "context2csv", "make-release-assets.py"] {
             assert!(first.join(tool).is_file(), "shim dir missing {tool}");
         }
     }
