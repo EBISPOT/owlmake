@@ -1,0 +1,44 @@
+id: arts
+uribase: http://example.org/onts
+uribase_suffix: arts-suffix
+catalog_file: my-catalog.xml
+use_context: true
+owltools_memory: 12G
+namespaces:
+  - http://example.org/onts/ARTS_
+  - http://example.org/onts/arts#
+release_artefacts:
+  - base
+  - baselite
+  - full
+  - non-classified
+  - simple
+  - simple-non-classified
+  - basic
+  - custom-arts-special
+primary_release: simple
+export_formats:
+  - owl
+  - obo
+  - json
+  - ttl
+  - db
+gzip_main: true
+release_date: true
+release_diff: true
+remove_owl_nothing: true
+allow_equivalents: all
+exclude_tautologies: all
+release_annotate_inferred_axioms: true
+release_materialize_object_properties:
+  - BFO:0000050
+  - RO:0002202
+extra_rdfxml_checks: true
+obo_format_options: --no-check
+robot_relax_options: --include-subclass-of false
+robot_reduce_options: --preserve-annotated-axioms true
+import_component_format: owl
+import_group:
+  annotate_defined_by: true
+  products:
+    - id: ro

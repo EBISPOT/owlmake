@@ -25,6 +25,18 @@ use serde::Deserialize;
 
 use super::makefile::{MakeModel, Rule};
 
+/// The release artefacts the standard build knows how to make.
+const VARIANTS: &[&str] = &[
+    "base",
+    "baselite",
+    "full",
+    "non-classified",
+    "simple",
+    "simple-non-classified",
+    "international",
+    "basic",
+];
+
 /// The behaviour set these rules implement: the build an ODK release of this
 /// version generates for the same configuration.
 pub const BEHAVIOUR_SET: &str = "1.6.1";
@@ -63,6 +75,57 @@ pub struct Config {
     pub components: Option<ComponentGroup>,
     #[serde(default)]
     pub robot_report: RobotReport,
+    #[serde(default = "default_catalog_file")]
+    pub catalog_file: String,
+    /// Read prefixes from `config/context.json` in every command.
+    #[serde(default)]
+    pub use_context: bool,
+    /// The namespaces that are this ontology's own. Defaults to the one its id
+    /// implies under `uribase`.
+    #[serde(default)]
+    pub namespaces: Option<Vec<String>>,
+    #[serde(default = "default_allow_equivalents")]
+    pub allow_equivalents: String,
+    #[serde(default = "default_exclude_tautologies")]
+    pub exclude_tautologies: String,
+    /// Classify the release artefacts. Off, they are relaxed and cut, not reasoned.
+    #[serde(default = "yes")]
+    pub release_use_reasoner: bool,
+    #[serde(default)]
+    pub release_annotate_inferred_axioms: bool,
+    #[serde(default)]
+    pub release_materialize_object_properties: Option<Vec<String>>,
+    #[serde(default)]
+    pub remove_owl_nothing: bool,
+    /// Stamp `oboInOwl:date` on the artefacts.
+    #[serde(default)]
+    pub release_date: bool,
+    /// Publish a gzipped copy of each export of the primary product.
+    #[serde(default)]
+    pub gzip_main: bool,
+    /// Merge the imports the edit file declares; off, merge the import modules
+    /// the configuration lists.
+    #[serde(default = "yes")]
+    pub use_edit_file_imports: bool,
+    #[serde(default)]
+    pub obo_format_options: String,
+    #[serde(default = "default_relax_options")]
+    pub robot_relax_options: String,
+    #[serde(default = "default_reduce_options")]
+    pub robot_reduce_options: String,
+    /// The serialization components and import modules are written in.
+    #[serde(default = "default_import_component_format")]
+    pub import_component_format: String,
+    #[serde(default = "yes")]
+    pub ensure_valid_rdfxml: bool,
+    #[serde(default)]
+    pub extra_rdfxml_checks: bool,
+    /// Compare each release with the one published, as part of the build.
+    #[serde(default)]
+    pub release_diff: bool,
+    /// Kept for repositories whose own rules still call the older tool.
+    #[serde(default)]
+    pub owltools_memory: String,
 
     // Describes the repository; no effect on what is built.
     #[serde(default)]
@@ -361,6 +424,24 @@ fn default_edit_format() -> String {
 fn default_reasoner() -> String {
     "ELK".into()
 }
+fn default_catalog_file() -> String {
+    "catalog-v001.xml".into()
+}
+fn default_allow_equivalents() -> String {
+    "asserted-only".into()
+}
+fn default_exclude_tautologies() -> String {
+    "structural".into()
+}
+fn default_relax_options() -> String {
+    "--include-subclass-of true".into()
+}
+fn default_reduce_options() -> String {
+    "--include-subproperties true".into()
+}
+fn default_import_component_format() -> String {
+    "ofn".into()
+}
 fn default_primary_release() -> String {
     "full".into()
 }
@@ -415,26 +496,27 @@ impl Config {
         if let Some(g) = &mut config.import_group {
             g.derive();
         }
+        // An OBO export is always cleaned; a configuration may only add to that.
+        if !config.obo_format_options.contains("--clean-obo") {
+            if !config.obo_format_options.is_empty() {
+                config.obo_format_options.push(' ');
+            }
+            config.obo_format_options.push_str("--clean-obo \"strict drop-untranslatable-axioms\"");
+        }
         config.check()?;
         Ok(config)
     }
 
     /// Options that parse but are covered for only some of their values.
     fn check(&self) -> Result<()> {
-        for a in &self.release_artefacts {
-            if !matches!(a.as_str(), "base" | "full" | "simple") {
-                bail!("release artefact `{a}` has no built-in rules yet (covered: base, full, simple)");
+        for a in self.release_artefacts.iter().chain([&self.primary_release]) {
+            if !VARIANTS.contains(&a.as_str()) && !a.starts_with("custom-") {
+                bail!("release artefact `{a}` is not one of {VARIANTS:?} or `custom-<name>`");
             }
         }
-        if !self.release_artefacts.contains(&self.primary_release) {
-            bail!(
-                "primary_release `{}` is not one of the release_artefacts",
-                self.primary_release
-            );
-        }
         for f in &self.export_formats {
-            if !matches!(f.as_str(), "owl" | "obo" | "json") {
-                bail!("export format `{f}` has no built-in rules yet (covered: owl, obo, json)");
+            if !matches!(f.as_str(), "owl" | "obo" | "json" | "ttl" | "db") {
+                bail!("export format `{f}` is not one of owl, obo, json, ttl, db");
             }
         }
         let kinds = ["slme", "minimal", "mirror", "filter", "custom"];
@@ -462,6 +544,20 @@ impl Config {
         Ok(())
     }
 
+    /// Whether the build makes this artefact, as a release or as the source of
+    /// the primary product.
+    fn makes(&self, variant: &str) -> bool {
+        self.primary_release == variant || self.release_artefacts.iter().any(|a| a == variant)
+    }
+
+    /// The namespaces that are this ontology's own, as `remove` wants them.
+    fn own_namespaces(&self) -> String {
+        match &self.namespaces {
+            Some(ns) => ns.iter().map(|i| format!("--base-iri {i} ")).collect(),
+            None => format!("--base-iri $(URIBASE)/{} ", self.id.to_uppercase()),
+        }
+    }
+
     fn imports(&self) -> &[ImportProduct] {
         self.import_group.as_ref().map(|g| g.products.as_slice()).unwrap_or(&[])
     }
@@ -470,6 +566,15 @@ impl Config {
     }
     fn component_products(&self) -> &[ComponentProduct] {
         self.components.as_ref().map(|g| g.products.as_slice()).unwrap_or(&[])
+    }
+}
+
+/// The file stem of a release artefact: `<id>-<variant>`, or the name a
+/// `custom-<name>` artefact gives itself.
+fn artefact_root(id: &str, artefact: &str) -> String {
+    match artefact.strip_prefix("custom-") {
+        Some(name) => name.to_string(),
+        None => format!("{id}-{artefact}"),
     }
 }
 
@@ -547,7 +652,17 @@ pub fn model(
 
     // --- Top level -----------------------------------------------------------
     b.phony("all", "all_odk", "", &[], &[]);
-    b.phony("all_odk", "test custom_reports all_assets", "", &[], &[]);
+    b.phony(
+        "all_odk",
+        if config.release_diff {
+            "test custom_reports all_assets release_diff"
+        } else {
+            "test custom_reports all_assets"
+        },
+        "",
+        &[],
+        &[],
+    );
     b.phony(
         "test",
         "validate_idranges reason_test sparql_test robot_reports \
@@ -568,7 +683,13 @@ pub fn model(
     b.phony("all_imports", "$(IMPORT_FILES)", "", &[], &[]);
     b.phony("all_subsets", "$(SUBSET_FILES)", "", &[], &[]);
     b.phony("all_mappings", "$(MAPPING_FILES)", "", &[], &[]);
-    b.phony("all_assets", "$(ASSETS) check_rdfxml_assets", "", &[], &[]);
+    b.phony(
+        "all_assets",
+        if config.ensure_valid_rdfxml { "$(ASSETS) check_rdfxml_assets" } else { "$(ASSETS)" },
+        "",
+        &[],
+        &[],
+    );
     b.phony("show_assets", "", "", &["echo $(ASSETS)", "du -sh $(ASSETS)"], &[]);
 
     checks(&mut b, config);
@@ -595,8 +716,22 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("EDIT_FORMAT", c.edit_format.as_str());
     b.var("SRC", "$(ONT)-edit.$(EDIT_FORMAT)");
     b.var("MAKE_FAST", "$(MAKE) IMP=false PAT=false COMP=false MIR=false");
-    b.var("CATALOG", "catalog-v001.xml");
-    b.var("ROBOT", "om --catalog $(CATALOG)");
+    b.var("CATALOG", c.catalog_file.as_str());
+    if c.use_context {
+        b.var("CONTEXT_FILE", "config/context.json");
+        b.var("ROBOT", "om --catalog $(CATALOG) --add-prefixes $(CONTEXT_FILE)");
+        if c.export_formats.iter().any(|f| f == "db") {
+            b.var("CONTEXT_FILE_CSV", "$(TMPDIR)/context.csv");
+        }
+    } else {
+        b.var("ROBOT", "om --catalog $(CATALOG)");
+    }
+    if c.owltools_memory.is_empty() {
+        b.var("OWLTOOLS", "owltools --use-catalog");
+    } else {
+        b.var("OWLTOOLS_MEMORY", c.owltools_memory.as_str());
+        b.var("OWLTOOLS", "OWLTOOLS_MEMORY=$(OWLTOOLS_MEMORY) owltools --use-catalog");
+    }
     b.var("REASONER", c.reasoner.as_str());
     b.var("RELEASEDIR", "../..");
     b.var("REPORTDIR", "reports");
@@ -613,13 +748,14 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("REPORT_FAIL_ON", c.robot_report.fail_on.as_deref().unwrap_or("None"));
     b.var("REPORT_LABEL", if c.robot_report.use_labels { "-l true" } else { "" });
     b.var("REPORT_PROFILE_OPTS", "");
-    b.var("OBO_FORMAT_OPTIONS", "--clean-obo \"strict drop-untranslatable-axioms\"");
+    b.var("OBO_FORMAT_OPTIONS", c.obo_format_options.as_str());
     b.var("SPARQL_VALIDATION_CHECKS", c.robot_report.custom_sparql_checks.join(" "));
     b.var("SPARQL_EXPORTS", c.robot_report.custom_sparql_exports.join(" "));
     b.var("ODK_VERSION_MAKEFILE", format!("v{BEHAVIOUR_SET}"));
-    b.var("RELAX_OPTIONS", "--include-subclass-of true");
-    b.var("REDUCE_OPTIONS", "--include-subproperties true");
+    b.var("RELAX_OPTIONS", c.robot_relax_options.as_str());
+    b.var("REDUCE_OPTIONS", c.robot_reduce_options.as_str());
     b.var("TODAY", "$(shell date +%Y-%m-%d)");
+    b.var("OBODATE", "$(shell date +'%d:%m:%Y %H:%M')");
     b.var("VERSION", "$(TODAY)");
     b.var(
         "ANNOTATE_ONTOLOGY_VERSION",
@@ -629,8 +765,11 @@ fn variables(b: &mut Build, c: &Config) {
     // this variable expect: they may go on to edit the target in place.
     b.var(
         "ANNOTATE_CONVERT_FILE",
-        "annotate --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
-         convert -f ofn --output $@.tmp.owl && mv $@.tmp.owl $@",
+        format!(
+            "annotate --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
+             convert -f {} --output $@.tmp.owl && mv $@.tmp.owl $@",
+            c.import_component_format
+        ),
     );
     let other_src: Vec<String> = c
         .component_products()
@@ -660,8 +799,7 @@ fn variables(b: &mut Build, c: &Config) {
     formats_tsv.push("tsv".into());
     formats_tsv.sort();
     formats_tsv.dedup();
-    let mut release_artefacts: Vec<String> =
-        c.release_artefacts.iter().map(|a| format!("{id}-{a}")).collect();
+    let mut release_artefacts: Vec<String> = c.release_artefacts.iter().map(|a| artefact_root(id, a)).collect();
     release_artefacts.sort();
     release_artefacts.dedup();
     let mut main_products = release_artefacts.clone();
@@ -679,8 +817,16 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("FORMATS_INCL_TSV", formats_tsv.join(" "));
     b.var("RELEASE_ARTEFACTS", release_artefacts.join(" "));
     b.var("MAIN_PRODUCTS", main_products.join(" "));
-    b.var("MAIN_GZIPPED", "");
-    b.var("MAIN_FILES", cross(&main_products, &formats));
+    if c.gzip_main {
+        b.var("MAIN_GZIPPED", "$(foreach f,$(FORMATS), $(ONT).$(f).gz)");
+    } else {
+        b.var("MAIN_GZIPPED", "");
+    }
+    b.var("MAIN_FILES", format!("{} $(MAIN_GZIPPED)", cross(&main_products, &formats)));
+    if c.makes("basic") {
+        b.var("KEEPRELATIONS", "keeprelations.txt");
+    }
+    b.var("SHARED_ROBOT_COMMANDS", if c.remove_owl_nothing { "remove --term owl:Nothing" } else { "" });
 
     let import_ids: Vec<String> = c.imports().iter().map(|p| p.id.clone()).collect();
     let import_roots: Vec<String> =
@@ -767,8 +913,11 @@ fn checks(b: &mut Build, c: &Config) {
         "reason_test",
         "$(EDIT_PREPROCESSED)",
         "",
-        &["$(ROBOT) reason --input $< --reasoner $(REASONER) --equivalent-classes-allowed asserted-only \
-           --exclude-tautologies structural --output test.owl && rm test.owl"],
+        &[&format!(
+            "$(ROBOT) reason --input $< --reasoner $(REASONER) --equivalent-classes-allowed {} \
+             --exclude-tautologies {} --output test.owl && rm test.owl",
+            c.allow_equivalents, c.exclude_tautologies
+        )],
         &[],
     );
     b.phony(
@@ -800,10 +949,11 @@ fn checks(b: &mut Build, c: &Config) {
     let verify: Vec<&str> = verify.iter().map(String::as_str).collect();
     b.rule("sparql_test", &on.join(" "), "$(REPORTDIR)", &verify, &[]);
 
-    let base_iris = if c.robot_report.use_base_iris {
-        format!("--base-iri $(URIBASE)/{upper}_ --base-iri $(URIBASE)/{id} ")
-    } else {
-        String::new()
+    // What the report treats as this ontology's own terms.
+    let base_iris = match (&c.namespaces, c.robot_report.use_base_iris) {
+        (_, false) => String::new(),
+        (Some(ns), true) => ns.iter().map(|i| format!("--base-iri {i} ")).collect(),
+        (None, true) => format!("--base-iri $(URIBASE)/{upper}_ --base-iri $(URIBASE)/{id} "),
     };
     let report = format!(
         "$(ROBOT) report -i $< $(REPORT_LABEL) $(REPORT_PROFILE_OPTS) --fail-on $(REPORT_FAIL_ON) \
@@ -834,7 +984,13 @@ fn checks(b: &mut Build, c: &Config) {
         &[],
     );
 
-    b.rule("check_rdfxml_%", "%", "", &["@check-rdfxml $<"], &[]);
+    b.rule(
+        "check_rdfxml_%",
+        "%",
+        "",
+        &[if c.extra_rdfxml_checks { "@check-rdfxml --jena --rdflib $<" } else { "@check-rdfxml $<" }],
+        &[],
+    );
     let products: Vec<String> = b
         .words("$(MAIN_PRODUCTS)")
         .iter()
@@ -935,7 +1091,7 @@ fn seeds(b: &mut Build, c: &Config) {
     );
     // The ontology's own terms and what they need, which only the artefacts cut
     // down to them read.
-    if !c.release_artefacts.iter().any(|a| a == "simple") {
+    if !["basic", "simple", "simple-non-classified"].iter().any(|v| c.makes(v)) {
         return;
     }
     b.rule(
@@ -1422,31 +1578,63 @@ fn subsets(b: &mut Build) {
 
 /// The release artefacts and their export formats.
 fn artefacts(b: &mut Build, c: &Config) {
-    let upper = c.id.to_uppercase();
+    let id = c.id.as_str();
     let uribase = c.uribase.as_str();
-    let obo = "$(ROBOT) convert --input $< --check false -f obo $(OBO_FORMAT_OPTIONS) -o $@";
     let has = |f: &str| c.export_formats.iter().any(|x| x == f);
+    let obo = "$(ROBOT) convert --input $< --check false -f obo $(OBO_FORMAT_OPTIONS) -o $@";
+    let export = |iri_base: &str, format: &str| {
+        format!(
+            "$(ROBOT) annotate --input $< --ontology-iri {iri_base}/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
+             convert --check false -f {format} -o $@"
+        )
+    };
 
+    // Each artefact in each export format.
     for a in &c.release_artefacts {
+        let root = match a.strip_prefix("custom-") {
+            Some(name) => name.to_string(),
+            None => format!("$(ONT)-{a}"),
+        };
         if has("obo") {
-            b.rule(&format!("$(ONT)-{a}.obo"), &format!("$(ONT)-{a}.owl"), "", &[obo], &[]);
+            b.rule(&format!("{root}.obo"), &format!("{root}.owl"), "", &[obo], &[]);
         }
-        if has("json") {
-            b.rule(
-                &format!("$(ONT)-{a}.json"),
-                &format!("$(ONT)-{a}.owl"),
-                "",
-                &["$(ROBOT) annotate --input $< --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
-                   convert --check false -f json -o $@"],
-                &[],
-            );
+        for format in ["ttl", "json"] {
+            if has(format) {
+                b.rule(
+                    &format!("{root}.{format}"),
+                    &format!("{root}.owl"),
+                    "",
+                    &[&export("$(ONTBASE)", format)],
+                    &[],
+                );
+            }
         }
+    }
+    if has("db") {
+        let context = if c.use_context { " $(CONTEXT_FILE_CSV)" } else { "" };
+        let prefixes = if c.use_context { " -P $(CONTEXT_FILE_CSV)" } else { "" };
+        if c.use_context {
+            b.rule("$(CONTEXT_FILE_CSV)", "$(CONTEXT_FILE)", "$(TMPDIR)", &["context2csv < $< > $@"], &[]);
+        }
+        b.rule(
+            "%.db",
+            &format!("%.owl{context}"),
+            "",
+            &[
+                "@rm -f $*.db $*-relation-graph.tsv.gz .template.db .template.db.tmp",
+                &format!("semsql make $*.db{prefixes}"),
+                "@rm -f $*-relation-graph.tsv.gz .template.db .template.db.tmp",
+                "@test -f $*.db || (echo \"SQLite/SemSQL generation failed\" && exit 1)",
+            ],
+            &[],
+        );
     }
 
     // The primary product is one of the artefacts under the ontology's own IRI.
+    let primary = format!("$(ONT)-{}.owl", c.primary_release);
     b.rule(
         "$(ONT).owl",
-        &format!("$(ONT)-{}.owl", c.primary_release),
+        &primary,
         "",
         &["$(ROBOT) annotate --input $< --ontology-iri $(URIBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) convert -o $@"],
         &[],
@@ -1454,68 +1642,209 @@ fn artefacts(b: &mut Build, c: &Config) {
     if has("obo") {
         b.rule("$(ONT).obo", "$(ONT).owl", "", &[obo], &[]);
     }
-    if has("json") {
+    for format in ["ttl", "json"] {
+        if has(format) {
+            b.rule(&format!("$(ONT).{format}"), "$(ONT).owl", "", &[&export("$(URIBASE)", format)], &[]);
+        }
+    }
+    if c.gzip_main {
+        let mut zipped: Vec<&str> = c.export_formats.iter().map(String::as_str).collect();
+        if !has("owl") {
+            zipped.push("owl");
+        }
+        for format in zipped {
+            b.rule(
+                &format!("$(ONT).{format}.gz"),
+                &format!("$(ONT).{format}"),
+                "",
+                &["gzip -c $< > $@.tmp && mv $@.tmp $@"],
+                &[],
+            );
+        }
+    }
+    // A build that does not export OWL still makes the primary product: a copy.
+    if !has("owl") {
+        b.rule("$(ONT).owl", &primary, "", &["cp $< $@"], &[]);
+    }
+
+    // How an artefact starts: the edit file with what it imports, either as it
+    // declares its imports or as the configuration lists them…
+    // The components are merged whether or not there are any: with none the list
+    // is empty and the merge adds nothing.
+    let merge_components = "merge $(patsubst %, -i %, $(OTHER_SRC)) ";
+    let open = if c.use_edit_file_imports {
+        let defined_by = c
+            .import_group
+            .as_ref()
+            .is_some_and(|g| !g.use_base_merging && g.annotate_defined_by);
+        format!(
+            "$(ROBOT) merge --input $< {}",
+            if defined_by { "--annotate-defined-by true" } else { "" }
+        )
+    } else {
+        format!(
+            "$(ROBOT) remove --input $< --select imports --trim false {merge_components}\
+             merge $(patsubst %, -i %, $(IMPORT_FILES))"
+        )
+    };
+    // …or without its imports at all.
+    let open_base =
+        format!("$(ROBOT) remove --input $< --select imports --trim false {merge_components}");
+    b.var("ROBOT_RELEASE_IMPORT_MODE", open.as_str());
+    b.var("ROBOT_RELEASE_IMPORT_MODE_BASE", open_base.as_str());
+
+    let reason = |annotated: bool| {
+        let annotate = if annotated {
+            format!(" --annotate-inferred-axioms {}", c.release_annotate_inferred_axioms)
+        } else {
+            String::new()
+        };
+        format!(
+            "reason --reasoner $(REASONER) --equivalent-classes-allowed {} --exclude-tautologies {}{annotate}",
+            c.allow_equivalents, c.exclude_tautologies
+        )
+    };
+    let materialize: String = match &c.release_materialize_object_properties {
+        Some(props) if !props.is_empty() => format!(
+            "materialize {} ",
+            props.iter().map(|p| format!("--term {p} ")).collect::<String>()
+        ),
+        _ => String::new(),
+    };
+    let reduce = "reduce -r $(REASONER) $(REDUCE_OPTIONS)";
+    let date = if c.release_date { "--annotation oboInOwl:date \"$(OBODATE)\" " } else { "" };
+    let close = format!(
+        "$(SHARED_ROBOT_COMMANDS) annotate --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) {date}--output $@"
+    );
+    let sources = "$(EDIT_PREPROCESSED) $(OTHER_SRC)";
+    let reasoned = c.release_use_reasoner;
+
+    // Nothing that belongs to another ontology.
+    if c.makes("base") {
+        let classify = if reasoned { format!("{} {materialize}", reason(true)) } else { String::new() };
+        let reduced = if reasoned { reduce } else { "" };
         b.rule(
-            "$(ONT).json",
-            "$(ONT).owl",
+            "$(ONT)-base.owl",
+            &format!("{sources} $(IMPORT_FILES)"),
             "",
-            &["$(ROBOT) annotate --input $< --ontology-iri $(URIBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) \
-               convert --check false -f json -o $@"],
+            &[&format!(
+                "$(ROBOT_RELEASE_IMPORT_MODE) {classify}relax $(RELAX_OPTIONS) {reduced} \
+                 remove {}--axioms external --preserve-structure false --trim false \
+                 $(SHARED_ROBOT_COMMANDS) \
+                 annotate --link-annotation http://purl.org/dc/elements/1.1/type http://purl.obolibrary.org/obo/IAO_8000001 \
+                 --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) {date}--output $@",
+                c.own_namespaces()
+            )],
             &[],
         );
     }
-
-    let reason = "reason --reasoner $(REASONER) --equivalent-classes-allowed asserted-only --exclude-tautologies structural";
-    let annotate = "annotate --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) --output $@";
-    let sources = "$(EDIT_PREPROCESSED) $(OTHER_SRC)";
-    for a in &c.release_artefacts {
-        match a.as_str() {
-            // Nothing that belongs to another ontology.
-            "base" => b.rule(
-                "$(ONT)-base.owl",
-                &format!("{sources} $(IMPORT_FILES)"),
-                "",
-                &[&format!(
-                    "$(ROBOT) merge --input $< \
-                     {reason} --annotate-inferred-axioms false \
-                     relax $(RELAX_OPTIONS) \
-                     reduce -r $(REASONER) $(REDUCE_OPTIONS) \
-                     remove --base-iri $(URIBASE)/{upper} --axioms external --preserve-structure false --trim false \
-                     annotate --link-annotation http://purl.org/dc/elements/1.1/type http://purl.obolibrary.org/obo/IAO_8000001 \
-                     --ontology-iri $(ONTBASE)/$@ $(ANNOTATE_ONTOLOGY_VERSION) --output $@"
-                )],
-                &[],
-            ),
-            // Imports merged in, classified.
-            "full" => b.rule(
-                "$(ONT)-full.owl",
-                &format!("{sources} $(IMPORT_FILES)"),
-                "",
-                &[&format!(
-                    "$(ROBOT) merge --input $< {reason} relax $(RELAX_OPTIONS) \
-                     reduce -r $(REASONER) $(REDUCE_OPTIONS) {annotate}"
-                )],
-                &[],
-            ),
-            // Classified, then cut down to the ontology's own terms and the
-            // plain hierarchy between them.
-            "simple" => b.rule(
-                "$(ONT)-simple.owl",
-                &format!("{sources} $(SIMPLESEED) $(IMPORT_FILES)"),
-                "",
-                &[&format!(
-                    "$(ROBOT) merge --input $< {reason} --annotate-inferred-axioms false \
-                     relax $(RELAX_OPTIONS) \
-                     remove --axioms equivalent \
-                     filter --term-file $(SIMPLESEED) --select \"annotations ontology anonymous self\" --trim true --signature true \
-                     reduce -r $(REASONER) $(REDUCE_OPTIONS) \
-                     normalize --base-iri {uribase} --subset-decls true --synonym-decls true \
-                     repair --merge-axiom-annotations true {annotate}"
-                )],
-                &[],
-            ),
-            other => unreachable!("release artefact `{other}` passed Config::check"),
-        }
+    // The edit file and its components as written: no imports, no reasoning.
+    if c.makes("baselite") {
+        b.rule(
+            "$(ONT)-baselite.owl",
+            sources,
+            "",
+            &[&format!("$(ROBOT_RELEASE_IMPORT_MODE_BASE) {close}")],
+            &[],
+        );
+    }
+    // Imports merged in, classified.
+    if c.makes("full") {
+        b.rule(
+            "$(ONT)-full.owl",
+            &format!("{sources} $(IMPORT_FILES)"),
+            "",
+            &[&format!(
+                "$(ROBOT_RELEASE_IMPORT_MODE) {} {materialize}relax $(RELAX_OPTIONS) {reduce} {close}",
+                reason(false)
+            )],
+            &[],
+        );
+    }
+    // Imports merged in, nothing inferred.
+    if c.makes("non-classified") {
+        b.rule(
+            "$(ONT)-non-classified.owl",
+            &format!("{sources} $(IMPORT_FILES)"),
+            "",
+            &[&format!("$(ROBOT_RELEASE_IMPORT_MODE) {close}")],
+            &[],
+        );
+    }
+    // Classified, then cut down to the ontology's own terms and the plain
+    // hierarchy between them.
+    if c.makes("simple") {
+        let classify = if reasoned { reason(true) } else { String::new() };
+        let reduced = if reasoned { reduce } else { "" };
+        b.rule(
+            "$(ONT)-simple.owl",
+            &format!("{sources} $(SIMPLESEED) $(IMPORT_FILES)"),
+            "",
+            &[&format!(
+                "$(ROBOT_RELEASE_IMPORT_MODE) {classify} relax $(RELAX_OPTIONS) \
+                 remove --axioms equivalent \
+                 filter --term-file $(SIMPLESEED) --select \"annotations ontology anonymous self\" --trim true --signature true \
+                 {reduced} \
+                 normalize --base-iri {uribase} --subset-decls true --synonym-decls true \
+                 repair --merge-axiom-annotations true {close}"
+            )],
+            &[],
+        );
+    }
+    // The same cut, without classifying first.
+    if c.makes("simple-non-classified") {
+        let reduced = if reasoned { reduce } else { "" };
+        b.rule(
+            "$(ONT)-simple-non-classified.owl",
+            &format!("{sources} $(SIMPLESEED) $(IMPORT_FILES)"),
+            "",
+            &[&format!(
+                "$(ROBOT_RELEASE_IMPORT_MODE_BASE) remove --axioms equivalent {reduced} \
+                 filter --select ontology --term-file $(SIMPLESEED) --trim false {close}"
+            )],
+            &[],
+        );
+    }
+    // The primary product with its translations merged in.
+    if c.makes("international") {
+        b.rule(
+            "$(ONT)-international.owl",
+            "$(ONT).owl $(TRANSLATIONS_OWL)",
+            "",
+            &[&format!("$(ROBOT) merge $(patsubst %, -i %, $^) {close}")],
+            &[],
+        );
+    }
+    // The simple cut, keeping only relationships over the listed relations.
+    if c.makes("basic") {
+        let classify = if reasoned { reason(true) } else { String::new() };
+        b.rule(
+            "$(ONT)-basic.owl",
+            &format!("{sources} $(SIMPLESEED) $(KEEPRELATIONS) $(IMPORT_FILES)"),
+            "",
+            &[&format!(
+                "$(ROBOT_RELEASE_IMPORT_MODE) {classify} relax $(RELAX_OPTIONS) \
+                 remove --axioms equivalent \
+                 remove --axioms disjoint \
+                 remove --term-file $(KEEPRELATIONS) --select complement --select object-properties --trim true \
+                 filter --term-file $(SIMPLESEED) --select \"annotations ontology anonymous self\" --trim true --signature true \
+                 {reduce} {close}"
+            )],
+            &[],
+        );
+    }
+    // An artefact the repository builds itself.
+    for a in c.release_artefacts.iter().filter_map(|a| a.strip_prefix("custom-")) {
+        b.rule(
+            &format!("{a}.owl"),
+            "",
+            "",
+            &[&format!(
+                "echo \"ERROR: You have configured a custom release artefact ($@); \
+                 this release artefact needs to be define in {id}.Makefile!\" && false"
+            )],
+            &[],
+        );
     }
 }
 
