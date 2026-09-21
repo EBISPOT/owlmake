@@ -144,6 +144,10 @@ pub struct OdkRepo {
     /// parsed spec — the build's source of truth. In this mode `plan()` returns
     /// the spec's plan directly and `owlmake.json` is never regenerated.
     pub spec: Option<OwlmakeSpec>,
+    /// The configuration this repository's standard rules were built from, when
+    /// they came from owlmake's built-in rules rather than from a file — what
+    /// [`OdkRepo::configuration_under`] resolves again under another switch value.
+    pub builtin: Option<builtin::Config>,
     /// The command-line assignments that SURVIVED the conditional filter above,
     /// kept so the same configuration can be resolved again under another value
     /// of a switch (see [`OdkRepo::configuration_under`]) and the two models
@@ -230,6 +234,7 @@ impl OdkRepo {
             seeded: false,
             seeded_vars: Vec::new(),
             spec: None,
+            builtin: Some(config),
         })
     }
 
@@ -302,6 +307,7 @@ impl OdkRepo {
                     seeded: false,
                     seeded_vars: Vec::new(),
                     spec: None,
+                    builtin: None,
                 });
             }
             // No edit file either: a non-ODK repo that just ships its ontology as
@@ -336,6 +342,7 @@ impl OdkRepo {
                     seeded: true,
                     seeded_vars: Vec::new(),
                     spec: None,
+                    builtin: None,
                 });
             }
             bail!(
@@ -403,6 +410,7 @@ impl OdkRepo {
             seeded: false,
             seeded_vars: seeded,
             spec: None,
+            builtin: None,
         })
     }
 
@@ -466,6 +474,7 @@ impl OdkRepo {
             seeded: false,
             seeded_vars: Vec::new(),
             spec: Some(parsed),
+            builtin: None,
         })
     }
 
@@ -478,6 +487,10 @@ impl OdkRepo {
     /// repository with no build configuration to re-read — a plan-only repo
     /// already carries both branches, which is the point of writing them down.
     pub fn configuration_under(&self, flag: &str, value: &str) -> Option<makefile::MakeModel> {
+        if let Some(config) = &self.builtin {
+            return builtin_configuration(config, &self.dir, &self.seeded_vars, &[(flag, value)])
+                .ok();
+        }
         let main_mk = self.dir.join("Makefile");
         if !main_mk.exists() {
             return None;
@@ -573,6 +586,7 @@ pub fn seed_spec(id: &str, edit: Option<&str>, dir: &Path) -> Result<OwlmakeSpec
         seeded: false,
         seeded_vars: Vec::new(),
         spec: None,
+        builtin: None,
     };
     Ok(OwlmakeSpec::from_plan(&repo.plan(&[])?))
 }

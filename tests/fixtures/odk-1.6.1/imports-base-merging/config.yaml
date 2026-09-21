@@ -1,0 +1,38 @@
+id: bm
+import_group:
+  use_base_merging: true
+  exclude_iri_patterns:
+    - <http://purl.obolibrary.org/obo/GOCHE_*>
+    - <http://www.informatics.jax.org/marker/MGI:*>
+  slme_individuals: exclude
+  annotate_defined_by: true
+  base_merge_drop_equivalent_class_axioms: true
+  mirror_max_time_download: 400
+  mirror_retry_download: 2
+  products:
+    - id: ro
+      use_base: true
+    - id: go
+      make_base: true
+      base_iris:
+        - http://purl.obolibrary.org/obo/GO_
+        - http://purl.obolibrary.org/obo/GOREL_
+    - id: pato
+      mirror_from: https://raw.githubusercontent.com/pato-ontology/pato/master/pato.owl
+    - id: chebi
+      is_large: true
+      use_gzipped: true
+      make_base: true
+    - id: pr
+      is_large: true
+      use_base: true
+      use_gzipped: true
+    - id: uberon
+      mirror_type: base
+    - id: ncbitaxon
+      mirror_type: custom
+    - id: local
+      mirror_type: no_mirror
+    - id: envo
+      mirror_from: http://purl.obolibrary.org/obo/envo/envo-base.owl
+      make_base: true

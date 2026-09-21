@@ -92,22 +92,190 @@ pub struct Config {
     robot_java_args: Option<IgnoredAny>,
 }
 
+/// The import modules, and what holds for all of them unless a product says
+/// otherwise.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportGroup {
-    #[serde(default = "default_annotation_properties")]
-    pub annotation_properties: Vec<String>,
     #[serde(default)]
     pub products: Vec<ImportProduct>,
+    /// Product ids given bare; each is a product with every default.
+    #[serde(default)]
+    pub ids: Vec<String>,
+    /// `slme`, `minimal`, `mirror`, `filter` or `custom`.
+    #[serde(default = "default_module_type")]
+    pub module_type: String,
+    /// The locality module kind: `BOT`, `TOP` or `STAR`.
+    #[serde(default = "default_module_type_slme")]
+    pub module_type_slme: String,
+    #[serde(default = "default_slme_individuals")]
+    pub slme_individuals: String,
+    #[serde(default = "default_mirror_retry")]
+    pub mirror_retry_download: u32,
+    #[serde(default = "default_mirror_max_time")]
+    pub mirror_max_time_download: u32,
+    /// Copy the modules to the release directory with the artefacts.
+    #[serde(default)]
+    pub release_imports: bool,
+    /// Merge every mirror, then cut ONE module from the merged whole.
+    #[serde(default)]
+    pub use_base_merging: bool,
+    #[serde(default)]
+    pub base_merge_drop_equivalent_class_axioms: bool,
+    #[serde(default)]
+    pub exclude_iri_patterns: Option<Vec<String>>,
+    /// Write each module in OBO format as well.
+    #[serde(default)]
+    pub export_obo: bool,
+    #[serde(default = "default_annotation_properties")]
+    pub annotation_properties: Vec<String>,
+    #[serde(default = "yes")]
+    pub strip_annotation_properties: bool,
+    #[serde(default)]
+    pub annotate_defined_by: bool,
+    /// Seed the modules from what the edit file refers to, not only from the
+    /// committed term lists.
+    #[serde(default = "yes")]
+    pub scan_signature: bool,
+
+    #[serde(default)]
+    disabled: Option<IgnoredAny>,
+    #[serde(default)]
+    rebuild_if_source_changes: Option<IgnoredAny>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportProduct {
     pub id: String,
-    /// `slme` (a locality module over the seed) or `mirror` (the whole ontology).
-    #[serde(default = "default_module_type")]
-    pub module_type: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Fetch the ontology from here instead of its OBO PURL.
+    #[serde(default)]
+    pub mirror_from: Option<String>,
+    /// The namespaces that are this ontology's own. Defaults to its OBO one.
+    #[serde(default)]
+    pub base_iris: Option<Vec<String>>,
+    /// Rebuilt only while `IMP_LARGE` is on.
+    #[serde(default)]
+    pub is_large: bool,
+    /// Defaults to the group's.
+    #[serde(default)]
+    pub module_type: Option<String>,
+    #[serde(default)]
+    pub module_type_slme: Option<String>,
+    #[serde(default = "default_annotation_properties")]
+    pub annotation_properties: Vec<String>,
+    #[serde(default)]
+    pub slme_individuals: Option<String>,
+    /// Mirror the ontology's published base product.
+    #[serde(default)]
+    pub use_base: bool,
+    /// Cut the mirror down to the ontology's own axioms.
+    #[serde(default)]
+    pub make_base: bool,
+    #[serde(default)]
+    pub use_gzipped: bool,
+    /// `base`, `custom` or `no_mirror`.
+    #[serde(default)]
+    pub mirror_type: Option<String>,
+
+    #[serde(default)]
+    maintenance: Option<IgnoredAny>,
+    #[serde(default)]
+    rebuild_if_source_changes: Option<IgnoredAny>,
+    #[serde(default)]
+    robot_settings: Option<IgnoredAny>,
+}
+
+impl ImportProduct {
+    fn stub(id: &str) -> ImportProduct {
+        ImportProduct {
+            id: id.to_string(),
+            description: None,
+            mirror_from: None,
+            base_iris: None,
+            is_large: false,
+            module_type: None,
+            module_type_slme: None,
+            annotation_properties: default_annotation_properties(),
+            slme_individuals: None,
+            use_base: false,
+            make_base: false,
+            use_gzipped: false,
+            mirror_type: None,
+            maintenance: None,
+            rebuild_if_source_changes: None,
+            robot_settings: None,
+        }
+    }
+
+    fn kind(&self) -> &str {
+        self.module_type.as_deref().unwrap_or("slme")
+    }
+
+    /// Whether the mirror is cut down to the ontology's own axioms.
+    fn mirrors_base(&self) -> bool {
+        self.make_base || self.mirror_type.as_deref() == Some("base")
+    }
+}
+
+impl ImportGroup {
+    /// The group of a repository that configures none.
+    fn empty() -> ImportGroup {
+        ImportGroup {
+            products: Vec::new(),
+            ids: Vec::new(),
+            module_type: default_module_type(),
+            module_type_slme: default_module_type_slme(),
+            slme_individuals: default_slme_individuals(),
+            mirror_retry_download: default_mirror_retry(),
+            mirror_max_time_download: default_mirror_max_time(),
+            release_imports: false,
+            use_base_merging: false,
+            base_merge_drop_equivalent_class_axioms: false,
+            exclude_iri_patterns: None,
+            export_obo: false,
+            annotation_properties: default_annotation_properties(),
+            strip_annotation_properties: true,
+            annotate_defined_by: false,
+            scan_signature: true,
+            disabled: None,
+            rebuild_if_source_changes: None,
+        }
+    }
+
+    /// Settle what each product inherits from the group.
+    fn derive(&mut self) {
+        for id in std::mem::take(&mut self.ids) {
+            if !self.products.iter().any(|p| p.id == id) {
+                self.products.push(ImportProduct::stub(&id));
+            }
+        }
+        for p in &mut self.products {
+            match p.module_type.as_deref() {
+                None => p.module_type = Some(self.module_type.clone()),
+                Some("fast_slme") => p.module_type = Some("slme".into()),
+                Some(_) => {}
+            }
+            if p.kind() == "slme" {
+                p.module_type_slme.get_or_insert_with(|| self.module_type_slme.clone());
+                p.slme_individuals.get_or_insert_with(|| self.slme_individuals.clone());
+            }
+            p.base_iris.get_or_insert_with(|| {
+                vec![format!("http://purl.obolibrary.org/obo/{}", p.id.to_uppercase())]
+            });
+        }
+    }
+
+    /// A product the group's one rule does not build: a large one, or one of
+    /// another kind than the group's.
+    fn is_special(&self, p: &ImportProduct) -> bool {
+        p.is_large
+            || p.kind() != self.module_type
+            || (p.kind() == "slme"
+                && p.module_type_slme.as_deref() != Some(self.module_type_slme.as_str()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,6 +367,18 @@ fn default_primary_release() -> String {
 fn default_module_type() -> String {
     "slme".into()
 }
+fn default_module_type_slme() -> String {
+    "BOT".into()
+}
+fn default_slme_individuals() -> String {
+    "include".into()
+}
+fn default_mirror_retry() -> u32 {
+    4
+}
+fn default_mirror_max_time() -> u32 {
+    200
+}
 fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
@@ -230,8 +410,11 @@ fn default_sparql_exports() -> Vec<String> {
 impl Config {
     /// Read a configuration, refusing any option the built-in rules do not cover.
     pub fn parse(text: &str) -> Result<Config> {
-        let config: Config = serde_yaml::from_str(text)
+        let mut config: Config = serde_yaml::from_str(text)
             .context("this configuration uses an option owlmake has no built-in rules for")?;
+        if let Some(g) = &mut config.import_group {
+            g.derive();
+        }
         config.check()?;
         Ok(config)
     }
@@ -254,13 +437,15 @@ impl Config {
                 bail!("export format `{f}` has no built-in rules yet (covered: owl, obo, json)");
             }
         }
-        for p in self.import_group.iter().flat_map(|g| &g.products) {
-            if !matches!(p.module_type.as_str(), "slme" | "mirror") {
-                bail!(
-                    "import `{}`: module_type `{}` has no built-in rules yet (covered: slme, mirror)",
-                    p.id,
-                    p.module_type
-                );
+        let kinds = ["slme", "minimal", "mirror", "filter", "custom"];
+        for g in &self.import_group {
+            if !kinds.contains(&g.module_type.as_str()) {
+                bail!("import_group.module_type `{}` is not one of {kinds:?}", g.module_type);
+            }
+            for p in &g.products {
+                if !kinds.contains(&p.kind()) {
+                    bail!("import `{}`: module_type `{}` is not one of {kinds:?}", p.id, p.kind());
+                }
             }
         }
         for c in self.components.iter().flat_map(|g| &g.products) {
@@ -319,6 +504,12 @@ impl Build<'_> {
             guards: guards.iter().map(|g| g.to_string()).collect(),
         };
         self.m.add_rule(rule);
+    }
+
+    /// Files kept once built even where only a pattern reaches them, and so named
+    /// outright: a build does not sweep what it lists here.
+    fn precious(&mut self, targets: &str) {
+        self.rule(".PRECIOUS", targets, "", &[], &[]);
     }
 
     /// A target that names no file: a group, a check, a command.
@@ -450,10 +641,14 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("ONTOLOGYTERMS", "$(TMPDIR)/ontologyterms.txt");
     b.var("EDIT_PREPROCESSED", "$(TMPDIR)/$(ONT)-preprocess.owl");
     b.var("SRCMERGED", "$(TMPDIR)/merged-$(ONT)-edit.ofn");
-    b.var("PRESEED", "$(TMPDIR)/pre_seed.txt");
+    // A seed the configuration turns off is not an empty file but no file: the
+    // recipes that name it then name nothing.
+    if c.import_group.as_ref().is_some_and(|g| g.scan_signature) {
+        b.var("PRESEED", "$(TMPDIR)/pre_seed.txt");
+        b.var("IMPORTSEED", "$(TMPDIR)/seed.txt");
+        b.var("T_IMPORTSEED", "--term-file $(IMPORTSEED)");
+    }
     b.var("SIMPLESEED", "$(TMPDIR)/simple_seed.txt");
-    b.var("IMPORTSEED", "$(TMPDIR)/seed.txt");
-    b.var("T_IMPORTSEED", "--term-file $(IMPORTSEED)");
 
     // The lists every group is written against, in the order the build makes
     // them: sorted, as a release's file listing is.
@@ -490,17 +685,24 @@ fn variables(b: &mut Build, c: &Config) {
     let import_ids: Vec<String> = c.imports().iter().map(|p| p.id.clone()).collect();
     let import_roots: Vec<String> =
         import_ids.iter().map(|i| format!("$(IMPORTDIR)/{i}_import")).collect();
+    let group = c.import_group.as_ref();
+    let import_roots = if group.is_some_and(|g| g.use_base_merging) {
+        strings(&["$(IMPORTDIR)/merged_import"])
+    } else {
+        import_roots
+    };
     b.var("IMPORTS", import_ids.join(" "));
     b.var("IMPORT_ROOTS", import_roots.join(" "));
     b.var("IMPORT_OWL_FILES", cross(&import_roots, &strings(&["owl"])));
-    b.var("IMPORT_FILES", "$(IMPORT_OWL_FILES)");
-    b.var(
-        "ANNOTATION_PROPERTIES",
-        c.import_group
-            .as_ref()
-            .map(|g| g.annotation_properties.join(" "))
-            .unwrap_or_default(),
-    );
+    if group.is_some_and(|g| g.export_obo) {
+        b.var("IMPORT_OBO_FILES", cross(&import_roots, &strings(&["obo"])));
+        b.var("IMPORT_FILES", "$(IMPORT_OWL_FILES) $(IMPORT_OBO_FILES)");
+    } else {
+        b.var("IMPORT_FILES", "$(IMPORT_OWL_FILES)");
+    }
+    if let Some(g) = c.import_group.as_ref().filter(|g| g.strip_annotation_properties) {
+        b.var("ANNOTATION_PROPERTIES", g.annotation_properties.join(" "));
+    }
 
     let subset_ids: Vec<String> = c.subsets().iter().map(|p| p.id.clone()).collect();
     let subset_roots: Vec<String> =
@@ -540,7 +742,9 @@ fn variables(b: &mut Build, c: &Config) {
             .join(" "),
     );
     b.var("ASSETS", "$(IMPORT_FILES) $(MAIN_FILES) $(REPORT_FILES) $(SUBSET_FILES) $(MAPPING_FILES)");
-    b.var("RELEASE_ASSETS", "$(MAIN_FILES) $(SUBSET_FILES)");
+    let released_imports =
+        if group.is_some_and(|g| g.release_imports) { "$(IMPORT_FILES) " } else { "" };
+    b.var("RELEASE_ASSETS", format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES)"));
     b.var("CLEANFILES", "$(MAIN_FILES) $(SRCMERGED) $(EDIT_PREPROCESSED)");
     let released: Vec<String> = b
         .words("$(RELEASE_ASSETS)")
@@ -712,7 +916,7 @@ fn seeds(b: &mut Build, c: &Config) {
     );
     // Import modules are cut against everything the edit file and its components
     // refer to; a repository with no imports has no use for that list.
-    if c.import_group.is_some() {
+    if c.import_group.as_ref().is_some_and(|g| g.scan_signature) {
         b.rule(
             "$(PRESEED)",
             "$(SRCMERGED)",
@@ -746,46 +950,204 @@ fn seeds(b: &mut Build, c: &Config) {
     );
 }
 
-/// One module per import: a locality module over the seed, or the whole mirror.
+/// The recipe that turns a mirror into a module of `kind`. `terms` names the
+/// module's committed term list and `own` the extra properties and namespaces a
+/// product of its own brings; the group's one rule has neither.
+fn module_recipe(g: &ImportGroup, uribase: &str, kind: &str, terms: &str, own: Option<&ImportProduct>) -> Vec<String> {
+    let normalize = format!("normalize --base-iri {uribase} --subset-decls true --synonym-decls true");
+    let own_properties: String = own
+        .map(|p| p.annotation_properties.iter().map(|a| format!("--term {a} ")).collect())
+        .unwrap_or_default();
+    let kept = format!(
+        "remove $(foreach p, $(ANNOTATION_PROPERTIES), --term $(p)) {own_properties}\
+         --term-file {terms} $(T_IMPORTSEED) --select complement"
+    );
+    // A product's own namespaces, or the one its id implies.
+    let external = match own {
+        Some(p) => format!(
+            "remove --axioms external --preserve-structure false --trim false {}",
+            p.base_iris.iter().flatten().map(|i| format!("--base-iri {i} ")).collect::<String>()
+        ),
+        None => "remove --base-iri $(OBOBASE)\"/$(shell echo $* | tr a-z A-Z)_\" \
+                 --axioms external --preserve-structure false --trim false"
+            .to_string(),
+    };
+    let extract = |individuals: Option<&str>, method: &str| {
+        let individuals = individuals.map(|i| format!("--individuals {i} ")).unwrap_or_default();
+        format!(
+            "extract --term-file {terms} $(T_IMPORTSEED) --force true \
+             --copy-ontology-annotations true {individuals}--method {method}"
+        )
+    };
+    let open = "$(ROBOT) annotate --input $< --remove-annotations normalize --add-source true";
+    match kind {
+        "slme" => {
+            let (individuals, method) = match own {
+                Some(p) => (p.slme_individuals.clone(), p.module_type_slme.clone()),
+                None => (Some(g.slme_individuals.clone()), Some(g.module_type_slme.clone())),
+            };
+            let strip = if g.strip_annotation_properties {
+                format!("{kept} --select annotation-properties ")
+            } else {
+                String::new()
+            };
+            vec![format!(
+                "{open} {} {strip}{normalize} repair --merge-axiom-annotations true $(ANNOTATE_CONVERT_FILE)",
+                extract(individuals.as_deref(), method.as_deref().unwrap_or("BOT"))
+            )]
+        }
+        "minimal" => {
+            let select = if own.is_some() {
+                "classes individual annotation-properties"
+            } else {
+                "classes individuals annotation-properties"
+            };
+            vec![format!(
+                "{open} {} {external} {normalize} repair --merge-axiom-annotations true \
+                 {kept} --select \"{select}\" $(ANNOTATE_CONVERT_FILE)",
+                extract(None, "BOT")
+            )]
+        }
+        "mirror" => vec![format!(
+            "$(ROBOT) annotate --input $< --remove-annotations {normalize} --add-source true \
+             repair --merge-axiom-annotations true $(ANNOTATE_CONVERT_FILE)"
+        )],
+        "filter" => match own {
+            Some(_) => vec![format!(
+                "{open} {} {external} {kept} {normalize} \
+                 repair --merge-axiom-annotations true $(ANNOTATE_CONVERT_FILE)",
+                extract(None, "BOT")
+            )],
+            None => vec![format!(
+                "$(ROBOT) merge --input $< annotate --remove-annotations normalize --add-source true \
+                 {external} {kept} {normalize} \
+                 repair --merge-axiom-annotations true $(ANNOTATE_CONVERT_FILE)"
+            )],
+        },
+        _ => unreachable!("module kind `{kind}` passed Config::check"),
+    }
+}
+
+/// A rule that can only say it has to be written: the configuration declares
+/// this the repository's own to build.
+fn must_be_overridden(what: &str, id: &str) -> Vec<String> {
+    vec![
+        format!("@echo \"ERROR: You have configured {what};\""),
+        format!("@echo \"       This rule needs to be overwritten in {id}.Makefile!\""),
+        "@false".to_string(),
+    ]
+}
+
+/// The import modules: one per import, each cut from its mirror according to its
+/// kind — or, with base merging, a single module cut from every mirror merged.
 fn imports(b: &mut Build, c: &Config) {
+    // With no import group there are no modules, but the switch and the refresh
+    // commands are part of every build.
+    let Some(g) = c.import_group.as_ref() else {
+        b.switch("IMP");
+        refresh_targets(b);
+        return;
+    };
     let uribase = c.uribase.as_str();
+    let id = c.id.as_str();
+    fn lines(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
     if b.switch("IMP") {
-        let slme = format!(
-            "$(ROBOT) annotate --input $< --remove-annotations \
-             normalize --add-source true \
-             extract --term-file $(IMPORTDIR)/$*_terms.txt $(T_IMPORTSEED) \
-             --force true --copy-ontology-annotations true --individuals include --method BOT \
-             remove $(foreach p, $(ANNOTATION_PROPERTIES), --term $(p)) \
-             --term-file $(IMPORTDIR)/$*_terms.txt $(T_IMPORTSEED) \
-             --select complement --select annotation-properties \
-             normalize --base-iri {uribase} --subset-decls true --synonym-decls true \
-             repair --merge-axiom-annotations true \
-             $(ANNOTATE_CONVERT_FILE)"
-        );
-        b.rule(
-            "$(IMPORTDIR)/%_import.owl",
-            "$(MIRRORDIR)/%.owl $(IMPORTDIR)/%_terms.txt $(IMPORTSEED)",
-            "",
-            &[&slme],
-            &["IMP"],
-        );
-        let whole = format!(
-            "$(ROBOT) annotate --input $< --remove-annotations \
-             normalize --base-iri {uribase} --subset-decls true --synonym-decls true --add-source true \
-             repair --merge-axiom-annotations true \
-             $(ANNOTATE_CONVERT_FILE)"
-        );
-        for p in c.imports().iter().filter(|p| p.module_type == "mirror") {
+        if g.use_base_merging {
+            b.var("ALL_TERMS", "$(foreach imp, $(IMPORTS), $(IMPORTDIR)/$(imp)_terms.txt)");
+            let recipe = if g.module_type == "slme" {
+                let excluded: String = g
+                    .exclude_iri_patterns
+                    .iter()
+                    .flatten()
+                    .map(|p| format!("remove --select \"{p}\" "))
+                    .collect();
+                let strip = if g.strip_annotation_properties {
+                    "remove $(foreach p, $(ANNOTATION_PROPERTIES), --term $(p)) \
+                     $(foreach f, $(ALL_TERMS), --term-file $(f)) $(T_IMPORTSEED) \
+                     --select complement --select annotation-properties "
+                } else {
+                    ""
+                };
+                vec![format!(
+                    "$(ROBOT) merge --input $< {excluded}\
+                     extract $(foreach f, $(ALL_TERMS), --term-file $(f)) $(T_IMPORTSEED) \
+                     --force true --copy-ontology-annotations false \
+                     --individuals {} --method {} {strip}\
+                     normalize --base-iri {uribase} --subset-decls true --synonym-decls true \
+                     repair --merge-axiom-annotations true $(ANNOTATE_CONVERT_FILE)",
+                    g.slme_individuals, g.module_type_slme
+                )]
+            } else {
+                must_be_overridden("the merged import as a custom module", id)
+            };
             b.rule(
-                &format!("$(IMPORTDIR)/{}_import.owl", p.id),
-                &format!("$(MIRRORDIR)/{}.owl", p.id),
+                "$(IMPORTDIR)/merged_import.owl",
+                "$(MIRRORDIR)/merged.owl $(ALL_TERMS) $(IMPORTSEED)",
                 "",
-                &[&whole],
+                &lines(&recipe),
+                &["IMP"],
+            );
+        } else {
+            // The group's one rule, for every product of the group's kind…
+            let (needs, recipe) = match g.module_type.as_str() {
+                "mirror" => (
+                    "$(MIRRORDIR)/%.owl",
+                    module_recipe(g, uribase, "mirror", "", None),
+                ),
+                "custom" => (
+                    "$(MIRRORDIR)/%.owl",
+                    must_be_overridden("the default module type to be custom", id),
+                ),
+                kind => (
+                    "$(MIRRORDIR)/%.owl $(IMPORTDIR)/%_terms.txt $(IMPORTSEED)",
+                    module_recipe(g, uribase, kind, "$(IMPORTDIR)/$*_terms.txt", None),
+                ),
+            };
+            b.rule("$(IMPORTDIR)/%_import.owl", needs, "", &lines(&recipe), &["IMP"]);
+            b.precious("$(IMPORTDIR)/%_import.owl");
+
+            // …and a rule of its own for each product that is not.
+            for p in g.products.iter().filter(|p| g.is_special(p)) {
+                let large = p.is_large;
+                if large && !b.switch("IMP_LARGE") {
+                    continue;
+                }
+                let guards: &[&str] = if large { &["IMP", "IMP_LARGE"] } else { &["IMP"] };
+                let target = format!("$(IMPORTDIR)/{}_import.owl", p.id);
+                let mirror = format!("$(MIRRORDIR)/{}.owl", p.id);
+                let terms = format!("$(IMPORTDIR)/{}_terms.txt", p.id);
+                let (needs, recipe) = match p.kind() {
+                    "mirror" => (mirror, module_recipe(g, uribase, "mirror", "", Some(p))),
+                    "custom" => (
+                        if p.mirror_type.as_deref() == Some("no_mirror") { String::new() } else { mirror },
+                        must_be_overridden(&format!("{} as a custom module", p.id), id),
+                    ),
+                    kind => (
+                        format!("{mirror} {terms} $(IMPORTSEED)"),
+                        module_recipe(g, uribase, kind, &terms, Some(p)),
+                    ),
+                };
+                b.rule(&target, &needs, "", &lines(&recipe), guards);
+            }
+        }
+        if g.export_obo {
+            b.rule(
+                "$(IMPORTDIR)/%_import.obo",
+                "$(IMPORTDIR)/%_import.owl",
+                "",
+                &["$(ROBOT) convert --input $< --check false --format obo --output $@"],
                 &["IMP"],
             );
         }
     }
 
+    refresh_targets(b);
+}
+
+/// Rebuilding the modules on request, with or without fetching their mirrors.
+fn refresh_targets(b: &mut Build) {
     b.phony(
         "refresh-imports",
         "",
@@ -878,7 +1240,9 @@ fn components(b: &mut Build, c: &Config) {
         &["test -f $@ || touch $@"],
         g,
     );
+    b.precious("$(COMPONENTSDIR)/%.owl");
     b.rule("$(TMPDIR)/stamp-component-%.owl", "", "$(TMPDIR)", &["touch $@"], g);
+    b.precious("$(TMPDIR)/stamp-component-%.owl");
 
     for p in c.component_products().iter().filter(|p| p.use_template) {
         let templates: Vec<String> =
@@ -896,6 +1260,7 @@ fn components(b: &mut Build, c: &Config) {
             &[&recipe],
             g,
         );
+        b.precious(&format!("$(COMPONENTSDIR)/{}", p.filename));
     }
 }
 
@@ -904,19 +1269,111 @@ fn mirrors(b: &mut Build, c: &Config) {
     if !b.switch("MIR") {
         return;
     }
-    let g = &["MIR"];
-    for p in c.imports() {
+    let no_group = ImportGroup::empty();
+    let g = c.import_group.as_ref().unwrap_or(&no_group);
+    let curl = format!(
+        "--retry {} --max-time {}",
+        g.mirror_retry_download, g.mirror_max_time_download
+    );
+    for p in &g.products {
         let id = p.id.as_str();
-        b.phony(
-            &format!("mirror-{id}"),
-            "",
-            "$(TMPDIR)",
-            &[&format!(
-                "curl -L $(OBOBASE)/{id}.owl --create-dirs -o $(TMPDIR)/{id}-download.owl --retry 4 --max-time 200 && \
-                 $(ROBOT) convert -i $(TMPDIR)/{id}-download.owl -o $(TMPDIR)/$@.owl"
-            )],
-            g,
-        );
+        let large = p.is_large;
+        if large && !b.switch("IMP_LARGE") {
+            continue;
+        }
+        let guards: &[&str] = if large { &["MIR", "IMP_LARGE"] } else { &["MIR"] };
+        // The mirror is the ontology as published, or only what is its own.
+        let namespaces: String =
+            p.base_iris.iter().flatten().map(|i| format!("--base-iri {i} ")).collect();
+        let keep = |input: &str| {
+            if p.mirrors_base() {
+                format!(
+                    "$(ROBOT) remove {input} {namespaces}--axioms external --preserve-structure false --trim false -o $(TMPDIR)/$@.owl"
+                )
+            } else {
+                format!("$(ROBOT) convert {input} -o $(TMPDIR)/$@.owl")
+            }
+        };
+        let fetch = |url: &str, to: &str| format!("curl -L {url} --create-dirs -o {to} {curl}");
+        let mirror = format!("mirror-{id}");
+        let recipe = if let Some(from) = &p.mirror_from {
+            Some(keep(&format!("-I {from}")))
+        } else if p.use_base && p.use_gzipped {
+            let gz = format!("$(MIRRORDIR)/{id}-base.owl.gz");
+            Some(format!(
+                "{} && {}",
+                fetch(&format!("$(OBOBASE)/{id}/{id}-base.owl.gz"), &gz),
+                keep(&format!("-i {gz}"))
+            ))
+        } else if p.use_base {
+            let download = format!("$(TMPDIR)/{id}-download.owl");
+            Some(format!(
+                "{} && $(ROBOT) convert -i {download} -o $(TMPDIR)/$@.owl",
+                fetch(&format!("$(OBOBASE)/{id}/{id}-base.owl"), &download)
+            ))
+        } else if p.use_gzipped {
+            let gz = format!("$(MIRRORDIR)/{id}.owl.gz");
+            Some(format!(
+                "{} && {}",
+                fetch(&format!("$(OBOBASE)/{id}.owl.gz"), &gz),
+                keep(&format!("-i {gz}"))
+            ))
+        } else {
+            match p.mirror_type.as_deref() {
+                Some("custom") => {
+                    b.rule(
+                        &format!("$(MIRRORDIR)/{id}.owl"),
+                        "",
+                        "",
+                        &[&format!(
+                            "echo \"ERROR: You have configured your default mirror type to be custom; \
+                             this behavior needs to be overwritten in {}.Makefile!\" && false",
+                            c.id
+                        )],
+                        guards,
+                    );
+                    None
+                }
+                Some("no_mirror") => None,
+                _ => {
+                    let download = format!("$(TMPDIR)/{id}-download.owl");
+                    Some(format!(
+                        "{} && {}",
+                        fetch(&format!("$(OBOBASE)/{id}.owl"), &download),
+                        keep(&format!("-i {download}"))
+                    ))
+                }
+            }
+        };
+        if p.mirror_type.as_deref() != Some("no_mirror") {
+            b.m.phony.insert(mirror.clone());
+            b.precious(&format!("$(MIRRORDIR)/{id}.owl"));
+        }
+        if let Some(recipe) = recipe {
+            b.rule(&mirror, "", "$(TMPDIR)", &[&recipe], guards);
+        }
+    }
+    if g.use_base_merging {
+        b.var("ALL_MIRRORS", "$(patsubst %, $(MIRRORDIR)/%.owl, $(IMPORTS))");
+        b.var("MERGE_MIRRORS", "true");
+        let defined_by = if g.annotate_defined_by { "--annotate-defined-by true " } else { "" };
+        let drop_equivalents = if g.base_merge_drop_equivalent_class_axioms {
+            "remove --axioms equivalent --preserve-structure false "
+        } else {
+            ""
+        };
+        // Switched off, the merged mirror is whatever its own `mirror-merged`
+        // rule makes it: a repository that assembles it some other way.
+        if b.switch("MERGE_MIRRORS") {
+            b.rule(
+                "$(MIRRORDIR)/merged.owl",
+                "$(ALL_MIRRORS)",
+                "",
+                &[&format!("$(ROBOT) merge $(patsubst %, -i %, $^) {defined_by}{drop_equivalents}-o $@")],
+                &["MIR", "MERGE_MIRRORS"],
+            );
+            b.precious("$(MIRRORDIR)/merged.owl");
+        }
     }
     b.rule(
         "$(MIRRORDIR)/%.owl",
@@ -925,7 +1382,7 @@ fn mirrors(b: &mut Build, c: &Config) {
         &["if [ -f $(TMPDIR)/mirror-$*.owl ]; then if cmp -s $(TMPDIR)/mirror-$*.owl $@ ; then \
            echo \"Mirror identical, ignoring.\"; else echo \"Mirrors different, updating.\" && \
            cp $(TMPDIR)/mirror-$*.owl $@; fi; fi"],
-        g,
+        &["MIR"],
     );
 }
 

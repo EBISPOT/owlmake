@@ -1,0 +1,7 @@
+id: gmirror
+import_group:
+  module_type: mirror
+  products:
+    - id: ro
+    - id: go
+      module_type: slme

@@ -1,0 +1,34 @@
+id: kinds
+import_group:
+  module_type_slme: TOP
+  export_obo: true
+  release_imports: true
+  ids:
+    - iao
+    - bfo
+  products:
+    - id: ro
+    - id: go
+      module_type: minimal
+    - id: pato
+      module_type: mirror
+    - id: cl
+      module_type: filter
+      base_iris:
+        - http://purl.obolibrary.org/obo/CL_
+      annotation_properties:
+        - rdfs:label
+        - IAO:0000115
+        - oboInOwl:hasExactSynonym
+    - id: ecto
+      module_type: custom
+    - id: nomirror
+      module_type: custom
+      mirror_type: no_mirror
+    - id: uberon
+      module_type_slme: STAR
+      slme_individuals: minimal
+    - id: chebi
+      is_large: true
+    - id: fast
+      module_type: fast_slme

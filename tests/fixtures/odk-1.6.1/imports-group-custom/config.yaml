@@ -1,0 +1,7 @@
+id: gcustom
+import_group:
+  module_type: custom
+  products:
+    - id: ro
+    - id: go
+      module_type: slme
