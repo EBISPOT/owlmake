@@ -289,7 +289,7 @@ pub struct Plan {
     /// Cap on one shard file in bytes (default 10 MiB): a shard above it is split
     /// on its local ids.
     pub merged_import_shard_bytes: Option<usize>,
-    pub components: Vec<String>,
+
     /// Build variables the *executor* still needs after planning — `$(SRC)`,
     /// `$(OTHER_SRC)`, `$(ROBOT)`, `$(OBOBASE)`, `$(MIRRORDIR)` — resolved at
     /// ingest. Recorded here (and so in `owlmake.json`) because a recorded step
@@ -722,9 +722,15 @@ impl fmt::Display for Plan {
         if !self.exclude_iri_patterns.is_empty() {
             writeln!(f, "║   exclusions  : {} IRI pattern(s)", self.exclude_iri_patterns.len())?;
         }
-        if !self.components.is_empty() {
+        // The components are what the build merges with the edit file.
+        let components: Vec<&str> = self
+            .variables
+            .get("OTHER_SRC")
+            .map(|v| v.split_whitespace().collect())
+            .unwrap_or_default();
+        if !components.is_empty() {
             writeln!(f, "╠─ components")?;
-            for c in &self.components {
+            for c in &components {
                 let blocked = self.component_gaps.iter().any(|g| g.starts_with(&format!("component {c}:")));
                 writeln!(f, "║   [{}] {c}", if blocked { "✗" } else { "✓" })?;
             }

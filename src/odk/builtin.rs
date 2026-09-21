@@ -30,6 +30,34 @@ use super::makefile::{MakeModel, Rule};
 /// nothing would say so.
 const UNPORTED: &[&str] = &[];
 
+/// Every option of the standard build, by its top-level name. Most shape the
+/// build; the rest describe the repository (its title, where it is hosted, how
+/// its documentation and CI are set up) and are accepted because a repository
+/// states them in the same place.
+const OPTIONS: &[&str] = &[
+    "id", "title", "git_user", "repo", "repo_url", "github_org", "git_main_branch", "edit_format",
+    "run_as_root", "robot_version", "robot_settings", "robot_java_args", "owltools_memory",
+    "use_external_date", "remove_owl_nothing", "export_project_yaml", "reasoner",
+    "exclude_tautologies", "primary_release", "license", "description", "use_dosdps",
+    "use_templates", "use_mappings", "use_translations", "use_env_file_docker",
+    "use_custom_import_module", "manage_import_declarations", "custom_makefile_header",
+    "use_context", "public_release", "public_release_assets", "release_date", "allow_equivalents",
+    "ci", "workflows", "import_pattern_ontology", "import_component_format", "create_obo_metadata",
+    "gzip_main", "release_artefacts", "release_use_reasoner", "release_annotate_inferred_axioms",
+    "release_materialize_object_properties", "export_formats", "namespaces",
+    "use_edit_file_imports", "dosdp_tools_options", "travis_emails", "obo_format_options",
+    "robot_relax_options", "robot_reduce_options", "catalog_file", "uribase", "uribase_suffix",
+    "contact", "creators", "contributors", "robot_report", "ensure_valid_rdfxml",
+    "extra_rdfxml_checks", "robot_plugins", "import_group", "components", "documentation",
+    "subset_group", "pattern_pipelines_group", "sssom_mappingset_group",
+    "babelon_translation_group", "release_diff",
+];
+
+/// Whether `key` names an option of the standard build.
+pub fn is_option(key: &str) -> bool {
+    OPTIONS.contains(&key)
+}
+
 /// The release artefacts the standard build knows how to make.
 const VARIANTS: &[&str] = &[
     "base",
@@ -755,9 +783,19 @@ fn default_sparql_exports() -> Vec<String> {
 }
 
 impl Config {
-    /// Read a configuration, refusing any option the built-in rules do not cover.
+    /// Read a configuration written as YAML.
     pub fn parse(text: &str) -> Result<Config> {
         let raw: serde_yaml::Value = serde_yaml::from_str(text).context("not a YAML document")?;
+        Self::from_document(raw)
+    }
+
+    /// Read a configuration held as JSON, as the options of `owlmake.yaml` are.
+    pub fn from_options(options: serde_json::Value) -> Result<Config> {
+        Self::from_document(serde_yaml::to_value(options)?)
+    }
+
+    /// Settle a configuration, refusing any option the built-in rules do not cover.
+    fn from_document(raw: serde_yaml::Value) -> Result<Config> {
         for path in UNPORTED {
             let set = path.split('.').try_fold(&raw, |v, key| v.get(key));
             // An option spelled out at the value that leaves the build alone is

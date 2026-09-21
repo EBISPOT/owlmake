@@ -111,6 +111,14 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             // recipe (so per-import excludes / renames / extra seed terms are
             // captured faithfully); fall back to the canonical BOT/make-base
             // pipeline synthesized from the product's flags.
+            // An import the repository records as built its own way is taken as
+            // written, as a recorded target is.
+            if let Some(own) = repo.own_imports.iter().find(|i| i.id == p.id) {
+                let merged_cached =
+                    use_base_merging && repo.dir.join("imports/merged_import.owl").exists();
+                imports.push(own.clone().into_plan(&repo.dir, merged_cached));
+                continue;
+            }
             let steps = import_pipeline(repo, p, &obobase);
             imports.push(ImportPlan {
                 id: p.id.clone(),
@@ -557,13 +565,18 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         // whoever invokes the build.
         strict: robot_global_flag(make, &["--strict"]),
         xml_entities: robot_global_flag(make, &["-x", "--xml-entities"]),
-        dosdp: {
+        // The pattern products the repository records as built its own way are
+        // taken as written.
+        dosdp: if let Some(own) = &repo.own_dosdp {
+            Some(own.clone())
+        } else {
             let dir = make.expand("$(PATTERNDIR)");
             let dir = dir.trim();
             plan_dosdp(
                 &repo.dir,
                 if dir.is_empty() { "../patterns" } else { dir },
                 Some(make),
+                Some(repo),
                 &ontbase,
                 &version,
             )
@@ -592,7 +605,6 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         merged_import_iri: None,
         merged_import_shards: None,
             merged_import_shard_bytes: None,
-        components,
         variables: exec_variables(repo),
         component_gaps,
         prerequisites,
@@ -700,6 +712,13 @@ fn plan_rule(
     target: &str,
     on_release_path: bool,
 ) -> Option<ArtefactPlan> {
+    // A target the repository records as resolved is taken as written: its steps
+    // are already what a recipe would have been planned into. One that only
+    // extends the standard target is planned from the standard rule, which its
+    // prerequisites have joined.
+    if let Some(own) = repo.own_targets.iter().find(|t| t.target == target && !t.extends) {
+        return Some(own.clone().into_plan());
+    }
     let (rule, stem) = make.rule_for(target)?;
     let mut autos = Autos::default();
     autos.set("@", target);
@@ -1624,20 +1643,10 @@ fn catalog_file(dir: &std::path::Path) -> Option<String> {
 /// Read from the rule that branch defines for `$(TMPDIR)/all_pattern_terms.txt`
 /// — the else half of `ifeq ($(PAT),true)`, which ingest's own parse (every flag
 /// TRUE) never sees.
-fn cached_pattern_seed_query(make: &super::makefile::MakeModel) -> Option<String> {
-    let base = make.base_dir.as_ref()?;
-    let main_mk = base.join("Makefile");
-    let mut alt =
-        super::makefile::MakeModel::parse_file_with_flags(&main_mk, &[], &[("PAT", "false")])
-            .ok()?;
-    alt.base_dir = Some(base.clone());
-    let id = alt.expand("$(ONT)").trim().to_string();
-    if !id.is_empty() {
-        let over = base.join(format!("{id}.Makefile"));
-        if over.exists() {
-            alt.overlay_file(&over).ok()?;
-        }
-    }
+fn cached_pattern_seed_query(repo: &OdkRepo) -> Option<String> {
+    // The configuration as it stands with pattern generation switched off —
+    // resolved the way the repository's configuration is, wherever it comes from.
+    let alt = repo.configuration_under("PAT", "false")?;
     let tmpdir = {
         let d = alt.expand("$(TMPDIR)").trim().to_string();
         if d.is_empty() { "tmp".to_string() } else { d }
@@ -1668,6 +1677,7 @@ fn plan_dosdp(
     dir: &std::path::Path,
     pattern_dir: &str,
     make: Option<&super::makefile::MakeModel>,
+    repo: Option<&OdkRepo>,
     ontbase: &str,
     version: &str,
 ) -> Option<crate::spec::DosdpSpec> {
@@ -1744,7 +1754,7 @@ fn plan_dosdp(
     Some(DosdpSpec {
         output,
         prefixes,
-        cached_seed_query: make.and_then(cached_pattern_seed_query),
+        cached_seed_query: repo.and_then(cached_pattern_seed_query),
         patterns,
         steps,
         templates,
@@ -2461,7 +2471,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
     // The DOSDP products are a source of the release, exactly as an ODK Makefile
     // puts `$(PATTERNDIR)/definitions.owl` in `$(OTHER_SRC)`. Without this the
     // pattern step would write `definitions.owl` and nothing would merge it.
-    let dosdp = plan_dosdp(&repo.dir, "../patterns", None, &ontbase, &version);
+    let dosdp = plan_dosdp(&repo.dir, "../patterns", None, None, &ontbase, &version);
     if let Some(d) = &dosdp {
         if !d.patterns.is_empty() && !components.contains(&d.output) {
             components.push(d.output.clone());
@@ -2635,7 +2645,6 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         merged_import_iri: None,
         merged_import_shards: None,
             merged_import_shard_bytes: None,
-        components,
         variables: std::collections::BTreeMap::new(),
         component_gaps: Vec::new(),
         prerequisites: Vec::new(),

@@ -30,8 +30,15 @@ fn squeeze(v: &mut serde_yaml::Value) {
         serde_yaml::Value::Mapping(m) => {
             for (k, v) in m.iter_mut() {
                 match (k.as_str(), &mut *v) {
+                    // …and a path is the same path with or without a `./` in
+                    // it, which writing a plan to a file does not keep.
                     (Some("command" | "message"), serde_yaml::Value::String(s)) => {
-                        *s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+                        *s = s
+                            .split_whitespace()
+                            .map(|w| w.replace("/./", "/"))
+                            .map(|w| w.strip_prefix("./").map(str::to_string).unwrap_or(w))
+                            .collect::<Vec<_>>()
+                            .join(" ");
                     }
                     _ => squeeze(v),
                 }
@@ -122,14 +129,15 @@ fn compare(root: &Path) -> Vec<String> {
     problems
 }
 
-/// Lay a fixture out as the repository it describes and return its root.
-fn repository_for(fixture: &Path) -> std::path::PathBuf {
+/// Lay a fixture out as the repository it describes and return its root. `test`
+/// keeps the directories of tests that run side by side apart.
+fn repository_for(fixture: &Path, test: &str) -> std::path::PathBuf {
     let config = std::fs::read_to_string(fixture.join("config.yaml")).expect("config.yaml");
     let parsed: serde_yaml::Value = serde_yaml::from_str(&config).expect("a YAML configuration");
     let id = parsed.get("id").and_then(|i| i.as_str()).expect("a configuration names its id");
     let mut root = std::env::temp_dir();
     root.push(format!(
-        "owlmake_builtin_{}_{}",
+        "owlmake_builtin_{}_{test}_{}",
         std::process::id(),
         fixture.file_name().unwrap().to_string_lossy()
     ));
@@ -172,7 +180,7 @@ fn builtin_rules_resolve_to_what_odk_generates() {
     assert!(!names.is_empty(), "no fixtures under {}", fixtures.display());
     let mut failed = Vec::new();
     for fixture in &names {
-        let root = repository_for(fixture);
+        let root = repository_for(fixture, "oracle");
         let problems = compare(&root);
         let _ = std::fs::remove_dir_all(&root);
         let name = fixture.file_name().unwrap().to_string_lossy().to_string();
@@ -185,6 +193,146 @@ fn builtin_rules_resolve_to_what_odk_generates() {
         }
     }
     assert!(failed.is_empty(), "fixtures whose plans differ: {failed:?}");
+}
+
+/// The differences between two resolved plans, named.
+fn differences(
+    want: &BTreeMap<String, serde_yaml::Value>,
+    got: &BTreeMap<String, serde_yaml::Value>,
+    (wanted, gotten): (&str, &str),
+) -> Vec<String> {
+    let show = |v: &serde_yaml::Value| serde_yaml::to_string(v).unwrap_or_default();
+    let mut problems = Vec::new();
+    for (name, w) in want {
+        match got.get(name) {
+            None => problems.push(format!("MISSING from {gotten}: {name}")),
+            Some(g) if g != w => problems.push(format!(
+                "DIFFERS: {name}\n--- {wanted}\n{}--- {gotten}\n{}",
+                show(w),
+                show(g)
+            )),
+            Some(_) => {}
+        }
+    }
+    for name in got.keys().filter(|n| !want.contains_key(*n)) {
+        problems.push(format!("ONLY in {gotten}: {name}"));
+    }
+    problems
+}
+
+/// **The acceptance test for `owlmake.yaml`.** Write the file a repository
+/// commits, take its Makefile, its own rules and its configuration OUT of the
+/// tree, and plan again from the file alone: the plan must be the one the
+/// repository had. The file holds only the repository's options and what it
+/// builds in a way of its own, so this is also the proof that nothing else was
+/// needed.
+#[test]
+fn a_standard_file_alone_resolves_to_the_same_plan() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1");
+    let mut names: Vec<_> = std::fs::read_dir(&fixtures)
+        .expect("the fixture directory")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join("config.yaml").exists())
+        .collect();
+    names.sort();
+    let mut failed = Vec::new();
+    for fixture in &names {
+        let name = fixture.file_name().unwrap().to_string_lossy().to_string();
+        let root = repository_for(fixture, "standard");
+        let before = resolved(&OdkRepo::load_with_builtin_rules(&root).expect("loading"));
+        let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+        let file = root.join("owlmake.yaml");
+        owlmake::spec::save(&spec, &file).expect("saving owlmake.yaml");
+        let lines = std::fs::read_to_string(&file).unwrap().lines().count();
+        // Kept for a reader who wants to see what a repository would commit.
+        if let Ok(dir) = std::env::var("OM_KEEP_STANDARD_FILES") {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::copy(&file, Path::new(&dir).join(format!("{name}.owlmake.yaml")));
+        }
+
+        let ont = root.join("src/ontology");
+        for entry in std::fs::read_dir(&ont).unwrap().flatten() {
+            let n = entry.file_name().to_string_lossy().to_string();
+            if n == "Makefile" || n.ends_with(".Makefile") || n.ends_with("-odk.yaml") {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        let after = resolved(&OdkRepo::load(&root).expect("loading from owlmake.yaml alone"));
+        let problems = differences(&before, &after, ("with its build files", "from owlmake.yaml alone"));
+        eprintln!("== standard file {name}: {lines} lines, {} difference(s)", problems.len());
+        for p in &problems {
+            eprintln!("{p}\n");
+        }
+        if !problems.is_empty() {
+            failed.push(name);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    assert!(failed.is_empty(), "fixtures whose plan changed: {failed:?}");
+}
+
+/// A working repository laid out again WITHOUT its build files: every entry of
+/// its `src/` linked into a scratch tree, except the Makefile, the repository's
+/// own rules and its configuration. Real repositories are too large to copy and
+/// must not be touched.
+fn without_build_files(root: &Path) -> std::path::PathBuf {
+    let mut scratch = std::env::temp_dir();
+    scratch.push(format!(
+        "owlmake_builtin_{}_real_{}",
+        std::process::id(),
+        root.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let link = |from: &Path, to: &Path| std::os::unix::fs::symlink(from, to).unwrap();
+    let ont = scratch.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    for entry in std::fs::read_dir(root.join("src")).unwrap().flatten() {
+        if entry.file_name() != "ontology" {
+            link(&entry.path(), &scratch.join("src").join(entry.file_name()));
+        }
+    }
+    for entry in std::fs::read_dir(root.join("src/ontology")).unwrap().flatten() {
+        let n = entry.file_name().to_string_lossy().to_string();
+        if n == "Makefile" || n.ends_with(".Makefile") || n.ends_with("-odk.yaml") {
+            continue;
+        }
+        link(&entry.path(), &ont.join(&n));
+    }
+    scratch
+}
+
+/// The same acceptance test over working repositories, which hold what no
+/// fixture does: rules of their own for an import, a mirror, the pattern merge.
+#[test]
+fn a_standard_file_alone_resolves_a_real_repository() {
+    let Ok(repos) = std::env::var("OM_ORACLE_REPOS") else {
+        eprintln!("OM_ORACLE_REPOS is unset: no repositories to compare");
+        return;
+    };
+    let mut failed = false;
+    for root in repos.split(':').filter(|r| !r.is_empty()).map(Path::new) {
+        let mut before = resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading"));
+        let spec = OdkRepo::standard_spec(root).expect("writing the standard file");
+        let scratch = without_build_files(root);
+        let file = scratch.join("owlmake.yaml");
+        owlmake::spec::save(&spec, &file).expect("saving owlmake.yaml");
+        let lines = std::fs::read_to_string(&file).unwrap().lines().count();
+        if let Ok(dir) = std::env::var("OM_KEEP_STANDARD_FILES") {
+            let _ = std::fs::create_dir_all(&dir);
+            let name = root.file_name().unwrap().to_string_lossy();
+            let _ = std::fs::copy(&file, Path::new(&dir).join(format!("{name}.owlmake.yaml")));
+        }
+        let mut after = resolved(&OdkRepo::load(&scratch).expect("loading from owlmake.yaml alone"));
+        before.values_mut().chain(after.values_mut()).for_each(squeeze);
+        let problems = differences(&before, &after, ("with its build files", "from owlmake.yaml alone"));
+        eprintln!("== standard file {}: {lines} lines, {} difference(s)", root.display(), problems.len());
+        for p in &problems {
+            eprintln!("{p}\n");
+        }
+        failed |= !problems.is_empty();
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
+    assert!(!failed, "a repository's plan changed; see above");
 }
 
 #[test]
