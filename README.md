@@ -83,20 +83,9 @@ om test              # run the repository's QC checks
 om update-repo       # bring the repository's files into step with owlmake.yaml
 ```
 
-Each is `om make <target>` by another name and takes the same `VAR=value` switches: `om test IMP=false MIR=false` runs the checks against the committed imports.
+Each takes the same `VAR=value` switches as `om make` (`om test IMP=false MIR=false`). After adding or removing an import or a component in `owlmake.yaml`, `om update-repo` updates the edit file's imports and the XML catalog to match and creates the placeholder files, as ODK's `update_repo` does.
 
 Any other target defined in the repo's Makefile is dispatched too — `om <target>` interprets that target's recipe (and its prerequisites). Targets owlmake doesn't replicate (`seed`-style scaffolding) report a clear error rather than doing the wrong thing.
-
-### After changing `owlmake.yaml`
-
-A change to an option takes effect the next time `om` runs. Adding or removing an import, a component or a pattern pipeline also has files that follow from it, and `om update-repo` (ODK's `update_repo`) writes them:
-
-- the edit file's import declarations become exactly the imports, components and pattern products the options state;
-- the `odk-managed-catalog` group of `catalog-v001.xml` is rewritten to match, and the rest of the catalog is kept;
-- the files the build reads are created where they are missing — import modules and term files, components, templates, mapping and translation tables, the ID ranges — with the placeholders ODK gives them; what is already there is left alone;
-- the standard build's SPARQL queries in `src/sparql` are written afresh.
-
-The result is byte-for-byte what `odk.py update` leaves (`tests/update_repo.rs` holds the comparison). What that command also writes and this does not is what is about ODK itself: the generated Makefile and `run.sh`, the workflows that run the ODK container, the ODK workflow docs and the `.gitignore` block. `manage_import_declarations: false` leaves the edit file and the catalog to you.
 
 ### Starting a new ontology
 
