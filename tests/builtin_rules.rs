@@ -218,6 +218,16 @@ fn a_standard_file_builds_a_release() {
     assert!(said.contains("built-its-own-way"), "the repository's own target ran:\n{said}");
     assert!(said.contains("Finished running all tests successfully"), "and so did the standard ones:\n{said}");
 
+    // `om test` is `om make test` by another name, switches and all.
+    let out = om(&["test", "MIR=false"]);
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "`om test MIR=false` failed:\n{said}");
+    assert!(said.contains("Finished running all tests successfully"), "{said}");
+    // …but it builds `test` and nothing else.
+    let out = om(&["test", "tiny.obo"]);
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(!out.status.success() && said.contains("om make test tiny.obo"), "{said}");
+
     // The file is the build: nothing rewrote it.
     let file = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(file.starts_with("emulate_odk_version: 1.6.1\nid: tiny\n"), "{file}");

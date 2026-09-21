@@ -82,6 +82,8 @@ om refresh-imports   # rebuild imports from upstream
 om test              # run the repository's QC checks
 ```
 
+Each is `om make <target>` by another name and takes the same `VAR=value` switches: `om test IMP=false MIR=false` runs the checks against the committed imports.
+
 Any other target defined in the repo's Makefile is dispatched too — `om <target>` interprets that target's recipe (and its prerequisites). Targets owlmake doesn't replicate (`update_repo`, `clean`, `seed`-style scaffolding) report a clear error rather than doing the wrong thing.
 
 ### Starting a new ontology

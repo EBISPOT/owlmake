@@ -144,6 +144,9 @@ pub struct TargetArgs {
     /// How to obtain import modules: `cached` (default) or `fresh`.
     #[arg(long, default_value = "cached")]
     pub imports: String,
+    /// `VAR=value` assignments, as `om make` takes them (`IMP=true`, `PAT=false`).
+    #[arg(value_name = "VAR=VALUE")]
+    pub assignments: Vec<String>,
     /// How to obtain `patterns/definitions.owl`: `regenerate` (`PAT=true`;
     /// default) or `cached` (`PAT=false`).
     #[arg(long, default_value = "regenerate")]
@@ -160,6 +163,9 @@ pub struct RefreshArgs {
     /// Skip imports flagged `is_large_import` (`refresh-imports-excluding-large`).
     #[arg(long)]
     pub exclude_large: bool,
+    /// `VAR=value` assignments, as `om make` takes them (`MIR=false`).
+    #[arg(value_name = "VAR=VALUE")]
+    pub assignments: Vec<String>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -170,6 +176,9 @@ pub struct RefreshArgs {
 pub struct RepoArgs {
     #[arg(short = 'C', long = "directory", visible_alias = "repo", value_name = "DIR", default_value = ".")]
     pub repo: PathBuf,
+    /// `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`).
+    #[arg(value_name = "VAR=VALUE")]
+    pub assignments: Vec<String>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -563,8 +572,16 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // `owlmake <those targets>` are literally the same code path. What the
     // default means was decided at plan time (EFO's `all` ends in `qc`); nothing
     // downstream re-derives it.
+    // `test` on a repo whose QC target is spelled `qc` (EFO) means that one.
+    let named = |t: &String| {
+        if t == "test" && !plan_target(&full_plan, "test") && plan_target(&full_plan, "qc") {
+            "qc".to_string()
+        } else {
+            t.clone()
+        }
+    };
     let mut selection: Vec<String> =
-        targets.iter().chain(args.artefacts.iter()).cloned().collect();
+        targets.iter().chain(args.artefacts.iter()).map(named).collect();
     let defaulted = selection.is_empty();
     if defaulted {
         selection = full_plan.default_targets.clone();
@@ -852,103 +869,76 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
 }
 
 // --- Curated build commands -----------------------------------------------
+//
+// Each is `om make <target>` under a name of its own, and runs as exactly that:
+// one path decides what a switch means, what the plan's groups default to and
+// how a target is dispatched, so `om test IMP=false` and `om make test IMP=false`
+// cannot come to differ.
 
-/// `prepare-release` / `all`: build every release artefact.
-pub fn prepare_release(a: &TargetArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    // A release never rewrites the committed plan: `--regenerate` is a
-    // deliberate, separate act, not something a build does on the way past.
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    let output_dir = a.output_dir.clone().unwrap_or_else(|| repo.dir.clone());
-    let imports_mode = parse_imports(&a.imports)?;
-    let opts = ExecOpts {
-        imports_mode,
-        patterns_mode: parse_patterns(&a.patterns)?,
-        refresh_mirrors: true,
-        // `--imports cached` on this command IS the caller pinning them.
-        imports_pinned: matches!(imports_mode, ImportsMode::Cached),
-        mirrors_pinned: false,
-        // This command takes no switches, so every group does what the plan says.
-        kept_groups: default_kept_groups(&plan),
-        output_dir,
-        run_env: Vec::new(),
+/// Run `target` as `om make <target> <assignments…>` would.
+fn make_target(
+    repo: &std::path::Path,
+    target: &str,
+    assignments: &[String],
+    common: &crate::cmd::CommonArgs,
+    configure: impl FnOnce(&mut Args),
+) -> Result<()> {
+    let (targets, _) = partition_make_args(assignments);
+    if let Some(t) = targets.first() {
+        bail!(
+            "`{t}` is not a `VAR=value` assignment, and this command builds `{target}` only: \
+             name other targets with `om make {target} {t}`"
+        );
+    }
+    let mut args = Args {
+        targets: std::iter::once(target.to_string()).chain(assignments.iter().cloned()).collect(),
         always_make: false,
         keep_going: false,
         assume_new: Vec::new(),
+        repo: repo.to_path_buf(),
+        rebuild: Vec::new(),
+        keep: Vec::new(),
+        list_targets: false,
+        plan_only: false,
+        plan_format: "yaml".to_string(),
+        regenerate: false,
+        imports: None,
+        patterns: "regenerate".to_string(),
+        output_dir: None,
+        artefacts: Vec::new(),
+        common: common.clone(),
     };
-    build_plan(&repo, &plan, &opts, true)?;
-    // A curated whole-release command names no individual target, so nothing here
-    // is a goal in the command-line sense and everything transient is swept.
-    build::sweep_transients(&repo, &plan, &[]);
-    Ok(())
+    configure(&mut args);
+    step(None, &args).map(|_| ())
+}
+
+/// `prepare-release` / `all`: build every release artefact.
+pub fn prepare_release(a: &TargetArgs) -> Result<()> {
+    make_target(&a.repo, "prepare_release", &a.assignments, &a.common, |args| {
+        args.imports = Some(a.imports.clone());
+        args.patterns = a.patterns.clone();
+        args.output_dir = a.output_dir.clone();
+    })
 }
 
 /// `refresh-imports`: rebuild import modules from upstream (native).
 pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    build::refresh_imports(&repo, &plan, a.exclude_large, &default_exec_opts(&repo))
+    let target = if a.exclude_large { "refresh-imports-excluding-large" } else { "refresh-imports" };
+    make_target(&a.repo, target, &a.assignments, &a.common, |_| {})
 }
 
 /// `all-imports`: rebuild every individual import module from upstream.
 pub fn all_imports(a: &RepoArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    build::build_all_imports(&repo, &plan, &default_exec_opts(&repo))
+    make_target(&a.repo, "all_imports", &a.assignments, &a.common, |_| {})
 }
 
-/// `test` / `qc`: run the repository's own QC target, from the plan.
+/// `test`: run the repository's own QC target, from the plan.
 ///
 /// There is no built-in QC pipeline: whatever the repo declares under this name
-/// is what runs, exactly as `owlmake make test` would. The checks those recipes
-/// ask for are `om report`, `om reason` and `om verify`, so a QC run needs
-/// nothing beyond the `om` binary itself.
+/// is what runs. The checks those recipes ask for are `om report`, `om reason`
+/// and `om verify`, so a QC run needs nothing beyond the `om` binary itself.
 pub fn test(a: &RepoArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    let name = ["test", "qc"]
-        .into_iter()
-        .find(|n| plan_target(&plan, n))
-        .ok_or_else(|| anyhow::anyhow!(
-            "this repo declares no `test` or `qc` target\navailable targets: {}",
-            known_targets(&plan)
-        ))?;
-    build::run_target_recipe(&repo, &plan, name, &default_exec_opts(&repo))
-}
-
-/// The run inputs of a curated build command, which takes none of its own.
-fn default_exec_opts(repo: &OdkRepo) -> ExecOpts {
-    ExecOpts {
-        imports_mode: ImportsMode::Cached,
-        patterns_mode: PatternsMode::Regenerate,
-        refresh_mirrors: true,
-        // These commands take no flags, so the caller has pinned nothing: an
-        // `all-imports`/`refresh-imports` entry point still means "rebuild".
-        imports_pinned: false,
-        mirrors_pinned: false,
-        kept_groups: Vec::new(),
-        output_dir: repo.dir.clone(),
-        run_env: Vec::new(),
-        always_make: false,
-        keep_going: false,
-        assume_new: Vec::new(),
-    }
+    make_target(&a.repo, "test", &a.assignments, &a.common, |_| {})
 }
 
 // --- helpers --------------------------------------------------------------
@@ -1011,21 +1001,6 @@ fn obtain_plan(
         regen_plan(repo, format, write)?
     };
     bind_run_version(repo, &plan, version, today, clock)
-}
-
-/// The switch values an entry point that takes none resolves to: whatever the
-/// plan says an ordinary build of this repository does. A curated command still
-/// has to CHOOSE, because a target whose recipe differs by branch has no recipe
-/// until one is chosen.
-fn default_switches(plan: &Plan) -> Vec<(String, String)> {
-    plan.refresh_groups
-        .iter()
-        .filter(|g| !g.flag.is_empty())
-        .map(|g| {
-            let on = matches!(g.default, crate::plan::Freshness::Rebuild);
-            (g.flag.clone(), if on { "true".to_string() } else { "false".to_string() })
-        })
-        .collect()
 }
 
 /// Resolve this run's release version against the plan's default and bind it in.
@@ -1264,17 +1239,6 @@ fn brief(v: &serde_json::Value) -> String {
         s = format!("{}…", s.chars().take(89).collect::<String>());
     }
     s
-}
-
-/// The groups an entry point that takes no switches keeps: whichever the plan
-/// says an ordinary build does not refresh.
-fn default_kept_groups(plan: &Plan) -> Vec<String> {
-    plan.refresh_groups
-        .iter()
-        .filter(|g| !["mirrors", "imports", "patterns"].contains(&g.name.as_str()))
-        .filter(|g| matches!(g.default, crate::plan::Freshness::Keep))
-        .map(|g| g.name.clone())
-        .collect()
 }
 
 /// `VAR=value` assignments pulled out of the positional target list.
