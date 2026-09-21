@@ -14,6 +14,8 @@ const SUBCOMMANDS: &[&str] = &[
     "query", "verify", "report", "template", "export", "measure", "extract", "mirror", "repair",
     "rename", "expand", "collapse", "unmerge", "diff", "explain", "validate-profile", "reduce",
     "mireot", "rdfxml-to-json", "python",
+    // owlmake's own names for the commands a recipe may also spell `odk:<name>`.
+    "normalize", "subset",
 ];
 
 const BENIGN_SHELL: &[&str] = &[

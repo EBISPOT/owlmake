@@ -598,8 +598,73 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         prerequisites,
         artefacts,
     };
+    drop_inert_targets(&mut plan);
     drop_unspelled_robot_launcher(&mut plan);
     Ok(plan)
+}
+
+/// Drop the targets a generated build configuration carries for managing ITSELF,
+/// and every mention of them.
+///
+/// They are about the tooling that generated the file, not about the ontology:
+/// a banner naming the generator's version, a check that the file is in step
+/// with the configuration it was generated from, a notice about the report
+/// profile, the generator's help text, its own updater, and the provisioning of
+/// reasoner-tool plugins owlmake does not load (every command such a plugin
+/// supplies is one of owlmake's own). None of them builds, checks or groups
+/// anything, so the standard build has no such targets and a plan read from a
+/// generated file does not keep them.
+///
+/// Named, not inferred: a repository's OWN rule that only prints is that
+/// repository's decision, and stays.
+fn drop_inert_targets(plan: &mut Plan) {
+    const SELF_MANAGEMENT: &[&str] = &[
+        "odkversion",
+        "config_check",
+        "check_for_robot_updates",
+        "help",
+        "update_repo",
+        "all_robot_plugins",
+        "custom_robot_plugins",
+        "extra_robot_plugins",
+    ];
+    let inert = |a: &ArtefactPlan| {
+        SELF_MANAGEMENT.contains(&a.target.as_str()) || a.target.ends_with(".jar")
+    };
+    let dropped: std::collections::HashSet<String> = plan
+        .prerequisites
+        .iter()
+        .chain(plan.artefacts.iter())
+        .filter(|a| inert(a))
+        .map(|a| a.target.clone())
+        .collect();
+    if dropped.is_empty() {
+        return;
+    }
+    let keep = |t: &String| !dropped.contains(t);
+    plan.prerequisites.retain(|a| keep(&a.target));
+    plan.artefacts.retain(|a| keep(&a.target));
+    for a in plan.prerequisites.iter_mut().chain(plan.artefacts.iter_mut()) {
+        a.needs.retain(keep);
+        a.order_only.retain(keep);
+        // The input is the first prerequisite; with that one gone, the next is.
+        if a.input.as_ref().is_some_and(|i| dropped.contains(i)) {
+            a.input = a.needs.iter().find(|n| !a.order_only.contains(n)).cloned();
+        }
+        for b in &mut a.branches {
+            b.needs.retain(keep);
+            if b.input.as_ref().is_some_and(|i| dropped.contains(i)) {
+                b.input = None;
+            }
+        }
+    }
+    plan.default_targets.retain(keep);
+    plan.phony.retain(keep);
+    plan.transient_targets.retain(keep);
+    plan.native_targets.retain(keep);
+    for g in &mut plan.refresh_groups {
+        g.targets.retain(keep);
+    }
 }
 
 /// Drop the recorded `ROBOT` launcher when no step in the plan spells it.
@@ -796,6 +861,7 @@ fn plan_rule(
         input = None;
     }
     drop_target_round_trip(&mut steps, target);
+    fold_output_bookkeeping(&mut steps, target);
     // A recipe that is nothing but recursive make is an aggregate wearing a
     // disguise: `feature_diff: make reports/a.txt -B; make reports/b.txt -B` says
     // "these two targets", and saying it as a dependency beats spawning owlmake
@@ -3060,6 +3126,7 @@ fn import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str) -> V
         }
     }
     drop_target_round_trip(&mut steps, &target);
+    fold_output_bookkeeping(&mut steps, &target);
     resolve_seed_paths(make, repo, &mut steps);
     steps
 }
@@ -3282,6 +3349,75 @@ fn drop_target_round_trip(steps: &mut Vec<Step>, target: &str) {
         i += 1;
         keep
     });
+}
+
+/// Record what a pipeline's tail DOES rather than how the recipe staged it.
+///
+/// A recipe that ends `… --output $@.tmp.owl && mv $@.tmp.owl $@` writes the
+/// target once; the staging file is how it avoids leaving a half-written target
+/// behind, which the pipeline's closing write already guarantees. So a closing
+/// write to a staging file followed by the move of that file onto the target is
+/// recorded as the write alone: a `convert` keeps its format and loses its
+/// `output`, and a `round-trip` — a write with no format of its own — goes
+/// entirely.
+///
+/// Two `annotate`s side by side are one annotation of the ontology, and are
+/// recorded as one, unless either clears the existing annotations or both set
+/// the same IRI — there the order is the meaning.
+fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
+    use crate::build::recipe::FileOp;
+    let same_file = |a: &str, b: &str| {
+        std::path::Path::new(a).file_name() == std::path::Path::new(b).file_name()
+    };
+    if let [.., write, Step::File(FileOp::Move { src, dst })] = steps.as_slice() {
+        let staged = match write {
+            Step::Op(robot::Op::Convert { output: Some(o), .. }) => Some(o),
+            Step::Op(robot::Op::RoundTrip { path }) => Some(path),
+            _ => None,
+        };
+        let folds = same_file(dst, target)
+            && matches!((staged, src.as_slice()), (Some(o), [only]) if o == only && !same_file(o, target));
+        if folds {
+            steps.pop();
+            match steps.last_mut() {
+                Some(Step::Op(robot::Op::Convert { output, .. })) => *output = None,
+                _ => {
+                    steps.pop();
+                }
+            }
+        }
+    }
+
+    // A closing `convert` that names the target outright is the same write.
+    if let Some(Step::Op(robot::Op::Convert { output, .. })) = steps.last_mut() {
+        if output.as_deref().is_some_and(|o| same_file(o, target)) {
+            *output = None;
+        }
+    }
+
+    let mut i = 0;
+    while i + 1 < steps.len() {
+        let (Step::Op(robot::Op::Annotate(a)), Step::Op(robot::Op::Annotate(b))) =
+            (&steps[i], &steps[i + 1])
+        else {
+            i += 1;
+            continue;
+        };
+        let independent = !a.remove_annotations
+            && !b.remove_annotations
+            && !(a.ontology_iri.is_some() && b.ontology_iri.is_some())
+            && !(a.version_iri.is_some() && b.version_iri.is_some());
+        if !independent {
+            i += 1;
+            continue;
+        }
+        let Step::Op(robot::Op::Annotate(b)) = steps.remove(i + 1) else { unreachable!() };
+        let Step::Op(robot::Op::Annotate(a)) = &mut steps[i] else { unreachable!() };
+        a.ontology_iri = a.ontology_iri.take().or(b.ontology_iri);
+        a.version_iri = a.version_iri.take().or(b.version_iri);
+        a.annotations.extend(b.annotations);
+        a.link_annotations.extend(b.link_annotations);
+    }
 }
 
 /// Parse a recipe line that is a single `$(eval VAR <op> VALUE)` (or `${…}`)
