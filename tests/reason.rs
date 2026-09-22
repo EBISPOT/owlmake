@@ -579,3 +579,117 @@ fn imported_plant_ontology_shape_with_a_cyclic_part_of_definition() {
     assert!(d.is_subsumed(&iri("Flower"), &iri("ReproSystem")), "HermiT: Flower ⊑ ReproSystem");
     assert!(d.is_subsumed(&iri("Stoma"), &iri("LeafComponent")), "HermiT: Stoma ⊑ LeafComponent");
 }
+
+/// Object property assertions between individuals: the EL engine closes the
+/// asserted assertions under the property hierarchy and transitivity.
+#[test]
+fn el_object_property_assertions_close_over_hierarchy_and_transitivity() {
+    use horned_owl::model::{
+        Individual, NamedIndividual, ObjectPropertyAssertion, SubObjectPropertyOf,
+        TransitiveObjectProperty,
+    };
+    let b = Build::new_rc();
+    let part_of = b.object_property(format!("{NS}part_of"));
+    let sub_cohort_of = b.object_property(format!("{NS}sub_cohort_of"));
+    let ind = |n: &str| Individual::Named(NamedIndividual(b.iri(format!("{NS}{n}"))));
+    let assert = |p: &horned_owl::model::ObjectProperty<_>, f: &str, t: &str| {
+        Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
+            ope: OPE::ObjectProperty(p.clone()),
+            from: ind(f),
+            to: ind(t),
+        })
+    };
+    let m = model_from(vec![
+        Component::SubObjectPropertyOf(SubObjectPropertyOf {
+            sub: SOPE::ObjectPropertyExpression(OPE::ObjectProperty(sub_cohort_of.clone())),
+            sup: OPE::ObjectProperty(part_of.clone()),
+        }),
+        Component::TransitiveObjectProperty(TransitiveObjectProperty(OPE::ObjectProperty(
+            part_of.clone(),
+        ))),
+        assert(&sub_cohort_of, "twingene", "twin_registry"),
+        assert(&sub_cohort_of, "twin_registry", "swedish_cohorts"),
+    ]);
+    let r = Reasoner::classify(&m);
+    let got = r.object_property_assertions();
+    let t = |f: &str, p: &str, t: &str| {
+        (format!("{NS}{f}"), format!("{NS}{p}"), format!("{NS}{t}"))
+    };
+    assert!(got.contains(&t("twingene", "sub_cohort_of", "twin_registry")), "{got:?}");
+    assert!(got.contains(&t("twingene", "part_of", "twin_registry")), "sub-property: {got:?}");
+    assert!(
+        got.contains(&t("twingene", "part_of", "swedish_cohorts")),
+        "transitive closure on the super-property: {got:?}"
+    );
+    assert!(
+        !got.contains(&t("twingene", "sub_cohort_of", "swedish_cohorts")),
+        "sub_cohort_of is not transitive: {got:?}"
+    );
+}
+
+/// The DL backend answers the inverse of an asserted assertion, which lies
+/// outside EL, and the transitive closure.
+#[test]
+fn dl_object_property_assertions_include_inverses() {
+    use horned_owl::model::{
+        Individual, InverseObjectProperties, NamedIndividual, ObjectPropertyAssertion,
+        TransitiveObjectProperty,
+    };
+    let b = Build::new_rc();
+    let has_sub = b.object_property(format!("{NS}has_sub_cohort"));
+    let sub_of = b.object_property(format!("{NS}sub_cohort_of"));
+    let ind = |n: &str| Individual::Named(NamedIndividual(b.iri(format!("{NS}{n}"))));
+    let assert = |p: &horned_owl::model::ObjectProperty<_>, f: &str, t: &str| {
+        Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
+            ope: OPE::ObjectProperty(p.clone()),
+            from: ind(f),
+            to: ind(t),
+        })
+    };
+    let m = model_from(vec![
+        Component::InverseObjectProperties(InverseObjectProperties(
+            OPE::ObjectProperty(has_sub.clone()),
+            OPE::ObjectProperty(sub_of.clone()),
+        )),
+        Component::TransitiveObjectProperty(TransitiveObjectProperty(OPE::ObjectProperty(
+            sub_of.clone(),
+        ))),
+        assert(&sub_of, "twingene", "twin_registry"),
+        assert(&sub_of, "twin_registry", "swedish_cohorts"),
+    ]);
+    let r = DlReasoner::classify(&m);
+    assert!(r.is_consistent());
+    let got = r.object_property_assertions();
+    let t = |f: &str, p: &str, t: &str| {
+        (format!("{NS}{f}"), format!("{NS}{p}"), format!("{NS}{t}"))
+    };
+    assert!(got.contains(&t("twin_registry", "has_sub_cohort", "twingene")), "inverse: {got:?}");
+    assert!(
+        got.contains(&t("twingene", "sub_cohort_of", "swedish_cohorts")),
+        "transitive: {got:?}"
+    );
+    assert!(
+        got.contains(&t("swedish_cohorts", "has_sub_cohort", "twingene")),
+        "inverse of the transitive closure: {got:?}"
+    );
+    assert!(!got.contains(&t("twin_registry", "sub_cohort_of", "twingene")), "{got:?}");
+}
+
+/// The DL backend realises individuals to their direct types.
+#[test]
+fn dl_class_assertions_are_direct_types() {
+    use horned_owl::model::{ClassAssertion, Individual, NamedIndividual};
+    let b = Build::new_rc();
+    let c = |n: &str| CE::Class(b.class(format!("{NS}{n}")));
+    let sub = |x: CE<_>, y: CE<_>| Component::SubClassOf(horned_owl::model::SubClassOf { sub: x, sup: y });
+    let m = model_from(vec![
+        sub(c("Cohort"), c("Group")),
+        Component::ClassAssertion(ClassAssertion {
+            ce: c("Cohort"),
+            i: Individual::Named(NamedIndividual(b.iri(format!("{NS}ukb")))),
+        }),
+    ]);
+    let r = DlReasoner::classify(&m);
+    let got = r.class_assertions();
+    assert_eq!(got, vec![(format!("{NS}ukb"), format!("{NS}Cohort"))], "{got:?}");
+}

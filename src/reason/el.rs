@@ -437,6 +437,47 @@ impl Reasoner {
         out
     }
 
+    /// Inferred object property assertions: every `(subject, property, object)`
+    /// triple of asserted individuals and a named object property for which
+    /// `property(subject, object)` is entailed — the asserted assertions closed
+    /// under the property hierarchy, property chains and transitivity. An
+    /// individual is a singleton nominal concept here, so `r(a, b)` is read off
+    /// as an `r`-link from `a` to a concept subsumed by `{b}`.
+    pub fn object_property_assertions(&self) -> Vec<(String, String, String)> {
+        let individuals: HashSet<CId> = self.individuals.iter().copied().collect();
+        let mut out = Vec::new();
+        for ((r, x), ys) in &self.state.r_succ {
+            if !individuals.contains(x) {
+                continue;
+            }
+            let r_iri = match self.role_iri.get(*r as usize) {
+                Some(iri)
+                    if !iri.starts_with("__owlmake_aux_role_")
+                        && iri != "http://www.w3.org/2002/07/owl#topObjectProperty" =>
+                {
+                    iri
+                }
+                _ => continue,
+            };
+            let Some(x_iri) = &self.class_iri[*x as usize] else {
+                continue;
+            };
+            for &y in ys {
+                for &d in self.state.s[y as usize].iter().chain(std::iter::once(&y)) {
+                    if !individuals.contains(&d) {
+                        continue;
+                    }
+                    if let Some(d_iri) = &self.class_iri[d as usize] {
+                        out.push((x_iri.clone(), r_iri.clone(), d_iri.clone()));
+                    }
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// All entailed subsumptions `sub ⊑ sup` between distinct named classes,
     /// excluding ⊤/⊥ and tautologies. Returns (sub_iri, sup_iri) pairs.
     pub fn all_subsumptions(&self) -> Vec<(String, String)> {

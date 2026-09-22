@@ -3257,3 +3257,41 @@ fn release_assets_are_uploaded_to_a_release() {
         ]
     );
 }
+
+/// `reason --axiom-generators PropertyAssertion` asserts the entailed object
+/// property assertions between individuals; with `--reasoner hermit` that
+/// includes the inverse of an asserted assertion.
+#[test]
+fn reason_property_assertion_generator() {
+    let inp = tmp("pa.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://ex/>)\nOntology(\n\
+         Declaration(ObjectProperty(:hasSubCohort))\nDeclaration(ObjectProperty(:isSubCohortOf))\n\
+         Declaration(NamedIndividual(:twingene))\nDeclaration(NamedIndividual(:registry))\n\
+         InverseObjectProperties(:hasSubCohort :isSubCohortOf)\n\
+         ObjectPropertyAssertion(:isSubCohortOf :twingene :registry)\n)\n",
+    )
+    .unwrap();
+    let out = tmp("pa-out.ofn");
+    let status = bin()
+        .args(["reason", "--reasoner", "hermit", "--axiom-generators", "PropertyAssertion"])
+        .args(["--annotate-inferred-axioms", "true", "--exclude-duplicate-axioms", "true"])
+        .arg("-i").arg(&inp).arg("-o").arg(&out).args(["--format", "ofn"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "reason failed");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        text.contains(
+            "ObjectPropertyAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> \"true\") \
+             <http://ex/hasSubCohort> <http://ex/registry> <http://ex/twingene>)"
+        ),
+        "the inverse assertion is asserted and marked inferred:\n{text}"
+    );
+    assert_eq!(
+        text.matches("ObjectPropertyAssertion(").count(),
+        2,
+        "the asserted assertion is not duplicated:\n{text}"
+    );
+}

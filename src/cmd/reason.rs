@@ -2,7 +2,8 @@
 //!
 //! By default this checks coherence (no unsatisfiable classes) and asserts the
 //! transitive reduction of inferred SubClassOf axioms. The full option set is
-//! available: axiom generators, indirect inference, tautology/owl:Thing/
+//! available: axiom generators (subsumptions, equivalences, class assertions
+//! and object property assertions), indirect inference, tautology/owl:Thing/
 //! duplicate/external exclusion, equivalent-class policy, new-ontology output,
 //! redundant-axiom removal, and unsatisfiable dumping.
 
@@ -13,7 +14,8 @@ use anyhow::{bail, Result};
 use clap::Args as ClapArgs;
 use horned_owl::model::{
     Annotation, AnnotatedComponent, AnnotationValue, ClassAssertion, ClassExpression as CE,
-    Component, EquivalentClasses, Individual, Literal, MutableOntology, SubClassOf,
+    Component, EquivalentClasses, Individual, Literal, MutableOntology, ObjectPropertyAssertion,
+    ObjectPropertyExpression as OPE, SubClassOf,
 };
 
 use crate::model::Model;
@@ -213,7 +215,7 @@ impl ReasonerKind {
     }
 }
 
-/// The `--axiom-generators` names. All fourteen are recognised; the eleven
+/// The `--axiom-generators` names. All fourteen are recognised; the ten
 /// owlmake has no inference for are a hard error, because a name that generated
 /// **no** axioms and still exited 0 would turn `reason` into an expensive no-op.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -321,10 +323,11 @@ fn parse_generators(raw: &[String]) -> Result<Vec<AxiomGenerator>> {
             AxiomGenerator::SubClass
                 | AxiomGenerator::EquivalentClass
                 | AxiomGenerator::ClassAssertion
+                | AxiomGenerator::PropertyAssertion
         ) {
             bail!(
-                "--axiom-generators {}: owlmake infers only SubClass, EquivalentClass and \
-                 ClassAssertion; refusing to silently emit nothing for '{}'",
+                "--axiom-generators {}: owlmake infers only SubClass, EquivalentClass, \
+                 ClassAssertion and PropertyAssertion; refusing to silently emit nothing for '{}'",
                 gen.robot_name(),
                 gen.robot_name()
             );
@@ -497,6 +500,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     let want_subclass = generators.contains(&AxiomGenerator::SubClass);
     let want_equiv = generators.contains(&AxiomGenerator::EquivalentClass);
     let want_class_assertion = generators.contains(&AxiomGenerator::ClassAssertion);
+    let want_property_assertion = generators.contains(&AxiomGenerator::PropertyAssertion);
     // The equivalence policy needs the inferred equivalence pairs, NOT the full
     // subsumption closure: each backend computes them directly (O(n·|S(c)|)).
     // `--equivalent-classes-allowed asserted-only` is on essentially every
@@ -509,6 +513,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // (huge) parsed model can be freed before saturation in reasoning-only mode —
     // on phenio that drops ~12 GB held uselessly through the ~60 s saturation.
     let declared = declared_classes(&model);
+    let declared_individuals = declared_individuals(&model);
     let existing = existing_subclass_pairs(&model);
     // `--equivalent-classes-allowed asserted-only` subtracts the equivalences the
     // input ALREADY states, so the asserted set must be captured here, before the
@@ -565,6 +570,11 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             } else {
                 Vec::new()
             },
+            property_assertions: if want_property_assertion {
+                r.object_property_assertions()
+            } else {
+                Vec::new()
+            },
         }
     } else {
         classify(
@@ -573,6 +583,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             need_all,
             need_equiv,
             want_class_assertion,
+            want_property_assertion,
         )
     };
     let Classification {
@@ -582,6 +593,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         all,
         equiv,
         class_assertions,
+        property_assertions,
     } = cls;
 
     if !consistent {
@@ -852,6 +864,31 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         }
     }
 
+    if want_property_assertion {
+        let existing_pa = existing_object_property_assertions(&target);
+        for (from, prop, to) in &property_assertions {
+            if opts.exclude_external_entities && !declared_individuals.contains(from) {
+                continue;
+            }
+            if opts.exclude_duplicate_axioms
+                && existing_pa.contains(&(from.clone(), prop.clone(), to.clone()))
+            {
+                continue;
+            }
+            let ax = Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
+                ope: OPE::ObjectProperty(target.build.object_property(prop.clone())),
+                from: Individual::Named(target.build.named_individual(from.clone())),
+                to: Individual::Named(target.build.named_individual(to.clone())),
+            });
+            if taut_checker.as_ref().is_some_and(|t| t.is_tautology(&ax)) {
+                continue;
+            }
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+                added += 1;
+            }
+        }
+    }
+
     status!("reason: asserted {added} inferred axiom(s)");
 
     // Redundant-subclass removal (on by default): drop an asserted NAMED,
@@ -950,6 +987,9 @@ struct Classification {
     /// Inferred direct class assertions (individual_iri, class_iri), only the
     /// `class-assertion` generator populates this.
     class_assertions: Vec<(String, String)>,
+    /// Inferred object property assertions (subject, property, object) between
+    /// named individuals; only the `property-assertion` generator populates this.
+    property_assertions: Vec<(String, String, String)>,
 }
 
 fn classify(
@@ -958,6 +998,7 @@ fn classify(
     need_all: bool,
     need_equiv: bool,
     need_class_assertions: bool,
+    need_property_assertions: bool,
 ) -> Classification {
     match kind {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so `hermit`/
@@ -967,16 +1008,26 @@ fn classify(
             let r = crate::reason::DlReasoner::classify(model);
             let direct = r.direct_subsumptions();
             let all = if need_all { r.all_subsumptions() } else { Vec::new() };
-            if need_class_assertions {
-                status!("note: the 'class-assertion' generator needs the EL reasoner; no inferred class assertions from '{kind:?}'");
-            }
+            // The ABox queries need a consistent ontology; `reason_with` fails
+            // on inconsistency right after this, so an inconsistent one just
+            // gets no assertions.
+            let consistent = r.is_consistent();
             Classification {
-                consistent: r.is_consistent(),
+                consistent,
                 unsat: r.unsatisfiable(),
                 direct,
                 all,
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
-                class_assertions: Vec::new(),
+                class_assertions: if need_class_assertions && consistent {
+                    r.class_assertions()
+                } else {
+                    Vec::new()
+                },
+                property_assertions: if need_property_assertions && consistent {
+                    r.object_property_assertions()
+                } else {
+                    Vec::new()
+                },
             }
         }
         ReasonerKind::Whelk => {
@@ -985,6 +1036,9 @@ fn classify(
             let direct = r.direct_subsumptions();
             if need_class_assertions {
                 status!("note: the 'class-assertion' generator needs the built-in EL reasoner; no inferred class assertions from whelk");
+            }
+            if need_property_assertions {
+                status!("note: the 'property-assertion' generator needs the built-in EL reasoner or hermit; no inferred property assertions from whelk");
             }
             Classification {
                 consistent: r.is_consistent(),
@@ -997,6 +1051,7 @@ fn classify(
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
                 direct,
                 class_assertions: Vec::new(),
+                property_assertions: Vec::new(),
             }
         }
         // `structural`: the TOLD hierarchy, no reasoning at all.
@@ -1030,6 +1085,11 @@ fn classify(
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
                 class_assertions: if need_class_assertions {
                     r.class_assertions()
+                } else {
+                    Vec::new()
+                },
+                property_assertions: if need_property_assertions {
+                    r.object_property_assertions()
                 } else {
                     Vec::new()
                 },
@@ -1138,6 +1198,7 @@ fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Class
         all,
         equiv,
         class_assertions: Vec::new(),
+        property_assertions: Vec::new(),
     }
 }
 
@@ -1289,6 +1350,36 @@ fn existing_class_assertions(model: &Model) -> std::collections::HashSet<(String
             if let (CE::Class(c), Individual::Named(i)) = (&ca.ce, &ca.i) {
                 out.insert((i.0.as_ref().to_string(), c.0.as_ref().to_string()));
             }
+        }
+    }
+    out
+}
+
+/// The asserted `(subject, property, object)` assertions between named
+/// individuals on named properties, for `--exclude-duplicate-axioms`.
+fn existing_object_property_assertions(model: &Model) -> HashSet<(String, String, String)> {
+    let mut out = HashSet::new();
+    for ac in model.ont.iter() {
+        if let Component::ObjectPropertyAssertion(pa) = &ac.component {
+            if let (OPE::ObjectProperty(p), Individual::Named(f), Individual::Named(t)) =
+                (&pa.ope, &pa.from, &pa.to)
+            {
+                out.insert((
+                    f.0.as_ref().to_string(),
+                    p.0.as_ref().to_string(),
+                    t.0.as_ref().to_string(),
+                ));
+            }
+        }
+    }
+    out
+}
+
+fn declared_individuals(model: &Model) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for ac in model.ont.iter() {
+        if let Component::DeclareNamedIndividual(d) = &ac.component {
+            out.insert(d.0 .0.as_ref().to_string());
         }
     }
     out
