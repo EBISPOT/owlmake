@@ -2311,6 +2311,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     /// change what the mirror says.
     type IndProp = (String, String, Option<String>);
     let mut ind_props: BTreeMap<String, Vec<IndProp>> = BTreeMap::new();
+    // An annotated property assertion is reified as an `<owl:Axiom>` after the
+    // individual, like an annotated `rdf:type`: COHO's `has_data_collection_location`
+    // assertions carry the recruitment quote and its source this way.
+    type PropReif = (String, String, Option<String>, Vec<(String, AnnotationValue<RcStr>)>);
+    let mut prop_reif: BTreeMap<String, Vec<PropReif>> = BTreeMap::new();
     let mut ann_assertions: BTreeMap<String, Vec<Ann>> = BTreeMap::new();
     let mut anon_ind: BTreeMap<String, Vec<Ann>> = BTreeMap::new();
     // `rdf:type` of an anonymous individual — `ClassAssertion(C, _:x)`, the first
@@ -2763,6 +2768,14 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         o.0.as_ref().to_string(),
                         None,
                     ));
+                    if !ac.ann.is_empty() {
+                        prop_reif.entry(s.0.as_ref().to_string()).or_default().push((
+                            p.0.as_ref().to_string(),
+                            o.0.as_ref().to_string(),
+                            None,
+                            ax_anns(ac),
+                        ));
+                    }
                 }
             }
             Component::DataPropertyAssertion(dpa) => {
@@ -2781,8 +2794,16 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     ind_props.entry(s.0.as_ref().to_string()).or_default().push((
                         dpa.dp.0.as_ref().to_string(),
                         dpa.to.literal().clone(),
-                        Some(attrs),
+                        Some(attrs.clone()),
                     ));
+                    if !ac.ann.is_empty() {
+                        prop_reif.entry(s.0.as_ref().to_string()).or_default().push((
+                            dpa.dp.0.as_ref().to_string(),
+                            dpa.to.literal().clone(),
+                            Some(attrs),
+                            ax_anns(ac),
+                        ));
+                    }
                 }
             }
             Component::ObjectPropertyDomain(d) => {
@@ -4030,8 +4051,20 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             body.push_str(&abody);
+            let mut prop_reifs = String::new();
+            if let Some(reifs) = prop_reif.get(iri) {
+                let mut reifs = reifs.clone();
+                reifs.sort_by(|a, b| iri_key(&a.0).cmp(&iri_key(&b.0)).then_with(|| a.1.cmp(&b.1)));
+                for (p, v, lit, anns) in reifs {
+                    let t = match lit {
+                        Some(attrs) => format!("        <owl:annotatedTarget{attrs}>{}</owl:annotatedTarget>\n", esc(&v)),
+                        None => format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(&v)),
+                    };
+                    prop_reifs.push_str(&edge_reif(iri, &esc_attr(&p), &t, &anns, prefixes));
+                }
+            }
             let mut after = order_reifs_by_genid(
-                &format!("{after}{}", type_reifs(iri)),
+                &format!("{after}{}{prop_reifs}", type_reifs(iri)),
                 reif_genids.get(iri),
             );
             if let Some(negs) = neg_assertions.get(iri) {
