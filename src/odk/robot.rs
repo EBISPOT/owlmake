@@ -1311,6 +1311,8 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             )
             .map(|s| s == "true"),
             exclude_duplicate_axioms: val2("--exclude-duplicate-axioms", "-x").map(|s| s == "true"),
+            axiom_generators: { let mut g = all("--axiom-generators"); g.extend(all("-A")); g },
+            properties: all("--properties"),
         }),
         "relax" => Step::Op(Op::Relax {
             include_subclass_of: boolv("--include-subclass-of").unwrap_or(false),

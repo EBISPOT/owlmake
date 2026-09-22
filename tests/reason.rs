@@ -659,7 +659,7 @@ fn dl_object_property_assertions_include_inverses() {
     ]);
     let r = DlReasoner::classify(&m);
     assert!(r.is_consistent());
-    let got = r.object_property_assertions();
+    let got = r.object_property_assertions(&Default::default());
     let t = |f: &str, p: &str, t: &str| {
         (format!("{NS}{f}"), format!("{NS}{p}"), format!("{NS}{t}"))
     };

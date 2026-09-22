@@ -57,6 +57,12 @@ pub enum Op {
         /// `-x`/`--exclude-duplicate-axioms` (default false): do not assert
         /// an inferred axiom that is already present.
         exclude_duplicate_axioms: Option<bool>,
+        /// `-A`/`--axiom-generators`: the inference types to assert, as the
+        /// recipe spells them; empty is the command's default, `SubClass`.
+        axiom_generators: Vec<String>,
+        /// `--properties`: the object properties the `PropertyAssertion`
+        /// generator is restricted to; empty is every named object property.
+        properties: Vec<String>,
     },
     Relax {
         /// `relax --include-subclass-of` (default false): also weaken
@@ -717,11 +723,18 @@ fn op_label(op: &Op) -> String {
             }
         }
         Op::Unmerge { .. } => "unmerge".into(),
-        Op::Reason { reasoner, equivalent_classes_allowed, exclude_tautologies, .. } => format!(
-            "reason[{}{}{}]",
+        Op::Reason {
+            reasoner, equivalent_classes_allowed, exclude_tautologies, axiom_generators, ..
+        } => format!(
+            "reason[{}{}{}{}]",
             reasoner.clone().unwrap_or_else(|| "ELK".into()),
             equivalent_classes_allowed.as_ref().map(|e| format!(", eq={e}")).unwrap_or_default(),
             exclude_tautologies.as_ref().map(|e| format!(", tauto={e}")).unwrap_or_default(),
+            if axiom_generators.is_empty() {
+                String::new()
+            } else {
+                format!(", generators={}", axiom_generators.join(" "))
+            },
         ),
         Op::Relax { include_subclass_of } => {
             if *include_subclass_of {

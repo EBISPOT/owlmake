@@ -6231,6 +6231,8 @@ fn apply_op(
             create_new_ontology,
             create_new_ontology_with_annotations,
             exclude_duplicate_axioms,
+            axiom_generators,
+            properties,
         } => {
             let reasoner = reasoner.as_deref().unwrap_or("elk");
             // Honour the recipe's reason flags rather than hardcoding them. A
@@ -6259,6 +6261,8 @@ fn apply_op(
                 exclude_duplicate_axioms: exclude_duplicate_axioms.unwrap_or(false),
                 exclude_external_entities: exclude_external_entities.unwrap_or(false),
                 exclude_owl_thing: exclude_owl_thing.unwrap_or(false),
+                axiom_generators: axiom_generators.clone(),
+                properties: properties.clone(),
                 ..Default::default()
             };
             match closure {

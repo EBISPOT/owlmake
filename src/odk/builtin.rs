@@ -43,7 +43,8 @@ const OPTIONS: &[&str] = &[
     "use_context", "public_release", "public_release_assets", "release_date", "allow_equivalents",
     "ci", "workflows", "import_pattern_ontology", "import_component_format", "create_obo_metadata",
     "gzip_main", "release_artefacts", "release_use_reasoner", "release_annotate_inferred_axioms",
-    "release_materialize_object_properties", "export_formats", "namespaces",
+    "release_materialize_object_properties", "release_property_assertions", "export_formats",
+    "namespaces",
     "use_edit_file_imports", "dosdp_options", "obo_format_options",
     "relax_options", "reduce_options", "catalog_file", "uribase", "uribase_suffix",
     "contact", "creators", "contributors", "report", "ensure_valid_rdfxml",
@@ -191,6 +192,12 @@ pub struct Config {
     pub release_annotate_inferred_axioms: bool,
     #[serde(default)]
     pub release_materialize_object_properties: Option<Vec<String>>,
+    /// Assert, in every reasoned release artefact, the entailed object
+    /// property assertions between named individuals on these properties
+    /// (IRIs or CURIEs). The reasoner decides what those are: an inverse or a
+    /// symmetric property needs one that reads OWL 2 DL.
+    #[serde(default)]
+    pub release_property_assertions: Vec<String>,
     #[serde(default)]
     pub remove_owl_nothing: bool,
     /// Stamp `oboInOwl:date` on the artefacts.
@@ -2945,8 +2952,16 @@ fn artefacts(b: &mut Build, c: &Config) {
         } else {
             String::new()
         };
+        let assertions = if c.release_property_assertions.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " --axiom-generators SubClass,PropertyAssertion --properties {}",
+                c.release_property_assertions.join(",")
+            )
+        };
         format!(
-            "reason --reasoner $(REASONER) --equivalent-classes-allowed {} --exclude-tautologies {}{annotate}",
+            "reason --reasoner $(REASONER) --equivalent-classes-allowed {} --exclude-tautologies {}{annotate}{assertions}",
             c.allow_equivalents, c.exclude_tautologies
         )
     };

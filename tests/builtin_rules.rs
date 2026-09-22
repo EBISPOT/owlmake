@@ -344,3 +344,90 @@ fn tool_named_options_are_owlmakes_own_in_the_file() {
     assert!(err.contains("robot_java_args") && err.contains("JVM"), "{err}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// `release_property_assertions` asks the release's reason step for the
+/// entailed object property assertions on the listed properties, and only
+/// those; with `reasoner: hermit` that reaches the inverse of an asserted
+/// relation.
+#[test]
+fn a_release_asserts_the_property_assertions_it_asks_for() {
+    let mut root = std::env::temp_dir();
+    root.push(format!("owlmake_builtin_{}_assertions", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "emulate_odk_version: 1.6.1\n\
+         id: tiny\n\
+         uribase: http://example.org\n\
+         edit_format: ofn\n\
+         reasoner: hermit\n\
+         release_artefacts:\n- full\n\
+         export_formats:\n- owl\n\
+         release_property_assertions:\n- tiny:hasSubCohort\n\
+         report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(tiny:=<http://example.org/tiny/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/tiny.owl>\n\
+         Declaration(Class(tiny:TINY_0000001))\n\
+         Declaration(ObjectProperty(tiny:hasSubCohort))\n\
+         Declaration(ObjectProperty(tiny:isSubCohortOf))\n\
+         Declaration(ObjectProperty(tiny:partOf))\n\
+         Declaration(NamedIndividual(tiny:TINY_0000002))\n\
+         Declaration(NamedIndividual(tiny:TINY_0000003))\n\
+         Declaration(NamedIndividual(tiny:TINY_0000004))\n\
+         AnnotationAssertion(rdfs:label tiny:TINY_0000001 \"cohort\")\n\
+         InverseObjectProperties(tiny:hasSubCohort tiny:isSubCohortOf)\n\
+         TransitiveObjectProperty(tiny:partOf)\n\
+         ClassAssertion(tiny:TINY_0000001 tiny:TINY_0000002)\n\
+         ClassAssertion(tiny:TINY_0000001 tiny:TINY_0000003)\n\
+         ObjectPropertyAssertion(tiny:isSubCohortOf tiny:TINY_0000003 tiny:TINY_0000002)\n\
+         ObjectPropertyAssertion(tiny:partOf tiny:TINY_0000002 tiny:TINY_0000003)\n\
+         ObjectPropertyAssertion(tiny:partOf tiny:TINY_0000003 tiny:TINY_0000004)\n\
+         )\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+        .args(["make", "tiny.owl", "-C"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let full = owlmake::io::load(&ont.join("tiny.owl")).expect("tiny.owl was built");
+    let assertions: Vec<(String, String, String)> = full
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            horned_owl::model::Component::ObjectPropertyAssertion(a) => match (&a.ope, &a.from, &a.to) {
+                (
+                    horned_owl::model::ObjectPropertyExpression::ObjectProperty(p),
+                    horned_owl::model::Individual::Named(f),
+                    horned_owl::model::Individual::Named(t),
+                ) => Some((p.0.to_string(), f.0.to_string(), t.0.to_string())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let t = |p: &str, f: &str, t: &str| {
+        (
+            format!("http://example.org/tiny/{p}"),
+            format!("http://example.org/tiny/TINY_000000{f}"),
+            format!("http://example.org/tiny/TINY_000000{t}"),
+        )
+    };
+    assert!(
+        assertions.contains(&t("hasSubCohort", "2", "3")),
+        "the release carries the inverse assertion on the listed property: {assertions:?}"
+    );
+    assert!(
+        !assertions.contains(&t("partOf", "2", "4")),
+        "the closure of the unlisted transitive property is not asserted: {assertions:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

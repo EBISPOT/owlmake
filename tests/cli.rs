@@ -3317,3 +3317,48 @@ fn reason_hermit_reports_inconsistency_as_an_error() {
     assert!(stderr.contains("ontology is inconsistent"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
+
+/// `reason --properties` restricts the `PropertyAssertion` generator to the
+/// named object properties, given as CURIEs of the ontology's own prefixes.
+#[test]
+fn reason_property_assertions_restricted_to_named_properties() {
+    let inp = tmp("pa-props.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://ex/>)\nOntology(\n\
+         Declaration(ObjectProperty(:hasSubCohort))\nDeclaration(ObjectProperty(:isSubCohortOf))\n\
+         Declaration(ObjectProperty(:partOf))\n\
+         Declaration(NamedIndividual(:a))\nDeclaration(NamedIndividual(:b))\nDeclaration(NamedIndividual(:c))\n\
+         InverseObjectProperties(:hasSubCohort :isSubCohortOf)\n\
+         TransitiveObjectProperty(:partOf)\n\
+         ObjectPropertyAssertion(:isSubCohortOf :a :b)\n\
+         ObjectPropertyAssertion(:partOf :a :b)\nObjectPropertyAssertion(:partOf :b :c)\n)\n",
+    )
+    .unwrap();
+    let run = |properties: &str| {
+        let out = tmp(&format!("pa-props-out-{}.ofn", properties.len()));
+        let status = bin()
+            .args(["reason", "--reasoner", "hermit", "--axiom-generators", "PropertyAssertion"])
+            .args(["--exclude-duplicate-axioms", "true", "--properties", properties])
+            .arg("-i").arg(&inp).arg("-o").arg(&out).args(["--format", "ofn"])
+            .status()
+            .unwrap();
+        assert!(status.success(), "reason failed");
+        std::fs::read_to_string(&out).unwrap()
+    };
+    let text = run(":hasSubCohort");
+    assert!(
+        text.contains("ObjectPropertyAssertion(<http://ex/hasSubCohort> <http://ex/b> <http://ex/a>)"),
+        "the listed property's inverse assertion is asserted:\n{text}"
+    );
+    assert!(
+        !text.contains("ObjectPropertyAssertion(<http://ex/partOf> <http://ex/a> <http://ex/c>)"),
+        "the transitive closure of an unlisted property is not:\n{text}"
+    );
+    let text = run(":partOf,:hasSubCohort");
+    assert!(
+        text.contains("ObjectPropertyAssertion(<http://ex/partOf> <http://ex/a> <http://ex/c>)")
+            && text.contains("ObjectPropertyAssertion(<http://ex/hasSubCohort> <http://ex/b> <http://ex/a>)"),
+        "both listed properties' inferences are asserted:\n{text}"
+    );
+}

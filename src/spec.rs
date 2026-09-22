@@ -779,6 +779,13 @@ pub enum StepSpec {
         create_new_ontology_with_annotations: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exclude_duplicate_axioms: Option<bool>,
+        /// The inference types to assert; empty is the default, `SubClass`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        axiom_generators: Vec<String>,
+        /// The object properties the `PropertyAssertion` generator is
+        /// restricted to; empty is every named object property.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        properties: Vec<String>,
     },
     /// Relax equivalence axioms into weaker existentials.
     Relax {
@@ -1704,6 +1711,8 @@ impl StepSpec {
                 create_new_ontology,
                 create_new_ontology_with_annotations,
                 exclude_duplicate_axioms,
+                axiom_generators,
+                properties,
             } => StepSpec::Reason {
                 reasoner: reasoner.clone(),
                 equivalent_classes_allowed: equivalent_classes_allowed.clone(),
@@ -1716,6 +1725,8 @@ impl StepSpec {
                 create_new_ontology: *create_new_ontology,
                 create_new_ontology_with_annotations: *create_new_ontology_with_annotations,
                 exclude_duplicate_axioms: *exclude_duplicate_axioms,
+                axiom_generators: axiom_generators.clone(),
+                properties: properties.clone(),
             },
             Op::Relax { include_subclass_of } => {
                 StepSpec::Relax { include_subclass_of: *include_subclass_of }
@@ -1916,6 +1927,8 @@ impl StepSpec {
                 create_new_ontology,
                 create_new_ontology_with_annotations,
                 exclude_duplicate_axioms,
+                axiom_generators,
+                properties,
             } => Step::Op(Op::Reason {
                 reasoner,
                 equivalent_classes_allowed,
@@ -1928,6 +1941,8 @@ impl StepSpec {
                 create_new_ontology,
                 create_new_ontology_with_annotations,
                 exclude_duplicate_axioms,
+                axiom_generators,
+                properties,
             }),
             StepSpec::Relax { include_subclass_of } => {
                 Step::Op(Op::Relax { include_subclass_of })
@@ -2609,7 +2624,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.3.0";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.3.2";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3201,7 +3216,15 @@ mod format_floor_tests {
         // owlmake does not run are refused. Only the schema's description
         // changed with the option names; an older build refuses a file that
         // names `report` as an unknown key, loudly, so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "5a37aa4286246567";
+        //
+        // A reason step carries `axiom_generators` and `properties`: which
+        // inference types it asserts, and which object properties its
+        // property assertions are restricted to. A step's fields are not
+        // refused when unknown, so a 0.3.1 build reading a plan that asks for
+        // property assertions would reason without them and release an
+        // ontology missing what the plan says it holds. That is the silent
+        // case, so the floor moves to 0.3.2.
+        const PLAN_SCHEMA_DIGEST: &str = "222f1830c071e35f";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

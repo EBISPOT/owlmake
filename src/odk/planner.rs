@@ -2399,6 +2399,8 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
                 create_new_ontology: None,
                 create_new_ontology_with_annotations: None,
                 exclude_duplicate_axioms: None,
+                axiom_generators: Vec::new(),
+                properties: Vec::new(),
             }),
             Step::Op(Op::Reduce { reasoner: None, include_subproperties: None }),
         ];
@@ -2492,6 +2494,8 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         create_new_ontology: None,
         create_new_ontology_with_annotations: None,
         exclude_duplicate_axioms: None,
+        axiom_generators: Vec::new(),
+        properties: Vec::new(),
     };
     let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None };
     let ann = |art: &str| {

@@ -71,9 +71,16 @@ pub struct Args {
     pub annotate_inferred_axioms: Option<bool>,
 
     /// Inference types to assert: `SubClass`, `EquivalentClass`,
-    /// `ClassAssertion`, … Repeatable / comma-separated. Default: `SubClass`.
+    /// `ClassAssertion`, `PropertyAssertion`. Repeatable / comma-separated.
+    /// Default: `SubClass`.
     #[arg(short = 'A', long, value_delimiter = ',')]
     pub axiom_generators: Vec<String>,
+
+    /// The object properties whose inferred assertions the `PropertyAssertion`
+    /// generator asserts, as IRIs or CURIEs. Repeatable / comma-separated.
+    /// Default: every named object property in the signature.
+    #[arg(long, value_delimiter = ',')]
+    pub properties: Vec<String>,
 
     /// Assert all (indirect) subsumptions, not just the direct ones (`<bool>`).
     #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
@@ -375,6 +382,9 @@ pub struct ReasonOptions {
     pub annotate_inferred_axioms: bool,
     pub allow_incoherent: bool,
     pub axiom_generators: Vec<String>,
+    /// The object properties the `PropertyAssertion` generator is restricted to
+    /// (IRIs or CURIEs); empty means every named object property.
+    pub properties: Vec<String>,
     pub include_indirect: bool,
     pub equivalent_classes_allowed: String,
     pub create_new_ontology: bool,
@@ -394,6 +404,7 @@ impl Default for ReasonOptions {
             annotate_inferred_axioms: false,
             allow_incoherent: false,
             axiom_generators: Vec::new(),
+            properties: Vec::new(),
             include_indirect: false,
             equivalent_classes_allowed: "all".to_string(),
             create_new_ontology: false,
@@ -431,6 +442,7 @@ impl Args {
             annotate_inferred_axioms: self.annotate_inferred_axioms.unwrap_or(false),
             allow_incoherent: self.allow_incoherent,
             axiom_generators: self.axiom_generators.clone(),
+            properties: self.properties.clone(),
             include_indirect: self.include_indirect.unwrap_or(false),
             equivalent_classes_allowed: self.equivalent_classes_allowed.clone(),
             create_new_ontology: self.create_new_ontology.unwrap_or(false),
@@ -514,6 +526,15 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // on phenio that drops ~12 GB held uselessly through the ~60 s saturation.
     let declared = declared_classes(&model);
     let declared_individuals = declared_individuals(&model);
+    // The properties the PropertyAssertion generator is restricted to, expanded
+    // against the model's prefixes here, before the model may be released.
+    let assertion_properties: HashSet<String> = opts
+        .properties
+        .iter()
+        .flat_map(|p| p.split([',', ' ']))
+        .filter(|p| !p.is_empty())
+        .map(|p| crate::cmd::select::expand(&model, p))
+        .collect();
     let existing = existing_subclass_pairs(&model);
     // `--equivalent-classes-allowed asserted-only` subtracts the equivalences the
     // input ALREADY states, so the asserted set must be captured here, before the
@@ -584,6 +605,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             need_equiv,
             want_class_assertion,
             want_property_assertion,
+            &assertion_properties,
         )
     };
     let Classification {
@@ -593,8 +615,11 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         all,
         equiv,
         class_assertions,
-        property_assertions,
+        mut property_assertions,
     } = cls;
+    if !assertion_properties.is_empty() {
+        property_assertions.retain(|(_, p, _)| assertion_properties.contains(p));
+    }
 
     if !consistent {
         bail!("ontology is inconsistent (owl:Thing is unsatisfiable)");
@@ -999,6 +1024,7 @@ fn classify(
     need_equiv: bool,
     need_class_assertions: bool,
     need_property_assertions: bool,
+    assertion_properties: &HashSet<String>,
 ) -> Classification {
     match kind {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so `hermit`/
@@ -1024,7 +1050,7 @@ fn classify(
                     Vec::new()
                 },
                 property_assertions: if need_property_assertions && consistent {
-                    r.object_property_assertions()
+                    r.object_property_assertions(assertion_properties)
                 } else {
                     Vec::new()
                 },

@@ -791,11 +791,15 @@ impl DlReasoner {
     }
 
     /// Every entailed object property assertion between named individuals, as
-    /// `(subject, property, object)` triples, over the named object properties
-    /// in the signature. One saturated model is read off for every property at
-    /// once; each property's query then only confirms the pairs that model
-    /// left undecided. The ontology must be consistent.
-    pub fn object_property_assertions(&self) -> Vec<(String, String, String)> {
+    /// `(subject, property, object)` triples, over `properties`, or over every
+    /// named object property in the signature when that is empty. One
+    /// saturated model is read off for every property at once; each property's
+    /// query then only confirms the pairs that model left undecided. The
+    /// ontology must be consistent.
+    pub fn object_property_assertions(
+        &self,
+        properties: &std::collections::HashSet<String>,
+    ) -> Vec<(String, String, String)> {
         let _hb = crate::progress::Heartbeat::start(
             "reason: hermit-rs retrieving object property instances",
         );
@@ -804,7 +808,10 @@ impl DlReasoner {
                 .unwrap_or_else(|e| die(e));
         let build = Build::new_arc();
         let mut out = Vec::new();
-        for p in &self.object_properties {
+        let mut asked: Vec<String> = properties.iter().cloned().collect();
+        asked.sort();
+        let queried = if asked.is_empty() { &self.object_properties } else { &asked };
+        for p in queried {
             let ope = ho::ObjectPropertyExpression::ObjectProperty(build.object_property(p.clone()));
             let pairs = index.object_property_instances(ope).unwrap_or_else(|e| die(e));
             for (from, to) in pairs {
