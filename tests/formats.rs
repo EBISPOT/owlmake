@@ -228,3 +228,57 @@ fn an_equivalence_between_two_inverses_survives_rdfxml() {
     assert!(kept, "the axiom did not survive the round trip:\n{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An annotated property assertion on an individual is reified as an
+/// `<owl:Axiom>` after the individual's block, like an annotated `rdf:type`.
+/// Written bare instead, COHO's `has_data_collection_location` assertions lose
+/// the recruitment quote and its source URL in every RDF/XML release.
+#[test]
+fn an_annotated_property_assertion_survives_rdfxml() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use horned_owl::model::{
+        Annotation, AnnotationValue, DeclareNamedIndividual, DeclareObjectProperty, Individual,
+        Literal, ObjectPropertyAssertion, ObjectPropertyExpression as OPE,
+    };
+    let b = Build::new();
+    let mut ont = SetOntology::new();
+    let p = b.object_property(format!("{NS}located_in"));
+    let s = b.named_individual(format!("{NS}I_1"));
+    let o = b.named_individual(format!("{NS}I_2"));
+    ont.insert(Component::DeclareObjectProperty(DeclareObjectProperty(p.clone())));
+    ont.insert(Component::DeclareNamedIndividual(DeclareNamedIndividual(s.clone())));
+    ont.insert(Component::DeclareNamedIndividual(DeclareNamedIndividual(o.clone())));
+    let mut ac = horned_owl::model::AnnotatedComponent::from(Component::ObjectPropertyAssertion(
+        ObjectPropertyAssertion {
+            ope: OPE::ObjectProperty(p.clone()),
+            from: Individual::Named(s.clone()),
+            to: Individual::Named(o.clone()),
+        },
+    ));
+    ac.ann.insert(Annotation {
+        ann: Default::default(),
+        ap: b.annotation_property("http://www.w3.org/2000/01/rdf-schema#comment"),
+        av: AnnotationValue::Literal(Literal::Simple { literal: "recruited in Kuopio".into() }),
+    });
+    ont.insert(ac);
+    let mut model = Model::from_parts(ont, owlmake::model::default_prefixes());
+
+    let dir = std::env::temp_dir().join(format!("om-annopa-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.owl");
+    io::save_as(&mut model, &path, Format::RdfXml).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains(&format!("<annotatedProperty rdf:resource=\"{NS}located_in\"/>"))
+            || text.contains(&format!("<owl:annotatedProperty rdf:resource=\"{NS}located_in\"/>")),
+        "the assertion is not reified:\n{text}"
+    );
+
+    let back = io::load(&path).unwrap();
+    let kept = back.ont.iter().any(|ac| {
+        matches!(&ac.component, Component::ObjectPropertyAssertion(_))
+            && ac.ann.iter().any(|a| matches!(&a.av, AnnotationValue::Literal(l) if l.literal() == "recruited in Kuopio"))
+    });
+    assert!(kept, "the axiom annotation did not survive the round trip:\n{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
