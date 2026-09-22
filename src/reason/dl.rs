@@ -100,9 +100,23 @@ impl ClassificationProgressMonitor<Class<ArcStr>> for ProgressMonitor {
 /// with ETA once per-concept classification begins; the final summary line is
 /// printed when classification returns. Falls back to a plain classify when
 /// progress is disabled.
+/// The hermit-rs configuration every classification here runs under: the
+/// defaults, except that an inconsistent ontology classifies to the collapsed
+/// hierarchy (every class in the one ⊤/⊥ node) instead of raising an error.
+/// Inconsistency is an answer the callers read off that hierarchy, through
+/// [`DlReasoner::is_consistent`] and [`DlReasoner::unsatisfiable`], and report
+/// as they see fit; it is not a failure of the reasoner.
+fn configuration() -> hermit_rs::configuration::Configuration {
+    hermit_rs::configuration::Configuration {
+        throw_inconsistent_ontology_exception: false,
+        ..Default::default()
+    }
+}
+
 fn classify_with_progress(ont: &SetOntology<ArcStr>) -> Hierarchy<Class<ArcStr>> {
     if !crate::progress::enabled() {
-        return hermit::classify(ont).unwrap_or_else(|e| die(e));
+        return hermit::classify_with_configuration(ont, &configuration())
+            .unwrap_or_else(|e| die(e));
     }
 
     let state = Arc::new(ProgressState::default());
@@ -154,7 +168,7 @@ fn classify_with_progress(ont: &SetOntology<ArcStr>) -> Hierarchy<Class<ArcStr>>
     };
 
     let mut monitor = ProgressMonitor { state };
-    let result = hermit::classify_with_monitor(ont, &mut monitor);
+    let result = hermit::classify_with_configuration_and_monitor(ont, &configuration(), &mut monitor);
     finished.store(true, Ordering::Relaxed);
     let _ = hb.join();
     result.unwrap_or_else(|e| die(e))

@@ -3295,3 +3295,25 @@ fn reason_property_assertion_generator() {
         "the asserted assertion is not duplicated:\n{text}"
     );
 }
+
+/// `reason --reasoner hermit` on an inconsistent ontology fails with the
+/// inconsistency error, as it does under the EL reasoner: never with a panic.
+#[test]
+fn reason_hermit_reports_inconsistency_as_an_error() {
+    let inp = tmp("inconsistent.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://ex/>)\nOntology(\nDeclaration(Class(:A))\nDeclaration(NamedIndividual(:a))\n\
+         SubClassOf(:A owl:Nothing)\nClassAssertion(:A :a)\n)\n",
+    )
+    .unwrap();
+    let out = tmp("inconsistent-out.ofn");
+    let output = bin()
+        .args(["reason", "--reasoner", "hermit", "-i"]).arg(&inp).arg("-o").arg(&out)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "an inconsistent ontology fails reason");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ontology is inconsistent"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
