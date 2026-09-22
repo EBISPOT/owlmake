@@ -36,19 +36,18 @@ const UNPORTED: &[&str] = &[];
 /// states them in the same place.
 const OPTIONS: &[&str] = &[
     "id", "title", "git_user", "repo", "repo_url", "github_org", "git_main_branch", "edit_format",
-    "run_as_root", "robot_version", "robot_settings", "robot_java_args", "owltools_memory",
     "use_external_date", "remove_owl_nothing", "export_project_yaml", "reasoner",
     "exclude_tautologies", "primary_release", "license", "description", "use_dosdps",
-    "use_templates", "use_mappings", "use_translations", "use_env_file_docker",
+    "use_templates", "use_mappings", "use_translations",
     "use_custom_import_module", "manage_import_declarations", "custom_makefile_header",
     "use_context", "public_release", "public_release_assets", "release_date", "allow_equivalents",
     "ci", "workflows", "import_pattern_ontology", "import_component_format", "create_obo_metadata",
     "gzip_main", "release_artefacts", "release_use_reasoner", "release_annotate_inferred_axioms",
     "release_materialize_object_properties", "export_formats", "namespaces",
-    "use_edit_file_imports", "dosdp_tools_options", "travis_emails", "obo_format_options",
-    "robot_relax_options", "robot_reduce_options", "catalog_file", "uribase", "uribase_suffix",
-    "contact", "creators", "contributors", "robot_report", "ensure_valid_rdfxml",
-    "extra_rdfxml_checks", "robot_plugins", "import_group", "components", "documentation",
+    "use_edit_file_imports", "dosdp_options", "obo_format_options",
+    "relax_options", "reduce_options", "catalog_file", "uribase", "uribase_suffix",
+    "contact", "creators", "contributors", "report", "ensure_valid_rdfxml",
+    "extra_rdfxml_checks", "import_group", "components", "documentation",
     "subset_group", "pattern_pipelines_group", "sssom_mappingset_group",
     "babelon_translation_group", "release_diff",
 ];
@@ -56,6 +55,71 @@ const OPTIONS: &[&str] = &[
 /// Whether `key` names an option of the standard build.
 pub fn is_option(key: &str) -> bool {
     OPTIONS.contains(&key)
+}
+
+/// Options an ODK configuration may state that configure a tool owlmake does
+/// not run, each with what it sets. They have no meaning here: ingest leaves
+/// them out of the plan file, and a plan file that states one is refused with
+/// the reason, so that a setting nothing reads is never carried as if it were.
+pub const TOOL_ONLY: &[(&str, &str)] = &[
+    ("robot_java_args", "a Java heap size; owlmake runs no JVM"),
+    ("owltools_memory", "a Java heap size; owlmake runs no JVM"),
+    ("robot_version", "which ROBOT to install; owlmake's commands are its own"),
+    ("robot_settings", "ROBOT's settings; owlmake's commands are its own"),
+    ("robot_plugins", "ROBOT plugins to install; owlmake loads none"),
+    ("run_as_root", "how the build container runs; owlmake runs in none"),
+    ("use_env_file_docker", "how the build container runs; owlmake runs in none"),
+    ("travis_emails", "Travis CI notifications; owlmake writes no Travis configuration"),
+];
+
+/// What a tool-only option sets, when `key` is one.
+pub fn tool_only_reason(key: &str) -> Option<&'static str> {
+    TOOL_ONLY.iter().find(|(k, _)| *k == key).map(|(_, reason)| *reason)
+}
+
+/// Options an ODK configuration names after the tool ODK runs them with, and
+/// owlmake's name for the same option. Renamed at every depth, so the
+/// per-pipeline `dosdp_tools_options` and a translation's
+/// `include_robot_template_synonyms` follow the top-level keys.
+pub const ODK_RENAMED: &[(&str, &str)] = &[
+    ("robot_report", "report"),
+    ("robot_relax_options", "relax_options"),
+    ("robot_reduce_options", "reduce_options"),
+    ("dosdp_tools_options", "dosdp_options"),
+    ("include_robot_template_synonyms", "include_template_synonyms"),
+];
+
+/// An ODK configuration's options as owlmake names them: the tool-only options
+/// left out (each noted when `note` is set) and the tool-named ones renamed.
+pub fn from_odk_options(mut value: serde_json::Value, note: bool) -> serde_json::Value {
+    if let Some(map) = value.as_object_mut() {
+        for (key, reason) in TOOL_ONLY {
+            if map.remove(*key).is_some() && note {
+                status!("plan: `{key}` sets {reason}; left out");
+            }
+        }
+    }
+    rename_odk_keys(&mut value);
+    value
+}
+
+/// Rename the [`ODK_RENAMED`] keys throughout `value`, keeping every key where
+/// it stood.
+fn rename_odk_keys(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, mut v) in std::mem::take(map) {
+                rename_odk_keys(&mut v);
+                let key = ODK_RENAMED
+                    .iter()
+                    .find(|(from, _)| *from == key)
+                    .map_or(key, |(_, to)| (*to).to_string());
+                map.insert(key, v);
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(rename_odk_keys),
+        _ => {}
+    }
 }
 
 /// The release artefacts the standard build knows how to make.
@@ -106,7 +170,7 @@ pub struct Config {
     #[serde(default)]
     pub components: Option<ComponentGroup>,
     #[serde(default)]
-    pub robot_report: RobotReport,
+    pub report: Report,
     #[serde(default = "default_catalog_file")]
     pub catalog_file: String,
     /// Read prefixes from `config/context.json` in every command.
@@ -142,9 +206,9 @@ pub struct Config {
     #[serde(default)]
     pub obo_format_options: String,
     #[serde(default = "default_relax_options")]
-    pub robot_relax_options: String,
+    pub relax_options: String,
     #[serde(default = "default_reduce_options")]
-    pub robot_reduce_options: String,
+    pub reduce_options: String,
     /// The serialization components and import modules are written in.
     #[serde(default = "default_import_component_format")]
     pub import_component_format: String,
@@ -155,10 +219,6 @@ pub struct Config {
     /// Compare each release with the one published, as part of the build.
     #[serde(default)]
     pub release_diff: bool,
-    /// Kept for repositories whose own rules still call the older tool.
-    #[serde(default)]
-    pub owltools_memory: String,
-
     /// Maintain translations of the ontology's labels and definitions.
     #[serde(default)]
     pub use_translations: bool,
@@ -191,8 +251,8 @@ pub struct Config {
     /// catalog in step with the imports and components stated here.
     #[serde(default = "yes")]
     pub manage_import_declarations: bool,
-    #[serde(default = "default_dosdp_tools_options")]
-    pub dosdp_tools_options: String,
+    #[serde(default = "default_dosdp_options")]
+    pub dosdp_options: String,
     #[serde(default)]
     pub pattern_pipelines_group: Option<PatternPipelineGroup>,
     /// Where the repository is hosted: the pattern documentation links its data
@@ -247,7 +307,7 @@ pub struct Translation {
     pub mirror_synonyms_from: Option<String>,
     /// The language also has a table of synonyms, built as a template.
     #[serde(default)]
-    pub include_robot_template_synonyms: bool,
+    pub include_template_synonyms: bool,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default)]
@@ -352,8 +412,8 @@ pub struct PatternPipelineGroup {
 #[derive(Debug, Deserialize)]
 pub struct PatternPipeline {
     pub id: String,
-    #[serde(default = "default_dosdp_tools_options")]
-    pub dosdp_tools_options: String,
+    #[serde(default = "default_dosdp_options")]
+    pub dosdp_options: String,
     #[serde(default = "default_pipeline_ontology")]
     pub ontology: String,
 }
@@ -364,7 +424,7 @@ impl PatternPipelineGroup {
             if !self.products.iter().any(|p| p.id == id) {
                 self.products.push(PatternPipeline {
                     id,
-                    dosdp_tools_options: default_dosdp_tools_options(),
+                    dosdp_options: default_dosdp_options(),
                     ontology: default_pipeline_ontology(),
                 });
             }
@@ -622,7 +682,7 @@ pub struct ComponentProduct {
 /// and the default checks are the four that do not include `dc-properties`.
 #[derive(Debug, Deserialize)]
 #[serde(from = "Option<StatedReport>")]
-pub struct RobotReport {
+pub struct Report {
     pub fail_on: Option<String>,
     pub use_labels: bool,
     pub use_base_iris: bool,
@@ -659,10 +719,10 @@ struct StatedReport {
     upper_ontology: Option<String>,
 }
 
-impl From<Option<StatedReport>> for RobotReport {
+impl From<Option<StatedReport>> for Report {
     fn from(stated: Option<StatedReport>) -> Self {
-        let Some(s) = stated else { return RobotReport::default() };
-        RobotReport {
+        let Some(s) = stated else { return Report::default() };
+        Report {
             checks_unstated: s.custom_sparql_checks.is_none(),
             fail_on: s.fail_on,
             use_labels: s.use_labels.unwrap_or(true),
@@ -681,9 +741,9 @@ impl From<Option<StatedReport>> for RobotReport {
     }
 }
 
-impl Default for RobotReport {
+impl Default for Report {
     fn default() -> Self {
-        RobotReport {
+        Report {
             fail_on: None,
             use_labels: true,
             use_base_iris: true,
@@ -712,7 +772,7 @@ fn default_edit_format() -> String {
 fn default_reasoner() -> String {
     "ELK".into()
 }
-fn default_dosdp_tools_options() -> String {
+fn default_dosdp_options() -> String {
     "--obo-prefixes=true".into()
 }
 fn default_pipeline_ontology() -> String {
@@ -801,10 +861,10 @@ fn default_sparql_exports() -> Vec<String> {
 }
 
 impl Config {
-    /// Read a configuration written as YAML.
-    pub fn parse(text: &str) -> Result<Config> {
-        let raw: serde_yaml::Value = serde_yaml::from_str(text).context("not a YAML document")?;
-        Self::from_document(raw)
+    /// Read an ODK configuration: its options, under owlmake's names.
+    pub fn parse_odk(text: &str) -> Result<Config> {
+        let raw: serde_json::Value = serde_yaml::from_str(text).context("not a YAML document")?;
+        Self::from_options(from_odk_options(raw, false))
     }
 
     /// Read a configuration held as JSON, as the options of `owlmake.yaml` are.
@@ -1127,7 +1187,7 @@ pub fn model(
         &format!(
             "validate_idranges {}reason_test sparql_test robot_reports {}",
             if config.use_dosdps { "dosdp_validation " } else { "" },
-            if config.robot_report.ensure_owl2dl_profile {
+            if config.report.ensure_owl2dl_profile {
                 "$(REPORTDIR)/validate_profile_owl2dl_$(ONT).owl.txt"
             } else {
                 ""
@@ -1195,12 +1255,8 @@ fn variables(b: &mut Build, c: &Config) {
     } else {
         b.var("ROBOT", "om --catalog $(CATALOG)");
     }
-    if c.owltools_memory.is_empty() {
-        b.var("OWLTOOLS", "owltools --use-catalog");
-    } else {
-        b.var("OWLTOOLS_MEMORY", c.owltools_memory.as_str());
-        b.var("OWLTOOLS", "OWLTOOLS_MEMORY=$(OWLTOOLS_MEMORY) owltools --use-catalog");
-    }
+    // Kept for a repository's own rules that still call the older tool.
+    b.var("OWLTOOLS", "owltools --use-catalog");
     b.var("REASONER", c.reasoner.as_str());
     b.var("RELEASEDIR", "../..");
     b.var("DOCSDIR", "../../docs");
@@ -1216,24 +1272,24 @@ fn variables(b: &mut Build, c: &Config) {
     b.var("COMPONENTSDIR", "components");
     b.var("EXTENDED_PREFIX_MAP", "$(TMPDIR)/obo.epm.json");
     // Where a reasoner tool would look for plugins. owlmake loads none — every
-    // command one supplies is its own — so `robot_plugins` adds no rules; the
-    // variable stays for a repository's rules that name it.
+    // command one supplies is its own — so nothing installs any; the variable
+    // stays for a repository's rules that name it.
     b.var("ROBOT_PLUGINS_DIRECTORY", "$(TMPDIR)/plugins");
-    b.var("REPORT_FAIL_ON", c.robot_report.fail_on.as_deref().unwrap_or("None"));
-    b.var("REPORT_LABEL", if c.robot_report.use_labels { "-l true" } else { "" });
+    b.var("REPORT_FAIL_ON", c.report.fail_on.as_deref().unwrap_or("None"));
+    b.var("REPORT_LABEL", if c.report.use_labels { "-l true" } else { "" });
     // A repository's own report profile, kept beside the edit file.
-    if c.robot_report.custom_profile {
+    if c.report.custom_profile {
         b.var("ROBOT_PROFILE", "profile.txt");
         b.var("REPORT_PROFILE_OPTS", "--profile $(ROBOT_PROFILE)");
     } else {
         b.var("REPORT_PROFILE_OPTS", "");
     }
     b.var("OBO_FORMAT_OPTIONS", c.obo_format_options.as_str());
-    b.var("SPARQL_VALIDATION_CHECKS", c.robot_report.custom_sparql_checks.join(" "));
-    b.var("SPARQL_EXPORTS", c.robot_report.custom_sparql_exports.join(" "));
+    b.var("SPARQL_VALIDATION_CHECKS", c.report.custom_sparql_checks.join(" "));
+    b.var("SPARQL_EXPORTS", c.report.custom_sparql_exports.join(" "));
     b.var("ODK_VERSION_MAKEFILE", format!("v{BEHAVIOUR_SET}"));
-    b.var("RELAX_OPTIONS", c.robot_relax_options.as_str());
-    b.var("REDUCE_OPTIONS", c.robot_reduce_options.as_str());
+    b.var("RELAX_OPTIONS", c.relax_options.as_str());
+    b.var("REDUCE_OPTIONS", c.reduce_options.as_str());
     b.var("TODAY", "$(shell date +%Y-%m-%d)");
     b.var("OBODATE", "$(shell date +'%d:%m:%Y %H:%M')");
     b.var("VERSION", "$(TODAY)");
@@ -1349,7 +1405,7 @@ fn variables(b: &mut Build, c: &Config) {
             languages
                 .iter()
                 .map(|t| {
-                    let synonyms = if t.include_robot_template_synonyms {
+                    let synonyms = if t.include_template_synonyms {
                         format!(" $(TRANSLATIONSDIR)/{}.synonyms.owl", t.id)
                     } else {
                         String::new()
@@ -1394,17 +1450,17 @@ fn variables(b: &mut Build, c: &Config) {
 
     let report_of = |x: &String| if x == "edit" { "$(SRC)".to_string() } else { x.clone() };
     let obo_reports: Vec<String> =
-        c.robot_report.report_on.iter().map(|x| format!("{}-obo-report", report_of(x))).collect();
+        c.report.report_on.iter().map(|x| format!("{}-obo-report", report_of(x))).collect();
     let align_reports: Vec<String> =
-        c.robot_report.report_on.iter().map(|x| format!("{}-align-report", report_of(x))).collect();
-    let aligned = c.robot_report.upper_ontology.as_deref().is_some_and(|u| !u.is_empty());
+        c.report.report_on.iter().map(|x| format!("{}-align-report", report_of(x))).collect();
+    let aligned = c.report.upper_ontology.as_deref().is_some_and(|u| !u.is_empty());
     b.var("OBO_REPORT", obo_reports.join(" "));
     b.var("ALIGNMENT_REPORT", align_reports.join(" "));
     b.var("REPORTS", if aligned { "$(OBO_REPORT) $(ALIGNMENT_REPORT)" } else { "$(OBO_REPORT)" });
     b.var("REPORT_FILES", "$(patsubst %, $(REPORTDIR)/%.tsv, $(REPORTS))");
     b.var(
         "SPARQL_VALIDATION_QUERIES",
-        c.robot_report
+        c.report
             .custom_sparql_checks
             .iter()
             .map(|v| format!("$(SPARQLDIR)/{v}-violation.sparql"))
@@ -1413,7 +1469,7 @@ fn variables(b: &mut Build, c: &Config) {
     );
     b.var(
         "SPARQL_EXPORTS_ARGS",
-        c.robot_report
+        c.report
             .custom_sparql_exports
             .iter()
             .map(|v| format!("-s $(SPARQLDIR)/{v}.sparql $(REPORTDIR)/{v}.tsv"))
@@ -1430,7 +1486,7 @@ fn variables(b: &mut Build, c: &Config) {
     );
     let released_imports =
         if group.is_some_and(|g| g.release_imports) { "$(IMPORT_FILES) " } else { "" };
-    let released_reports = if c.robot_report.release_reports { " $(REPORT_FILES)" } else { "" };
+    let released_reports = if c.report.release_reports { " $(REPORT_FILES)" } else { "" };
     b.var(
         "RELEASE_ASSETS",
         format!("$(MAIN_FILES) {released_imports}$(SUBSET_FILES){released_reports}"),
@@ -1479,12 +1535,12 @@ fn checks(b: &mut Build, c: &Config) {
     );
 
     let on: Vec<String> = c
-        .robot_report
+        .report
         .sparql_test_on
         .iter()
         .map(|x| if x == "edit" { "$(SRCMERGED)".to_string() } else { x.clone() })
         .collect();
-    let verify: Vec<String> = if c.robot_report.custom_sparql_checks.is_empty() {
+    let verify: Vec<String> = if c.report.custom_sparql_checks.is_empty() {
         Vec::new()
     } else {
         on.iter()
@@ -1497,7 +1553,7 @@ fn checks(b: &mut Build, c: &Config) {
     b.rule("sparql_test", &on.join(" "), "$(REPORTDIR)", &verify, &[]);
 
     // What the report treats as this ontology's own terms.
-    let base_iris = match (&c.namespaces, c.robot_report.use_base_iris) {
+    let base_iris = match (&c.namespaces, c.report.use_base_iris) {
         (_, false) => String::new(),
         (Some(ns), true) => ns.iter().map(|i| format!("--base-iri {i} ")).collect(),
         (None, true) => format!("--base-iri $(URIBASE)/{upper}_ --base-iri $(URIBASE)/{id} "),
@@ -1508,7 +1564,7 @@ fn checks(b: &mut Build, c: &Config) {
     );
     b.rule("$(REPORTDIR)/$(SRC)-obo-report.tsv", "$(SRCMERGED)", "$(REPORTDIR)", &[&report], &[]);
     b.rule("$(REPORTDIR)/%-obo-report.tsv", "%", "$(REPORTDIR)", &[&report], &[]);
-    if let Some(upper) = c.robot_report.upper_ontology.as_deref().filter(|u| !u.is_empty()) {
+    if let Some(upper) = c.report.upper_ontology.as_deref().filter(|u| !u.is_empty()) {
         let align = format!(
             "$(ROBOT) odk:check-align -i $< --reasoner $(REASONER) --upper-ontology-iri {upper} \
              {base_iris}--report-output $@"
@@ -1555,7 +1611,7 @@ fn checks(b: &mut Build, c: &Config) {
         &[],
     );
 
-    let exports: &[&str] = if c.robot_report.custom_sparql_exports.is_empty() {
+    let exports: &[&str] = if c.report.custom_sparql_exports.is_empty() {
         &[]
     } else {
         &["$(ROBOT) query -f tsv --use-graphs true -i $< $(SPARQL_EXPORTS_ARGS)"]
@@ -2305,9 +2361,9 @@ fn patterns(b: &mut Build, c: &Config) {
     );
     // `default` first, then the configured pipelines: (directory, variable suffix, options).
     let mut pipelines: Vec<(String, String, String)> =
-        vec![("default".into(), "DEFAULT".into(), c.dosdp_tools_options.clone())];
+        vec![("default".into(), "DEFAULT".into(), c.dosdp_options.clone())];
     pipelines.extend(
-        c.pipelines().iter().map(|p| (p.id.clone(), p.id.to_uppercase(), p.dosdp_tools_options.clone())),
+        c.pipelines().iter().map(|p| (p.id.clone(), p.id.to_uppercase(), p.dosdp_options.clone())),
     );
     let each = |what: &str| -> String {
         pipelines.iter().map(|(_, v, _)| format!("$(DOSDP_{what}_FILES_{v}) ")).collect()
@@ -2461,7 +2517,7 @@ fn patterns(b: &mut Build, c: &Config) {
                 "$(DOSDPT) query --ontology=$< --catalog=$(CATALOG) --reasoner=elk {} \
                  --batch-patterns=\"$(ALL_PATTERN_NAMES)\" --template=\"$(PATTERNDIR)/dosdp-patterns\" \
                  --outfile=\"$(PATTERNDIR)/data/{}/\"",
-                m.dosdp_tools_options, m.id
+                m.dosdp_options, m.id
             )],
             g,
         );
@@ -2531,12 +2587,12 @@ fn translations(b: &mut Build, c: &Config) {
             if t.maintenance == "mirror" {
                 let from = |u: &Option<String>| u.clone().unwrap_or_else(|| "None".into());
                 b.rule(&table, "", "", &[&format!("wget \"{}\" -O $@", from(&t.mirror_babelon_from))], &[]);
-                if t.include_robot_template_synonyms {
+                if t.include_template_synonyms {
                     b.rule(&synonyms, "", "", &[&format!("wget \"{}\" -O $@", from(&t.mirror_synonyms_from))], &[]);
                 }
             } else {
                 b.rule(&table, "", "", &["test -f $@"], &[]);
-                if t.include_robot_template_synonyms {
+                if t.include_template_synonyms {
                     b.rule(&synonyms, "", "", &["test -f $@"], &[]);
                 }
             }

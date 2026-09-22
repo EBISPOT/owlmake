@@ -173,7 +173,7 @@ fn a_standard_file_builds_a_release() {
          edit_format: ofn\n\
          release_artefacts:\n- base\n- full\n\
          export_formats:\n- owl\n- obo\n\
-         robot_report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n\
+         report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n\
          targets:\n\
          - target: greeting\n  steps:\n  - op: print\n    message: built-its-own-way\n\
          - target: test\n  extends: true\n  needs:\n  - greeting\n",
@@ -313,4 +313,34 @@ fn builtin_rules_resolve_to_the_ingested_plan() {
         failed |= !problems.is_empty();
     }
     assert!(!failed, "the built-in rules and the ingested plans differ; see above");
+}
+
+/// The options a repository states by the tool ODK runs them with are written
+/// under owlmake's own names, and the ones that configure a tool owlmake does
+/// not run are left out. A file that states one of those is refused by name.
+#[test]
+fn tool_named_options_are_owlmakes_own_in_the_file() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/coho");
+    let root = repository_for(&fixture, "keys");
+    let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+    let file = root.join("owlmake.yaml");
+    owlmake::spec::save(&spec, &file).expect("saving owlmake.yaml");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\nreport:\n"), "{text}");
+    for odk in ["robot_report", "robot_java_args"] {
+        assert!(!text.contains(odk), "`{odk}` is ODK's name, not owlmake's:\n{text}");
+    }
+
+    let ont = root.join("src/ontology");
+    for entry in std::fs::read_dir(&ont).unwrap().flatten() {
+        let n = entry.file_name().to_string_lossy().to_string();
+        if n == "Makefile" || n.ends_with(".Makefile") || n.ends_with("-odk.yaml") {
+            std::fs::remove_file(entry.path()).unwrap();
+        }
+    }
+    OdkRepo::load(&root).expect("the file under owlmake's names loads");
+    std::fs::write(&file, format!("{text}robot_java_args: -Xmx8G\n")).unwrap();
+    let err = OdkRepo::load(&root).err().map(|e| format!("{e:#}")).unwrap_or_default();
+    assert!(err.contains("robot_java_args") && err.contains("JVM"), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
 }

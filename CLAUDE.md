@@ -132,7 +132,7 @@ which about forty lines were anything the repo had chosen. Nobody can review
 that, and nobody should be asked to commit it.
 
 So the file's top-level keys ARE the repository's options — `release_artefacts`,
-`import_group`, `components`, `robot_report`, … There is no `config:` wrapper:
+`import_group`, `components`, `report`, … There is no `config:` wrapper:
 an option and any other key of the file are the same kind of thing, something the
 repository said. What it builds in a way of its own goes under `targets`, as
 resolved targets (target / needs / steps) in owlmake's own vocabulary — not as
@@ -230,7 +230,7 @@ learns it twice: in ODK's template `x is defined` is ALWAYS true (an unset group
 is `None`, which is defined) and only `is not none` tests anything; an option
 turned off leaves its variable UNDEFINED, so recipes naming it name nothing;
 `.PRECIOUS` lines decide what the planner treats as an intermediate;
-`robot_report` is a plain dictionary, so a configuration that states any of it
+ODK's `robot_report` (owlmake's `report`) is a plain dictionary, so a configuration that states any of it
 gets none of the config class's defaults; and ODK ignores a key it does not know,
 where a committed `owlmake.yaml` refuses one.
 

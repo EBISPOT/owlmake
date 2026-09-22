@@ -292,7 +292,7 @@ impl OdkRepo {
         let dir = resolve_ontology_dir(path)?;
         let yaml_path = find_odk_yaml(&dir)?;
         let text = std::fs::read_to_string(&yaml_path)?;
-        let config = builtin::Config::parse(&text)
+        let config = builtin::Config::parse_odk(&text)
             .with_context(|| format!("reading {}", yaml_path.display()))?;
         let own = if own_rules { OwnRules::File } else { OwnRules::None };
         let make = builtin_configuration(&config, &dir, &[], &[], own)?;
@@ -575,7 +575,9 @@ impl OdkRepo {
         }
 
         let text = std::fs::read_to_string(find_odk_yaml(&with_own.dir)?)?;
-        let stated: serde_json::Value = serde_yaml::from_str(&text)?;
+        // The options under owlmake's names: what configures a tool owlmake does
+        // not run is left out here, with a note.
+        let stated = builtin::from_odk_options(serde_yaml::from_str(&text)?, true);
         let mut spec = OwlmakeSpec::standard(&with_own.yaml.id);
         for (key, value) in stated.as_object().into_iter().flatten() {
             match key.as_str() {

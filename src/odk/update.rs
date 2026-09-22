@@ -216,7 +216,7 @@ fn stubs(c: &Config, dir: &Path) -> Vec<Option<(std::path::PathBuf, String)>> {
                 src.join(format!("translations/{}.babelon.tsv", t.id)),
                 include_str!("update/babelon.tsv").to_string(),
             )));
-            if t.include_robot_template_synonyms {
+            if t.include_template_synonyms {
                 pack.push(Some((
                     src.join(format!("translations/{}.synonyms.tsv", t.id)),
                     include_str!("update/synonyms.tsv").replace("@LANGUAGE@", &t.language),
@@ -277,7 +277,7 @@ fn write_queries(c: &Config, dir: &Path) -> Result<usize> {
         n += always(&sparql.join(name), text)?;
     }
     // One pack again (see `stubs`): the last of these ends in a blank line.
-    let report = &c.robot_report;
+    let report = &c.report;
     let mut pack = vec![(format!("{}_terms.sparql", c.id), include_str!("update/terms.sparql"))];
     for (check, text) in CHECKS {
         if report.checks_unstated || report.custom_sparql_checks.iter().any(|c| c == check) {

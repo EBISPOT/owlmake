@@ -46,11 +46,11 @@ babelon_translation_group:
   products:
     - id: sink-fr
       language: fr
-      include_robot_template_synonyms: true
+      include_template_synonyms: true
 pattern_pipelines_group:
   products:
     - id: extra
-robot_report:
+report:
   custom_sparql_checks:
     - owldef-self-reference
     - iri-range

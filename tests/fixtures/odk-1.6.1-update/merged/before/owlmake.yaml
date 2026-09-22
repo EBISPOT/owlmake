@@ -14,5 +14,5 @@ import_group:
 components:
   products:
     - filename: part.owl
-robot_report:
+report:
   fail_on: ERROR

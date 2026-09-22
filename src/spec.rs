@@ -116,7 +116,7 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 ///
 /// A file that states neither asks for the STANDARD build. Its top-level keys are the
 /// repository's options — `release_artefacts`, `import_group`, `components`,
-/// `robot_report`, … (see [`crate::odk::builtin::Config`]) — and `targets` holds
+/// `report`, … (see [`crate::odk::builtin::Config`]) — and `targets` holds
 /// only what the repository builds in a way of its own. Everything else is
 /// owlmake's built-in rules for those options.
 ///
@@ -2693,6 +2693,9 @@ impl OwlmakeSpec {
     /// Refuse a file that is neither shape, or that holds a key nothing reads.
     pub fn check_shape(&self) -> Result<()> {
         for key in self.options.keys() {
+            if let Some(reason) = crate::odk::builtin::tool_only_reason(key) {
+                bail!("`{key}` sets {reason}; leave it out");
+            }
             if !crate::odk::builtin::is_option(key) {
                 bail!("unknown key `{key}`: it is neither part of a plan nor an option of the standard build");
             }
@@ -3191,7 +3194,14 @@ mod format_floor_tests {
         // The floor moves to 0.3.0. An older build reads a standard file as a plan
         // with no artefacts and builds nothing, reporting success; that is the
         // silent case the floor exists to refuse.
-        const PLAN_SCHEMA_DIGEST: &str = "5341ed7c18406442";
+        //
+        // The options a repository states by the tool ODK runs them with are
+        // now named for what they set (`report`, `relax_options`,
+        // `reduce_options`, `dosdp_options`), and the ones that configure a tool
+        // owlmake does not run are refused. Only the schema's description
+        // changed with the option names; an older build refuses a file that
+        // names `report` as an unknown key, loudly, so the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "5a37aa4286246567";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

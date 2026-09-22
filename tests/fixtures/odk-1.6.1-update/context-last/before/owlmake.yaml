@@ -2,7 +2,7 @@ emulate_odk_version: 1.6.1
 id: cl
 use_context: true
 manage_import_declarations: false
-robot_report:
+report:
   custom_sparql_checks:
     - owldef-self-reference
     - iri-range
