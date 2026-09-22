@@ -923,10 +923,13 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
             continue;
         }
         // A phony target names no file, so it is out of date however old the file
-        // that happens to share its name is.
-        if !plan.is_phony(&a.target)
+        // that happens to share its name is. `-B`/`--always-make` runs the
+        // recipe regardless, here as on the target-recipe path.
+        if !opts.always_make
+            && !plan.is_phony(&a.target)
             && is_up_to_date(&out, &a.needs, &a.order_only, a.input.as_deref(), &opts.output_dir)
         {
+            status!("make: `{}` is up to date", a.target);
             stage.finish_ok();
             continue;
         }

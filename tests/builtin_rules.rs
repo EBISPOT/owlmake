@@ -204,6 +204,18 @@ fn a_standard_file_builds_a_release() {
     let out = om(&["make", "tiny.owl", "tiny-base.owl", "tiny.obo"]);
     assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
     let full = std::fs::read_to_string(ont.join("tiny.owl")).expect("tiny.owl was built");
+    // A second build finds the artefact up to date and leaves it; `-B` runs its
+    // recipe again regardless.
+    let built = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).unwrap();
+    let first = built(&ont.join("tiny.owl"));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let out = om(&["make", "tiny.owl"]);
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(out.status.success() && said.contains("`tiny.owl` is up to date"), "{said}");
+    assert_eq!(built(&ont.join("tiny.owl")), first, "an up-to-date artefact is left alone");
+    let out = om(&["make", "-B", "tiny.owl"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(built(&ont.join("tiny.owl")) > first, "`-B` rebuilds an up-to-date artefact");
     assert!(full.contains("http://example.org/tiny/TINY_0000002"), "the release holds the ontology:\n{full}");
     assert!(
         full.contains("http://example.org/tiny/releases/"),
