@@ -792,17 +792,21 @@ impl DlReasoner {
 
     /// Every entailed object property assertion between named individuals, as
     /// `(subject, property, object)` triples, over the named object properties
-    /// in the signature. The ontology must be consistent.
+    /// in the signature. One saturated model is read off for every property at
+    /// once; each property's query then only confirms the pairs that model
+    /// left undecided. The ontology must be consistent.
     pub fn object_property_assertions(&self) -> Vec<(String, String, String)> {
+        let _hb = crate::progress::Heartbeat::start(
+            "reason: hermit-rs retrieving object property instances",
+        );
+        let mut index =
+            hermit::ObjectPropertyInstanceIndex::with_configuration(&self.ont, &configuration())
+                .unwrap_or_else(|e| die(e));
         let build = Build::new_arc();
         let mut out = Vec::new();
         for p in &self.object_properties {
-            let _hb = crate::progress::Heartbeat::start(&format!(
-                "reason: hermit-rs retrieving instances of <{p}>"
-            ));
             let ope = ho::ObjectPropertyExpression::ObjectProperty(build.object_property(p.clone()));
-            let pairs =
-                hermit::object_property_instances(&self.ont, ope).unwrap_or_else(|e| die(e));
+            let pairs = index.object_property_instances(ope).unwrap_or_else(|e| die(e));
             for (from, to) in pairs {
                 out.push((from.0.to_string(), p.clone(), to.0.to_string()));
             }
