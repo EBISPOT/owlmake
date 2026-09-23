@@ -1177,7 +1177,7 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
-    let shims: [(&str, String); 27] = [
+    let shims: [(&str, String); 28] = [
         ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
         ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
@@ -1189,6 +1189,10 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
         // owlmake itself: a recipe that spells `om …` runs THIS binary, wherever it
         // is installed and whatever it is called there.
         ("om", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
+        // A recipe that recurses (`$(MAKE) …`, or `make …` inside an `if … fi`)
+        // builds the target from this repository's plan: there is no Makefile for
+        // any other `make` to read.
+        ("make", format!("#!/bin/sh\nexec {exe:?} make \"$@\"\n")),
         ("kgx", format!("#!/bin/sh\nexec {exe:?} kgx \"$@\"\n")),
         ("dosdp-tools", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
         ("sssom-cli", format!("#!/bin/sh\nexec {exe:?} sssom transform \"$@\"\n")),
@@ -1299,6 +1303,8 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
     out = replace_command_word(&out, "odk-info", &format!("{exe} odk-info"));
     out = replace_command_word(&out, "sha256sum", &format!("{exe} sha256sum"));
     out = replace_command_word(&out, "semsql", &format!("{exe} semsql"));
+    // A recursive `make` builds from this repository's plan.
+    out = replace_command_word(&out, "make", &format!("{exe} make"));
     for tool in ["tsvalid", "context2csv", "make-release-assets.py"] {
         out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
     }
@@ -1339,7 +1345,7 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
         let at_cmd_pos = {
             // scan back over whitespace
             let mut j = i;
-            while j > 0 && (bytes[j - 1] as char).is_whitespace() {
+            while j > 0 && bytes[j - 1].is_ascii_whitespace() {
                 j -= 1;
             }
             if j == 0 || matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
@@ -1352,7 +1358,7 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
                 let end = j;
                 let mut k = j;
                 while k > 0
-                    && !(bytes[k - 1] as char).is_whitespace()
+                    && !bytes[k - 1].is_ascii_whitespace()
                     && !matches!(bytes[k - 1], b'|' | b';' | b'&' | b'(')
                 {
                     k -= 1;
@@ -1362,15 +1368,16 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
         };
         if at_cmd_pos && s[i..].starts_with(word) {
             let after = i + word.len();
-            let boundary = after >= bytes.len() || (bytes[after] as char).is_whitespace();
+            let boundary = after >= bytes.len() || bytes[after].is_ascii_whitespace();
             if boundary {
                 out.push_str(repl);
                 i = after;
                 continue;
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        let c = s[i..].chars().next().expect("i is on a character boundary");
+        out.push(c);
+        i += c.len_utf8();
     }
     out
 }
@@ -1498,9 +1505,25 @@ pub fn has_shell_substitution(s: &str) -> bool {
     s.contains("$(") || s.contains('`')
 }
 
-/// The owlmake binary that runs the bundled tools (cached). Falls back to the
-/// literal name if the current exe can't be resolved.
+/// The owlmake binary a program embedding owlmake has named with
+/// [`run_bundled_tools_as`].
+static BUNDLED_TOOLS_EXE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Run the bundled tools — the `grep`, `sed`, `jq` or `robot` of a recipe or a
+/// `$(shell …)` substitution — as the owlmake binary `exe`. A program that
+/// embeds owlmake without being that binary names it here: a test harness
+/// planning a repository in its own process is one. The first call wins.
+pub fn run_bundled_tools_as(exe: impl Into<PathBuf>) {
+    let _ = BUNDLED_TOOLS_EXE.set(exe.into());
+}
+
+/// The owlmake binary that runs the bundled tools: the one named with
+/// [`run_bundled_tools_as`], else this process. Falls back to the literal name
+/// if the current exe can't be resolved.
 pub fn owlmake_exe() -> PathBuf {
+    if let Some(exe) = BUNDLED_TOOLS_EXE.get() {
+        return exe.clone();
+    }
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("owlmake"))
 }
 
@@ -1711,6 +1734,23 @@ mod robot_prefix_tests {
             "robot --catalog catalog-v001.xml",
         );
         assert_eq!(got, "/opt/om --catalog catalog-v001.xml merge -i x.obo -o y.owl");
+    }
+
+    /// A command whose text is not ASCII is rewritten around that text and keeps
+    /// it as written: UBERON's check echoes `changes — please normalise`, and the
+    /// second byte of `à` is the byte a no-break space is.
+    #[test]
+    fn a_command_that_is_not_ascii_keeps_its_text() {
+        let exe = std::path::Path::new("/opt/om");
+        let got = super::rewrite_tools(
+            "robot convert -i à.owl && echo \"changes — please normalise\" | jq .",
+            exe,
+            "robot",
+        );
+        assert_eq!(
+            got,
+            "/opt/om convert -i à.owl && echo \"changes — please normalise\" | /opt/om jq ."
+        );
     }
 
     /// A JVM launcher has no option tail to keep (`-jar` is single-dash).

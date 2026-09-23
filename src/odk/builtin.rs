@@ -1072,28 +1072,34 @@ pub fn differences(
 ///
 /// Three things a generated file holds have no counterpart in rules built as
 /// data, and are set aside: its launcher is spelled `robot …` where the rules
-/// spell `om …` (the executor runs owlmake for either); it declares `.FORCE`;
-/// and it wraps recipes in emptiness tests, which the rules decide as they are
-/// built, so only switches gate them.
+/// spell `om …` (the executor runs owlmake for either); it writes the configured
+/// Java heap size in front of every `owltools` command
+/// (`OWLTOOLS_MEMORY=20G owltools …`), a setting nothing reads (`owltools_memory`
+/// is tool-only); and it wraps recipes in emptiness tests, which the rules decide
+/// as they are built, so only switches gate them.
 pub fn differences_from_generated(
     generated: &crate::plan::Plan,
     builtin: &crate::plan::Plan,
 ) -> Vec<String> {
-    fn relaunch(v: &mut serde_json::Value) {
+    fn set_aside(v: &mut serde_json::Value) {
+        static HEAP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let heap = HEAP.get_or_init(|| regex::Regex::new(r"(^|\s)OWLTOOLS_MEMORY=\S+ ").unwrap());
         match v {
-            serde_json::Value::String(s) if s.starts_with("robot --catalog ") => {
-                *s = format!("om{}", &s["robot".len()..]);
+            serde_json::Value::String(s) => {
+                if s.starts_with("robot --catalog ") {
+                    *s = format!("om{}", &s["robot".len()..]);
+                }
+                if heap.is_match(s) {
+                    *s = heap.replace_all(s, "${1}").into_owned();
+                }
             }
-            serde_json::Value::Object(m) => m.values_mut().for_each(relaunch),
-            serde_json::Value::Array(items) => items.iter_mut().for_each(relaunch),
+            serde_json::Value::Object(m) => m.values_mut().for_each(set_aside),
+            serde_json::Value::Array(items) => items.iter_mut().for_each(set_aside),
             _ => {}
         }
     }
     let (mut theirs, ours) = (comparable(generated), comparable(builtin));
-    theirs.values_mut().for_each(relaunch);
-    if let Some(serde_json::Value::Array(phony)) = theirs.get_mut("field phony") {
-        phony.retain(|t| t.as_str() != Some(".FORCE"));
-    }
+    theirs.values_mut().for_each(set_aside);
     if let (Some(serde_json::Value::Object(flags)), Some(serde_json::Value::Object(switches))) =
         (theirs.get_mut("field gating_flags"), ours.get("field gating_flags"))
     {
@@ -1177,6 +1183,10 @@ pub fn model(
     variables(&mut b, config);
 
     // --- Top level -----------------------------------------------------------
+    // `.FORCE` names no file and has no rule: a rule that lists it is always out
+    // of date, which is how a repository's own rules fetch something again on
+    // every build.
+    b.m.phony.insert(".FORCE".to_string());
     b.phony("all", "all_odk", "", &[], &[]);
     b.phony(
         "all_odk",

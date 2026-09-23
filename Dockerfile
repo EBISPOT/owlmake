@@ -5,12 +5,13 @@
 #
 # Two images are produced from this file:
 #   * default target       — om only, no language runtime (~38 MB)
-#   * target `with-python`  — adds a Python 3 runtime for build steps that
-#                             shell out to Python, e.g. uPheno, plus `git` for
+#   * target `with-python`  — adds a Python 3 runtime with Pandas and PyYAML for
+#                             build steps that shell out to Python, e.g. uPheno's
+#                             tables and UBERON's bridge rules, plus `git` for
 #                             steps that diff against a release
-# Most ontologies (EFO, CL, UBERON, …) build with the default image; only the
-# minority that run Python scripts, or whose non-release targets shell out to
-# git, need `with-python`.
+# Most ontologies (EFO, CL, …) build with the default image; only the minority
+# that run Python scripts, or whose non-release targets shell out to git, need
+# `with-python`.
 #
 #   docker build -t owlmake .                        # default (slim)
 #   docker build -t owlmake:python --target with-python .
@@ -99,6 +100,11 @@ CMD ["om", "--help"]
 # py3-pandas covers the common case (uPheno and friends build tables with it);
 # it pulls in NumPy and its OpenBLAS runtime, which is most of this layer's size.
 #
+# py3-yaml is for scripts that read YAML configuration. UBERON's taxa.py loads
+# config/taxa.yaml with PyYAML's CLoader to write the rules its bridges and
+# composites are built from; Alpine builds py3-yaml against libyaml, so the C
+# loader is there. With libyaml it adds ~0.5 MB.
+#
 # git is here and not in the slim image: build steps use it to diff an edit file
 # against a release or to fetch a branch's version of one (EFO has five such
 # steps, which is why a plan records `requires: [git]` for them), but it costs
@@ -106,7 +112,7 @@ CMD ["om", "--help"]
 # for something no release build needs. Against this layer it is noise.
 FROM base AS with-python
 USER root
-RUN apk add --no-cache python3 py3-pandas git
+RUN apk add --no-cache python3 py3-pandas py3-yaml git
 USER owlmake
 
 # ---- default target: the slim image (om only) ----

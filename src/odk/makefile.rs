@@ -874,13 +874,16 @@ impl MakeModel {
                     continue;
                 } else {
                     // Automatic single-char variable.
-                    out.push_str(autos.get((c as char).to_string().as_str()).unwrap_or(""));
-                    i += 2;
+                    let name = s[i + 1..].chars().next().expect("a character follows `$`");
+                    out.push_str(autos.get(name.to_string().as_str()).unwrap_or(""));
+                    i += 1 + name.len_utf8();
                     continue;
                 }
             }
-            out.push(bytes[i] as char);
-            i += 1;
+            // Everything up to the next `$` is text, copied as it is.
+            let next = s[i + 1..].find('$').map_or(s.len(), |p| i + 1 + p);
+            out.push_str(&s[i..next]);
+            i = next;
         }
         out
     }
@@ -1297,17 +1300,11 @@ fn parse_assignment(line: &str) -> Option<(&str, &str, &str)> {
     }
     // Find the assignment operator before any ':' that would make it a rule.
     // Operators: ::=, :=, ?=, +=, =
-    let bytes = trimmed.as_bytes();
-    let mut i = 0;
     // variable name
-    while i < bytes.len() {
-        let c = bytes[i] as char;
-        if c.is_alphanumeric() || c == '_' || c == '.' || c == '-' {
-            i += 1;
-        } else {
-            break;
-        }
-    }
+    let i = trimmed
+        .char_indices()
+        .find(|&(_, c)| !(c.is_alphanumeric() || c == '_' || c == '.' || c == '-'))
+        .map_or(trimmed.len(), |(i, _)| i);
     if i == 0 {
         return None;
     }
@@ -1573,6 +1570,24 @@ fn is_today_command(cmd: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Text that is not ASCII reads and expands as itself: a message's dash, a
+    /// file named in another language, and a `$` before a character of several
+    /// bytes, which names a variable as any single character does.
+    #[test]
+    fn text_that_is_not_ascii_reads_and_expands_as_itself() {
+        let mut m = MakeModel::default();
+        m.ingest(concat!(
+            "MSG = changes — please normalise\n",
+            "café.owl: thé.owl\n",
+            "\techo \"$(MSG)\" à\n",
+        ))
+        .unwrap();
+        let r = m.rules.get("café.owl").expect("a rule for a file whose name is not ASCII");
+        assert_eq!(r.prereqs, vec!["thé.owl"]);
+        assert_eq!(m.expand(&r.recipe[0]), "echo \"changes — please normalise\" à");
+        assert_eq!(m.expand("prix: 5$€"), "prix: 5");
+    }
 
     #[test]
     fn a_guarded_recipe_does_not_swallow_the_next_conditional() {

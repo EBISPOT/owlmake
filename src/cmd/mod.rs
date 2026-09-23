@@ -756,7 +756,7 @@ fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::
     for frag in text.split("<rewriteURI").skip(1) {
         let tag = frag.split('>').next().unwrap_or(frag);
         if let (Some(start), Some(prefix)) = (attr(tag, "uriStartString"), attr(tag, "rewritePrefix")) {
-            let prefix = percent_decode(&prefix);
+            let prefix = crate::build::percent_decode(&prefix);
             let p = std::path::Path::new(&prefix);
             let resolved = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
             map.insert(format!("{CATALOG_REWRITE_KEY}{start}"), resolved);
@@ -768,7 +768,7 @@ fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::
             (Some(n), Some(u)) => (n, u),
             _ => continue,
         };
-        let uri = percent_decode(&uri);
+        let uri = crate::build::percent_decode(&uri);
         let p = std::path::Path::new(&uri);
         let resolved = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
         map.insert(name, resolved);
@@ -819,25 +819,6 @@ fn attr(frag: &str, key: &str) -> Option<String> {
     let rest = &frag[start..];
     let end = rest.find('"')?;
     Some(rest[..end].to_string())
-}
-
-/// Decode `%XX` percent-escapes in a catalog `uri` (other bytes untouched).
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 3 <= b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v as char);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i] as char);
-        i += 1;
-    }
-    out
 }
 
 pub mod annotate;
@@ -924,3 +905,25 @@ pub mod validate_id_ranges;
 pub mod validate_patterns;
 pub mod validate_profile;
 pub mod verify;
+
+#[cfg(test)]
+mod catalog_tests {
+    /// A catalog's escapes are bytes of UTF-8: `caf%C3%A9_import.owl` names
+    /// `café_import.owl`.
+    #[test]
+    fn a_catalog_uri_decodes_to_the_file_it_names() {
+        let dir = std::env::temp_dir().join(format!("om-catalog-uri-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let catalog = dir.join("catalog-v001.xml");
+        std::fs::write(
+            &catalog,
+            "<catalog xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+             <uri name=\"http://example.org/cafe.owl\" uri=\"imports/caf%C3%A9_import.owl\"/>\n\
+             </catalog>\n",
+        )
+        .unwrap();
+        let map = super::parse_catalog(&catalog).unwrap();
+        assert_eq!(map["http://example.org/cafe.owl"], dir.join("imports/café_import.owl"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

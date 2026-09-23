@@ -31,12 +31,12 @@ cd bio-attribute-ontology
 om
 ```
 
-**Much of the existing ODK is functionally mirrored by the `om` binary itself (the majority of `robot`, `sssom`, `owltools`, `dosdp-tools`), so for many existing ontologies there are no environmental dependencies.** You can build ontologies like EFO, CL, and UBERON out of the box without Docker, Java, or Python.
+**Much of the existing ODK is functionally mirrored by the `om` binary itself (the majority of `robot`, `sssom`, `owltools`, `dosdp-tools`), so for many existing ontologies there are no environmental dependencies.** You can build ontologies like EFO and CL out of the box without Docker, Java, or Python.
 
-Notable exceptions are ontologies using Python scripts as part of their build, e.g. uPheno which uses Python and Pandas which are not supplied as part of the single `om` binary. For this reason Docker images are also provided, as a compact alternative to the ODK image (2.81 GB for `odkfull`):
+Notable exceptions are ontologies using Python scripts as part of their build, e.g. uPheno, which uses Python and Pandas, and UBERON, whose bridge rules come from a Python script that reads YAML with PyYAML; none of these is supplied as part of the single `om` binary. For this reason Docker images are also provided, as a compact alternative to the ODK image (2.81 GB for `odkfull`):
 
-- the **default** image bundles just `om`, with `robot`/`jq`/`sssom` shims on the `PATH` — **~38 MB**. This builds every ontology `om` handles natively (EFO, CL, UBERON, …).
-- the **`with-python`** image adds a Python 3 runtime plus Pandas (and NumPy) for the ontologies that shell out part of their builds to Python, and `git` for the recipes that diff against a release — **~200 MB**.
+- the **default** image bundles just `om`, with `robot`/`jq`/`sssom` shims on the `PATH` — **~38 MB**. This builds every ontology `om` handles natively (EFO, CL, …).
+- the **`with-python`** image adds a Python 3 runtime plus Pandas (and NumPy) and PyYAML for the ontologies that shell out part of their builds to Python, and `git` for the recipes that diff against a release — **~200 MB**.
 
 Both are published to GitHub Container Registry for `linux/amd64` and `linux/arm64`:
 

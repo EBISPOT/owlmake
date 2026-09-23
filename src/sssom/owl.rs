@@ -1826,8 +1826,10 @@ impl<'a> Engine<'a> {
                 out.push_str(&self.resolve_var(&name, ctx, short, bracket_iri));
                 i = next;
             } else {
-                out.push(b[i] as char);
-                i += 1;
+                // Everything up to the next `%` is text, copied as it is.
+                let next = tmpl[i + 1..].find('%').map_or(tmpl.len(), |p| i + 1 + p);
+                out.push_str(&tmpl[i..next]);
+                i = next;
             }
         }
         out

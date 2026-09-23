@@ -35,9 +35,17 @@ fn compare(root: &Path) -> Vec<String> {
     )
 }
 
+/// Plan in this process as `om` does: a `$(shell …)` in a repository's rules
+/// runs owlmake's own `grep`, `sed` and the rest, and this test binary is not
+/// owlmake.
+fn bundled_tools_as_om() {
+    owlmake::build::recipe::run_bundled_tools_as(env!("CARGO_BIN_EXE_om"));
+}
+
 /// Lay a fixture out as the repository it describes and return its root. `test`
 /// keeps the directories of tests that run side by side apart.
 fn repository_for(fixture: &Path, test: &str) -> std::path::PathBuf {
+    bundled_tools_as_om();
     let config = std::fs::read_to_string(fixture.join("config.yaml")).expect("config.yaml");
     let parsed: serde_yaml::Value = serde_yaml::from_str(&config).expect("a YAML configuration");
     let id = parsed.get("id").and_then(|i| i.as_str()).expect("a configuration names its id");
@@ -284,6 +292,7 @@ fn a_standard_file_alone_resolves_a_real_repository() {
         eprintln!("OM_ORACLE_REPOS is unset: no repositories to compare");
         return;
     };
+    bundled_tools_as_om();
     let mut failed = false;
     for root in repos.split(':').filter(|r| !r.is_empty()).map(Path::new) {
         let before = resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading"));
@@ -315,6 +324,7 @@ fn builtin_rules_resolve_to_the_ingested_plan() {
         eprintln!("OM_ORACLE_REPOS is unset: no repositories to compare");
         return;
     };
+    bundled_tools_as_om();
     let mut failed = false;
     for root in repos.split(':').filter(|r| !r.is_empty()) {
         let problems = compare(Path::new(root));
@@ -441,5 +451,158 @@ fn a_release_asserts_the_property_assertions_it_asks_for() {
         !assertions.contains(&t("partOf", "2", "4")),
         "the closure of the unlisted transitive property is not asserted: {assertions:?}"
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// With the imports kept, each import module is a stage of the release, and the
+/// stage closes on what it did: a module on disk is kept, and an absent one is
+/// built from its pipeline this once — or refused, when the run pinned the
+/// imports with `IMP=false`. A line after the stages counts both, so the log says
+/// whether any module changed.
+#[test]
+fn a_kept_import_stage_says_whether_it_rebuilt_the_module() {
+    let mut root = std::env::temp_dir();
+    root.push(format!("owlmake_builtin_{}_kept_imports", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    for dir in ["imports", "mirror"] {
+        std::fs::create_dir_all(ont.join(dir)).unwrap();
+    }
+    std::fs::create_dir_all(root.join("src/sparql")).unwrap();
+    let file = |imports: &str| {
+        format!(
+            "emulate_odk_version: 1.6.1\n\
+             id: tiny\n\
+             uribase: http://example.org\n\
+             edit_format: ofn\n\
+             release_artefacts:\n- full\n\
+             export_formats:\n- owl\n\
+             import_group:\n{imports}  products:\n  - id: x\n\
+             report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n"
+        )
+    };
+    std::fs::write(root.join("owlmake.yaml"), file("")).unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/tiny.owl>\n\
+         Declaration(Class(<http://example.org/tiny/TINY_0000001>))\n\
+         SubClassOf(<http://example.org/tiny/TINY_0000001> <http://example.org/x/X_1>)\n\
+         )\n",
+    )
+    .unwrap();
+    // The mirror is on disk and every run pins it, so nothing is fetched.
+    std::fs::write(
+        ont.join("mirror/x.owl"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/x.owl>\n\
+         Declaration(Class(<http://example.org/x/X_1>))\n\
+         Declaration(Class(<http://example.org/x/X_2>))\n\
+         SubClassOf(<http://example.org/x/X_1> <http://example.org/x/X_2>)\n\
+         AnnotationAssertion(rdfs:label <http://example.org/x/X_1> \"x one\")\n\
+         )\n",
+    )
+    .unwrap();
+    std::fs::write(ont.join("imports/x_terms.txt"), "http://example.org/x/X_1\n").unwrap();
+    std::fs::write(
+        root.join("src/sparql/terms.sparql"),
+        "SELECT DISTINCT ?term WHERE { { ?s ?p ?term . } UNION { ?term ?p2 ?o . } FILTER(isIRI(?term)) }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    let om = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+            .args(args)
+            .args(["MIR=false", "-C"])
+            .arg(&root)
+            .env_remove("OWLMAKE_PROGRESS")
+            .env_remove("OWLMAKE_COLOR")
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+    let module = ont.join("imports/x_import.owl");
+
+    // Pinned and absent: nothing may build it.
+    let (ok, said) = om(&["make", "tiny.owl", "IMP=false"]);
+    assert!(!ok && said.contains("pinned by IMP=false but is not present"), "{said}");
+    assert!(!module.exists(), "a module pinned by IMP=false was built");
+
+    // Kept by default and absent: built this once, and the log says so.
+    let (ok, said) = om(&["make", "tiny.owl", "--imports", "cached"]);
+    assert!(ok, "the build failed:\n{said}");
+    assert!(said.contains("✓ rebuilt (") && said.contains("imports: 0 kept, 1 rebuilt"), "{said}");
+    let built = std::fs::read(&module).expect("the absent module was built");
+    let stamp = std::fs::metadata(&module).and_then(|m| m.modified()).unwrap();
+
+    // On disk: kept as it is.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let (ok, said) = om(&["make", "tiny.owl", "IMP=false"]);
+    assert!(ok, "the build failed:\n{said}");
+    assert!(said.contains("✓ kept (") && said.contains("imports: 1 kept, 0 rebuilt"), "{said}");
+    assert!(!said.contains("✓ rebuilt"), "{said}");
+    assert_eq!(std::fs::read(&module).unwrap(), built, "a kept module was rewritten");
+    assert_eq!(std::fs::metadata(&module).and_then(|m| m.modified()).unwrap(), stamp);
+
+    // A merged import is the one module the release reads, and it is kept the
+    // same way.
+    std::fs::write(root.join("owlmake.yaml"), file("  use_base_merging: true\n")).unwrap();
+    std::fs::copy(ont.join("mirror/x.owl"), ont.join("imports/merged_import.owl")).unwrap();
+    let (ok, said) = om(&["make", "tiny.owl", "IMP=false"]);
+    assert!(ok, "the build failed:\n{said}");
+    assert!(said.contains("imports: `imports/merged_import.owl` kept"), "{said}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A rule of the repository's own that needs `.FORCE` is covered from
+/// `owlmake.yaml` alone. UBERON fetches the mapping sets it merges into its
+/// released one again on every build this way; `.FORCE` names no file, and the
+/// standard build declares it phony, so the release that reaches those rules is
+/// not refused for want of it.
+#[test]
+fn a_force_prerequisite_is_covered_from_the_file_alone() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/own-force");
+    let root = repository_for(&fixture, "force");
+    let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+    owlmake::spec::save(&spec, &root.join("owlmake.yaml")).expect("saving owlmake.yaml");
+    let ont = root.join("src/ontology");
+    for name in ["Makefile", "force.Makefile", "force-odk.yaml"] {
+        std::fs::remove_file(ont.join(name)).unwrap();
+    }
+    let plan = OdkRepo::load(&root)
+        .expect("loading from owlmake.yaml alone")
+        .plan(&[])
+        .expect("planning");
+    let forced: Vec<String> =
+        plan.blocking_gaps().into_iter().filter(|g| g.contains(".FORCE")).collect();
+    assert!(forced.is_empty(), "the release is refused for want of `.FORCE`: {forced:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A `$(shell …)` in a repository's own rules runs owlmake's own tools when the
+/// repository is planned in this process, as it does under `om`. UBERON lists
+/// the bridges a merge reads with `ls … | grep -v …`; the merge reads what that
+/// lists.
+#[test]
+fn a_shell_substitution_runs_the_bundled_tools() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/own-shell");
+    let root = repository_for(&fixture, "shell");
+    let plan = OdkRepo::load_with_builtin_rules(&root)
+        .expect("loading the built-in rules")
+        .plan(&[])
+        .expect("planning");
+    let pieces = plan
+        .prerequisites
+        .iter()
+        .chain(plan.artefacts.iter())
+        .find(|a| a.target == "tmp/pieces.owl")
+        .expect("the merge of the pieces is planned");
+    assert_eq!(pieces.needs, ["pieces/a.owl", "pieces/b.owl"], "what `ls … | grep -v …` lists");
     let _ = std::fs::remove_dir_all(&root);
 }

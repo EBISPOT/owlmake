@@ -3362,3 +3362,51 @@ fn reason_property_assertions_restricted_to_named_properties() {
         "both listed properties' inferences are asserted:\n{text}"
     );
 }
+
+/// `owltools … --list-cycles -f`: the asserted graph's cycles are listed and
+/// counted, and a count above zero fails the command. `A ⊑ B ⊑ part_of some A`
+/// puts A, B and the restriction in one cycle — three for each of A and B.
+#[test]
+fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
+    let cyclic = tmp("cycles.ofn");
+    std::fs::write(
+        &cyclic,
+        "Prefix(:=<http://x.org/>)\n\
+         Ontology(<http://x.org/o>\n\
+         Declaration(Class(:A))\n\
+         Declaration(Class(:B))\n\
+         Declaration(ObjectProperty(:part_of))\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:B ObjectSomeValuesFrom(:part_of :A))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin().args(["owltools", cyclic.to_str().unwrap(), "--list-cycles", "-f"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "a cycle must fail the check:\n{text}");
+    assert!(text.ends_with("Number of cycles: 6\n"), "{text}");
+    assert!(
+        text.contains("http://x.org/B in-cycle-with http://x.org/A // via [http://x.org/part_of some]"),
+        "{text}"
+    );
+
+    // Without `-f` the same cycles are listed, and the command succeeds.
+    let out = bin().args(["owltools", cyclic.to_str().unwrap(), "--list-cycles"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+
+    // An acyclic graph has none.
+    let acyclic = tmp("nocycles.ofn");
+    std::fs::write(
+        &acyclic,
+        "Prefix(:=<http://x.org/>)\n\
+         Ontology(<http://x.org/o>\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:B ObjectSomeValuesFrom(:part_of :C))\n\
+         EquivalentClasses(:C ObjectIntersectionOf(:A ObjectSomeValuesFrom(:part_of :B)))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin().args(["owltools", acyclic.to_str().unwrap(), "--list-cycles", "-f"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "Number of cycles: 0\n");
+    assert_eq!(out.status.code(), Some(0));
+}

@@ -165,6 +165,12 @@ pub struct OdkRepo {
     /// Likewise the pattern products, where the repository generates or merges
     /// them in a way of its own.
     pub own_dosdp: Option<crate::spec::DosdpSpec>,
+    /// The switches the repository's own rules test, with the values it gives
+    /// them, as `owlmake.yaml` records them.
+    pub own_switches: BTreeMap<String, String>,
+    /// Which of the targets the repository builds its own way are intermediates:
+    /// written on the way to something else and not kept.
+    pub own_transient: Vec<String>,
     /// The repository was loaded from an `owlmake.yaml` that asks for the standard
     /// build: its options and its own targets are that file's.
     pub standard_file: bool,
@@ -230,9 +236,34 @@ fn builtin_configuration(
         }
         // A resolved target has no recipe to read — the planner takes its steps as
         // recorded — but the graph still has to know the target and what it needs.
-        OwnRules::Targets(targets, phony) => {
+        OwnRules::Targets { targets, phony, switches, transient } => {
             make.phony.extend(phony.iter().cloned());
+            // The repository's own switches take the values it gives them, as its
+            // own assignments did; what the run bound still wins.
+            for (name, value) in switches {
+                if !make.command_line_vars.contains(name) {
+                    make.vars.insert(name.clone(), value.clone());
+                }
+                let value = make.expand(&format!("$({name})")).trim().to_string();
+                make.cond_vars.entry(name.clone()).or_insert(value);
+            }
+            if !transient.is_empty() {
+                make.add_rule(makefile::Rule {
+                    targets: vec![".INTERMEDIATE".to_string()],
+                    prereqs: transient.to_vec(),
+                    order_only: Vec::new(),
+                    recipe: Vec::new(),
+                    guards: Vec::new(),
+                });
+            }
             for t in targets {
+                // A target that exists only under a switch makes the switch one
+                // of the build's, as the conditional around its rule did.
+                for flag in &t.when {
+                    let value = make.expand(&format!("$({flag})")).trim().to_string();
+                    make.switch_vars.insert(flag.clone());
+                    make.cond_vars.entry(flag.clone()).or_insert(value);
+                }
                 let needs: Vec<String> =
                     t.needs.iter().filter(|n| !t.order_only.contains(n)).cloned().collect();
                 let rule = makefile::Rule {
@@ -274,8 +305,14 @@ enum OwnRules<'a> {
     None,
     /// Its `<id>.Makefile`.
     File,
-    /// The targets and phony names its `owlmake.yaml` records.
-    Targets(&'a [crate::spec::ArtefactSpec], &'a [String]),
+    /// What its `owlmake.yaml` records: its targets and phony names, the values
+    /// of its own switches, and which of its targets are intermediates.
+    Targets {
+        targets: &'a [crate::spec::ArtefactSpec],
+        phony: &'a [String],
+        switches: &'a BTreeMap<String, String>,
+        transient: &'a [String],
+    },
 }
 
 impl OdkRepo {
@@ -317,6 +354,8 @@ impl OdkRepo {
             own_phony: Vec::new(),
             own_imports: Vec::new(),
             own_dosdp: None,
+            own_switches: BTreeMap::new(),
+            own_transient: Vec::new(),
             standard_file: false,
         })
     }
@@ -395,6 +434,8 @@ impl OdkRepo {
                     own_phony: Vec::new(),
                     own_imports: Vec::new(),
                     own_dosdp: None,
+                    own_switches: BTreeMap::new(),
+                    own_transient: Vec::new(),
                     standard_file: false,
                 });
             }
@@ -435,6 +476,8 @@ impl OdkRepo {
                     own_phony: Vec::new(),
                     own_imports: Vec::new(),
                     own_dosdp: None,
+                    own_switches: BTreeMap::new(),
+                    own_transient: Vec::new(),
                     standard_file: false,
                 });
             }
@@ -508,6 +551,8 @@ impl OdkRepo {
             own_phony: Vec::new(),
             own_imports: Vec::new(),
             own_dosdp: None,
+            own_switches: BTreeMap::new(),
+            own_transient: Vec::new(),
             standard_file: false,
         })
     }
@@ -595,6 +640,21 @@ impl OdkRepo {
         }
         spec.phony = mine.phony.iter().filter(|p| !theirs.phony.contains(p)).cloned().collect();
         spec.targets = targets;
+        // What its own rules decide beyond their targets: the switches they test,
+        // with the values the repository gives them, and the targets they reach
+        // only as intermediates.
+        spec.gating_flags = mine
+            .gating_flags
+            .iter()
+            .filter(|(k, v)| theirs.gating_flags.get(*k) != Some(*v))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        spec.transient_targets = mine
+            .transient_targets
+            .iter()
+            .filter(|t| !theirs.transient_targets.contains(t))
+            .cloned()
+            .collect();
         // The natively built products are not targets, so what the repository does
         // its own way with one shows up in the import, or in the pattern spec.
         let as_value = |v: &dyn erased::Json| v.json();
@@ -638,7 +698,12 @@ impl OdkRepo {
             &dir,
             &[],
             &[],
-            OwnRules::Targets(&parsed.targets, &parsed.phony),
+            OwnRules::Targets {
+                targets: &parsed.targets,
+                phony: &parsed.phony,
+                switches: &parsed.gating_flags,
+                transient: &parsed.transient_targets,
+            },
         )?;
         // The same options, as the parts of the planner that read the
         // configuration directly hold them.
@@ -663,6 +728,8 @@ impl OdkRepo {
             own_phony: parsed.phony,
             own_imports: parsed.imports,
             own_dosdp: parsed.dosdp,
+            own_switches: parsed.gating_flags,
+            own_transient: parsed.transient_targets,
             standard_file: true,
         })
     }
@@ -732,6 +799,8 @@ impl OdkRepo {
             own_phony: Vec::new(),
             own_imports: Vec::new(),
             own_dosdp: None,
+            own_switches: BTreeMap::new(),
+            own_transient: Vec::new(),
             standard_file: false,
         })
     }
@@ -804,7 +873,12 @@ impl OdkRepo {
             // A repository keeps its own rules in one place or the other: its
             // `owlmake.yaml` once it has one, its `<id>.Makefile` until then.
             let own = if self.standard_file {
-                OwnRules::Targets(&self.own_targets, &self.own_phony)
+                OwnRules::Targets {
+                    targets: &self.own_targets,
+                    phony: &self.own_phony,
+                    switches: &self.own_switches,
+                    transient: &self.own_transient,
+                }
             } else {
                 OwnRules::File
             };
@@ -911,6 +985,8 @@ pub fn seed_spec(id: &str, edit: Option<&str>, dir: &Path) -> Result<OwlmakeSpec
         own_phony: Vec::new(),
         own_imports: Vec::new(),
         own_dosdp: None,
+        own_switches: BTreeMap::new(),
+        own_transient: Vec::new(),
         standard_file: false,
     };
     Ok(OwlmakeSpec::from_plan(&repo.plan(&[])?))

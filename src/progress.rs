@@ -402,17 +402,24 @@ impl Stage {
     }
 
     /// End the stage successfully — a green `✓` and the elapsed time.
-    pub fn finish_ok(mut self) {
+    pub fn finish_ok(self) {
+        self.finish_ok_as("done");
+    }
+
+    /// End the stage successfully, closing on `outcome` in place of `done`: a
+    /// stage that may leave its output as it found it says which it did
+    /// (`✓ kept`, `✓ rebuilt`).
+    pub fn finish_ok_as(mut self, outcome: &str) {
         clear_detail();
-        self.finish(true);
+        self.finish(true, outcome);
     }
 
     /// End the stage in failure — a red `✗` and the elapsed time.
     pub fn finish_err(mut self) {
-        self.finish(false);
+        self.finish(false, "failed");
     }
 
-    fn finish(&mut self, ok: bool) {
+    fn finish(&mut self, ok: bool, word: &str) {
         if self.finished {
             return;
         }
@@ -426,10 +433,10 @@ impl Stage {
             return;
         }
         let el = fmt_hms(self.start.elapsed().as_secs_f64());
-        let (glyph, word) = if ok {
-            (styled("✓", Style::new().green().bold()), "done")
+        let glyph = if ok {
+            styled("✓", Style::new().green().bold())
         } else {
-            (styled("✗", Style::new().red().bold()), "failed")
+            styled("✗", Style::new().red().bold())
         };
         let mut err = std::io::stderr().lock();
         if self.tty {
@@ -447,7 +454,7 @@ impl Drop for Stage {
         // A stage dropped without an explicit finish (e.g. via `?` propagating an
         // error out of the stage body) is reported as failed so the spinner thread
         // is always joined and the line is closed off.
-        self.finish(false);
+        self.finish(false, "failed");
     }
 }
 
