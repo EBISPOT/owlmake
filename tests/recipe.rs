@@ -125,3 +125,71 @@ fn a_make_inside_a_shell_construct_builds_from_the_plan() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+
+/// A plan-only repository whose one target is the shell command `command`, run
+/// with `om make linked.owl` in its ontology directory next to `source.owl`.
+fn build_linked(name: &str, command: &str) -> (PathBuf, bool) {
+    let root = workdir(name);
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        format!(
+            "emulate_odk_version: 1.6.1\n\
+             id: tiny\n\
+             uribase: http://example.org\n\
+             edit_format: ofn\n\
+             targets:\n\
+             - target: src/ontology/linked.owl\n\
+             \x20 steps:\n\
+             \x20 - op: shell\n\
+             \x20   command: {command}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(:=<http://example.org/tiny/>)\nOntology(<http://example.org/tiny.owl>\n)\n",
+    )
+    .unwrap();
+    std::fs::write(ont.join("source.owl"), SOURCE).unwrap();
+    let ok = std::process::Command::new(BIN)
+        .args(["make", "linked.owl"])
+        .current_dir(&ont)
+        .output()
+        .expect("running om")
+        .status
+        .success();
+    (root, ok)
+}
+
+const SOURCE: &str = "Prefix(:=<http://example.org/src/>)\nOntology(<http://example.org/src.owl>\n\
+                      Declaration(Class(:A))\n)\n";
+
+/// A rule whose command names its target and has no ontology before it — it
+/// writes the target itself — leaves nothing behind when the command fails, so
+/// the next build does not find the target made.
+#[test]
+fn a_failed_command_leaves_no_target_behind() {
+    let (root, ok) = build_linked("failed-link", "false && ln -f -s source.owl linked.owl");
+    assert!(!ok, "the build succeeded");
+    let linked = root.join("src/ontology/linked.owl");
+    assert!(
+        std::fs::symlink_metadata(&linked).is_err(),
+        "a failed command left `linked.owl` behind"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// …and when it succeeds, what it made is the target: the link, with the file it
+/// links to untouched.
+#[test]
+fn a_command_that_makes_its_target_keeps_what_it_made() {
+    let (root, ok) = build_linked("made-link", "ln -f -s source.owl linked.owl");
+    assert!(ok, "the build failed");
+    let ont = root.join("src/ontology");
+    assert_eq!(std::fs::read_link(ont.join("linked.owl")).unwrap(), Path::new("source.owl"));
+    assert_eq!(std::fs::read_to_string(ont.join("source.owl")).unwrap(), SOURCE);
+    let _ = std::fs::remove_dir_all(&root);
+}

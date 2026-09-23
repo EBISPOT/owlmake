@@ -3255,15 +3255,29 @@ fn run_shell_step_in_pipeline(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if !model_on_disk {
+    // The command gets the ontology the pipeline holds — when it holds one. With
+    // nothing loaded and nothing built, the target is the command's own to write
+    // (UBERON's `… && ln -f -s ../mirror/ncbitaxondisjoints.owl $@`).
+    let handed_over = !model_on_disk && !model.is_empty();
+    if handed_over {
         match format {
             Some(f) => crate::io::save_as(&mut model, &path, f)?,
             None => crate::io::save(&mut model, &path)?,
         }
     }
-    run_shell_step(repo, step)?;
+    if let Err(e) = run_shell_step(repo, step) {
+        // What was handed to the command is not the target, and left in place it
+        // would count as one built.
+        if handed_over {
+            let _ = std::fs::remove_file(&path);
+        }
+        return Err(e);
+    }
     // The command may have rewritten the target in place; if it did not, this
-    // re-reads exactly what was just written.
+    // re-reads exactly what was handed over.
+    if !handed_over && !model_on_disk && !path.exists() {
+        return Ok(model);
+    }
     crate::io::load(&path)
 }
 
