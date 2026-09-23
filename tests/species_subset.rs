@@ -77,6 +77,7 @@ fn tags_for(strategy: &str, taxon: &str) -> Vec<String> {
         only_tag_in: vec!["CL:".into()],
         write_tags_to: Some(tags.clone()),
         no_remove: true,
+        prune_taxa: false,
         common: Default::default(),
     })
     .unwrap();
@@ -177,4 +178,71 @@ fn odk_subset_starts_a_new_ontology_header() {
     assert!(doc.contains("UBERON_0000002"), "the subset kept its classes:\n{doc}");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A taxonomy under cellular organisms with the human line — Eukaryota, Mammalia,
+/// human and a human sub-taxon — beside the mouse and the bacteria.
+const TAXA: &str = r#"Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Ontology(<http://example.org/taxa.owl>
+Declaration(Class(obo:NCBITaxon_131567))
+Declaration(Class(obo:NCBITaxon_2759))
+Declaration(Class(obo:NCBITaxon_40674))
+Declaration(Class(obo:NCBITaxon_9606))
+Declaration(Class(obo:NCBITaxon_63221))
+Declaration(Class(obo:NCBITaxon_10090))
+Declaration(Class(obo:NCBITaxon_2))
+Declaration(Class(obo:UBERON_0001062))
+SubClassOf(obo:NCBITaxon_2759 obo:NCBITaxon_131567)
+SubClassOf(obo:NCBITaxon_40674 obo:NCBITaxon_2759)
+SubClassOf(obo:NCBITaxon_9606 obo:NCBITaxon_40674)
+SubClassOf(obo:NCBITaxon_63221 obo:NCBITaxon_9606)
+SubClassOf(obo:NCBITaxon_10090 obo:NCBITaxon_40674)
+SubClassOf(obo:NCBITaxon_2 obo:NCBITaxon_131567)
+)
+"#;
+
+/// The NCBITaxon ids the human subset of [`TAXA`] declares.
+fn taxa_kept(prune: bool) -> Vec<String> {
+    let dir = std::env::temp_dir()
+        .join(format!("owlmake_sss_prune_{}_{prune}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (input, output) = (dir.join("in.ofn"), dir.join("out.ofn"));
+    std::fs::write(&input, TAXA).unwrap();
+    create_species_subset::run(Args {
+        input: Some(input),
+        output: Some(output.clone()),
+        format: None,
+        taxon: "NCBITaxon:9606".into(),
+        reasoner: None,
+        strategy: "default".into(),
+        root: vec![],
+        subset_name: None,
+        only_tag_in: vec![],
+        write_tags_to: None,
+        no_remove: false,
+        prune_taxa: prune,
+        common: Default::default(),
+    })
+    .unwrap();
+    let text = std::fs::read_to_string(&output).unwrap();
+    let mut ids: Vec<String> = text
+        .lines()
+        .filter(|l| l.starts_with("Declaration(Class("))
+        .filter_map(|l| l.split("NCBITaxon_").nth(1))
+        .map(|rest| rest.trim_end_matches(|c: char| !c.is_ascii_digit()).to_string())
+        .collect();
+    ids.sort();
+    let _ = std::fs::remove_dir_all(&dir);
+    ids
+}
+
+/// `--prune-taxa` removes every taxon under cellular organisms that is neither
+/// the taxon nor one of its ancestors or descendants: the mouse and the bacteria
+/// go, the human line stays. Without it, the default root (`owl:Thing`) keeps
+/// every taxon, since none is unsatisfiable in the human.
+#[test]
+fn prune_taxa_keeps_only_the_taxon_line() {
+    assert_eq!(taxa_kept(true), ["131567", "2759", "40674", "63221", "9606"]);
+    assert_eq!(taxa_kept(false), ["10090", "131567", "2", "2759", "40674", "63221", "9606"]);
 }
