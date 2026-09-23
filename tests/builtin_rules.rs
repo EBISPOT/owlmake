@@ -443,3 +443,109 @@ fn a_release_asserts_the_property_assertions_it_asks_for() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// With the imports kept, each import module is a stage of the release, and the
+/// stage closes on what it did: a module on disk is kept, and an absent one is
+/// built from its pipeline this once — or refused, when the run pinned the
+/// imports with `IMP=false`. A line after the stages counts both, so the log says
+/// whether any module changed.
+#[test]
+fn a_kept_import_stage_says_whether_it_rebuilt_the_module() {
+    let mut root = std::env::temp_dir();
+    root.push(format!("owlmake_builtin_{}_kept_imports", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    for dir in ["imports", "mirror"] {
+        std::fs::create_dir_all(ont.join(dir)).unwrap();
+    }
+    std::fs::create_dir_all(root.join("src/sparql")).unwrap();
+    let file = |imports: &str| {
+        format!(
+            "emulate_odk_version: 1.6.1\n\
+             id: tiny\n\
+             uribase: http://example.org\n\
+             edit_format: ofn\n\
+             release_artefacts:\n- full\n\
+             export_formats:\n- owl\n\
+             import_group:\n{imports}  products:\n  - id: x\n\
+             report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n"
+        )
+    };
+    std::fs::write(root.join("owlmake.yaml"), file("")).unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/tiny.owl>\n\
+         Declaration(Class(<http://example.org/tiny/TINY_0000001>))\n\
+         SubClassOf(<http://example.org/tiny/TINY_0000001> <http://example.org/x/X_1>)\n\
+         )\n",
+    )
+    .unwrap();
+    // The mirror is on disk and every run pins it, so nothing is fetched.
+    std::fs::write(
+        ont.join("mirror/x.owl"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/x.owl>\n\
+         Declaration(Class(<http://example.org/x/X_1>))\n\
+         Declaration(Class(<http://example.org/x/X_2>))\n\
+         SubClassOf(<http://example.org/x/X_1> <http://example.org/x/X_2>)\n\
+         AnnotationAssertion(rdfs:label <http://example.org/x/X_1> \"x one\")\n\
+         )\n",
+    )
+    .unwrap();
+    std::fs::write(ont.join("imports/x_terms.txt"), "http://example.org/x/X_1\n").unwrap();
+    std::fs::write(
+        root.join("src/sparql/terms.sparql"),
+        "SELECT DISTINCT ?term WHERE { { ?s ?p ?term . } UNION { ?term ?p2 ?o . } FILTER(isIRI(?term)) }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    let om = |args: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+            .args(args)
+            .args(["MIR=false", "-C"])
+            .arg(&root)
+            .env_remove("OWLMAKE_PROGRESS")
+            .env_remove("OWLMAKE_COLOR")
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+    let module = ont.join("imports/x_import.owl");
+
+    // Pinned and absent: nothing may build it.
+    let (ok, said) = om(&["make", "tiny.owl", "IMP=false"]);
+    assert!(!ok && said.contains("pinned by IMP=false but is not present"), "{said}");
+    assert!(!module.exists(), "a module pinned by IMP=false was built");
+
+    // Kept by default and absent: built this once, and the log says so.
+    let (ok, said) = om(&["make", "tiny.owl", "--imports", "cached"]);
+    assert!(ok, "the build failed:\n{said}");
+    assert!(said.contains("✓ rebuilt (") && said.contains("imports: 0 kept, 1 rebuilt"), "{said}");
+    let built = std::fs::read(&module).expect("the absent module was built");
+    let stamp = std::fs::metadata(&module).and_then(|m| m.modified()).unwrap();
+
+    // On disk: kept as it is.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let (ok, said) = om(&["make", "tiny.owl", "IMP=false"]);
+    assert!(ok, "the build failed:\n{said}");
+    assert!(said.contains("✓ kept (") && said.contains("imports: 1 kept, 0 rebuilt"), "{said}");
+    assert!(!said.contains("✓ rebuilt"), "{said}");
+    assert_eq!(std::fs::read(&module).unwrap(), built, "a kept module was rewritten");
+    assert_eq!(std::fs::metadata(&module).and_then(|m| m.modified()).unwrap(), stamp);
+
+    // A merged import is the one module the release reads, and it is kept the
+    // same way.
+    std::fs::write(root.join("owlmake.yaml"), file("  use_base_merging: true\n")).unwrap();
+    std::fs::copy(ont.join("mirror/x.owl"), ont.join("imports/merged_import.owl")).unwrap();
+    let (ok, said) = om(&["make", "tiny.owl", "IMP=false"]);
+    assert!(ok, "the build failed:\n{said}");
+    assert!(said.contains("imports: `imports/merged_import.owl` kept"), "{said}");
+    let _ = std::fs::remove_dir_all(&root);
+}

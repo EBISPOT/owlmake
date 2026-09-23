@@ -748,24 +748,31 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     let mut idx = 0usize;
 
     // --- Imports -----------------------------------------------------------
+    // A module on disk is kept. An absent one is built from its pipeline, or
+    // refused under an explicit `IMP=false` (see `ensure_import_module`). Each
+    // stage closes on which of the two it did, and one line after them counts
+    // both, so the log says whether any module changed.
     if stage_imports {
+        let mut seen = std::collections::HashSet::new();
+        let mut rebuilt = 0usize;
         for imp in &plan.imports {
             idx += 1;
             let (head, detail) = imp.describe(&repo.dir);
             let stage = Stage::start(idx, total, &head, &detail, None);
-            let res = (|| -> Result<()> {
-                if !repo.dir.join(&imp.output).exists() {
-                    build_one_import(repo, plan, imp, &catalog, &tmp)?;
+            match ensure_import_module(repo, imp, &imp.output, &mut seen) {
+                Ok(false) => stage.finish_ok_as("kept"),
+                Ok(true) => {
+                    rebuilt += 1;
+                    stage.finish_ok_as("rebuilt");
                 }
-                Ok(())
-            })();
-            match res {
-                Ok(()) => stage.finish_ok(),
                 Err(e) => {
                     stage.finish_err();
                     return Err(e).with_context(|| format!("import `{}`", imp.id));
                 }
             }
+        }
+        if !plan.imports.is_empty() {
+            status!("imports: {} kept, {rebuilt} rebuilt", plan.imports.len() - rebuilt);
         }
     } else {
         prepare_imports(repo, plan, opts)?;
@@ -1039,33 +1046,16 @@ fn artefact_order(plan: &Plan) -> Vec<usize> {
 
 fn prepare_imports(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     match opts.imports_mode {
+        // Only a MERGED import reaches here cached: per-product modules are staged
+        // one by one in `execute_plan`, and with a merged import they are inputs
+        // to nothing — the merged module is the one module the release reads.
         ImportsMode::Cached => {
-            // Prefer the committed import modules in place. Any the release needs
-            // but that are not committed (the `imports/*_import.owl` are build
-            // artefacts and often git-ignored) are built on demand here —
-            // download the product's mirror and run its pipeline — rather than
-            // forcing the user to re-mirror *every* import with `--imports fresh`.
-            let catalog = load_catalog_planned(repo);
-            let work = opts.output_dir.join(".owlmake-odk-tmp");
-            std::fs::create_dir_all(&work)?;
-            for imp in &plan.imports {
-                let p = repo.dir.join(&imp.output);
-                if !p.exists() && plan.merged_import.is_none() {
-                    eprintln!(
-                        "import: cached module {} missing ({}); building it from upstream",
-                        imp.id,
-                        p.display()
-                    );
-                    build_one_import(repo, plan, imp, &catalog, &work).with_context(|| {
-                        format!("building missing import module `{}`", imp.id)
-                    })?;
-                }
-            }
             if let Some(m) = &plan.merged_import {
                 let p = repo.dir.join(m);
                 if !p.exists() {
                     bail!("cached merged import {} missing; use --imports fresh", p.display());
                 }
+                status!("imports: `{m}` kept");
             }
             Ok(())
         }
@@ -1818,24 +1808,30 @@ fn assumed_new(repo: &Repo, name: &str) -> bool {
     repo.assume_new.iter().any(|w| same_target(w, name, &dir_rel))
 }
 
-/// A prerequisite that is an import PRODUCT has no rule of its own: the
-/// product's recorded pipeline builds it. A module on disk stands, as any kept
-/// (`IMP`) target does; an absent one is built this once — unless the run pinned
-/// the imports explicitly, in which case there is nothing to build it from. EFO
-/// gitignores `imports/mondo_import.owl`, so on a fresh checkout `build/efo.owl`
-/// needs a module nothing has written yet.
-fn build_import_prerequisite(
+/// Bring the import module `name` into being for a build that reads it, and say
+/// whether this call built it.
+///
+/// An import PRODUCT has no rule of its own: the product's recorded pipeline
+/// builds it. A module on disk stands, as any kept (`IMP`) target does; an
+/// absent one is built this once — unless the run pinned the imports
+/// explicitly, in which case there is nothing to build it from. EFO gitignores
+/// `imports/mondo_import.owl`, so on a fresh checkout `build/efo.owl` needs a
+/// module nothing has written yet.
+///
+/// The release's import stages and a target's prerequisite walk both ask this
+/// one question, so both give the same answer for an absent module.
+fn ensure_import_module(
     repo: &Repo,
     imp: &crate::plan::ImportPlan,
     name: &str,
     seen: &mut std::collections::HashSet<String>,
-) -> Result<()> {
+) -> Result<bool> {
     if !seen.insert(name.to_string()) || memo_has(repo, name) {
-        return Ok(());
+        return Ok(false);
     }
     let present = repo.dir.join(name).exists() || repo.root.join(&imp.output).exists();
     if present && !repo.refresh_imports {
-        return Ok(());
+        return Ok(false);
     }
     if !present && repo.imports_pinned {
         bail!(
@@ -1843,7 +1839,7 @@ fn build_import_prerequisite(
              Under IMP=false nothing builds it — re-run with IMP=true (or `--rebuild imports`)"
         );
     }
-    if !present {
+    if !present && !repo.refresh_imports {
         status!("make: `{name}` is kept by default (IMP) but absent — building it from its pipeline this once");
     }
     let catalog = load_catalog_planned(repo);
@@ -1852,7 +1848,7 @@ fn build_import_prerequisite(
     build_one_import(repo, repo.plan, imp, &catalog, &work)
         .with_context(|| format!("building import module `{}`", imp.id))?;
     repo.built.borrow_mut().insert(name.to_string());
-    Ok(())
+    Ok(true)
 }
 
 fn run_target_recipe_inner(
@@ -1948,7 +1944,7 @@ fn run_target_recipe_inner(
             // No rule of its own — but an import PRODUCT is built by its recorded
             // pipeline, and a release that needs the module cannot wait for one.
             if let Some(imp) = import_module_for(repo.plan, pre) {
-                build_import_prerequisite(repo, imp, pre, seen)?;
+                ensure_import_module(repo, imp, pre, seen)?;
             }
             continue;
         }
