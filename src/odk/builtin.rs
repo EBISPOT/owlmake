@@ -1070,27 +1070,36 @@ pub fn differences(
 /// generated file says nothing the configuration does not, which is what lets a
 /// repository commit its options in place of the file.
 ///
-/// Three things a generated file holds have no counterpart in rules built as
+/// Four things a generated file holds have no counterpart in rules built as
 /// data, and are set aside: its launcher is spelled `robot …` where the rules
-/// spell `om …` (the executor runs owlmake for either); it declares `.FORCE`;
-/// and it wraps recipes in emptiness tests, which the rules decide as they are
-/// built, so only switches gate them.
+/// spell `om …` (the executor runs owlmake for either); it writes the configured
+/// Java heap size in front of every `owltools` command
+/// (`OWLTOOLS_MEMORY=20G owltools …`), a setting nothing reads (`owltools_memory`
+/// is tool-only); it declares `.FORCE`; and it wraps recipes in emptiness tests,
+/// which the rules decide as they are built, so only switches gate them.
 pub fn differences_from_generated(
     generated: &crate::plan::Plan,
     builtin: &crate::plan::Plan,
 ) -> Vec<String> {
-    fn relaunch(v: &mut serde_json::Value) {
+    fn set_aside(v: &mut serde_json::Value) {
+        static HEAP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let heap = HEAP.get_or_init(|| regex::Regex::new(r"(^|\s)OWLTOOLS_MEMORY=\S+ ").unwrap());
         match v {
-            serde_json::Value::String(s) if s.starts_with("robot --catalog ") => {
-                *s = format!("om{}", &s["robot".len()..]);
+            serde_json::Value::String(s) => {
+                if s.starts_with("robot --catalog ") {
+                    *s = format!("om{}", &s["robot".len()..]);
+                }
+                if heap.is_match(s) {
+                    *s = heap.replace_all(s, "${1}").into_owned();
+                }
             }
-            serde_json::Value::Object(m) => m.values_mut().for_each(relaunch),
-            serde_json::Value::Array(items) => items.iter_mut().for_each(relaunch),
+            serde_json::Value::Object(m) => m.values_mut().for_each(set_aside),
+            serde_json::Value::Array(items) => items.iter_mut().for_each(set_aside),
             _ => {}
         }
     }
     let (mut theirs, ours) = (comparable(generated), comparable(builtin));
-    theirs.values_mut().for_each(relaunch);
+    theirs.values_mut().for_each(set_aside);
     if let Some(serde_json::Value::Array(phony)) = theirs.get_mut("field phony") {
         phony.retain(|t| t.as_str() != Some(".FORCE"));
     }
