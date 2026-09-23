@@ -549,3 +549,28 @@ fn a_kept_import_stage_says_whether_it_rebuilt_the_module() {
     assert!(said.contains("imports: `imports/merged_import.owl` kept"), "{said}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A rule of the repository's own that needs `.FORCE` is covered from
+/// `owlmake.yaml` alone. UBERON fetches the mapping sets it merges into its
+/// released one again on every build this way; `.FORCE` names no file, and the
+/// standard build declares it phony, so the release that reaches those rules is
+/// not refused for want of it.
+#[test]
+fn a_force_prerequisite_is_covered_from_the_file_alone() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/own-force");
+    let root = repository_for(&fixture, "force");
+    let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+    owlmake::spec::save(&spec, &root.join("owlmake.yaml")).expect("saving owlmake.yaml");
+    let ont = root.join("src/ontology");
+    for name in ["Makefile", "force.Makefile", "force-odk.yaml"] {
+        std::fs::remove_file(ont.join(name)).unwrap();
+    }
+    let plan = OdkRepo::load(&root)
+        .expect("loading from owlmake.yaml alone")
+        .plan(&[])
+        .expect("planning");
+    let forced: Vec<String> =
+        plan.blocking_gaps().into_iter().filter(|g| g.contains(".FORCE")).collect();
+    assert!(forced.is_empty(), "the release is refused for want of `.FORCE`: {forced:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}

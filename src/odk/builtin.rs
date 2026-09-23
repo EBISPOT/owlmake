@@ -1070,13 +1070,13 @@ pub fn differences(
 /// generated file says nothing the configuration does not, which is what lets a
 /// repository commit its options in place of the file.
 ///
-/// Four things a generated file holds have no counterpart in rules built as
+/// Three things a generated file holds have no counterpart in rules built as
 /// data, and are set aside: its launcher is spelled `robot …` where the rules
 /// spell `om …` (the executor runs owlmake for either); it writes the configured
 /// Java heap size in front of every `owltools` command
 /// (`OWLTOOLS_MEMORY=20G owltools …`), a setting nothing reads (`owltools_memory`
-/// is tool-only); it declares `.FORCE`; and it wraps recipes in emptiness tests,
-/// which the rules decide as they are built, so only switches gate them.
+/// is tool-only); and it wraps recipes in emptiness tests, which the rules decide
+/// as they are built, so only switches gate them.
 pub fn differences_from_generated(
     generated: &crate::plan::Plan,
     builtin: &crate::plan::Plan,
@@ -1100,9 +1100,6 @@ pub fn differences_from_generated(
     }
     let (mut theirs, ours) = (comparable(generated), comparable(builtin));
     theirs.values_mut().for_each(set_aside);
-    if let Some(serde_json::Value::Array(phony)) = theirs.get_mut("field phony") {
-        phony.retain(|t| t.as_str() != Some(".FORCE"));
-    }
     if let (Some(serde_json::Value::Object(flags)), Some(serde_json::Value::Object(switches))) =
         (theirs.get_mut("field gating_flags"), ours.get("field gating_flags"))
     {
@@ -1186,6 +1183,10 @@ pub fn model(
     variables(&mut b, config);
 
     // --- Top level -----------------------------------------------------------
+    // `.FORCE` names no file and has no rule: a rule that lists it is always out
+    // of date, which is how a repository's own rules fetch something again on
+    // every build.
+    b.m.phony.insert(".FORCE".to_string());
     b.phony("all", "all_odk", "", &[], &[]);
     b.phony(
         "all_odk",
