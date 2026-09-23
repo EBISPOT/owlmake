@@ -7,6 +7,8 @@
 //! - [`remove_axiom_annotations`] — `--remove-axiom-annotations`.
 //! - [`make_subset_by_properties`] — `--make-subset-by-properties -f PROPS`
 //!   (composite `-basic`).
+//! - [`list_cycles`] — `--list-cycles [-f]` (UBERON's `uberon-basic-allcycles`
+//!   check).
 //!
 //! Subset extraction here is a different operation from [`crate::cmd::subset`]:
 //! it keeps the tagged slice ∪ its full graph-ancestor closure and then prunes
@@ -86,6 +88,8 @@ enum OwltoolsAct {
     MergeEquivalenceSets { scores: Vec<(String, f64)>, no_merge: Vec<String> },
     /// `--remove-dangling`.
     RemoveDangling,
+    /// `--list-cycles [-f|--fail-on-cycle]`.
+    ListCycles { fail: bool },
 }
 
 fn owltools_run(args: &[String]) -> Result<i32> {
@@ -119,6 +123,14 @@ fn owltools_run(args: &[String]) -> Result<i32> {
                 }
             }
             "--remove-dangling" => acts.push(OwltoolsAct::RemoveDangling),
+            "--list-cycles" => {
+                let fail =
+                    matches!(args.get(i + 1).map(String::as_str), Some("-f" | "--fail-on-cycle"));
+                if fail {
+                    i += 1;
+                }
+                acts.push(OwltoolsAct::ListCycles { fail });
+            }
             // `--reasoner NAME` only selects which reasoner the later operations
             // use (`CommandRunner` line 277: `reasonerName = opts.nextOpt()`).
             // owlmake has one, so the name is consumed and the choice recorded
@@ -305,6 +317,13 @@ fn owltools_run(args: &[String]) -> Result<i32> {
                 model
             }
             OwltoolsAct::RemoveDangling => remove_dangling(model),
+            OwltoolsAct::ListCycles { fail } => {
+                let cycles = list_cycles(std::iter::once(&model).chain(support.iter()));
+                if cycles > 0 && fail {
+                    return Ok(1);
+                }
+                model
+            }
             OwltoolsAct::RunReasoner { list_unsat, remove_unsat, module } => {
                 match run_reasoner(model, list_unsat, remove_unsat, module.as_deref())? {
                     Some(m) => m,
@@ -1287,4 +1306,279 @@ fn remove_dangling(mut model: Model) -> Model {
         model.ont.remove(&ac);
     }
     model
+}
+
+/// A node of the graph `--list-cycles` walks: a named class or individual, or a
+/// class expression, which points on to what it is built from.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum CycleNode {
+    Class(String),
+    Individual(String),
+    Expr(CE<Str>),
+}
+
+impl CycleNode {
+    fn of(ce: &CE<Str>) -> Self {
+        match ce {
+            CE::Class(c) => CycleNode::Class(c.0.to_string()),
+            other => CycleNode::Expr(other.clone()),
+        }
+    }
+
+    fn individual(i: &horned_owl::model::Individual<Str>) -> Self {
+        match i {
+            horned_owl::model::Individual::Named(n) => CycleNode::Individual(n.0.to_string()),
+            horned_owl::model::Individual::Anonymous(a) => {
+                CycleNode::Individual(format!("_:{}", a.0.as_ref()))
+            }
+        }
+    }
+
+    /// A named class or a named individual: what the cycles are counted from.
+    /// `owl:Thing` and `owl:Nothing` are not among them.
+    fn is_counted(&self) -> bool {
+        match self {
+            CycleNode::Class(iri) => !is_builtin_class(iri),
+            CycleNode::Individual(id) => !id.starts_with("_:"),
+            CycleNode::Expr(_) => false,
+        }
+    }
+}
+
+fn ope_label(ope: &OPE<Str>) -> String {
+    match ope {
+        OPE::ObjectProperty(p) => p.0.to_string(),
+        OPE::InverseObjectProperty(p) => format!("inverse({})", p.0),
+    }
+}
+
+/// What a class expression points to: a restriction to its filler, an
+/// intersection to its operands. A union, a complement, a one-of, a self
+/// restriction, a data restriction and a restriction of cardinality 0 point
+/// nowhere.
+fn expr_edges(ce: &CE<Str>) -> Vec<(CycleNode, Option<String>)> {
+    match ce {
+        CE::ObjectSomeValuesFrom { ope, bce } => {
+            vec![(CycleNode::of(bce), Some(format!("{} some", ope_label(ope))))]
+        }
+        CE::ObjectAllValuesFrom { ope, bce } => {
+            vec![(CycleNode::of(bce), Some(format!("{} only", ope_label(ope))))]
+        }
+        CE::ObjectHasValue { ope, i } => {
+            vec![(CycleNode::individual(i), Some(format!("{} value", ope_label(ope))))]
+        }
+        CE::ObjectMinCardinality { n, ope, bce }
+        | CE::ObjectMaxCardinality { n, ope, bce }
+        | CE::ObjectExactCardinality { n, ope, bce }
+            if *n > 0 =>
+        {
+            vec![(CycleNode::of(bce), Some(format!("{} some", ope_label(ope))))]
+        }
+        CE::ObjectIntersectionOf(ops) => ops.iter().map(|o| (CycleNode::of(o), None)).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The asserted graph: a class points to each superclass in its `SubClassOf`
+/// axioms, named or not (an equivalence adds no edge), an individual to its
+/// types and to the individuals its object property assertions name, and each
+/// class expression reached to what it is built from.
+#[derive(Default)]
+struct CycleGraph {
+    index: HashMap<CycleNode, usize>,
+    nodes: Vec<CycleNode>,
+    edges: Vec<Vec<(usize, Option<String>)>>,
+}
+
+impl CycleGraph {
+    fn node(&mut self, n: CycleNode) -> usize {
+        if let Some(&i) = self.index.get(&n) {
+            return i;
+        }
+        let i = self.nodes.len();
+        self.index.insert(n.clone(), i);
+        self.nodes.push(n);
+        self.edges.push(Vec::new());
+        i
+    }
+
+    fn edge(&mut self, from: CycleNode, to: CycleNode, label: Option<String>) {
+        let (f, t) = (self.node(from), self.node(to));
+        self.edges[f].push((t, label));
+    }
+
+    fn of<'a>(models: impl Iterator<Item = &'a Model>) -> Self {
+        let mut g = CycleGraph::default();
+        for m in models {
+            for ac in m.ont.iter() {
+                match &ac.component {
+                    Component::SubClassOf(sc) => {
+                        if let CE::Class(c) = &sc.sub {
+                            g.edge(CycleNode::Class(c.0.to_string()), CycleNode::of(&sc.sup), None);
+                        }
+                    }
+                    Component::ClassAssertion(ca) => g.edge(
+                        CycleNode::individual(&ca.i),
+                        CycleNode::of(&ca.ce),
+                        Some("instanceOf".to_string()),
+                    ),
+                    Component::ObjectPropertyAssertion(pa) => g.edge(
+                        CycleNode::individual(&pa.from),
+                        CycleNode::individual(&pa.to),
+                        Some(ope_label(&pa.ope)),
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        // Unfolding an expression can reach new ones, which are unfolded in turn.
+        let mut next = 0;
+        while next < g.nodes.len() {
+            if let CycleNode::Expr(ce) = g.nodes[next].clone() {
+                for (to, label) in expr_edges(&ce) {
+                    let t = g.node(to);
+                    g.edges[next].push((t, label));
+                }
+            }
+            next += 1;
+        }
+        g
+    }
+
+    /// The strongly connected component of each node (Tarjan's algorithm, kept
+    /// iterative so a long chain of superclasses cannot exhaust the stack).
+    fn components(&self) -> Vec<usize> {
+        let n = self.nodes.len();
+        let (mut index, mut low) = (vec![usize::MAX; n], vec![0usize; n]);
+        let (mut on_stack, mut comp) = (vec![false; n], vec![usize::MAX; n]);
+        let (mut stack, mut next_index, mut next_comp) = (Vec::new(), 0usize, 0usize);
+        for root in 0..n {
+            if index[root] != usize::MAX {
+                continue;
+            }
+            index[root] = next_index;
+            low[root] = next_index;
+            next_index += 1;
+            stack.push(root);
+            on_stack[root] = true;
+            let mut work: Vec<(usize, usize)> = vec![(root, 0)];
+            while let Some(top) = work.last_mut() {
+                let v = top.0;
+                if top.1 < self.edges[v].len() {
+                    let w = self.edges[v][top.1].0;
+                    top.1 += 1;
+                    if index[w] == usize::MAX {
+                        index[w] = next_index;
+                        low[w] = next_index;
+                        next_index += 1;
+                        stack.push(w);
+                        on_stack[w] = true;
+                        work.push((w, 0));
+                    } else if on_stack[w] {
+                        low[v] = low[v].min(index[w]);
+                    }
+                } else {
+                    work.pop();
+                    if let Some(&(u, _)) = work.last() {
+                        low[u] = low[u].min(low[v]);
+                    }
+                    if low[v] == index[v] {
+                        while let Some(w) = stack.pop() {
+                            on_stack[w] = false;
+                            comp[w] = next_comp;
+                            if w == v {
+                                break;
+                            }
+                        }
+                        next_comp += 1;
+                    }
+                }
+            }
+        }
+        comp
+    }
+
+    /// The labels along a shortest path from `from` to `to` (to `from` itself
+    /// through at least one edge when they are the same node), or `None`.
+    fn path_labels(&self, from: usize, to: usize) -> Option<Vec<String>> {
+        let mut prev: HashMap<usize, (usize, Option<String>)> = HashMap::new();
+        let mut queue = std::collections::VecDeque::new();
+        for (t, l) in &self.edges[from] {
+            if !prev.contains_key(t) {
+                prev.insert(*t, (from, l.clone()));
+                queue.push_back(*t);
+            }
+        }
+        while let Some(v) = queue.pop_front() {
+            if v == to {
+                let (mut labels, mut at) = (Vec::new(), to);
+                loop {
+                    let (p, l) = prev[&at].clone();
+                    labels.extend(l);
+                    if p == from {
+                        break;
+                    }
+                    at = p;
+                }
+                labels.reverse();
+                return Some(labels);
+            }
+            for (t, l) in &self.edges[v] {
+                if !prev.contains_key(t) {
+                    prev.insert(*t, (v, l.clone()));
+                    queue.push_back(*t);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// `--list-cycles`: the objects that are each other's ancestors in the asserted
+/// graph of `models`. An ancestor is anything reachable over the graph's edges,
+/// class expressions included, so two objects are each other's ancestors exactly
+/// when they share a strongly connected component, and an object is its own when
+/// it lies on a cycle.
+///
+/// For every named class or individual on a cycle, each member of its component
+/// is one cycle — the count ends the output as `Number of cycles: N`. Each pair
+/// of an object and a named class in its component is also printed, with the
+/// properties along a shortest path from one to the other. Prints to standard
+/// output and returns the count.
+pub(crate) fn list_cycles<'a>(models: impl Iterator<Item = &'a Model>) -> usize {
+    let g = CycleGraph::of(models);
+    let comp = g.components();
+    let mut size = vec![0usize; g.nodes.len()];
+    for &c in &comp {
+        size[c] += 1;
+    }
+    let on_cycle =
+        |v: usize| size[comp[v]] > 1 || g.edges[v].iter().any(|(t, _)| *t == v);
+    let name = |v: usize| match &g.nodes[v] {
+        CycleNode::Class(iri) | CycleNode::Individual(iri) => iri.clone(),
+        CycleNode::Expr(_) => String::new(),
+    };
+    let mut counted: Vec<usize> =
+        (0..g.nodes.len()).filter(|&v| g.nodes[v].is_counted() && on_cycle(v)).collect();
+    counted.sort_by_key(|&v| name(v));
+    let mut members: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (v, node) in g.nodes.iter().enumerate() {
+        if matches!(node, CycleNode::Class(_)) {
+            members.entry(comp[v]).or_default().push(v);
+        }
+    }
+    let mut cycles = 0;
+    for &x in &counted {
+        cycles += size[comp[x]];
+        let mut classes = members.get(&comp[x]).cloned().unwrap_or_default();
+        classes.sort_by_key(|&v| name(v));
+        for y in classes {
+            if let Some(labels) = g.path_labels(x, y) {
+                let via = if labels.is_empty() { "subClassOf".to_string() } else { labels.join(", ") };
+                println!("{} in-cycle-with {} // via [{via}]", name(x), name(y));
+            }
+        }
+    }
+    println!("Number of cycles: {cycles}");
+    cycles
 }
