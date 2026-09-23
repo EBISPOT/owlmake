@@ -1126,7 +1126,7 @@ checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 [[package]]
 name = "hermit-rs"
 version = "0.1.0"
-source = "git+https://github.com/EBISPOT/hermit-rs?rev=3f3002c46d893655b26d4d60cc55f0fa40091fdb#3f3002c46d893655b26d4d60cc55f0fa40091fdb"
+source = "git+https://github.com/EBISPOT/hermit-rs?rev=2bc25331bbb9e62ea00bfd87ec814d91ef27d5e6#2bc25331bbb9e62ea00bfd87ec814d91ef27d5e6"
 dependencies = [
  "horned-owl",
  "indexmap 2.14.0",
