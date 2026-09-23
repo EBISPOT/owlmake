@@ -2662,10 +2662,26 @@ fn collect_untranslatable_opt(
     // `--clean-obo drop-untranslatable-axioms` delete it before the writer can
     // unwrap it — every one of `hp-base.obo`'s 12,806 `intersection_of:` lines.
     let view_rel = declares_view_relation(model);
+    // A subset's comment is its `subsetdef:` line's description, which the header
+    // writes even when it is empty; it is never a frame's `comment:` clause.
+    let subset_property = format!("{OIO}SubsetProperty");
+    let subsets: HashSet<&str> = model
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::SubAnnotationPropertyOf(ax) if ax.sup.0.as_ref() == subset_property => {
+                Some(ax.sub.0.as_ref())
+            }
+            _ => None,
+        })
+        .collect();
     let mut out = Vec::new();
     for ac in model.ont.iter() {
         let unt = match &ac.component {
             Component::AnnotationAssertion(aa) => match &aa.subject {
+                AS::IRI(s) if aa.ann.ap.0.as_ref() == RDFS_COMMENT && subsets.contains(s.as_ref()) => {
+                    false
+                }
                 AS::IRI(s) => {
                     let vk = match &aa.ann.av {
                         AnnotationValue::Literal(l) => l.literal().clone(),

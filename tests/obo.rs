@@ -144,6 +144,32 @@ fn obo_label_comments_use_the_last_colliding_rdfxml_label() {
 // happens to give.
 
 /// An OWL functional-syntax fixture rendered to OBO by owlmake.
+/// A `subsetdef:` whose description is empty round-trips as itself. The
+/// subset's `rdfs:comment ""` is the header line's description, not a frame's
+/// `comment:` clause, so it is not carried a second time in the `owl-axioms:`
+/// header. UBERON's `subsetdef: human_reference_atlas ""` is the case, and its QC
+/// requires the edit file to come back from a conversion unchanged.
+#[test]
+fn an_empty_subsetdef_description_round_trips_as_itself() {
+    let m = load_obo(
+        "format-version: 1.2\n\
+         subsetdef: described \"a subset\"\n\
+         subsetdef: undescribed \"\"\n\
+         ontology: test\n\
+         \n\
+         [Term]\n\
+         id: X:1\n\
+         name: alpha\n\
+         subset: undescribed\n",
+    );
+    let mut out = Vec::new();
+    io::write_to_ref(&m, &mut out, Format::Obo).unwrap();
+    let written = String::from_utf8(out).unwrap();
+    assert!(!written.contains("owl-axioms:"), "the empty description was carried twice:\n{written}");
+    assert!(written.contains("subsetdef: undescribed \"\"\n"), "{written}");
+    assert!(written.contains("subsetdef: described \"a subset\"\n"), "{written}");
+}
+
 fn to_obo(ofn: &str) -> String {
     let m = io::load_from(std::io::Cursor::new(ofn.as_bytes().to_vec()), Format::Functional).unwrap();
     let mut out = Vec::new();
