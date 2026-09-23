@@ -2289,8 +2289,6 @@ const PATH_SUFFIXES: [&str; 21] = [
 /// Whether a token could name a file. Deliberately conservative: an IRI, a CURIE
 /// (`rdfs:comment`, `NCBITaxon:9606`), a flag and a bare word are all rejected, so
 /// only a token with a directory separator or a known suffix is even considered.
-/// A `sed` script like `s/[<>]//g` has a `/` and gets past this — the caller's
-/// "the parent directory must exist" test is what actually rules it out.
 fn could_be_path(tok: &str) -> bool {
     !tok.is_empty()
         && !tok.starts_with('-')
@@ -2309,92 +2307,19 @@ fn is_dot_path(tok: &str) -> bool {
     !tok.is_empty() && tok.split('/').all(|c| c == "." || c == "..")
 }
 
-/// How much latitude a string gets when its path-like tokens are rebased.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Rebase {
-    /// A field the schema declares as a path. Rebase on SHAPE alone, so the
-    /// result is the same whatever happens to exist on disk.
-    Field,
-    /// A shell line, a message, a tool's argument vector — arbitrary text a
-    /// human wrote, in which a path can only be guessed at. Here a token must
-    /// vouch for its parent directory — through the plan's own declared paths
-    /// first, the filesystem second — which is what stops `sed`'s `s/[<>]//g`
-    /// (it has a `/` and clears the shape gate) being rewritten.
-    FreeText,
-}
-
-/// The directories a plan's own declared paths establish: every proper ancestor
-/// of every path named by a path FIELD, in the same base the strings themselves
-/// are in.
-///
-/// This is what makes free-text rebasing deterministic where it matters. The
-/// filesystem probe below answers by what a build happened to leave on disk, and
-/// EFO's `.gitignore` lists `build`, `mirror` and `tmp` — so a command argument
-/// `build/efo.owl` would rebase on a built tree and stay put on a fresh clone,
-/// and the committed plan would fail the staleness check on exactly the machine
-/// a committed plan exists for. The plan already declares `build/efo.owl` as a
-/// target; that declaration, not the directory's existence, is what says
-/// `build/` is a directory.
-struct KnownDirs(std::collections::HashSet<PathBuf>);
-
-impl KnownDirs {
-    /// Collect from a serialized plan, honouring the same key discipline as
-    /// [`relocate`]: free-text and literal values hold no declared paths.
-    fn of(value: &serde_json::Value) -> Self {
-        let mut dirs = std::collections::HashSet::new();
-        fn walk(v: &serde_json::Value, dirs: &mut std::collections::HashSet<PathBuf>) {
-            match v {
-                serde_json::Value::String(s) => {
-                    if could_be_path(s) || is_dot_path(s) {
-                        let mut p = normalize(Path::new(s));
-                        while p.pop() && !p.as_os_str().is_empty() {
-                            dirs.insert(p.clone());
-                        }
-                    }
-                }
-                serde_json::Value::Array(a) => a.iter().for_each(|v| walk(v, dirs)),
-                serde_json::Value::Object(o) => {
-                    for (k, v) in o {
-                        if !is_free_text_key(k) && !is_literal_key(k) {
-                            walk(v, dirs);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        walk(value, &mut dirs);
-        Self(dirs)
-    }
-
-    fn vouches_for(&self, parent: &Path) -> bool {
-        self.0.contains(parent)
-    }
-}
-
 /// Reinterpret `tok` — a path relative to `from` — as a path relative to `to`.
 ///
-/// For a declared path field this is total and purely lexical. Probing the
-/// filesystem here would make the mapping neither total nor symmetric: a token
-/// whose parent directory exists at save time and not at load time is rewritten
-/// once and never rewritten back. EFO's `.gitignore` lists `build`, `mirror` and
-/// `tmp`, so a plan generated after a build records `src/ontology/build/efo.owl`,
-/// and on a fresh clone — the case owlmake exists for — the executor would
-/// resolve that against the ontology directory and write
-/// `src/ontology/src/ontology/build/efo.owl`, exit code 0. It would also make the
-/// plan's own bytes depend on which gitignored directories happened to be
-/// present.
-///
-/// A free-text token therefore asks the plan first ([`KnownDirs`]) and the
-/// filesystem only for directories the plan does not know — tracked material
-/// like `../scripts/`, present on every machine, where the probe answers the
-/// same everywhere.
-fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) -> Option<String> {
-    let shaped = match mode {
-        Rebase::Field => could_be_path(tok) || is_dot_path(tok),
-        Rebase::FreeText => could_be_path(tok),
-    };
-    if !shaped {
+/// This is total and purely lexical. Probing the filesystem here would make the
+/// mapping neither total nor symmetric: a token whose parent directory exists at
+/// save time and not at load time is rewritten once and never rewritten back.
+/// EFO's `.gitignore` lists `build`, `mirror` and `tmp`, so a plan generated
+/// after a build records `src/ontology/build/efo.owl`, and on a fresh clone — the
+/// case owlmake exists for — the executor would resolve that against the
+/// ontology directory and write `src/ontology/src/ontology/build/efo.owl`, exit
+/// code 0. It would also make the plan's own bytes depend on which gitignored
+/// directories happened to be present.
+fn rebase(tok: &str, from: &Path, to: &Path) -> Option<String> {
+    if !could_be_path(tok) && !is_dot_path(tok) {
         return None;
     }
     // An ABSOLUTE path names a machine location, not a repo file — the reference
@@ -2405,12 +2330,6 @@ fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) ->
         return None;
     }
     let abs = normalize(&from.join(tok));
-    if mode == Rebase::FreeText
-        && !normalize(Path::new(tok)).parent().is_some_and(|p| known.vouches_for(p))
-        && !abs.parent().is_some_and(|p| p.is_dir())
-    {
-        return None;
-    }
     // What is written has to be something the reverse trip turns back into `tok`.
     // A path keeps the trailing `/` that says it is a directory; and one that no
     // longer LOOKS like a path once rebased — `../../mappings` becoming `mappings`
@@ -2461,33 +2380,19 @@ fn shell_words(s: &str) -> Vec<&str> {
     out
 }
 
-/// Rebase every path-like token in `s`, leaving the rest of the string — quoting,
-/// pipes, redirections, `sed` scripts — byte-for-byte intact. Tokens are located
-/// by splitting on whitespace and stripping the punctuation a shell puts around a
-/// filename.
+/// Rebase every path-like token in `s`, leaving the rest of the string byte for
+/// byte intact: a declared value may name several paths, as a recorded
+/// variable's list does. Tokens are located by splitting on whitespace — a quoted
+/// region is one word however much whitespace is inside it — and stripping the
+/// punctuation a shell puts around a filename.
 ///
 /// Substitution is ONE left-to-right pass, taking the longest token that starts
-/// at each position and skipping past what it wrote. A sequence of
-/// `String::replace` calls cannot do this even ordered longest-first: that only
-/// stops a token being rewritten before a longer one containing it, not inside
-/// the REPLACEMENT a longer one just produced. MONDO's `mondo.obo` rule is the
-/// case — `grep -v ^owl-axioms mondo.obo.tmp.obo > mondo.obo` rebases
-/// `mondo.obo.tmp.obo` to `src/ontology/mondo.obo.tmp.obo`, and the shorter
-/// `mondo.obo` would then match inside that and prefix it a second time, giving
-/// `src/ontology/src/ontology/mondo.obo.tmp.obo`. `load` strips one level back,
-/// the `convert` step writes to the target instead of the temp file, and the
-/// `grep` exits 2 on a file that was never created.
-///
-/// A match must also sit on a token boundary, so `mondo.obo` in the middle of
-/// some longer word is left alone.
-///
-/// Tokenizing respects quotes, because a quoted word is one word however much
-/// whitespace is inside it. MONDO's `sed -i 's/  */ /g' reports/…` is the case:
-/// split on whitespace, the script becomes the three fragments `'s/`, `*/` and
-/// `/g'`, and the first and last look exactly like paths, so the plan would
-/// record `sed -i 'src/ontology/s  */ ../../../g' …`. Kept whole, `s/  */ /g`
-/// resolves to nothing that exists and `rebase` declines it.
-fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) -> String {
+/// at each position and skipping past what it wrote, and a match must sit on a
+/// token boundary. A sequence of `String::replace` calls cannot do this even
+/// ordered longest-first: that stops a token being rewritten before a longer one
+/// containing it, but not inside the REPLACEMENT the longer one just produced, so
+/// `mondo.obo.tmp.obo mondo.obo` would come out with the first prefixed twice.
+fn rebase_in_string(s: &str, from: &Path, to: &Path) -> String {
     const EDGE: [char; 10] = ['\'', '"', '(', ')', ';', ',', '<', '>', '|', '`'];
     let mut subs: Vec<(String, String)> = Vec::new();
     for raw in shell_words(s) {
@@ -2495,7 +2400,7 @@ fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase, known: &Known
         if tok.is_empty() || subs.iter().any(|(t, _)| t == tok) {
             continue;
         }
-        if let Some(new) = rebase(tok, from, to, mode, known) {
+        if let Some(new) = rebase(tok, from, to) {
             if new != tok {
                 subs.push((tok.to_string(), new));
             }
@@ -2535,16 +2440,15 @@ fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase, known: &Known
 }
 
 /// Keys whose value is arbitrary text a human wrote rather than a path the schema
-/// declares: a shell line, a `Print` message, a tool's argument vector. Their
-/// paths can only be found by guessing, so they keep the conservative treatment.
-/// Everything else in the plan is a declared path field and is rebased on shape
-/// alone.
+/// declares: a shell line, a `Print` message, a tool's argument vector. A path
+/// inside such text can only be guessed at, and rebasing a guess is not undone
+/// by rebasing it back, so the text is written as it runs: in the build's working
+/// directory, exactly as the step executes it. Everything else in the plan is a
+/// declared path field and is rebased on shape alone.
 ///
 /// `variables` is deliberately NOT here. A recorded variable's value is a path or
 /// a list of them (`SRC`, `ROBOT`, `MIRRORDIR`, `VQUERIES`) — that is why it is
-/// recorded at all — and under the conservative treatment `ROBOT =
-/// ../../bin/robot` would rebase asymmetrically whenever `bin/` was absent, which
-/// is the same defect one level down.
+/// recorded at all — so it is rebased as every other declared path is.
 fn is_free_text_key(key: &str) -> bool {
     matches!(key, "command" | "message" | "args")
 }
@@ -2555,28 +2459,27 @@ fn is_literal_key(key: &str) -> bool {
     matches!(key, "value" | "annotations" | "add_annotation" | "add_annotation_iri")
 }
 
-/// Walk a serialized plan and rebase every path it names.
+/// Walk a serialized plan and rebase every path it declares.
 ///
 /// The walk is key-aware because the plan holds three different kinds of string
-/// and they cannot be told apart by looking at one. Defaulting an unrecognised key
-/// to the FIELD treatment is deliberate: a path field added later is rebased
+/// — a declared path, free text, a literal — and they cannot be told apart by
+/// looking at one; only a declared path is rebased. Defaulting an unrecognised
+/// key to the path treatment is deliberate: a path field added later is rebased
 /// without anyone remembering to list it, which is the direction the mistake
 /// should fall.
-fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase, known: &KnownDirs) {
+fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path) {
     match value {
-        serde_json::Value::String(s) => *s = rebase_in_string(s, from, to, mode, known),
+        serde_json::Value::String(s) => *s = rebase_in_string(s, from, to),
         serde_json::Value::Array(a) => {
             for v in a {
-                relocate(v, from, to, mode, known);
+                relocate(v, from, to);
             }
         }
         serde_json::Value::Object(o) => {
             for (k, v) in o.iter_mut() {
-                if is_literal_key(k) {
-                    continue;
+                if !is_free_text_key(k) && !is_literal_key(k) {
+                    relocate(v, from, to);
                 }
-                let m = if is_free_text_key(k) { Rebase::FreeText } else { mode };
-                relocate(v, from, to, m, known);
             }
         }
         _ => {}
@@ -2586,13 +2489,13 @@ fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase,
 /// Rebase the paths of a whole document, leaving the standard-build options as
 /// written. An option is a setting, not a path: a template is named `GWAS.csv`
 /// whichever directory the file is read from.
-fn relocate_document(value: &mut serde_json::Value, from: &Path, to: &Path, known: &KnownDirs) {
+fn relocate_document(value: &mut serde_json::Value, from: &Path, to: &Path) {
     let Some(map) = value.as_object_mut() else { return };
     for (key, v) in map.iter_mut() {
         if crate::odk::builtin::is_option(key) && !OwlmakeSpec::is_plan_key(key) {
             continue;
         }
-        relocate(v, from, to, Rebase::Field, known);
+        relocate(v, from, to);
     }
 }
 
@@ -2648,15 +2551,12 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
         check_min_version(req, path)?;
     }
     validate(&value).with_context(|| format!("validating {}", path.display()))?;
-    // On disk every path is relative to this file; the build runs in the ontology
-    // directory, so translate them to that base before anything reads them.
+    // On disk every declared path is relative to this file; the build runs in the
+    // ontology directory, so translate them to that base before anything reads
+    // them.
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        // The declared paths that vouch for free-text tokens are read from the
-        // SAME document being relocated, so they are in the same base its
-        // strings are.
-        let known = KnownDirs::of(&value);
-        relocate_document(&mut value, &file_dir, &exec, &known);
+        relocate_document(&mut value, &file_dir, &exec);
     }
     let spec: OwlmakeSpec = serde_json::from_value(value)
         .with_context(|| format!("interpreting {}", path.display()))?;
@@ -2833,17 +2733,16 @@ pub fn to_value(spec: &OwlmakeSpec, path: &Path) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(spec)?;
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        let known = KnownDirs::of(&value);
-        relocate_document(&mut value, &exec, &file_dir, &known);
+        relocate_document(&mut value, &exec, &file_dir);
     }
     Ok(value)
 }
 
 /// Serialize a spec to `path`, in the format its extension names.
 pub fn save(spec: &OwlmakeSpec, path: &Path) -> Result<()> {
-    // Paths are held relative to the build's working directory; write them
-    // relative to the file, so what the plan says is what a reader sitting next
-    // to it can resolve. `load` translates them straight back.
+    // Declared paths are held relative to the build's working directory; write
+    // them relative to the file, so a reader sitting next to it can resolve them.
+    // `load` translates them straight back. Free text is written as it runs.
     let value = to_value(spec, path)?;
     let mut text = match PlanFormat::of_path(path) {
         PlanFormat::Json => serde_json::to_string_pretty(&value)?,
@@ -2894,86 +2793,29 @@ mod tests {
         assert!(!yaml.contains("may_fail"), "unexpected flag: {yaml}");
     }
 
-    /// A free-text token under a directory the plan declares rebases whether or
-    /// not the directory exists — and symmetrically, so the round trip is the
-    /// identity on a tree that has never built.
-    ///
-    /// EFO is the case: `build`, `mirror` and `tmp` are gitignored, and the qc
-    /// prerequisites name `build/efo.owl` in `owlmake-cli` args and python
-    /// commands. Decided by the filesystem, those tokens rebase on a built tree
-    /// and stay put on a fresh clone, so the committed plan fails the staleness
-    /// check on every machine that has not built yet — CI first among them.
-    #[test]
-    fn a_declared_directory_vouches_without_existing() {
-        let base = std::env::temp_dir()
-            .join(format!("owlmake-vouch-{}", std::process::id()));
-        let onto = base.join("src/ontology");
-        std::fs::create_dir_all(&onto).unwrap(); // no build/ anywhere
-
-        // Save direction: strings are exec-relative; `build/efo.owl` is declared
-        // by a path field of the same document.
-        let exec_doc = serde_json::json!({
-            "target": "build/efo.owl",
-            "steps": [{ "op": "shell", "command": "python3 check.py build/efo.owl" }],
-        });
-        let known = KnownDirs::of(&exec_doc);
-        let saved =
-            rebase_in_string("python3 check.py build/efo.owl", &onto, &base, Rebase::FreeText, &known);
-        // `check.py` rebases too — its parent is the exec dir itself, which
-        // exists wherever the plan does. The declared directory is what carries
-        // `build/efo.owl`.
-        assert_eq!(saved, "python3 src/ontology/check.py src/ontology/build/efo.owl");
-
-        // Load direction: the same document as written, file-relative.
-        let file_doc = serde_json::json!({ "target": "src/ontology/build/efo.owl" });
-        let known = KnownDirs::of(&file_doc);
-        assert_eq!(
-            rebase_in_string(&saved, &base, &onto, Rebase::FreeText, &known),
-            "python3 check.py build/efo.owl",
-            "the round trip is the identity with build/ absent on both sides"
-        );
-
-        // A sed script still has nothing vouching for it: `x.tsv` (parent: the
-        // exec dir) rebases, the script does not.
-        assert_eq!(
-            rebase_in_string("sed s/[<>]//g x.tsv", &onto, &base, Rebase::FreeText, &known),
-            "sed s/[<>]//g src/ontology/x.tsv"
-        );
-
-        std::fs::remove_dir_all(&base).ok();
-    }
-
-    /// A rule naming both `X` and `X.tmp.obo` must rebase each exactly once.
-    /// MONDO's `mondo.obo` recipe is the case: a sequence of `String::replace`
-    /// calls would rewrite `mondo.obo` inside the replacement it had just produced
-    /// for `mondo.obo.tmp.obo`, doubling the prefix.
+    /// A value naming both `X` and `X.tmp.obo` must rebase each exactly once: a
+    /// sequence of `String::replace` calls would rewrite `mondo.obo` inside the
+    /// replacement it had just produced for `mondo.obo.tmp.obo`, doubling the
+    /// prefix.
     #[test]
     fn rebases_a_token_that_is_a_prefix_of_another_once() {
-        let base = std::env::temp_dir()
-            .join(format!("owlmake-rebase-{}", std::process::id()));
+        let base = Path::new("/repo");
         let onto = base.join("src/ontology");
-        std::fs::create_dir_all(onto.join("reports")).unwrap();
 
         // save: paths held relative to src/ontology, written relative to the root.
-        let cmd = "grep -v ^owl-axioms mondo.obo.tmp.obo > mondo.obo";
-        let known = KnownDirs(Default::default());
-        let saved = rebase_in_string(cmd, &onto, &base, Rebase::FreeText, &known);
-        assert_eq!(
-            saved,
-            "grep -v ^owl-axioms src/ontology/mondo.obo.tmp.obo > src/ontology/mondo.obo"
-        );
+        let value = "mondo.obo.tmp.obo mondo.obo";
+        let saved = rebase_in_string(value, &onto, base);
+        assert_eq!(saved, "src/ontology/mondo.obo.tmp.obo src/ontology/mondo.obo");
 
         // load: and straight back, so the round trip is the identity.
-        assert_eq!(rebase_in_string(&saved, &base, &onto, Rebase::FreeText, &known), cmd);
+        assert_eq!(rebase_in_string(&saved, base, &onto), value);
 
-        // A quoted `sed` script is one word, not three path-shaped fragments.
+        // A quoted region is one word, not three path-shaped fragments.
         let sed = "sed -i 's/  */ /g' reports/mondo_release_diff.md";
         assert_eq!(
-            rebase_in_string(sed, &onto, &base, Rebase::FreeText, &known),
+            rebase_in_string(sed, &onto, base),
             "sed -i 's/  */ /g' src/ontology/reports/mondo_release_diff.md"
         );
-
-        std::fs::remove_dir_all(&base).ok();
     }
 
     /// **The plan file is the contract, so every path in it is relative to the
@@ -3127,6 +2969,69 @@ mod tests {
             std::fs::read_to_string(&second).unwrap(),
             "the plan's bytes changed because a directory appeared"
         );
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// A command, a message and a tool's argument vector are written as they run,
+    /// in the build's working directory, and come back byte for byte.
+    ///
+    /// Only a declared path can be rebased exactly. A path inside free text can
+    /// only be guessed at, and the reverse guess does not undo it: UBERON's
+    /// normalisation recipe names `../../src/ontology/imports/caro_import.owl`,
+    /// which climbs out of the ontology directory and back in, and
+    /// `src/ontology/imports/fbbt_import.owl`, which from the ontology directory
+    /// names a file that is not there. Rebased to the plan file and back, both
+    /// read `imports/…`: the first spelled differently, the second naming another
+    /// file. Nor may what is written depend on what is on disk: EFO's qc steps name
+    /// `build/efo.owl`, and `build/` exists only once the ontology has built.
+    #[test]
+    fn free_text_is_written_as_it_runs() {
+        let base =
+            std::env::temp_dir().join(format!("owlmake-freetext-{}", std::process::id()));
+        let onto = base.join("src/ontology");
+        let _ = std::fs::remove_dir_all(&base);
+        // The directories the commands climb into exist, as they do in the
+        // repository; `build/` does not.
+        std::fs::create_dir_all(onto.join("imports")).unwrap();
+        std::fs::create_dir_all(base.join("src/scripts")).unwrap();
+
+        let norm = "sh ../scripts/norm_rdfxml.sh ../../src/ontology/imports/caro_import.owl \
+                    src/ontology/imports/fbbt_import.owl";
+        let release = "sh ../scripts/norm_rdfxml.sh ../../tiny-base.owl";
+        let qc = "python3 ../scripts/check.py build/efo.owl";
+        let message = "normalised imports/caro_import.owl";
+        let spec: OwlmakeSpec = serde_json::from_value(serde_json::json!({
+            "min_owlmake_version": PLAN_FORMAT_MIN_VERSION,
+            "emulate_odk_version": crate::odk::builtin::BEHAVIOUR_SET,
+            "id": "tiny",
+            "phony": ["normalise"],
+            "targets": [{
+                "target": "normalise",
+                "steps": [
+                    { "op": "shell", "command": norm, "requires": ["sh"] },
+                    { "op": "shell", "command": release, "requires": ["sh"] },
+                    { "op": "shell", "command": qc, "requires": ["python3"] },
+                    { "op": "owlmake-cli", "command": "diff",
+                      "args": ["--left", "build/efo.owl", "--right", "../../efo.owl"] },
+                    { "op": "print", "message": message },
+                ],
+            }],
+        }))
+        .unwrap();
+
+        let path = base.join("owlmake.yaml");
+        save(&spec, &path).unwrap();
+        let back = load(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&back.targets).unwrap(),
+            serde_json::to_value(&spec.targets).unwrap(),
+            "free text did not come back byte for byte"
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        for want in [norm, release, qc, "- build/efo.owl", "- ../../efo.owl", message] {
+            assert!(text.contains(want), "`{want}` is not written as it runs:\n{text}");
+        }
 
         std::fs::remove_dir_all(&base).ok();
     }
