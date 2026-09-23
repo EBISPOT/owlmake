@@ -88,3 +88,40 @@ fn sequencing_and_ignore_errors() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A `make` the shell reaches inside a control construct — UBERON's
+/// `if [ ! -f mirror/ncbitaxondisjoints.owl ]; then make mirror/ncbitaxondisjoints.owl
+/// MIR=true IMP=true ; fi` — is owlmake's own, and builds the target from the
+/// repository's plan. There is no Makefile for any other `make` to read.
+#[test]
+fn a_make_inside_a_shell_construct_builds_from_the_plan() {
+    let root = workdir("submake");
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "emulate_odk_version: 1.6.1\n\
+         id: tiny\n\
+         uribase: http://example.org\n\
+         edit_format: ofn\n\
+         targets:\n\
+         - target: src/ontology/made.txt\n\
+         \x20 steps:\n\
+         \x20 - op: print\n\
+         \x20   message: made-by-the-plan\n\
+         \x20   dst: src/ontology/made.txt\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(:=<http://example.org/tiny/>)\nOntology(<http://example.org/tiny.owl>\n\
+         Declaration(Class(<http://example.org/TINY_0000001>))\n)\n",
+    )
+    .unwrap();
+    run("if [ ! -f made.txt ]; then make made.txt ; fi && cp made.txt copy.txt", &ont);
+    assert_eq!(
+        std::fs::read_to_string(ont.join("copy.txt")).unwrap().trim(),
+        "made-by-the-plan"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -1177,7 +1177,7 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
-    let shims: [(&str, String); 27] = [
+    let shims: [(&str, String); 28] = [
         ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
         ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
@@ -1189,6 +1189,10 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
         // owlmake itself: a recipe that spells `om …` runs THIS binary, wherever it
         // is installed and whatever it is called there.
         ("om", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
+        // A recipe that recurses (`$(MAKE) …`, or `make …` inside an `if … fi`)
+        // builds the target from this repository's plan: there is no Makefile for
+        // any other `make` to read.
+        ("make", format!("#!/bin/sh\nexec {exe:?} make \"$@\"\n")),
         ("kgx", format!("#!/bin/sh\nexec {exe:?} kgx \"$@\"\n")),
         ("dosdp-tools", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
         ("sssom-cli", format!("#!/bin/sh\nexec {exe:?} sssom transform \"$@\"\n")),
@@ -1299,6 +1303,8 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
     out = replace_command_word(&out, "odk-info", &format!("{exe} odk-info"));
     out = replace_command_word(&out, "sha256sum", &format!("{exe} sha256sum"));
     out = replace_command_word(&out, "semsql", &format!("{exe} semsql"));
+    // A recursive `make` builds from this repository's plan.
+    out = replace_command_word(&out, "make", &format!("{exe} make"));
     for tool in ["tsvalid", "context2csv", "make-release-assets.py"] {
         out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
     }
