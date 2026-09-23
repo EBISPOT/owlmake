@@ -35,9 +35,17 @@ fn compare(root: &Path) -> Vec<String> {
     )
 }
 
+/// Plan in this process as `om` does: a `$(shell …)` in a repository's rules
+/// runs owlmake's own `grep`, `sed` and the rest, and this test binary is not
+/// owlmake.
+fn bundled_tools_as_om() {
+    owlmake::build::recipe::run_bundled_tools_as(env!("CARGO_BIN_EXE_om"));
+}
+
 /// Lay a fixture out as the repository it describes and return its root. `test`
 /// keeps the directories of tests that run side by side apart.
 fn repository_for(fixture: &Path, test: &str) -> std::path::PathBuf {
+    bundled_tools_as_om();
     let config = std::fs::read_to_string(fixture.join("config.yaml")).expect("config.yaml");
     let parsed: serde_yaml::Value = serde_yaml::from_str(&config).expect("a YAML configuration");
     let id = parsed.get("id").and_then(|i| i.as_str()).expect("a configuration names its id");
@@ -284,6 +292,7 @@ fn a_standard_file_alone_resolves_a_real_repository() {
         eprintln!("OM_ORACLE_REPOS is unset: no repositories to compare");
         return;
     };
+    bundled_tools_as_om();
     let mut failed = false;
     for root in repos.split(':').filter(|r| !r.is_empty()).map(Path::new) {
         let before = resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading"));
@@ -315,6 +324,7 @@ fn builtin_rules_resolve_to_the_ingested_plan() {
         eprintln!("OM_ORACLE_REPOS is unset: no repositories to compare");
         return;
     };
+    bundled_tools_as_om();
     let mut failed = false;
     for root in repos.split(':').filter(|r| !r.is_empty()) {
         let problems = compare(Path::new(root));
@@ -572,5 +582,27 @@ fn a_force_prerequisite_is_covered_from_the_file_alone() {
     let forced: Vec<String> =
         plan.blocking_gaps().into_iter().filter(|g| g.contains(".FORCE")).collect();
     assert!(forced.is_empty(), "the release is refused for want of `.FORCE`: {forced:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A `$(shell …)` in a repository's own rules runs owlmake's own tools when the
+/// repository is planned in this process, as it does under `om`. UBERON lists
+/// the bridges a merge reads with `ls … | grep -v …`; the merge reads what that
+/// lists.
+#[test]
+fn a_shell_substitution_runs_the_bundled_tools() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/own-shell");
+    let root = repository_for(&fixture, "shell");
+    let plan = OdkRepo::load_with_builtin_rules(&root)
+        .expect("loading the built-in rules")
+        .plan(&[])
+        .expect("planning");
+    let pieces = plan
+        .prerequisites
+        .iter()
+        .chain(plan.artefacts.iter())
+        .find(|a| a.target == "tmp/pieces.owl")
+        .expect("the merge of the pieces is planned");
+    assert_eq!(pieces.needs, ["pieces/a.owl", "pieces/b.owl"], "what `ls … | grep -v …` lists");
     let _ = std::fs::remove_dir_all(&root);
 }

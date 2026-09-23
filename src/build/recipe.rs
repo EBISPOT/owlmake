@@ -1498,9 +1498,25 @@ pub fn has_shell_substitution(s: &str) -> bool {
     s.contains("$(") || s.contains('`')
 }
 
-/// The owlmake binary that runs the bundled tools (cached). Falls back to the
-/// literal name if the current exe can't be resolved.
+/// The owlmake binary a program embedding owlmake has named with
+/// [`run_bundled_tools_as`].
+static BUNDLED_TOOLS_EXE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Run the bundled tools — the `grep`, `sed`, `jq` or `robot` of a recipe or a
+/// `$(shell …)` substitution — as the owlmake binary `exe`. A program that
+/// embeds owlmake without being that binary names it here: a test harness
+/// planning a repository in its own process is one. The first call wins.
+pub fn run_bundled_tools_as(exe: impl Into<PathBuf>) {
+    let _ = BUNDLED_TOOLS_EXE.set(exe.into());
+}
+
+/// The owlmake binary that runs the bundled tools: the one named with
+/// [`run_bundled_tools_as`], else this process. Falls back to the literal name
+/// if the current exe can't be resolved.
 pub fn owlmake_exe() -> PathBuf {
+    if let Some(exe) = BUNDLED_TOOLS_EXE.get() {
+        return exe.clone();
+    }
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("owlmake"))
 }
 
