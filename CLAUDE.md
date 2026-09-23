@@ -153,7 +153,12 @@ must state and the standard build decides. An unknown key is an error in either.
 repository from the built-in rules alone and again with the rules it wrote, and
 keeping what differs. That catches what reading its `<id>.Makefile` for targets
 would miss — a standard target that came out differently because the repository
-reassigned a variable it reads (CL appends to `RELEASE_ASSETS`).
+reassigned a variable it reads (CL appends to `RELEASE_ASSETS`). It also catches
+what its rules decide beyond their targets: the switches they test, with the
+values the repository gives them (`gating_flags` — UBERON's `BRI = true`), and
+the targets they reach only as intermediates (`transient_targets`). A recorded
+target is a rule of its own, so without those two the file alone would lose the
+switch's default and keep every intermediate.
 
 ### The file and the resolved plan
 

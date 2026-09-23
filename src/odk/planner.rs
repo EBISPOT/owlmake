@@ -3161,31 +3161,39 @@ fn kept_after_build(make: &MakeModel, path: &str) -> bool {
             || a.strip_suffix(path).is_some_and(|p| p.ends_with('/'))
             || path.strip_suffix(a).is_some_and(|p| p.ends_with('/'))
     };
+    // Whether a special target covers the path, by name or by pattern.
+    let covers = |special: &str| {
+        make.rules.get(special).is_some_and(|r| {
+            r.prereqs.iter().any(|p| {
+                make.expand(p).split_whitespace().any(|t| {
+                    super::makefile::match_pattern(t, path).is_some()
+                        || path
+                            .rsplit_once('/')
+                            .is_some_and(|(_, base)| super::makefile::match_pattern(t, base).is_some())
+                })
+            })
+        })
+    };
+    // `.PRECIOUS` and `.SECONDARY` both keep what they cover, whether they name a
+    // file or a pattern. `.SECONDARY` is the one that says "these are
+    // intermediates, but do not delete them", so a build configuration that
+    // declares it is asking for exactly the file the sweep would remove.
+    if covers(".PRECIOUS") || covers(".SECONDARY") {
+        return true;
+    }
+    // `.INTERMEDIATE` makes a file an intermediate however it is named: a
+    // standard file records its repository's intermediates this way, since
+    // every target it records is a rule of its own.
+    if covers(".INTERMEDIATE") {
+        return false;
+    }
     if make.rules.keys().any(|k| same(k)) {
         return true;
     }
     let names = |list: &[String]| {
         list.iter().any(|p| make.expand(p).split_whitespace().any(same))
     };
-    if make.rules.values().any(|r| names(&r.prereqs) || names(&r.order_only)) {
-        return true;
-    }
-    // `.PRECIOUS` and `.SECONDARY` both keep what they cover, whether they name a
-    // file or a pattern. `.SECONDARY` is the one that says "these are
-    // intermediates, but do not delete them", so a build configuration that
-    // declares it is asking for exactly the file the sweep would remove.
-    [".PRECIOUS", ".SECONDARY"].iter().any(|special| {
-    make.rules.get(*special).is_some_and(|r| {
-        r.prereqs.iter().any(|p| {
-            make.expand(p).split_whitespace().any(|t| {
-                super::makefile::match_pattern(t, path).is_some()
-                    || path
-                        .rsplit_once('/')
-                        .is_some_and(|(_, base)| super::makefile::match_pattern(t, base).is_some())
-            })
-        })
-    })
-    })
+    make.rules.values().any(|r| names(&r.prereqs) || names(&r.order_only))
 }
 
 /// Every path the build writes on its way to something else and does not keep:
