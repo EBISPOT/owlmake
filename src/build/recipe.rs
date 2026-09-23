@@ -1339,7 +1339,7 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
         let at_cmd_pos = {
             // scan back over whitespace
             let mut j = i;
-            while j > 0 && (bytes[j - 1] as char).is_whitespace() {
+            while j > 0 && bytes[j - 1].is_ascii_whitespace() {
                 j -= 1;
             }
             if j == 0 || matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
@@ -1352,7 +1352,7 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
                 let end = j;
                 let mut k = j;
                 while k > 0
-                    && !(bytes[k - 1] as char).is_whitespace()
+                    && !bytes[k - 1].is_ascii_whitespace()
                     && !matches!(bytes[k - 1], b'|' | b';' | b'&' | b'(')
                 {
                     k -= 1;
@@ -1362,15 +1362,16 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
         };
         if at_cmd_pos && s[i..].starts_with(word) {
             let after = i + word.len();
-            let boundary = after >= bytes.len() || (bytes[after] as char).is_whitespace();
+            let boundary = after >= bytes.len() || bytes[after].is_ascii_whitespace();
             if boundary {
                 out.push_str(repl);
                 i = after;
                 continue;
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        let c = s[i..].chars().next().expect("i is on a character boundary");
+        out.push(c);
+        i += c.len_utf8();
     }
     out
 }
@@ -1727,6 +1728,23 @@ mod robot_prefix_tests {
             "robot --catalog catalog-v001.xml",
         );
         assert_eq!(got, "/opt/om --catalog catalog-v001.xml merge -i x.obo -o y.owl");
+    }
+
+    /// A command whose text is not ASCII is rewritten around that text and keeps
+    /// it as written: UBERON's check echoes `changes — please normalise`, and the
+    /// second byte of `à` is the byte a no-break space is.
+    #[test]
+    fn a_command_that_is_not_ascii_keeps_its_text() {
+        let exe = std::path::Path::new("/opt/om");
+        let got = super::rewrite_tools(
+            "robot convert -i à.owl && echo \"changes — please normalise\" | jq .",
+            exe,
+            "robot",
+        );
+        assert_eq!(
+            got,
+            "/opt/om convert -i à.owl && echo \"changes — please normalise\" | /opt/om jq ."
+        );
     }
 
     /// A JVM launcher has no option tail to keep (`-jar` is single-dash).

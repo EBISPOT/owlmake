@@ -7652,8 +7652,10 @@ fn read_catalog(dir: &Path, path: &Path) -> BTreeMap<String, PathBuf> {
     map
 }
 
-/// Decode `%XX` percent-escapes in a catalog URI path (other bytes untouched).
-fn percent_decode(s: &str) -> String {
+/// Decode `%XX` percent-escapes in a URI path — a catalog's, a `file:` URL's — to
+/// the path it names: the escapes are bytes of UTF-8, and other bytes are left
+/// untouched.
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;

@@ -211,9 +211,9 @@ pub fn parse_profile(text: &str) -> Result<Vec<ReportRule>> {
 fn resolve_file_rule(rule: &str) -> Result<PathBuf> {
     let path = if rule.starts_with("file:///") {
         // Keep the leading `/` of the absolute path.
-        PathBuf::from(percent_decode(&rule["file://".len()..]))
+        PathBuf::from(crate::build::percent_decode(&rule["file://".len()..]))
     } else {
-        PathBuf::from(percent_decode(&rule["file:".len()..]))
+        PathBuf::from(crate::build::percent_decode(&rule["file:".len()..]))
     };
     if !path.exists() {
         bail!("report: MISSING QUERY ERROR query at '{}' does not exist.", path.display());
@@ -232,26 +232,6 @@ fn rule_name(rule: &str) -> String {
         Some(i) if i > 0 => base[..i].to_string(),
         _ => base.to_string(),
     }
-}
-
-/// Decode `%XX` escapes in a `file:` URL's path (other bytes untouched), so the
-/// path that reaches the filesystem is the one the URL denotes.
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 3 <= b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v as char);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i] as char);
-        i += 1;
-    }
-    out
 }
 
 /// The rule set from the bundled profile — what runs when `--profile` is absent.
@@ -674,6 +654,19 @@ fn break_order_ties(rows: &mut [ReportRow], by_entity: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `file:` URL's escapes are bytes of UTF-8: `caf%C3%A9.sparql` names
+    /// `café.sparql`.
+    #[test]
+    fn a_file_url_decodes_to_the_file_it_names() {
+        let dir = std::env::temp_dir().join(format!("om-report-url-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("café.sparql");
+        std::fs::write(&file, "SELECT * WHERE { ?s ?p ?o }").unwrap();
+        let url = format!("file://{}/caf%C3%A9.sparql", dir.display());
+        assert_eq!(resolve_file_rule(&url).unwrap(), file);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn default_profile_parses() {
