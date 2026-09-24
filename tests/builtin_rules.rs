@@ -162,29 +162,27 @@ fn a_standard_file_alone_resolves_to_the_same_plan() {
     assert!(failed.is_empty(), "fixtures whose plan changed: {failed:?}");
 }
 
-/// A repository that has only ever had an `owlmake.yaml`: no Makefile, no
-/// configuration of any other kind, nothing to regenerate from. The standard build
-/// for its options has to BUILD — the plans agreeing is not the same as the
-/// release coming out.
-#[test]
-fn a_standard_file_builds_a_release() {
+/// A two-class repository that has only ever had an `owlmake.yaml` asking for
+/// the standard build, with `targets` as its own; `name` keeps each test's
+/// scratch tree apart.
+fn tiny_repo(name: &str, targets: &str) -> std::path::PathBuf {
     let mut root = std::env::temp_dir();
-    root.push(format!("owlmake_builtin_{}_builds", std::process::id()));
+    root.push(format!("owlmake_builtin_{}_{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let ont = root.join("src/ontology");
     std::fs::create_dir_all(&ont).unwrap();
     std::fs::write(
         root.join("owlmake.yaml"),
-        "emulate_odk_version: 1.6.1\n\
-         id: tiny\n\
-         uribase: http://example.org\n\
-         edit_format: ofn\n\
-         release_artefacts:\n- base\n- full\n\
-         export_formats:\n- owl\n- obo\n\
-         report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n\
-         targets:\n\
-         - target: greeting\n  steps:\n  - op: print\n    message: built-its-own-way\n\
-         - target: test\n  extends: true\n  needs:\n  - greeting\n",
+        format!(
+            "emulate_odk_version: 1.6.1\n\
+             id: tiny\n\
+             uribase: http://example.org\n\
+             edit_format: ofn\n\
+             release_artefacts:\n- base\n- full\n\
+             export_formats:\n- owl\n- obo\n\
+             report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n\
+             targets:\n{targets}"
+        ),
     )
     .unwrap();
     std::fs::write(
@@ -200,6 +198,35 @@ fn a_standard_file_builds_a_release() {
          )\n",
     )
     .unwrap();
+    root
+}
+
+/// `om <args> -C <root>`, with what it printed on both streams.
+fn om_in(root: &Path, args: &[&str]) -> (std::process::Output, String) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+        .args(args)
+        .arg("-C")
+        .arg(root)
+        .output()
+        .unwrap();
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out, said)
+}
+
+/// A repository that has only ever had an `owlmake.yaml`: no Makefile, no
+/// configuration of any other kind, nothing to regenerate from. The standard build
+/// for its options has to BUILD — the plans agreeing is not the same as the
+/// release coming out.
+#[test]
+fn a_standard_file_builds_a_release() {
+    let root = tiny_repo(
+        "builds",
+        "- target: greeting\n  steps:\n  - op: print\n    message: built-its-own-way\n\
+         - target: test\n  extends: true\n  needs:\n  - greeting\n\
+         - target: farewell\n  steps:\n  - op: print\n    message: released-its-own-way\n\
+         - target: prepare_release\n  extends: true\n  needs:\n  - farewell\n",
+    );
+    let ont = root.join("src/ontology");
     let om = |args: &[&str]| {
         std::process::Command::new(env!("CARGO_BIN_EXE_om"))
             .args(args)
@@ -248,9 +275,38 @@ fn a_standard_file_builds_a_release() {
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(!out.status.success() && said.contains("om make test tiny.obo"), "{said}");
 
+    // `prepare_release` is what its plan entry needs — the checks, the artefacts
+    // and what the repository added to it — and then the release, published at
+    // the root.
+    let (out, said) = om_in(&root, &["make", "prepare_release"]);
+    assert!(out.status.success(), "the release failed:\n{said}");
+    assert!(said.contains("Finished running all tests successfully"), "the release ran the checks:\n{said}");
+    assert!(said.contains("released-its-own-way"), "and what the repository added to it:\n{said}");
+    assert!(
+        root.join("tiny.owl").is_file() && root.join("tiny-base.owl").is_file(),
+        "and published the release at the root:\n{said}"
+    );
+
     // The file is the build: nothing rewrote it.
     let file = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(file.starts_with("emulate_odk_version: 1.6.1\nid: tiny\n"), "{file}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A release that something it needs failed is built as far as it goes and left
+/// unpublished, and the run says so and fails.
+#[test]
+fn a_release_that_fails_is_not_published() {
+    let root = tiny_repo(
+        "unpublished",
+        "- target: broken\n  steps:\n  - op: shell\n    command: exit 1\n\
+         - target: prepare_release\n  extends: true\n  needs:\n  - broken\n",
+    );
+    let (out, said) = om_in(&root, &["make", "prepare_release"]);
+    assert!(!out.status.success(), "a release whose own addition failed succeeded:\n{said}");
+    assert!(said.contains("not publishing the release"), "without saying it was not published:\n{said}");
+    assert!(root.join("src/ontology/tiny.owl").is_file(), "the artefacts are still built:\n{said}");
+    assert!(!root.join("tiny.owl").exists(), "but nothing is published:\n{said}");
     let _ = std::fs::remove_dir_all(&root);
 }
 

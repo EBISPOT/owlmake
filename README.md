@@ -77,7 +77,7 @@ om all-imports                     # rebuild every individual import module
 ODK's standard Make targets are available as top-level owlmake commands:
 
 ```
-om prepare-release   # build every release artefact (ODK `prepare_release`/`all`)
+om prepare-release   # build what the release needs — checks, reports, artefacts — then publish it (ODK `prepare_release`/`all`)
 om refresh-imports   # rebuild imports from upstream
 om test              # run the repository's QC checks
 om update-repo       # bring the repository's files into step with owlmake.yaml

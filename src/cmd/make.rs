@@ -192,7 +192,9 @@ pub fn run(args: Args) -> Result<()> {
 enum Kind {
     /// A release artefact (built by the native pipeline).
     Artefact,
-    /// `all` / `prepare_release` — build every artefact.
+    /// `prepare_release` — what its plan entry needs, then publication (see
+    /// [`release_selection`]); and `all` on a plan that does not define it —
+    /// every artefact, published.
     Release,
     /// `refresh-imports` family — rebuild import modules natively.
     RefreshImports { exclude_large: bool },
@@ -592,12 +594,14 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             );
         }
     }
-    // `release`/`all` names the artefact set: splice it in rather than handling
-    // it in the runner, so every index of `selection` is covered by exactly one
-    // phase below. Left for the runner, a `Kind::Release` sitting at the artefact
-    // split index would be dropped and `om make prepare_release` would silently
-    // do nothing.
+    // A release target is spliced into what it stands for rather than handled in
+    // the runner, so every index of `selection` is covered by exactly one phase
+    // below: `prepare_release` into what its plan entry needs, and `all` on a plan
+    // that does not define it into the artefact set.
     let mut publish = defaulted;
+    // `prepare_release` publishes once everything it needs has run, and only if
+    // none of it failed.
+    let mut publish_after = false;
     {
         let mut spliced: Vec<String> = Vec::with_capacity(selection.len());
         for t in selection {
@@ -629,6 +633,16 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 }
             }
             if matches!(classify(&full_plan, &t), Kind::Release) {
+                if let Some(needs) = release_selection(&full_plan, &t) {
+                    status!("make: `{t}` runs {}", describe_release(&full_plan, &needs));
+                    publish_after = true;
+                    for n in needs {
+                        if !spliced.contains(&n) {
+                            spliced.push(n);
+                        }
+                    }
+                    continue;
+                }
                 publish = true;
                 for a in full_plan.artefacts.iter().filter(|a| !a.missing_rule) {
                     if !spliced.contains(&a.target) {
@@ -832,6 +846,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         // A defaulted build hands `build_plan` the FULL plan; a named subset gets
         // a subset plan. Partial replay of a full artefact set rewrites artefacts
         // the full plan produces, at the wrong sizes.
+        let publish = publish && !publish_after;
         let r = if defaulted {
             build_plan(&repo, &full_plan, &run_opts, publish)
         } else {
@@ -853,6 +868,15 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     for (t, kind) in kinds.iter().skip(before) {
         let r = run_one(t, kind, &repo, &full_plan);
         report(t, r);
+    }
+    // A release whose checks, reports or artefacts failed is built as far as it
+    // goes and left unpublished.
+    if publish_after {
+        if !failures.is_empty() || artefact_err.is_some() {
+            status!("make: not publishing the release: a target it needs failed");
+        } else if run_opts.output_dir == repo.dir && repo.root != repo.dir {
+            publish_release(&repo, &full_plan, &run_opts.output_dir)?;
+        }
     }
     // Whatever this run wrote on its way to something else and does not keep —
     // excluding the targets the caller actually asked for, which are goals rather
@@ -1474,10 +1498,113 @@ fn known_targets(plan: &Plan) -> String {
 
 /// Whether the plan defines `target` as something it can build.
 fn plan_target(plan: &Plan, target: &str) -> bool {
+    plan_entry(plan, target).is_some()
+}
+
+/// The plan's entry for `target`, when it defines it as something it can build.
+fn plan_entry<'a>(plan: &'a Plan, target: &str) -> Option<&'a crate::plan::ArtefactPlan> {
     plan.artefacts
         .iter()
         .chain(plan.prerequisites.iter())
-        .any(|a| a.target == target && !a.missing_rule)
+        .find(|a| a.target == target && !a.missing_rule)
+}
+
+/// What `prepare_release` runs: what its plan entry needs, in the plan's order,
+/// with every grouping target (one with prerequisites and no steps) through which
+/// it reaches the files the release publishes opened into its members, and the
+/// release artefacts — every one, built together by the release pipeline — where
+/// the first published file is reached. So the checks and reports grouped with
+/// the artefacts run where they stand, and the import modules are left to the
+/// release pipeline. `prepare_release_fast` is the same release. `None` for any
+/// other target, and for a plan that records no prerequisites for the release.
+fn release_selection(plan: &Plan, target: &str) -> Option<Vec<String>> {
+    if !matches!(target.replace('-', "_").as_str(), "prepare_release" | "prepare_release_fast") {
+        return None;
+    }
+    let needs = &plan_entry(plan, "prepare_release")?.needs;
+    if needs.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    open_release_needs(plan, needs, &mut out, &mut std::collections::HashSet::new());
+    Some(out)
+}
+
+fn open_release_needs(
+    plan: &Plan,
+    needs: &[String],
+    out: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    for n in needs {
+        if !seen.insert(n.clone()) {
+            continue;
+        }
+        if published(plan, n) {
+            for a in plan.artefacts.iter().filter(|a| !a.missing_rule) {
+                if !out.contains(&a.target) {
+                    out.push(a.target.clone());
+                }
+            }
+        } else if crate::build::import_module_for(plan, n).is_some() {
+            // The release pipeline builds the import modules, kept or rebuilt as
+            // the run's import mode says.
+        } else if let Some(members) = grouped(plan, n).filter(|_| reaches_published(plan, n)) {
+            open_release_needs(plan, members, out, seen);
+        } else if !out.contains(n) {
+            out.push(n.clone());
+        }
+    }
+}
+
+/// The members of a grouping target: one with prerequisites and no steps.
+fn grouped<'a>(plan: &'a Plan, target: &str) -> Option<&'a [String]> {
+    plan_entry(plan, target)
+        .filter(|a| a.steps.is_empty() && !a.needs.is_empty())
+        .map(|a| a.needs.as_slice())
+}
+
+/// Whether `target` is a file the release publishes: an artefact at the top of
+/// the build directory (see [`publish_release`]).
+fn published(plan: &Plan, target: &str) -> bool {
+    !target.contains('/') && plan.artefacts.iter().any(|a| a.target == target && !a.missing_rule)
+}
+
+/// Whether `target` is a grouping target with a published file among its members,
+/// or among the members of a grouping target it holds.
+fn reaches_published(plan: &Plan, target: &str) -> bool {
+    let mut stack = vec![target];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(t) = stack.pop() {
+        if !seen.insert(t) {
+            continue;
+        }
+        for m in grouped(plan, t).unwrap_or_default() {
+            if published(plan, m) {
+                return true;
+            }
+            stack.push(m.as_str());
+        }
+    }
+    false
+}
+
+/// The release's selection as the run announces it, the artefacts counted
+/// rather than listed.
+fn describe_release(plan: &Plan, selection: &[String]) -> String {
+    let artefact = |n: &String| plan.artefacts.iter().any(|a| &a.target == n && !a.missing_rule);
+    let mut parts: Vec<String> = Vec::new();
+    let mut counted = false;
+    for n in selection {
+        if !artefact(n) {
+            parts.push(format!("`{n}`"));
+        } else if !counted {
+            counted = true;
+            let k = selection.iter().filter(|n| artefact(n)).count();
+            parts.push(format!("the {k} release artefact(s)"));
+        }
+    }
+    parts.join(", ")
 }
 
 #[cfg(test)]

@@ -167,7 +167,8 @@ pub enum Command {
     /// `owlmake.yaml`, or one regenerated from its build configuration), then run
     /// the requested targets. Defaults to the current directory.
     Make(cmd::make::Args),
-    /// Build every release artefact (`prepare_release`).
+    /// Build what the release needs — its checks, reports and artefacts, and
+    /// whatever the repository adds to it — then publish it (`prepare_release`).
     #[command(visible_aliases = ["prepare_release", "all"])]
     PrepareRelease(cmd::make::TargetArgs),
     /// Rebuild the import modules from upstream (`refresh-imports`).
