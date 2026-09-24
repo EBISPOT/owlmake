@@ -676,17 +676,104 @@ const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
 /// how every CURIE in every SSSOM artefact resolves, and the two differ by 388
 /// prefixes. A version emulated with the other version's map is not approximately
 /// right, it is a different answer.
+///
+/// One convention reads the ODK release instead: a build that emulates one neither
+/// writes nor reads OBO `[Instance]` frames, because that release does neither.
+///
+/// Every owlmake process the build starts runs under the same emulation
+/// ([`emulation_args`]), so a step writes the same bytes whether it runs in this
+/// process or in one of its own.
 pub fn set_robot_behaviours(plan: &Plan) {
-    let post_1_9_9 = plan.emulate_robot_version >= ROBOT_1_9_9;
-    crate::io::obograph::set_nest_axiom_anns(post_1_9_9);
-    crate::cmd::query::set_update_keeps_prefixes(post_1_9_9);
-    crate::sssom::converter::set_obo_epm(plan.emulate_robot_version);
+    set_emulation(Some(Emulation {
+        robot: plan.emulate_robot_version,
+        odk: plan.emulate_odk_version,
+    }));
+}
+
+/// The releases a run writes as: a plan's `emulate_robot_version` and
+/// `emulate_odk_version`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Emulation {
+    pub robot: (u32, u32, u32),
+    pub odk: Option<(u32, u32, u32)>,
+}
+
+/// The emulation this process runs under: `None` while no plan governs the run.
+/// [`set_emulation`] is its only writer, and sets it together with the switches
+/// it decides.
+static EMULATION: std::sync::Mutex<Option<Emulation>> = std::sync::Mutex::new(None);
+
+/// Put this process under `emulation`, setting every byte behaviour it decides
+/// (see [`set_robot_behaviours`]). `None` returns them to the conventions of a
+/// run no plan governs.
+pub fn set_emulation(emulation: Option<Emulation>) {
+    let post_1_9_9 = emulation.map(|e| e.robot >= ROBOT_1_9_9);
+    crate::io::obograph::set_nest_axiom_anns(post_1_9_9.unwrap_or(false));
+    crate::cmd::query::set_update_keeps_prefixes(post_1_9_9.unwrap_or(true));
+    crate::sssom::converter::set_obo_epm(post_1_9_9.unwrap_or(true));
+    crate::io::obo::set_instance_frames(emulation.is_none_or(|e| e.odk.is_none()));
+    *EMULATION.lock().unwrap_or_else(|e| e.into_inner()) = emulation;
+}
+
+/// The emulation this process runs under — see [`set_emulation`].
+pub fn emulation() -> Option<Emulation> {
+    *EMULATION.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The arguments naming this process's emulation: `__emulate-robot-version=`
+/// and, when it emulates an ODK release, `__emulate-odk-version=`. Every owlmake
+/// process a build starts is given them ahead of its command, and takes them
+/// ([`take_emulation_args`]) before anything else. Empty while no plan governs
+/// the run.
+pub fn emulation_args() -> Vec<String> {
+    let Some(e) = emulation() else { return Vec::new() };
+    let version = |(a, b, c): (u32, u32, u32)| format!("{a}.{b}.{c}");
+    let mut args = vec![format!("{EMULATE_ROBOT_ARG}{}", version(e.robot))];
+    if let Some(odk) = e.odk {
+        args.push(format!("{EMULATE_ODK_ARG}{}", version(odk)));
+    }
+    args
+}
+
+const EMULATE_ROBOT_ARG: &str = "__emulate-robot-version=";
+const EMULATE_ODK_ARG: &str = "__emulate-odk-version=";
+
+/// Take the [`emulation_args`] that lead `argv` off it, and put this process
+/// under the emulation they name. An argv without them is left as it is.
+pub fn take_emulation_args(argv: &mut Vec<String>) -> Result<()> {
+    let version = |s: &str| -> Result<(u32, u32, u32)> {
+        let parts: Result<Vec<u32>, _> = s.split('.').map(str::parse).collect();
+        match parts.as_deref() {
+            Ok(&[a, b, c]) => Ok((a, b, c)),
+            _ => bail!("`{s}` is not a version"),
+        }
+    };
+    let (mut robot, mut odk, mut taken) = (None, None, 0);
+    for arg in argv.iter() {
+        if let Some(v) = arg.strip_prefix(EMULATE_ROBOT_ARG) {
+            robot = Some(version(v)?);
+        } else if let Some(v) = arg.strip_prefix(EMULATE_ODK_ARG) {
+            odk = Some(version(v)?);
+        } else {
+            break;
+        }
+        taken += 1;
+    }
+    if taken == 0 {
+        return Ok(());
+    }
+    let Some(robot) = robot else {
+        bail!("`{EMULATE_ODK_ARG}` names an ODK release without `{EMULATE_ROBOT_ARG}`")
+    };
+    argv.drain(..taken);
+    set_emulation(Some(Emulation { robot, odk }));
+    Ok(())
 }
 
 fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     use crate::progress::Stage;
 
-    // The three byte-affecting global switches are set ONCE, here, from the plan.
+    // The byte-affecting global switches are set ONCE, here, from the plan.
     // The plan is their only writer on the build path: reachable from the
     // environment or from whichever subcommand ran last, they would let the same
     // plan produce different bytes depending on ambient state.

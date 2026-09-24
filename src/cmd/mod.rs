@@ -277,12 +277,12 @@ pub(crate) fn closure_labels(input: Option<&std::path::Path>, common: &crate::cm
 /// horned-owl's serializers. That is workable only because each of them is
 /// established at the START of a run — latched from the command line by
 /// [`CommonArgs::activate`], or set from the plan by
-/// `build::set_robot_behaviours` — and this is the point at which "the start of a
-/// run" is defined.
+/// `build::set_robot_behaviours` (in a process a build starts, from the
+/// arguments it is started with) — and this is the point at which "the start of
+/// a run" is defined.
 pub fn reset_invocation_options() {
     crate::io::set_run_options(crate::io::RunOptions::default());
-    crate::io::obograph::set_nest_axiom_anns(false);
-    crate::cmd::query::set_update_keeps_prefixes(true);
+    crate::build::set_emulation(None);
 }
 
 /// Resolve an output format from an explicit `--format` name, else the output

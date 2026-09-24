@@ -296,6 +296,13 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
     // chose them. Both are results decided by something other than the run that
     // produced them.
     crate::cmd::reset_invocation_options();
+    // An owlmake process a build starts is told the build's emulation ahead of its
+    // command, and runs under it: its conventions are the plan's, not those of a
+    // run no plan governs.
+    if let Err(e) = crate::build::take_emulation_args(&mut argv) {
+        eprintln!("Error: {e:?}");
+        return 2;
+    }
     // A leading `robot` token is accepted and dropped, so an existing invocation
     // spelled `owlmake robot reason …` behaves exactly like `owlmake reason …`.
     if argv.first().map(String::as_str) == Some("robot") {

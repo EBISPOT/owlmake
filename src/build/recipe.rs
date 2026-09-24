@@ -1022,11 +1022,15 @@ const CHILD_ENV_ALLOWED: &[&str] = &[
 /// transform. A recipe's own `sh` line still inherits — a shell step is a
 /// declared escape hatch — but it receives this run's `VAR=value` assignments
 /// explicitly, via `apply_run_env`.
+///
+/// It runs under this run's emulation, which its arguments name ahead of the
+/// command (`build::emulation_args`), as every owlmake process a build starts
+/// does.
 fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Result<()> {
     // As in `run_shell`: the child writes to the inherited stderr.
     let _quiet = crate::progress::Suspend::new();
     let mut cmd = Command::new(exe);
-    cmd.args(args).current_dir(dir);
+    cmd.args(crate::build::emulation_args()).args(args).current_dir(dir);
     cmd.env_clear();
     for (k, v) in std::env::vars_os() {
         if k.to_str().is_some_and(|k| CHILD_ENV_ALLOWED.contains(&k)) {
@@ -1150,85 +1154,90 @@ pub fn prepend_tool_path(cmd: &mut Command, exe: &Path) {
     cmd.env("PATH", path);
 }
 
-/// Directory of bundled-tool shims for `exe`, created once per binary. (In a
-/// release there is only ever one `exe` — the running owlmake binary — but
-/// keying on it keeps the shims correct under tests, where the live process is
-/// the test harness rather than owlmake.)
+/// Directory of bundled-tool shims for `exe` under this run's emulation, created
+/// once per binary and emulation. (In a release there is only ever one `exe` —
+/// the running owlmake binary — but keying on it keeps the shims correct under
+/// tests, where the live process is the test harness rather than owlmake.)
 fn shim_dir(exe: &Path) -> Option<PathBuf> {
-    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PathBuf>>> =
+    type Key = (PathBuf, Vec<String>);
+    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<Key, PathBuf>>> =
         OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    if let Some(d) = cache.lock().ok()?.get(exe) {
+    let key = (exe.to_path_buf(), crate::build::emulation_args());
+    if let Some(d) = cache.lock().ok()?.get(&key) {
         return Some(d.clone());
     }
-    let dir = install_shims(exe).ok()?;
-    cache.lock().ok()?.insert(exe.to_path_buf(), dir.clone());
+    let dir = install_shims(&key.0, &key.1).ok()?;
+    cache.lock().ok()?.insert(key, dir.clone());
     Some(dir)
 }
 
 /// Write tiny `robot`/`jq`/`sssom`/`sed`/`grep`/`comm` shell scripts that re-exec
 /// `exe`'s matching subcommand (`robot <sub> …` maps to `owlmake <sub> …`, since
 /// owlmake's chaining harness carries those subcommand names), and return their
-/// directory.
-fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
+/// directory. Each starts `exe` with `emulation` ahead of the subcommand, so a
+/// script a recipe runs writes as the build does.
+fn install_shims(exe: &Path, emulation: &[String]) -> std::io::Result<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     exe.hash(&mut h);
+    emulation.hash(&mut h);
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
+    let exe = format!("{exe:?}{}", emulation.iter().map(|a| format!(" {a}")).collect::<String>());
     let shims: [(&str, String); 28] = [
-        ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
-        ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
+        ("robot", format!("#!/bin/sh\nexec {exe} \"$@\"\n")),
+        ("jq", format!("#!/bin/sh\nexec {exe} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
         // recipe that calls one, and owlmake answers it with its own engine so
         // the refreshed-imports chain needs nothing installed.
-        ("arq", format!("#!/bin/sh\nexec {exe:?} arq \"$@\"\n")),
-        ("sssom", format!("#!/bin/sh\nexec {exe:?} sssom \"$@\"\n")),
+        ("arq", format!("#!/bin/sh\nexec {exe} arq \"$@\"\n")),
+        ("sssom", format!("#!/bin/sh\nexec {exe} sssom \"$@\"\n")),
         // KGX: the `<ont>_nodes.tsv`/`_edges.tsv` release artefacts.
         // owlmake itself: a recipe that spells `om …` runs THIS binary, wherever it
         // is installed and whatever it is called there.
-        ("om", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
+        ("om", format!("#!/bin/sh\nexec {exe} \"$@\"\n")),
         // A recipe that recurses (`$(MAKE) …`, or `make …` inside an `if … fi`)
         // builds the target from this repository's plan: there is no Makefile for
         // any other `make` to read.
-        ("make", format!("#!/bin/sh\nexec {exe:?} make \"$@\"\n")),
-        ("kgx", format!("#!/bin/sh\nexec {exe:?} kgx \"$@\"\n")),
-        ("dosdp-tools", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
-        ("sssom-cli", format!("#!/bin/sh\nexec {exe:?} sssom transform \"$@\"\n")),
-        ("owltools", format!("#!/bin/sh\nexec {exe:?} owltools \"$@\"\n")),
-        ("sed", format!("#!/bin/sh\nexec {exe:?} sed \"$@\"\n")),
-        ("grep", format!("#!/bin/sh\nexec {exe:?} grep \"$@\"\n")),
-        ("comm", format!("#!/bin/sh\nexec {exe:?} comm \"$@\"\n")),
+        ("make", format!("#!/bin/sh\nexec {exe} make \"$@\"\n")),
+        ("kgx", format!("#!/bin/sh\nexec {exe} kgx \"$@\"\n")),
+        ("dosdp-tools", format!("#!/bin/sh\nexec {exe} dosdp \"$@\"\n")),
+        ("sssom-cli", format!("#!/bin/sh\nexec {exe} sssom transform \"$@\"\n")),
+        ("owltools", format!("#!/bin/sh\nexec {exe} owltools \"$@\"\n")),
+        ("sed", format!("#!/bin/sh\nexec {exe} sed \"$@\"\n")),
+        ("grep", format!("#!/bin/sh\nexec {exe} grep \"$@\"\n")),
+        ("comm", format!("#!/bin/sh\nexec {exe} comm \"$@\"\n")),
         // gzip: a release asset is published compressed, and the header a system
         // gzip writes carries the clock — so two builds of one database would
         // differ in their first bytes.
-        ("gzip", format!("#!/bin/sh\nexec {exe:?} gzip \"$@\"\n")),
-        ("gunzip", format!("#!/bin/sh\nexec {exe:?} gunzip \"$@\"\n")),
-        ("zcat", format!("#!/bin/sh\nexec {exe:?} zcat \"$@\"\n")),
+        ("gzip", format!("#!/bin/sh\nexec {exe} gzip \"$@\"\n")),
+        ("gunzip", format!("#!/bin/sh\nexec {exe} gunzip \"$@\"\n")),
+        ("zcat", format!("#!/bin/sh\nexec {exe} zcat \"$@\"\n")),
         // Helper commands a repo's recipes call by name, implemented natively.
         // Nothing else on the box provides them, so without these an `om make
         // test` dies with exit 127 on its first prerequisite.
-        ("dicer-cli", format!("#!/bin/sh\nexec {exe:?} dicer-cli \"$@\"\n")),
-        ("fastobo-validator", format!("#!/bin/sh\nexec {exe:?} fastobo-validator \"$@\"\n")),
-        ("runoak", format!("#!/bin/sh\nexec {exe:?} runoak \"$@\"\n")),
-        ("dosdp", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
-        ("check-rdfxml", format!("#!/bin/sh\nexec {exe:?} check-rdfxml \"$@\"\n")),
+        ("dicer-cli", format!("#!/bin/sh\nexec {exe} dicer-cli \"$@\"\n")),
+        ("fastobo-validator", format!("#!/bin/sh\nexec {exe} fastobo-validator \"$@\"\n")),
+        ("runoak", format!("#!/bin/sh\nexec {exe} runoak \"$@\"\n")),
+        ("dosdp", format!("#!/bin/sh\nexec {exe} dosdp \"$@\"\n")),
+        ("check-rdfxml", format!("#!/bin/sh\nexec {exe} check-rdfxml \"$@\"\n")),
         (
             "simple_pattern_tester.py",
-            format!("#!/bin/sh\nexec {exe:?} simple_pattern_tester.py \"$@\"\n"),
+            format!("#!/bin/sh\nexec {exe} simple_pattern_tester.py \"$@\"\n"),
         ),
-        ("odk-info", format!("#!/bin/sh\nexec {exe:?} odk-info \"$@\"\n")),
-        ("sha256sum", format!("#!/bin/sh\nexec {exe:?} sha256sum \"$@\"\n")),
+        ("odk-info", format!("#!/bin/sh\nexec {exe} odk-info \"$@\"\n")),
+        ("sha256sum", format!("#!/bin/sh\nexec {exe} sha256sum \"$@\"\n")),
         // The ontology SQL database (`semsql make <name>.db`), a release asset
         // for repos that publish one.
-        ("semsql", format!("#!/bin/sh\nexec {exe:?} semsql \"$@\"\n")),
+        ("semsql", format!("#!/bin/sh\nexec {exe} semsql \"$@\"\n")),
         // Helpers of ODK's own that the standard build's recipes name.
-        ("tsvalid", format!("#!/bin/sh\nexec {exe:?} tsvalid \"$@\"\n")),
-        ("context2csv", format!("#!/bin/sh\nexec {exe:?} context2csv \"$@\"\n")),
+        ("tsvalid", format!("#!/bin/sh\nexec {exe} tsvalid \"$@\"\n")),
+        ("context2csv", format!("#!/bin/sh\nexec {exe} context2csv \"$@\"\n")),
         (
             "make-release-assets.py",
-            format!("#!/bin/sh\nexec {exe:?} make-release-assets.py \"$@\"\n"),
+            format!("#!/bin/sh\nexec {exe} make-release-assets.py \"$@\"\n"),
         ),
     ];
     for (name, body) in shims {
@@ -1247,8 +1256,14 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
 /// the launcher text at command position becomes `<exe>`, and bare `jq`/`sssom`
 /// words become `<exe> jq` / `<exe> sssom`. An explicit path rather than a `PATH`
 /// shim, so a recipe cannot pick up a same-named binary from the environment.
+/// `<exe>` carries this run's emulation (`build::emulation_args`), so what the
+/// line starts writes as the build does.
 pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
-    let exe = exe.display().to_string();
+    let mut exe = exe.display().to_string();
+    for arg in crate::build::emulation_args() {
+        exe.push(' ');
+        exe.push_str(&arg);
+    }
     let mut out = sub.to_string();
     let robot_prefix = robot_prefix.trim();
     if !robot_prefix.is_empty() {

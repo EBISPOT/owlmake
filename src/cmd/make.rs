@@ -404,8 +404,10 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?;
     // The plan's recorded `emulate_robot_version` selects the two version-dependent byte
     // behaviours — whether OBO Graphs JSON nests axiom-annotation `meta`, and
-    // whether a SPARQL update inherits the document's prefixes. Read from the
-    // plan, so a plan-only repo produces the same bytes as the repo it came from.
+    // whether a SPARQL update inherits the document's prefixes — and its
+    // `emulate_odk_version` whether OBO `[Instance]` frames are written and read.
+    // Read from the plan, so a plan-only repo produces the same bytes as the repo
+    // it came from.
     crate::build::set_robot_behaviours(&full_plan);
 
     // A switch this plan cannot vary is REFUSED, not ignored. Which rules exist
