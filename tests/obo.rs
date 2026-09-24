@@ -587,3 +587,261 @@ AnnotationAssertion(rdfs:comment obo:X_0000002 \"zzz\")
     assert!(two.contains("comment: aaa"), "the smallest value holds the slot:\n{two}");
     assert!(!two.contains("comment: zzz"), "only one comment survives:\n{two}");
 }
+
+/// Whether OBO `[Instance]` frames are written and read is process-wide, so the
+/// tests that write or read individuals take turns: two of them switch it off.
+static INSTANCE_SWITCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The OBO writer and reader as a build emulating ODK runs them, for as long as
+/// this lives.
+struct EmulatingOdk;
+
+impl EmulatingOdk {
+    fn start() -> EmulatingOdk {
+        owlmake::io::obo::set_instance_frames(false);
+        EmulatingOdk
+    }
+}
+
+impl Drop for EmulatingOdk {
+    fn drop(&mut self) {
+        owlmake::io::obo::set_instance_frames(true);
+    }
+}
+
+/// Named individuals — COHO models its cohorts as individuals of two classes —
+/// with the axioms an OBO `[Instance]` frame spells, and three it cannot.
+const INDIVIDUALS: &str = r#"Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(oio:=<http://www.geneontology.org/formats/oboInOwl#>)
+Prefix(coho:=<http://www.ebi.ac.uk/coho/>)
+Ontology(<http://www.ebi.ac.uk/coho.owl>
+Declaration(Class(coho:COHO_0000000))
+Declaration(ObjectProperty(coho:hasSubCohort))
+Declaration(ObjectProperty(obo:RO_0001025))
+Declaration(DataProperty(coho:size))
+Declaration(NamedIndividual(coho:COHO_0000460))
+Declaration(NamedIndividual(coho:COHO_0000990))
+Declaration(NamedIndividual(<http://dbpedia.org/resource/Northern_America>))
+AnnotationAssertion(rdfs:label coho:COHO_0000000 "cohort")
+AnnotationAssertion(rdfs:label obo:RO_0001025 "located in")
+AnnotationAssertion(rdfs:label coho:COHO_0000460 "Diabetes Heart Study")
+AnnotationAssertion(Annotation(obo:IAO_0000119 "PMID:21409311") obo:IAO_0000115 coho:COHO_0000460 "A cohort of families with type 2 diabetes.")
+AnnotationAssertion(Annotation(oio:hasSynonymType obo:OMO_0003000) oio:hasRelatedSynonym coho:COHO_0000460 "DHS")
+AnnotationAssertion(oio:hasDbXref coho:COHO_0000460 "PMID:23230101")
+AnnotationAssertion(obo:IAO_0000116 coho:COHO_0000460 "Not the Dallas Heart Study.")
+AnnotationAssertion(rdfs:label coho:COHO_0000990 "Diabetes Heart Study - Mind")
+ClassAssertion(coho:COHO_0000000 coho:COHO_0000460)
+ClassAssertion(coho:COHO_0000000 coho:COHO_0000990)
+ObjectPropertyAssertion(coho:hasSubCohort coho:COHO_0000460 coho:COHO_0000990)
+ObjectPropertyAssertion(Annotation(oio:hasDbXref "PMID:21409311") Annotation(rdfs:comment "Recruited in North Carolina.") obo:RO_0001025 coho:COHO_0000460 <http://dbpedia.org/resource/Northern_America>)
+DataPropertyAssertion(coho:size coho:COHO_0000460 "1443"^^xsd:integer)
+ClassAssertion(ObjectSomeValuesFrom(coho:hasSubCohort coho:COHO_0000000) coho:COHO_0000460)
+DifferentIndividuals(coho:COHO_0000460 coho:COHO_0000990)
+)"#;
+
+/// A named individual is an `[Instance]` frame, after the `[Typedef]` run: the
+/// tags a `[Term]` carries, `instance_of:` for each class it is asserted in, and
+/// `relationship:` for each object property assertion, its axiom annotations as
+/// qualifiers. An individual outside the obo PURL space is written under its full
+/// IRI rather than a shortened id that would read back as a different one, and the
+/// assertions OBO has no tag for — a class expression, a data property, a
+/// `DifferentIndividuals` — go to `owl-axioms:`.
+#[test]
+fn obo_writer_writes_named_individuals_as_instance_frames() {
+    let _turn = INSTANCE_SWITCH.lock().unwrap_or_else(|e| e.into_inner());
+    let obo = to_obo(INDIVIDUALS);
+    assert_eq!(
+        stanza(&obo, "coho:COHO_0000460"),
+        "id: coho:COHO_0000460\n\
+         name: Diabetes Heart Study\n\
+         def: \"A cohort of families with type 2 diabetes.\" [] {IAO:0000119=\"PMID:21409311\"}\n\
+         synonym: \"DHS\" RELATED OMO:0003000 []\n\
+         xref: PMID:23230101\n\
+         instance_of: coho:COHO_0000000 ! cohort\n\
+         relationship: coho:hasSubCohort coho:COHO_0000990\n\
+         relationship: RO:0001025 http://dbpedia.org/resource/Northern_America \
+         {xref=\"PMID:21409311\", comment=\"Recruited in North Carolina.\"} ! located in\n\
+         property_value: IAO:0000116 \"Not the Dallas Heart Study.\" xsd:string"
+    );
+    assert_eq!(
+        stanza(&obo, "coho:COHO_0000990"),
+        "id: coho:COHO_0000990\n\
+         name: Diabetes Heart Study - Mind\n\
+         instance_of: coho:COHO_0000000 ! cohort"
+    );
+    assert!(obo.contains("\n[Instance]\nid: coho:COHO_0000460\n"), "{obo}");
+    assert!(obo.find("[Instance]") > obo.rfind("[Typedef]"), "{obo}");
+    let owl_axioms = obo.lines().find(|l| l.starts_with("owl-axioms: ")).unwrap_or_default();
+    for axiom in [
+        "ClassAssertion(ObjectSomeValuesFrom(<http://www.ebi.ac.uk/coho/hasSubCohort> \
+         <http://www.ebi.ac.uk/coho/COHO_0000000>) <http://www.ebi.ac.uk/coho/COHO_0000460>)",
+        "DataPropertyAssertion(<http://www.ebi.ac.uk/coho/size> \
+         <http://www.ebi.ac.uk/coho/COHO_0000460> \\\"1443\\\"^^xsd:integer)",
+        "DifferentIndividuals(<http://www.ebi.ac.uk/coho/COHO_0000460> \
+         <http://www.ebi.ac.uk/coho/COHO_0000990>)",
+    ] {
+        assert!(owl_axioms.contains(axiom), "{axiom} missing from {owl_axioms}");
+    }
+    assert!(!obo.contains("Northern:America"), "{obo}");
+}
+
+/// Every axiom about an individual comes back from owl→obo→owl as it went in —
+/// its declaration, class and property assertions (axiom annotations included),
+/// its annotations, and what `owl-axioms:` carried. The OBO mapping adds an
+/// `oboInOwl:id` annotation to every frame and reads a plain literal as
+/// `xsd:string`, and neither counts as a difference.
+///
+/// The individuals' ids and the class they instantiate live in a declared
+/// `idspace:`, so this also holds the reader to expanding a frame's ids through the
+/// document's idspaces.
+#[test]
+fn obo_instances_round_trip_through_owl() {
+    let _turn = INSTANCE_SWITCH.lock().unwrap_or_else(|e| e.into_inner());
+    let source = io::load_from(std::io::Cursor::new(INDIVIDUALS.as_bytes().to_vec()), Format::Functional)
+        .unwrap();
+    let mut obo = Vec::new();
+    io::write_to_ref(&source, &mut obo, Format::Obo).unwrap();
+    let back = io::load_from(std::io::Cursor::new(obo), Format::Obo).unwrap();
+    let before = individual_axioms(&source);
+    assert_eq!(before.len(), 16, "{before:#?}");
+    assert_eq!(individual_axioms(&back), before);
+}
+
+/// A build that emulates an ODK release writes the `.obo` that release does: no
+/// `[Instance]` frames, its class assertions dropped, and its object property
+/// assertions left to `owl-axioms:` — the axioms `drop-untranslatable-axioms`
+/// removes.
+#[test]
+fn obo_writer_omits_instance_frames_when_emulating_odk() {
+    let _turn = INSTANCE_SWITCH.lock().unwrap_or_else(|e| e.into_inner());
+    let model = io::load_from(std::io::Cursor::new(INDIVIDUALS.as_bytes().to_vec()), Format::Functional)
+        .unwrap();
+    let (obo, untranslatable) = {
+        let _odk = EmulatingOdk::start();
+        let mut out = Vec::new();
+        io::write_to_ref(&model, &mut out, Format::Obo).unwrap();
+        (String::from_utf8(out).unwrap(), owlmake::io::obo::untranslatable_axioms(&model))
+    };
+    assert!(!obo.contains("[Instance]"), "{obo}");
+    assert!(!obo.contains("instance_of:"), "{obo}");
+    let owl_axioms = obo.lines().find(|l| l.starts_with("owl-axioms: ")).unwrap_or_default();
+    assert!(
+        owl_axioms.contains(
+            "ObjectPropertyAssertion(<http://www.ebi.ac.uk/coho/hasSubCohort> \
+             <http://www.ebi.ac.uk/coho/COHO_0000460> <http://www.ebi.ac.uk/coho/COHO_0000990>)"
+        ),
+        "{owl_axioms}"
+    );
+    assert!(!owl_axioms.contains("ClassAssertion("), "{owl_axioms}");
+    let count = |kind: fn(&Component<horned_owl::model::RcStr>) -> bool| {
+        untranslatable.iter().filter(|ac| kind(&ac.component)).count()
+    };
+    assert_eq!(count(|c| matches!(c, Component::ObjectPropertyAssertion(_))), 2);
+    assert_eq!(count(|c| matches!(c, Component::ClassAssertion(_))), 0);
+}
+
+/// A build that emulates an ODK release reads an OBO document the way that
+/// release does: it stops at the first `[Instance]` frame and keeps what came
+/// before, so the `[Term]` after it is not read either. Any other run reads every
+/// frame.
+#[test]
+fn obo_reader_stops_at_instance_frames_when_emulating_odk() {
+    let _turn = INSTANCE_SWITCH.lock().unwrap_or_else(|e| e.into_inner());
+    const DOC: &str = "format-version: 1.2
+idspace: coho http://www.ebi.ac.uk/coho/ \n\
+ontology: t
+
+[Term]
+id: coho:COHO_0000000
+name: cohort
+
+[Instance]
+id: coho:COHO_0000460
+name: Diabetes Heart Study
+instance_of: coho:COHO_0000000
+
+[Term]
+id: X:0000002
+name: after the instance
+";
+    let declared = |m: &owlmake::model::Model| -> Vec<String> {
+        let mut entities: Vec<String> = m
+            .ont
+            .iter()
+            .filter_map(|ac| match &ac.component {
+                Component::DeclareClass(d) => Some(format!("class {}", d.0 .0.as_ref())),
+                Component::DeclareNamedIndividual(d) => {
+                    Some(format!("individual {}", d.0 .0.as_ref()))
+                }
+                _ => None,
+            })
+            .collect();
+        entities.sort();
+        entities
+    };
+    let emulating = {
+        let _odk = EmulatingOdk::start();
+        load_obo(DOC)
+    };
+    assert_eq!(declared(&emulating), ["class http://www.ebi.ac.uk/coho/COHO_0000000"]);
+    assert_eq!(
+        declared(&load_obo(DOC)),
+        [
+            "class http://purl.obolibrary.org/obo/X_0000002",
+            "class http://www.ebi.ac.uk/coho/COHO_0000000",
+            "individual http://www.ebi.ac.uk/coho/COHO_0000460",
+        ]
+    );
+}
+
+/// The axioms of `m` that are about a named individual, as comparable strings.
+fn individual_axioms(m: &owlmake::model::Model) -> std::collections::BTreeSet<String> {
+    use horned_owl::model::{Annotation, AnnotationSubject, AnnotationValue, Literal};
+    const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+    const OBOINOWL_ID: &str = "http://www.geneontology.org/formats/oboInOwl#id";
+    fn plain(a: &Annotation<horned_owl::model::RcStr>) -> Annotation<horned_owl::model::RcStr> {
+        let mut a = a.clone();
+        if let AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri }) = &a.av {
+            if datatype_iri.as_ref() == XSD_STRING {
+                a.av = AnnotationValue::Literal(Literal::Simple { literal: literal.clone() });
+            }
+        }
+        a
+    }
+    let individuals: std::collections::BTreeSet<String> = m
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::DeclareNamedIndividual(d) => Some(d.0 .0.as_ref().to_string()),
+            _ => None,
+        })
+        .collect();
+    m.ont
+        .iter()
+        .filter_map(|ac| {
+            let mut component = ac.component.clone();
+            match &mut component {
+                Component::DeclareNamedIndividual(_)
+                | Component::ClassAssertion(_)
+                | Component::ObjectPropertyAssertion(_)
+                | Component::DataPropertyAssertion(_)
+                | Component::DifferentIndividuals(_) => {}
+                Component::AnnotationAssertion(aa) => match &aa.subject {
+                    AnnotationSubject::IRI(s)
+                        if individuals.contains(s.as_ref()) && aa.ann.ap.0.as_ref() != OBOINOWL_ID =>
+                    {
+                        aa.ann = plain(&aa.ann);
+                    }
+                    _ => return None,
+                },
+                _ => return None,
+            }
+            let anns: std::collections::BTreeSet<_> = ac.ann.iter().map(plain).collect();
+            Some(format!("{component:?} {anns:?}"))
+        })
+        .collect()
+}

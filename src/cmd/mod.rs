@@ -283,6 +283,7 @@ pub fn reset_invocation_options() {
     crate::io::set_run_options(crate::io::RunOptions::default());
     crate::io::obograph::set_nest_axiom_anns(false);
     crate::cmd::query::set_update_keeps_prefixes(true);
+    crate::io::obo::set_instance_frames(true);
 }
 
 /// Resolve an output format from an explicit `--format` name, else the output

@@ -676,17 +676,21 @@ const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
 /// how every CURIE in every SSSOM artefact resolves, and the two differ by 388
 /// prefixes. A version emulated with the other version's map is not approximately
 /// right, it is a different answer.
+///
+/// One convention reads the ODK release instead: a build that emulates one neither
+/// writes nor reads OBO `[Instance]` frames, because that release does neither.
 pub fn set_robot_behaviours(plan: &Plan) {
     let post_1_9_9 = plan.emulate_robot_version >= ROBOT_1_9_9;
     crate::io::obograph::set_nest_axiom_anns(post_1_9_9);
     crate::cmd::query::set_update_keeps_prefixes(post_1_9_9);
     crate::sssom::converter::set_obo_epm(plan.emulate_robot_version);
+    crate::io::obo::set_instance_frames(plan.emulate_odk_version.is_none());
 }
 
 fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     use crate::progress::Stage;
 
-    // The three byte-affecting global switches are set ONCE, here, from the plan.
+    // The byte-affecting global switches are set ONCE, here, from the plan.
     // The plan is their only writer on the build path: reachable from the
     // environment or from whichever subcommand ran last, they would let the same
     // plan produce different bytes depending on ambient state.
