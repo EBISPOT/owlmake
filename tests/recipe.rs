@@ -193,3 +193,77 @@ fn a_command_that_makes_its_target_keeps_what_it_made() {
     assert_eq!(std::fs::read_to_string(ont.join("source.owl")).unwrap(), SOURCE);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A class with an annotated definition, and an individual asserted to be one.
+const EMULATED_SOURCE: &str = "Prefix(obo:=<http://purl.obolibrary.org/obo/>)\n\
+    Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+    Ontology(<http://example.org/source.owl>\n\
+    Declaration(Class(obo:TINY_0000001))\n\
+    Declaration(NamedIndividual(obo:TINY_0000002))\n\
+    Declaration(AnnotationProperty(obo:IAO_0000115))\n\
+    AnnotationAssertion(Annotation(rdfs:comment \"said so\") obo:IAO_0000115 obo:TINY_0000001 \"a thing\")\n\
+    ClassAssertion(obo:TINY_0000001 obo:TINY_0000002)\n)\n";
+
+/// An owlmake process a build starts writes as the build does.
+///
+/// A standard build emulates ODK 1.6.1 and so ROBOT 1.9.10: its OBO has no
+/// `[Instance]` frame, and its OBO Graphs JSON nests a definition's axiom
+/// annotations as the definition's own `meta`. Each target here converts
+/// `source.ofn` in an owlmake process of its own, started by one of the three
+/// routes a build has: the build spawning the command itself, the shell running
+/// a line whose launcher is rewritten to the owlmake binary, and the shell
+/// finding `robot` on `PATH`.
+#[test]
+fn a_process_the_build_starts_writes_as_the_plan_emulates() {
+    const ROUTES: [(&str, &str); 3] = [
+        ("spawned", "robot convert --input source.ofn -f FORMAT -o spawned.FORMAT"),
+        (
+            "rewritten",
+            "om --catalog catalog-v001.xml convert --input source.ofn -f FORMAT -o rewritten.FORMAT | cat",
+        ),
+        ("on-path", "if true; then robot convert --input source.ofn -f FORMAT -o on-path.FORMAT; fi"),
+    ];
+    let root = workdir("emulated-children");
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    let mut plan = String::from(
+        "emulate_odk_version: 1.6.1\nid: tiny\nuribase: http://example.org\nedit_format: ofn\ntargets:\n",
+    );
+    let mut goals = Vec::new();
+    for (route, command) in ROUTES {
+        for format in ["obo", "json"] {
+            plan.push_str(&format!(
+                "- target: src/ontology/{route}.{format}\n  steps:\n  - op: shell\n    command: {}\n",
+                command.replace("FORMAT", format)
+            ));
+            goals.push(format!("{route}.{format}"));
+        }
+    }
+    std::fs::write(root.join("owlmake.yaml"), plan).unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(:=<http://example.org/tiny/>)\nOntology(<http://example.org/tiny.owl>\n)\n",
+    )
+    .unwrap();
+    std::fs::write(ont.join("source.ofn"), EMULATED_SOURCE).unwrap();
+    let out = std::process::Command::new(BIN)
+        .arg("make")
+        .args(&goals)
+        .current_dir(&ont)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for (route, _) in ROUTES {
+        let obo = std::fs::read_to_string(ont.join(format!("{route}.obo"))).unwrap();
+        assert!(
+            obo.contains("[Term]") && !obo.contains("[Instance]"),
+            "{route}: the OBO is not what ODK 1.6.1 writes:\n{obo}"
+        );
+        let json = std::fs::read_to_string(ont.join(format!("{route}.json"))).unwrap();
+        assert!(
+            json.contains("said so"),
+            "{route}: the definition's axiom annotation is not nested as ROBOT 1.9.10 nests it:\n{json}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

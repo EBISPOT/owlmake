@@ -115,10 +115,10 @@ pub fn compress_iri(iri: &str) -> String {
 /// object property assertion is left to `owl-axioms:`. Its reader stops at the
 /// first `[Instance]` frame, reporting the line, and keeps what came before. Every
 /// other run writes named individuals as `[Instance]` frames and reads them back.
-/// The plan decides it (`Plan::emulate_odk_version`): it is set once per build by
-/// `build::set_robot_behaviours` and returned to this default at the start of
-/// every invocation. There is deliberately no environment override: it decides
-/// artefact bytes.
+/// The plan decides it (`Plan::emulate_odk_version`): `build::set_emulation` sets
+/// it, in a build and in every owlmake process the build starts, and returns it
+/// to this default at the start of every invocation. There is deliberately no
+/// environment override: it decides artefact bytes.
 static INSTANCE_FRAMES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// Set whether OBO `[Instance]` frames are written and read — see the static
