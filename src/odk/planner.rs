@@ -113,7 +113,7 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             // pipeline synthesized from the product's flags.
             // An import the repository records as built its own way is taken as
             // written, as a recorded target is.
-            if let Some(own) = repo.own_imports.iter().find(|i| i.id == p.id) {
+            if let Some(own) = repo.own_imports().iter().find(|i| i.id == p.id) {
                 let merged_cached =
                     use_base_merging && repo.dir.join("imports/merged_import.owl").exists();
                 imports.push(own.clone().into_plan(&repo.dir, merged_cached));
@@ -140,156 +140,21 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
 
     // --- Release artefacts -------------------------------------------------
     // Candidate targets: each release artefact `<id>-<art>.owl`, the primary
-    // `<id>.owl`, and the configured export formats of the primary.
+    // `<id>.owl`, and the configured export formats of the primary — the
+    // conventions of the standard build, which a build of the repository's own
+    // has none of: its file says which of its targets are artefacts.
     let mut candidates: Vec<String> = Vec::new();
-    for art in &repo.yaml.release_artefacts {
-        // ODK names a `custom-<x>` artefact as `<x>.owl` (no ontology prefix);
-        // ordinary artefacts are `<id>-<x>.owl`.
-        candidates.push(match art.strip_prefix("custom-") {
-            Some(x) => format!("{x}.owl"),
-            None => format!("{id}-{art}.owl"),
-        });
+    if !repo.own_build() {
+        conventional_candidates(repo, make, &id, &mut candidates);
     }
-    candidates.push(format!("{id}.owl"));
-    for fmt in &repo.yaml.export_formats {
-        let t = format!("{id}.{fmt}");
-        if !candidates.contains(&t) {
-            candidates.push(t);
+    for t in repo.own_targets().iter().filter(|t| t.artefact) {
+        if !candidates.contains(&t.target) {
+            candidates.push(t.target.clone());
         }
     }
-    // …and every release artefact in every export format. ODK releases each
-    // product in each configured format — MONDO's `MAIN_FILES` is
-    // `$(foreach n,$(MAIN_PRODUCTS), $(n).owl $(n).obo $(n).json)` — so
-    // `mondo-base.obo`, `mondo-simple.json`, … are release artefacts too. Each one
-    // has to be a candidate: a format left out falls through to Makefile replay,
-    // which rebuilds the prerequisite `.owl` with the plain writer and clobbers the
-    // one the plan had just written.
-    // A candidate with no Makefile rule is dropped below, so this only ever adds
-    // targets the repo really builds.
-    for art in &repo.yaml.release_artefacts {
-        let base = match art.strip_prefix("custom-") {
-            Some(x) => x.to_string(),
-            None => format!("{id}-{art}"),
-        };
-        for fmt in &repo.yaml.export_formats {
-            let t = format!("{base}.{fmt}");
-            if !candidates.contains(&t) {
-                candidates.push(t);
-            }
-        }
-    }
-    // …every entry of `$(MAIN_FILES)`, which is not always
-    // `$(MAIN_PRODUCTS) × $(FORMATS)`: MONDO appends `$(ONT)_nodes.tsv
-    // $(ONT)_edges.tsv` (its kgx graph export) by hand.
-    for t in make
-        .expand("$(MAIN_FILES)")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>()
-    {
-        if !candidates.contains(&t) {
-            candidates.push(t);
-        }
-    }
-
-    // …and the RELEASE REPORTS. `$(ASSETS)` / `$(RELEASE_ASSETS)` are the canonical
-    // ODK "what gets released" lists, but they also carry `$(IMPORT_FILES)`, which
-    // the planner handles through its own import machinery — so take the report
-    // variable directly. It expands to nothing in a repo that does not define it.
-    for t in make
-        .expand("$(REPORT_FILES_RELEASE)")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>()
-    {
-        if !candidates.contains(&t) {
-            candidates.push(t);
-        }
-    }
-
-    // …and everything else the repo itself calls a release asset. `$(ASSETS)` is
-    // the canonical ODK list, and repos put things there that no fixed variable
-    // name would find: OBA releases `$(PATTERN_RELEASE_FILES)` (its DOSDP
-    // `patterns/definitions.owl` and `patterns/pattern.owl`) and `$(REPORT_FILES)`
-    // (`reports/oba.owl-obo-report.tsv`), neither of which is `MAIN_FILES`,
-    // `SUBSET_FILES` or MONDO's `REPORT_FILES_RELEASE`. Reading `$(ASSETS)`
-    // directly covers any repo's own list. `$(IMPORT_FILES)` is dropped — the
-    // planner has its own import machinery for those.
-    {
-        let imports: Vec<String> = make
-            .expand("$(IMPORT_FILES)")
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
-        for t in make
-            .expand("$(ASSETS)")
-            .split_whitespace()
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-        {
-            if !imports.contains(&t) && !candidates.contains(&t) {
-                candidates.push(t);
-            }
-        }
-    }
-
-    // …and the SUBSET products. `SUBSET_ROOTS`/`SUBSET_FILES` are ODK-standard
-    // (`SUBSET_FILES = $(foreach n,$(SUBSET_ROOTS), $(foreach f,$(FORMATS_INCL_TSV),
-    // $(n).$(f)))` in the ODK Makefile template, driven by `subset_group.products`),
-    // and they are part of `$(ASSETS)` — i.e. release artefacts. MONDO declares them
-    // by hand (`SUBSETS = mondo-rare mondo-clingen`) because it has no ODK yaml.
-    //
-    // They have to be PLANNED, not left to Makefile replay: replay rebuilds each
-    // prerequisite through the generic path, which does not reproduce the release
-    // plan's own output — asking for `subsets/mondo-clingen.owl` alone would rewrite
-    // `filtered.owl`, `reasoned.owl` and `mondo-base.owl` at sizes the release plan
-    // never produces, clobbering three artefacts the plan had already built.
-    for t in make
-        .expand("$(SUBSET_FILES)")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>()
-    {
-        if !candidates.contains(&t) {
-            candidates.push(t);
-        }
-    }
-
-    // Fallback for hand-written (non-ODK) Makefiles. The candidates above are
-    // all top-level `<id>.*` / `<id>-<art>.*` names derived from `$(MAIN_PRODUCTS)`
-    // (or the `[base, full]` default). A bespoke Makefile like EFO's defines no
-    // such rules — it builds its release products under `$(BUILDDIR)` (e.g.
-    // `build/efo.owl`, `build/efo-base.owl`) and names them only as the
-    // prerequisites of its `release:` target. When *none* of the standard
-    // candidates resolves to a rule, take the `release:` prerequisites that do
-    // as the authoritative artefact set (the MakeModel keys rules by their
-    // expanded path, so `build/efo.owl` resolves directly).
-    if !candidates.iter().any(|t| make.rule_for(t).is_some()) {
-        if let Some((rel, _)) = make.rule_for("release") {
-            let prereqs: Vec<String> = rel
-                .prereqs
-                .iter()
-                .filter(|p| make.rule_for(p).is_some())
-                .cloned()
-                .collect();
-            if !prereqs.is_empty() {
-                candidates = prereqs;
-            }
-        }
-    }
-    // Apply the `--artefact` filter: an entry matches by target filename, by
-    // `<id>-<entry>.owl`, or by `<id>.<entry>`.
-    let matches = |target: &str| -> bool {
-        only.is_empty()
-            || only.iter().any(|o| {
-                target == o || *target == format!("{id}-{o}.owl") || *target == format!("{id}.{o}")
-            })
-    };
-    let mut targets: Vec<(String, bool)> = candidates
-        .into_iter()
-        .filter(|t| matches(t))
-        .map(|t| (t, true))
-        .collect();
+    // Every candidate with a rule is planned; `only` selects afterwards, over
+    // the planned artefacts and what each of them needs.
+    let mut targets: Vec<(String, bool)> = candidates.into_iter().map(|t| (t, true)).collect();
 
     // A named target that is not a release product but has a rule of its own is
     // an on-path intermediate — `tmp/<id>-preprocess.owl`, `components/<x>.owl`,
@@ -374,7 +239,9 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
                 // `<id>.owl`), it is simply not part of this repo's release:
                 // drop it rather than flag a phantom gap. Only when the user
                 // explicitly named it (`--artefact`) is a missing rule an error.
-                if only.is_empty() {
+                if !only.iter().any(|o| {
+                    target == *o || target == format!("{id}-{o}.owl") || target == format!("{id}.{o}")
+                }) {
                     continue;
                 }
                 artefacts.push(ArtefactPlan {
@@ -406,10 +273,44 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     // `patterns/definitions.owl`, `patterns/pattern.owl` and the per-pattern
     // `data/*/*.ofn` in as intermediates, and a planned recipe for them competes
     // with the DOSDP engine that `PatternsMode` drives.
-    let mut native_patterns = native_pattern_targets(make, &repo.dir);
+    let mut native_patterns = native_patterns(repo, make);
     native_patterns.extend(native_import_targets(make, &imports, merged_import.as_deref()));
-    let artefacts: Vec<ArtefactPlan> =
+    let mut artefacts: Vec<ArtefactPlan> =
         artefacts.into_iter().filter(|a| !native_patterns.contains(&a.target)).collect();
+
+    // The `--artefact` filter: an entry matches by target filename, by
+    // `<id>-<entry>.owl`, or by `<id>.<entry>`. Naming a release product names
+    // the artefacts that make its inputs too. `mp-base.owl` is built from
+    // `tmp/mp-preprocess.owl`, which the plan records as an artefact of its own;
+    // keeping only the named targets leaves that one out, and the subset plan
+    // then reports its own prerequisite as a file it has no way to build.
+    if !only.is_empty() {
+        let matches = |target: &str| -> bool {
+            only.iter().any(|o| {
+                target == o || *target == format!("{id}-{o}.owl") || *target == format!("{id}.{o}")
+            })
+        };
+        let mut keep: std::collections::HashSet<String> =
+            artefacts.iter().filter(|a| matches(&a.target)).map(|a| a.target.clone()).collect();
+        loop {
+            let mut grew = false;
+            for a in &artefacts {
+                if !keep.contains(&a.target) {
+                    continue;
+                }
+                for n in a.needs.iter().chain(a.input.iter()) {
+                    if !keep.contains(n) && artefacts.iter().any(|b| b.target == *n) {
+                        keep.insert(n.clone());
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        artefacts.retain(|a| keep.contains(&a.target));
+    }
 
     let mut prerequisites = plan_prerequisites(repo, make, &robot_prefix, &artefacts, &imports, merged_import.as_deref());
 
@@ -420,7 +321,6 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     // and a build with nothing but the plan would otherwise have to ask the
     // Makefile whether the seed is buildable — and answer "no" for a file the very
     // same plan builds.
-    let mut artefacts = artefacts;
 
     // For every target a switch guards, what the OTHER branch of that conditional
     // builds it by. Done here, over the finished target set, because a branch is
@@ -553,11 +453,26 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             let src = make.expand("$(SRC)").trim().to_string();
             if !src.is_empty() {
                 Some(src)
+            } else if repo.own_build() {
+                None
             } else {
                 crate::odk::find_edit_file(&repo.dir)
             }
         },
-        catalog_file: catalog_file(&repo.dir),
+        // The catalog the rules read, as the configuration names it (`CATALOG`,
+        // which the standard build sets from the `catalog_file` option). A
+        // configuration that names none has ODK's file or no catalog; a build of
+        // the repository's own names its own or has none.
+        catalog_file: {
+            let named = make.expand("$(CATALOG)").trim().to_string();
+            if !named.is_empty() {
+                Some(named)
+            } else if repo.own_build() {
+                None
+            } else {
+                catalog_file(&repo.dir)
+            }
+        },
         emulate_robot_version: emulate_robot_version(&repo.root, make),
         // The global `--strict` / `-x` flags, as the repo's own `$(ROBOT)` launcher
         // declares them: they change which axioms survive a parse and the bytes
@@ -567,8 +482,10 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         xml_entities: robot_global_flag(make, &["-x", "--xml-entities"]),
         // The pattern products the repository records as built its own way are
         // taken as written.
-        dosdp: if let Some(own) = &repo.own_dosdp {
+        dosdp: if let Some(own) = repo.own_dosdp() {
             Some(own.clone())
+        } else if repo.own_build() {
+            None
         } else {
             let dir = make.expand("$(PATTERNDIR)");
             let dir = dir.trim();
@@ -613,6 +530,170 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     drop_inert_targets(&mut plan);
     drop_unspelled_robot_launcher(&mut plan);
     Ok(plan)
+}
+
+/// The release products a build configuration names by convention, in the order
+/// they are planned: each release artefact `<id>-<art>.owl`, the primary
+/// `<id>.owl`, each in every export format, everything the configuration's own
+/// lists of released files name, and — for a configuration whose products live
+/// elsewhere — what its `release` target names.
+fn conventional_candidates(
+    repo: &OdkRepo,
+    make: &super::makefile::MakeModel,
+    id: &str,
+    candidates: &mut Vec<String>,
+) {
+    for art in &repo.yaml.release_artefacts {
+        // ODK names a `custom-<x>` artefact as `<x>.owl` (no ontology prefix);
+        // ordinary artefacts are `<id>-<x>.owl`.
+        candidates.push(match art.strip_prefix("custom-") {
+            Some(x) => format!("{x}.owl"),
+            None => format!("{id}-{art}.owl"),
+        });
+    }
+    candidates.push(format!("{id}.owl"));
+    for fmt in &repo.yaml.export_formats {
+        let t = format!("{id}.{fmt}");
+        if !candidates.contains(&t) {
+            candidates.push(t);
+        }
+    }
+    // …and every release artefact in every export format. ODK releases each
+    // product in each configured format — MONDO's `MAIN_FILES` is
+    // `$(foreach n,$(MAIN_PRODUCTS), $(n).owl $(n).obo $(n).json)` — so
+    // `mondo-base.obo`, `mondo-simple.json`, … are release artefacts too. Each one
+    // has to be a candidate: a format left out falls through to Makefile replay,
+    // which rebuilds the prerequisite `.owl` with the plain writer and clobbers the
+    // one the plan had just written.
+    // A candidate with no Makefile rule is dropped below, so this only ever adds
+    // targets the repo really builds.
+    for art in &repo.yaml.release_artefacts {
+        let base = match art.strip_prefix("custom-") {
+            Some(x) => x.to_string(),
+            None => format!("{id}-{art}"),
+        };
+        for fmt in &repo.yaml.export_formats {
+            let t = format!("{base}.{fmt}");
+            if !candidates.contains(&t) {
+                candidates.push(t);
+            }
+        }
+    }
+    // …every entry of `$(MAIN_FILES)`, which is not always
+    // `$(MAIN_PRODUCTS) × $(FORMATS)`: MONDO appends `$(ONT)_nodes.tsv
+    // $(ONT)_edges.tsv` (its kgx graph export) by hand.
+    for t in make
+        .expand("$(MAIN_FILES)")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+    {
+        if !candidates.contains(&t) {
+            candidates.push(t);
+        }
+    }
+
+    // …and the RELEASE REPORTS. `$(ASSETS)` / `$(RELEASE_ASSETS)` are the canonical
+    // ODK "what gets released" lists, but they also carry `$(IMPORT_FILES)`, which
+    // the planner handles through its own import machinery — so take the report
+    // variable directly. It expands to nothing in a repo that does not define it.
+    for t in make
+        .expand("$(REPORT_FILES_RELEASE)")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+    {
+        if !candidates.contains(&t) {
+            candidates.push(t);
+        }
+    }
+
+    // …and everything else the repo itself calls a release asset. `$(ASSETS)` is
+    // the canonical ODK list, and repos put things there that no fixed variable
+    // name would find: OBA releases `$(PATTERN_RELEASE_FILES)` (its DOSDP
+    // `patterns/definitions.owl` and `patterns/pattern.owl`) and `$(REPORT_FILES)`
+    // (`reports/oba.owl-obo-report.tsv`), neither of which is `MAIN_FILES`,
+    // `SUBSET_FILES` or MONDO's `REPORT_FILES_RELEASE`. Reading `$(ASSETS)`
+    // directly covers any repo's own list. `$(IMPORT_FILES)` is dropped — the
+    // planner has its own import machinery for those.
+    {
+        let imports: Vec<String> = make
+            .expand("$(IMPORT_FILES)")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        for t in make
+            .expand("$(ASSETS)")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        {
+            if !imports.contains(&t) && !candidates.contains(&t) {
+                candidates.push(t);
+            }
+        }
+    }
+
+    // …and the SUBSET products. `SUBSET_ROOTS`/`SUBSET_FILES` are ODK-standard
+    // (`SUBSET_FILES = $(foreach n,$(SUBSET_ROOTS), $(foreach f,$(FORMATS_INCL_TSV),
+    // $(n).$(f)))` in the ODK Makefile template, driven by `subset_group.products`),
+    // and they are part of `$(ASSETS)` — i.e. release artefacts. MONDO declares them
+    // by hand (`SUBSETS = mondo-rare mondo-clingen`) because it has no ODK yaml.
+    //
+    // They have to be PLANNED, not left to Makefile replay: replay rebuilds each
+    // prerequisite through the generic path, which does not reproduce the release
+    // plan's own output — asking for `subsets/mondo-clingen.owl` alone would rewrite
+    // `filtered.owl`, `reasoned.owl` and `mondo-base.owl` at sizes the release plan
+    // never produces, clobbering three artefacts the plan had already built.
+    for t in make
+        .expand("$(SUBSET_FILES)")
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+    {
+        if !candidates.contains(&t) {
+            candidates.push(t);
+        }
+    }
+
+    // Fallback for hand-written (non-ODK) Makefiles. The candidates above are
+    // all top-level `<id>.*` / `<id>-<art>.*` names derived from `$(MAIN_PRODUCTS)`
+    // (or the `[base, full]` default). A bespoke Makefile like EFO's defines no
+    // such rules — it builds its release products under `$(BUILDDIR)` (e.g.
+    // `build/efo.owl`, `build/efo-base.owl`) and names them only as the
+    // prerequisites of its `release:` target. When *none* of the standard
+    // candidates resolves to a rule, take the `release:` prerequisites that do
+    // as the authoritative artefact set (the MakeModel keys rules by their
+    // expanded path, so `build/efo.owl` resolves directly).
+    if !candidates.iter().any(|t| make.rule_for(t).is_some()) {
+        if let Some((rel, _)) = make.rule_for("release") {
+            let prereqs: Vec<String> = rel
+                .prereqs
+                .iter()
+                .filter(|p| make.rule_for(p).is_some())
+                .cloned()
+                .collect();
+            if !prereqs.is_empty() {
+                *candidates = prereqs;
+            }
+        }
+    }
+}
+
+/// The pattern products owlmake builds natively, as this repository knows them:
+/// enumerated from its pattern directory where a build configuration or the
+/// standard build reaches one, and as its file states them.
+fn native_patterns(
+    repo: &OdkRepo,
+    make: &super::makefile::MakeModel,
+) -> std::collections::HashSet<String> {
+    let mut out = if repo.own_build() {
+        std::collections::HashSet::new()
+    } else {
+        native_pattern_targets(make, &repo.dir)
+    };
+    out.extend(repo.spec.iter().flat_map(|s| s.native_targets.iter().cloned()));
+    out
 }
 
 /// Drop the targets a generated build configuration carries for managing ITSELF,
@@ -716,7 +797,7 @@ fn plan_rule(
     // are already what a recipe would have been planned into. One that only
     // extends the standard target is planned from the standard rule, which its
     // prerequisites have joined.
-    if let Some(own) = repo.own_targets.iter().find(|t| t.target == target && !t.extends) {
+    if let Some(own) = repo.own_targets().iter().find(|t| t.target == target && !t.extends) {
         return Some(own.clone().into_plan());
     }
     let (rule, stem) = make.rule_for(target)?;
@@ -1629,8 +1710,9 @@ fn switch_group_name(flag: &str) -> String {
     }
 }
 
-/// The repo's `owl:imports` catalog, if it has one. ODK's filename, applied at
-/// plan time so execution has a NAME rather than a convention to re-derive.
+/// The repo's `owl:imports` catalog under its conventional name, if it has one:
+/// for a configuration that does not name its catalog. Applied at plan time so
+/// execution has a NAME rather than a convention to re-derive.
 fn catalog_file(dir: &std::path::Path) -> Option<String> {
     dir.join("catalog-v001.xml")
         .is_file()
@@ -2143,7 +2225,7 @@ fn plan_prerequisites(
     // the native path pins them, replayed rules do not.
     let mut native: HashSet<String> = native_mirror_targets(make, imports);
 
-    native.extend(native_pattern_targets(make, &repo.dir));
+    native.extend(native_patterns(repo, make));
     native.extend(native_import_targets(make, imports, merged_import));
 
     // Post-order DFS: a target is pushed only after everything it needs.

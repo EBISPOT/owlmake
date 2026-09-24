@@ -971,7 +971,7 @@ fn odk_checks_the_committed_plan_against_the_build_config() {
     assert!(out.status.success(), "schema command failed");
     let schema_text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        schema_text.contains("artefacts"),
+        schema_text.contains("\"targets\"") && schema_text.contains("standard_build"),
         "schema output looks wrong:\n{schema_text}"
     );
 
@@ -1125,6 +1125,11 @@ fn seed_then_spec_driven_build() {
     let plan = root.join("owlmake.yaml");
     assert!(plan.exists(), "seed did not write owlmake.yaml");
     let before = std::fs::read_to_string(&plan).unwrap();
+    // The seed asks for the standard build and states nothing it derives.
+    assert!(
+        before.contains("id: foo") && before.contains("edit_format: obo") && !before.contains("targets:"),
+        "the seed should be the repository's options, not a plan spelled out:\n{before}"
+    );
 
     // Provide the edit ontology the seeded plan references.
     std::fs::write(

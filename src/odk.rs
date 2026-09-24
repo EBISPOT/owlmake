@@ -143,37 +143,18 @@ pub struct OdkRepo {
     /// non-ODK repo) rather than a real `<id>-edit.*`: the plan is the canonical
     /// stock release scaffolded for this ontology.
     pub seeded: bool,
-    /// When the repo has no ODK layout but ships a committed `owlmake.json`, the
-    /// parsed spec — the build's source of truth. In this mode `plan()` returns
-    /// the spec's plan directly and `owlmake.json` is never regenerated.
+    /// The committed `owlmake.yaml`, when the repository is built from one. Its
+    /// targets, imports and switches are threaded into the rules
+    /// ([`OwnRules::Stated`]) and the rest of it laid over the plan
+    /// ([`OwlmakeSpec::overlay`]); the file is read and never rewritten.
     pub spec: Option<OwlmakeSpec>,
-    /// The configuration this repository's standard rules were built from, when
-    /// they came from owlmake's built-in rules rather than from a file — what
-    /// [`OdkRepo::configuration_under`] resolves again under another switch value.
+    /// The standard build's configuration, when the rules come from owlmake's
+    /// built-in rules for it rather than from a build file: a repository loaded
+    /// through [`OdkRepo::load_with_builtin_rules`], or from an `owlmake.yaml`
+    /// with the standard build. What [`OdkRepo::configuration_under`] resolves
+    /// again under another switch value. `None` for a file that says
+    /// `standard_build: false`.
     pub builtin: Option<builtin::Config>,
-    /// What the repository builds in a way of its own, when that is recorded as
-    /// resolved targets (`owlmake.yaml`'s `targets`) rather than read from rules.
-    /// The planner takes one of these in place of planning the target of that name.
-    pub own_targets: Vec<crate::spec::ArtefactSpec>,
-    /// Which of those name no file.
-    pub own_phony: Vec<String>,
-    /// The imports the repository obtains or cuts in a way of its own. An import
-    /// module and its mirror are built by owlmake's import builder from the
-    /// import's recorded steps, not by a target, so a repository's own way of
-    /// building one is recorded as the import.
-    pub own_imports: Vec<crate::spec::ImportSpec>,
-    /// Likewise the pattern products, where the repository generates or merges
-    /// them in a way of its own.
-    pub own_dosdp: Option<crate::spec::DosdpSpec>,
-    /// The switches the repository's own rules test, with the values it gives
-    /// them, as `owlmake.yaml` records them.
-    pub own_switches: BTreeMap<String, String>,
-    /// Which of the targets the repository builds its own way are intermediates:
-    /// written on the way to something else and not kept.
-    pub own_transient: Vec<String>,
-    /// The repository was loaded from an `owlmake.yaml` that asks for the standard
-    /// build: its options and its own targets are that file's.
-    pub standard_file: bool,
     /// The command-line assignments that SURVIVED the conditional filter above,
     /// kept so the same configuration can be resolved again under another value
     /// of a switch (see [`OdkRepo::configuration_under`]) and the two models
@@ -214,55 +195,59 @@ fn parse_configuration(
     Ok(make)
 }
 
-/// Resolve a repository's build configuration from owlmake's built-in rules: the
-/// standard build its configuration implies, then the rules the repository wrote
-/// itself, which win — the same two layers, in the same order, as
-/// [`parse_configuration`] reads from files.
-fn builtin_configuration(
-    config: &builtin::Config,
+/// Resolve a repository's build configuration from the rules owlmake supplies:
+/// the standard build its configuration implies — or nothing, for a repository
+/// whose build is all its own — then the rules the repository wrote itself,
+/// which win. The same two layers, in the same order, as [`parse_configuration`]
+/// reads from files.
+fn configuration(
+    standard: Option<&builtin::Config>,
     dir: &Path,
     seeded: &[(String, String)],
     flags: &[(&str, &str)],
     own: OwnRules,
 ) -> Result<makefile::MakeModel> {
-    let mut make = builtin::model(config, dir, seeded, flags)?;
+    let mut make = match standard {
+        Some(config) => builtin::model(config, dir, seeded, flags)?,
+        None => makefile::MakeModel::with_flags(dir, seeded, flags),
+    };
     match own {
         OwnRules::None => {}
         OwnRules::File => {
-            let own_rules = dir.join(format!("{}.Makefile", config.id));
-            if own_rules.exists() {
-                make.overlay_file(&own_rules)?;
+            if let Some(config) = standard {
+                let own_rules = dir.join(format!("{}.Makefile", config.id));
+                if own_rules.exists() {
+                    make.overlay_file(&own_rules)?;
+                }
             }
         }
         // A resolved target has no recipe to read — the planner takes its steps as
         // recorded — but the graph still has to know the target and what it needs.
-        OwnRules::Targets { targets, phony, switches, transient } => {
-            make.phony.extend(phony.iter().cloned());
+        OwnRules::Stated(spec) => {
+            make.phony.extend(spec.phony.iter().cloned());
             // The repository's own switches take the values it gives them, as its
             // own assignments did; what the run bound still wins.
-            for (name, value) in switches {
+            for (name, value) in &spec.gating_flags {
                 if !make.command_line_vars.contains(name) {
                     make.vars.insert(name.clone(), value.clone());
                 }
                 let value = make.expand(&format!("$({name})")).trim().to_string();
                 make.cond_vars.entry(name.clone()).or_insert(value);
             }
-            if !transient.is_empty() {
+            if !spec.transient_targets.is_empty() {
                 make.add_rule(makefile::Rule {
                     targets: vec![".INTERMEDIATE".to_string()],
-                    prereqs: transient.to_vec(),
+                    prereqs: spec.transient_targets.clone(),
                     order_only: Vec::new(),
                     recipe: Vec::new(),
                     guards: Vec::new(),
                 });
             }
-            for t in targets {
+            for t in &spec.targets {
                 // A target that exists only under a switch makes the switch one
                 // of the build's, as the conditional around its rule did.
                 for flag in &t.when {
-                    let value = make.expand(&format!("$({flag})")).trim().to_string();
                     make.switch_vars.insert(flag.clone());
-                    make.cond_vars.entry(flag.clone()).or_insert(value);
                 }
                 let needs: Vec<String> =
                     t.needs.iter().filter(|n| !t.order_only.contains(n)).cloned().collect();
@@ -287,32 +272,15 @@ fn builtin_configuration(
     Ok(make)
 }
 
-/// Comparing two recorded things by what they would write.
-mod erased {
-    pub trait Json {
-        fn json(&self) -> Option<serde_json::Value>;
-    }
-    impl<T: serde::Serialize> Json for T {
-        fn json(&self) -> Option<serde_json::Value> {
-            serde_json::to_value(self).ok()
-        }
-    }
-}
-
 /// Where the rules a repository wrote itself come from.
 enum OwnRules<'a> {
     /// Nowhere: the standard build alone.
     None,
     /// Its `<id>.Makefile`.
     File,
-    /// What its `owlmake.yaml` records: its targets and phony names, the values
+    /// What its `owlmake.yaml` states: its targets and phony names, the values
     /// of its own switches, and which of its targets are intermediates.
-    Targets {
-        targets: &'a [crate::spec::ArtefactSpec],
-        phony: &'a [String],
-        switches: &'a BTreeMap<String, String>,
-        transient: &'a [String],
-    },
+    Stated(&'a OwlmakeSpec),
 }
 
 impl OdkRepo {
@@ -332,7 +300,7 @@ impl OdkRepo {
         let config = builtin::Config::parse_odk(&text)
             .with_context(|| format!("reading {}", yaml_path.display()))?;
         let own = if own_rules { OwnRules::File } else { OwnRules::None };
-        let make = builtin_configuration(&config, &dir, &[], &[], own)?;
+        let make = configuration(Some(&config), &dir, &[], &[], own)?;
         let mut yaml: OdkYaml = serde_yaml::from_str(&text)?;
         if yaml.release_artefacts.is_empty() {
             yaml.release_artefacts = vec!["base".to_string(), "full".to_string()];
@@ -350,13 +318,6 @@ impl OdkRepo {
             seeded_vars: Vec::new(),
             spec: None,
             builtin: Some(config),
-            own_targets: Vec::new(),
-            own_phony: Vec::new(),
-            own_imports: Vec::new(),
-            own_dosdp: None,
-            own_switches: BTreeMap::new(),
-            own_transient: Vec::new(),
-            standard_file: false,
         })
     }
 
@@ -430,13 +391,6 @@ impl OdkRepo {
                     seeded_vars: Vec::new(),
                     spec: None,
                     builtin: None,
-                    own_targets: Vec::new(),
-                    own_phony: Vec::new(),
-                    own_imports: Vec::new(),
-                    own_dosdp: None,
-                    own_switches: BTreeMap::new(),
-                    own_transient: Vec::new(),
-                    standard_file: false,
                 });
             }
             // No edit file either: a non-ODK repo that just ships its ontology as
@@ -472,13 +426,6 @@ impl OdkRepo {
                     seeded_vars: Vec::new(),
                     spec: None,
                     builtin: None,
-                    own_targets: Vec::new(),
-                    own_phony: Vec::new(),
-                    own_imports: Vec::new(),
-                    own_dosdp: None,
-                    own_switches: BTreeMap::new(),
-                    own_transient: Vec::new(),
-                    standard_file: false,
                 });
             }
             bail!(
@@ -547,169 +494,84 @@ impl OdkRepo {
             seeded_vars: seeded,
             spec: None,
             builtin: None,
-            own_targets: Vec::new(),
-            own_phony: Vec::new(),
-            own_imports: Vec::new(),
-            own_dosdp: None,
-            own_switches: BTreeMap::new(),
-            own_transient: Vec::new(),
-            standard_file: false,
         })
     }
 
-    /// Load a repo whose build is defined by a committed `owlmake.json` and no ODK
-    /// layout. The spec is validated on load and becomes the source of truth;
-    /// inputs/outputs it names are relative to the spec file's directory.
-    /// What this repository commits as its `owlmake.yaml`: its options, and the
-    /// targets it builds in a way of its own.
-    ///
-    /// "Its own" is decided by planning it twice — from the built-in rules alone,
-    /// and with the rules it wrote itself — and keeping what differs. That takes in
-    /// a target its rules define or redefine, one they only add prerequisites to,
-    /// and a standard target that came out differently because they reassigned a
-    /// variable it reads.
-    pub fn standard_spec(path: &Path) -> Result<OwlmakeSpec> {
-        use crate::spec::ArtefactSpec;
-        let with_own = Self::load_builtin(path, true)?;
-        let standard = Self::load_builtin(path, false)?;
-        let (mine, theirs) = (with_own.plan(&[])?, standard.plan(&[])?);
-
-        let same = |a: &ArtefactSpec, b: &ArtefactSpec| {
-            serde_json::to_value(a).ok() == serde_json::to_value(b).ok()
-        };
-        let standard_targets: std::collections::HashMap<String, ArtefactSpec> = theirs
-            .prerequisites
-            .iter()
-            .chain(theirs.artefacts.iter())
-            .map(|t| (t.target.clone(), ArtefactSpec::from_plan(t)))
-            .collect();
-        let switches = |target: &str| -> Vec<String> {
-            mine.refresh_groups
-                .iter()
-                .filter(|g| !g.flag.is_empty() && g.targets.iter().any(|t| t == target))
-                .map(|g| g.flag.clone())
-                .collect()
-        };
-        let mut targets: Vec<ArtefactSpec> = Vec::new();
-        for t in mine.prerequisites.iter().chain(mine.artefacts.iter()) {
-            let mut own = ArtefactSpec::from_plan(t);
-            match standard_targets.get(&t.target) {
-                Some(theirs) if same(&own, theirs) => continue,
-                // The standard target with prerequisites added: record the additions.
-                Some(theirs) => {
-                    let mut grown = theirs.clone();
-                    grown.needs = own.needs.clone();
-                    grown.order_only = own.order_only.clone();
-                    grown.input = own.input.clone();
-                    let added = |all: &[String], had: &[String]| -> Vec<String> {
-                        all.iter().filter(|n| !had.contains(n)).cloned().collect()
-                    };
-                    if same(&own, &grown) && theirs.needs.iter().all(|n| own.needs.contains(n)) {
-                        own = ArtefactSpec {
-                            extends: true,
-                            needs: added(&own.needs, &theirs.needs),
-                            order_only: added(&own.order_only, &theirs.order_only),
-                            ..ArtefactSpec::named(&t.target)
-                        };
-                    }
-                }
-                None => {}
-            }
-            own.when = switches(&t.target);
-            targets.push(own);
-        }
-
-        let text = std::fs::read_to_string(find_odk_yaml(&with_own.dir)?)?;
-        // The options under owlmake's names: what configures a tool owlmake does
-        // not run is left out here, with a note.
-        let stated = builtin::from_odk_options(serde_yaml::from_str(&text)?, true);
-        let mut spec = OwlmakeSpec::standard(&with_own.yaml.id);
-        for (key, value) in stated.as_object().into_iter().flatten() {
-            match key.as_str() {
-                "id" => {}
-                "reasoner" => spec.reasoner = value.as_str().unwrap_or_default().to_string(),
-                "catalog_file" => spec.catalog_file = value.as_str().map(str::to_string),
-                // A key that is not an option never had any effect.
-                k if !builtin::is_option(k) => {
-                    status!("plan: `{k}` is not an option of the standard build; left out")
-                }
-                _ => {
-                    spec.options.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        spec.phony = mine.phony.iter().filter(|p| !theirs.phony.contains(p)).cloned().collect();
-        spec.targets = targets;
-        // What its own rules decide beyond their targets: the switches they test,
-        // with the values the repository gives them, and the targets they reach
-        // only as intermediates.
-        spec.gating_flags = mine
-            .gating_flags
-            .iter()
-            .filter(|(k, v)| theirs.gating_flags.get(*k) != Some(*v))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        spec.transient_targets = mine
-            .transient_targets
-            .iter()
-            .filter(|t| !theirs.transient_targets.contains(t))
-            .cloned()
-            .collect();
-        // The natively built products are not targets, so what the repository does
-        // its own way with one shows up in the import, or in the pattern spec.
-        let as_value = |v: &dyn erased::Json| v.json();
-        for import in &mine.imports {
-            let own = crate::spec::ImportSpec::from_plan(import);
-            let standard = theirs
-                .imports
-                .iter()
-                .find(|i| i.id == import.id)
-                .map(crate::spec::ImportSpec::from_plan);
-            if standard.map(|s| as_value(&s)) != Some(as_value(&own)) {
-                spec.imports.push(own);
-            }
-        }
-        if mine.dosdp.as_ref().map(|d| as_value(d)) != theirs.dosdp.as_ref().map(|d| as_value(d)) {
-            spec.dosdp = mine.dosdp.clone();
-        }
-        Ok(spec)
+    /// What the repository at `path` commits as its `owlmake.yaml`: its options,
+    /// and what it builds beyond the standard build for them — see
+    /// [`OdkRepo::plan_file`].
+    pub fn spec_for(path: &Path) -> Result<OwlmakeSpec> {
+        let repo = Self::load(path)?;
+        let full = repo.plan(&[])?;
+        repo.plan_file(&full)
     }
 
-    /// Load a repository whose `owlmake.yaml` asks for the standard build: the
-    /// built-in rules for its options, with the targets it lists taken as written.
-    fn load_standard(parsed: OwlmakeSpec, root: PathBuf, dir: PathBuf) -> Result<OdkRepo> {
-        match parsed.emulate_odk_version.as_deref() {
-            Some(v) if v == builtin::BEHAVIOUR_SET => {}
-            Some(v) => bail!(
-                "this file is written against the standard build of {v}; \
-                 this owlmake implements {}",
-                builtin::BEHAVIOUR_SET
-            ),
-            None => bail!(
-                "a file that asks for the standard build must say which one \
-                 (`emulate_odk_version: {}`)",
-                builtin::BEHAVIOUR_SET
-            ),
+    /// A repository built from its `owlmake.yaml`, with `root` the directory the
+    /// file lives in and `dir` the ontology directory. The one way a file is read.
+    ///
+    /// The file's options resolve to the standard build, or to nothing when it
+    /// says `standard_build: false`; its targets, imports and switches are
+    /// threaded into those rules, and the rest of what it states is laid over
+    /// the plan by [`OdkRepo::plan`]. Every stated variable, and the edit file it
+    /// names, is bound before the rules are built, so the rules read them too.
+    pub fn from_file(spec: OwlmakeSpec, root: PathBuf, dir: PathBuf) -> Result<OdkRepo> {
+        spec.check()?;
+        let config = spec
+            .standard_build
+            .then(|| builtin::Config::from_options(spec.options()))
+            .transpose()?;
+        // An import stated its own way is one of the standard build's imports,
+        // built differently: one the configuration does not list would be a module
+        // nothing merges.
+        if let Some(config) = &config {
+            for import in &spec.imports {
+                if !config.import_ids().contains(&import.id.as_str()) {
+                    bail!(
+                        "`imports` states `{}`, which `import_group` does not list: add it there, \
+                         and state under `imports` only how it is built",
+                        import.id
+                    );
+                }
+            }
         }
-        let options = parsed.standard_options();
-        let config = builtin::Config::from_options(options.clone())?;
-        let make = builtin_configuration(
-            &config,
-            &dir,
-            &[],
-            &[],
-            OwnRules::Targets {
-                targets: &parsed.targets,
-                phony: &parsed.phony,
-                switches: &parsed.gating_flags,
-                transient: &parsed.transient_targets,
-            },
-        )?;
+        let mut seeded: Vec<(String, String)> =
+            spec.variables.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        if let Some(edit) = &spec.edit_file {
+            seeded.push(("SRC".to_string(), edit.clone()));
+        }
+        let make = configuration(config.as_ref(), &dir, &seeded, &[], OwnRules::Stated(&spec))?;
         // The same options, as the parts of the planner that read the
         // configuration directly hold them.
-        let mut yaml: OdkYaml = serde_json::from_value(options)
-            .context("reading the standard-build options")?;
-        if yaml.release_artefacts.is_empty() {
+        let mut yaml: OdkYaml = match &config {
+            Some(_) => serde_json::from_value(spec.options())
+                .context("reading the standard build's options")?,
+            // A build of the repository's own lists every import itself; the
+            // products enumerate them for the planner, which takes each import
+            // as stated.
+            None => {
+                let products: Vec<ImportProduct> = spec
+                    .imports
+                    .iter()
+                    .map(|i| {
+                        i.product
+                            .clone()
+                            .unwrap_or_else(|| ImportProduct { id: i.id.clone(), ..Default::default() })
+                    })
+                    .collect();
+                OdkYaml {
+                    id: spec.id.clone(),
+                    reasoner: Some(spec.reasoner.clone()),
+                    import_group: (!products.is_empty() || spec.use_base_merging).then(|| ImportGroup {
+                        use_base_merging: spec.use_base_merging,
+                        exclude_iri_patterns: spec.exclude_iri_patterns.clone(),
+                        slme_individuals: spec.slme_individuals.clone(),
+                        products,
+                    }),
+                    ..Default::default()
+                }
+            }
+        };
+        if config.is_some() && yaml.release_artefacts.is_empty() {
             yaml.release_artefacts = vec!["base".to_string(), "full".to_string()];
         }
         Ok(OdkRepo {
@@ -721,22 +583,15 @@ impl OdkRepo {
             make,
             edit_file: None,
             seeded: false,
-            seeded_vars: Vec::new(),
-            spec: None,
-            builtin: Some(config),
-            own_targets: parsed.targets,
-            own_phony: parsed.phony,
-            own_imports: parsed.imports,
-            own_dosdp: parsed.dosdp,
-            own_switches: parsed.gating_flags,
-            own_transient: parsed.transient_targets,
-            standard_file: true,
+            seeded_vars: seeded,
+            spec: Some(spec),
+            builtin: config,
         })
     }
 
     fn load_from_spec(spec_path: &Path) -> Result<OdkRepo> {
         let parsed = crate::spec::load(spec_path)?;
-        // `owlmake.json` is written at the repo ROOT, but every path inside it is
+        // `owlmake.yaml` is written at the repo ROOT, but every path inside it is
         // relative to the ONTOLOGY DIRECTORY — `src/ontology` in an ODK layout — so
         // the two are resolved separately. Taking the spec file's own directory for
         // both would make a plan-only build of an ODK repo look for `imports/…`,
@@ -755,54 +610,147 @@ impl OdkRepo {
             "make: building from committed {} (no ODK layout found)",
             spec_path.display()
         );
-        if parsed.is_standard() {
-            return Self::load_standard(parsed, root, dir);
-        }
-        // Rebuild the ODK yaml view from the plan. The import products drive
-        // `--imports fresh` / `refresh-imports`, which would otherwise see an
-        // empty product list and extract the merged import from nothing.
-        let products: Vec<ImportProduct> =
-            parsed.imports.iter().filter_map(|i| i.product.clone()).collect();
-        let yaml = OdkYaml {
-            id: parsed.id.clone(),
-            reasoner: Some(parsed.reasoner.clone()),
-            import_group: (!products.is_empty()).then(|| ImportGroup {
-                use_base_merging: parsed.use_base_merging,
-                exclude_iri_patterns: parsed.exclude_iri_patterns.clone(),
-                slme_individuals: parsed.slme_individuals.clone(),
-                products,
-            }),
-            ..Default::default()
+        Self::from_file(parsed, root, dir)
+    }
+
+    /// The targets this repository's file states, taken as written in place of
+    /// planning the target of that name.
+    pub(crate) fn own_targets(&self) -> &[crate::spec::ArtefactSpec] {
+        self.spec.as_ref().map(|s| s.targets.as_slice()).unwrap_or(&[])
+    }
+
+    /// The imports its file states, each taken as written.
+    pub(crate) fn own_imports(&self) -> &[crate::spec::ImportSpec] {
+        self.spec.as_ref().map(|s| s.imports.as_slice()).unwrap_or(&[])
+    }
+
+    /// The pattern products its file states.
+    pub(crate) fn own_dosdp(&self) -> Option<&crate::spec::DosdpSpec> {
+        self.spec.as_ref().and_then(|s| s.dosdp.as_ref())
+    }
+
+    /// A build of the repository's own: its file states everything and no
+    /// standard build underlies it, so nothing is derived from a convention —
+    /// not the edit file, not the catalog, not the pattern directory.
+    pub(crate) fn own_build(&self) -> bool {
+        self.spec.is_some() && self.builtin.is_none()
+    }
+
+    /// What this repository commits as its `owlmake.yaml`, given `full`, the plan
+    /// its build configuration resolves to: its options, and what it builds
+    /// beyond the standard build for them.
+    ///
+    /// The standard build underlies the file when the repository has a
+    /// configuration and the build file generated from it says nothing the
+    /// configuration does not, so that the standard build for those options IS its
+    /// build. Otherwise — no configuration, or a build file generated by another
+    /// release than the one the standard build follows — the file says
+    /// `standard_build: false` and states the whole build, and why is reported.
+    ///
+    /// "Beyond" is measured, not declared: the build is planned from the base the
+    /// file names alone, and what differs is stated ([`OwlmakeSpec::state_build`]);
+    /// then the file as it stands is resolved and what that still does not derive
+    /// is stated too ([`OwlmakeSpec::state_rest`]). That catches what reading the
+    /// repository's own rules for targets would miss — a standard target that came
+    /// out differently because the repository reassigned a variable it reads — and
+    /// leaves out everything the file's own statements imply.
+    pub fn plan_file(&self, full: &crate::plan::Plan) -> Result<OwlmakeSpec> {
+        let standard = self.standard_build_underlies(full);
+        let options = match &standard {
+            Some(options) => options.clone(),
+            None => {
+                let mut only_id = serde_json::Map::new();
+                only_id.insert("id".into(), full.id.clone().into());
+                only_id
+            }
         };
-        // There is no Makefile to expand, but a handful of its variables are read
-        // at EXECUTION time (`$(SRC)`, `$(OTHER_SRC)`, `$(ROBOT)`, `$(OBOBASE)`,
-        // `$(ODK_VERSION_MAKEFILE)`). The plan records their expanded values, so
-        // seed them here and every `repo.make.expand(...)` site keeps working.
-        let mut make = makefile::MakeModel::default();
-        for (k, v) in &parsed.variables {
-            make.vars.insert(k.clone(), v.clone());
+        let mut spec = OwlmakeSpec::for_options(options, standard.is_some())?;
+        // The base the file names, with nothing else stated, and the build the
+        // repository has: the standard build for its options plus the rules it
+        // wrote itself, or the whole of what its build file resolves to.
+        let resolve = |spec: &OwlmakeSpec| -> Result<crate::plan::Plan> {
+            OdkRepo::from_file(spec.clone(), self.root.clone(), self.dir.clone())?.plan(&[])
+        };
+        let mine;
+        let base;
+        let mine = if standard.is_some() {
+            mine = Self::load_builtin(&self.dir, true)?.plan(&[])?;
+            base = resolve(&spec)?;
+            &mine
+        } else {
+            base = crate::plan::Plan::default();
+            full
+        };
+        spec.state_build(mine, &base);
+        let derived = resolve(&spec)?;
+        spec.state_rest(mine, &derived);
+        Ok(spec)
+    }
+
+    /// Whether the standard build underlies this repository's file, and if so
+    /// its options under owlmake's names. See [`OdkRepo::plan_file`].
+    fn standard_build_underlies(
+        &self,
+        full: &crate::plan::Plan,
+    ) -> Option<serde_json::Map<String, serde_json::Value>> {
+        let Some(config_file) = self.config_file_name() else {
+            status!("plan: recording the build as the repository's own: it has no configuration");
+            return None;
+        };
+        if !self.dir.join("Makefile").is_file() {
+            status!(
+                "plan: recording the build as the repository's own: no build file was generated \
+                 from {config_file}"
+            );
+            return None;
         }
-        make.base_dir = Some(dir.clone());
-        Ok(OdkRepo {
-                    built: Default::default(),
-                    failed: Default::default(),
-            dir,
-            root,
-            yaml,
-            make,
-            edit_file: None,
-            seeded: false,
-            seeded_vars: Vec::new(),
-            spec: Some(parsed),
-            builtin: None,
-            own_targets: Vec::new(),
-            own_phony: Vec::new(),
-            own_imports: Vec::new(),
-            own_dosdp: None,
-            own_switches: BTreeMap::new(),
-            own_transient: Vec::new(),
-            standard_file: false,
-        })
+        let standard = OdkRepo::load_with_builtin_rules(&self.dir)
+            .and_then(|r| r.plan(&[]))
+            .map(|plan| builtin::differences_from_generated(full, &plan));
+        match standard {
+            Ok(differences) if differences.is_empty() => {}
+            Ok(differences) => {
+                let named: Vec<&str> = differences
+                    .iter()
+                    .filter_map(|d| d.lines().next())
+                    .take(5)
+                    .collect();
+                status!(
+                    "plan: recording the build as the repository's own: the generated build file \
+                     differs from the standard build for this configuration in {} place(s) — {}{}",
+                    differences.len(),
+                    named.join("; "),
+                    if differences.len() > named.len() { "; …" } else { "" }
+                );
+                return None;
+            }
+            Err(e) => {
+                status!("plan: recording the build as the repository's own: {e:#}");
+                return None;
+            }
+        }
+        let text = std::fs::read_to_string(self.dir.join(&config_file)).ok()?;
+        let raw: serde_json::Value = serde_yaml::from_str(&text).ok()?;
+        // The options under owlmake's names: what configures a tool owlmake does
+        // not run is left out here, with a note.
+        let stated = builtin::from_odk_options(raw, true);
+        let mut options = serde_json::Map::new();
+        for (key, value) in stated.as_object().into_iter().flatten() {
+            // A key that is not an option never had any effect.
+            if !builtin::is_option(key) {
+                status!("plan: `{key}` is not an option of the standard build; left out");
+                continue;
+            }
+            options.insert(key.clone(), value.clone());
+        }
+        Some(options)
+    }
+
+    /// Whether this repository is built from its committed `owlmake.yaml` rather
+    /// than from a build configuration that is still in the tree. Such a file is
+    /// read and never rewritten.
+    pub fn built_from_file(&self) -> bool {
+        self.spec.is_some()
     }
 
     /// This repository's configuration resolved under a different value of one
@@ -811,78 +759,25 @@ impl OdkRepo {
     /// The plan records the rules of the branch that was taken; this is how it
     /// also records what the OTHER branch says, so a run that flips the switch
     /// has a recipe to run rather than only a target to pin. Returns `None` for a
-    /// repository with no build configuration to re-read — a plan-only repo
-    /// already carries both branches, which is the point of writing them down.
-    /// What this repository commits as its plan file.
-    ///
-    /// Its options and what it builds in a way of its own, when that is the whole of
-    /// it: the build file generated from its configuration says nothing the
-    /// configuration does not, so the standard build for those options IS its build.
-    /// Otherwise the whole plan — and why, because a repository that expected the
-    /// short file should be told what stands in the way: an option the standard build
-    /// does not cover, or a build file generated by another release than the one the
-    /// standard build follows, whose rules differ.
-    pub fn plan_file(&self, full: &crate::plan::Plan) -> OwlmakeSpec {
-        let whole = || OwlmakeSpec::from_plan(full);
-        if self.config_file_name().is_none() || !self.dir.join("Makefile").is_file() {
-            return whole();
-        }
-        let standard = OdkRepo::load_with_builtin_rules(&self.dir)
-            .and_then(|r| r.plan(&[]))
-            .map(|plan| builtin::differences_from_generated(full, &plan));
-        match standard {
-            Ok(differences) if differences.is_empty() => match OdkRepo::standard_spec(&self.dir) {
-                Ok(spec) => spec,
-                Err(e) => {
-                    status!("plan: recording the whole plan: {e:#}");
-                    whole()
-                }
-            },
-            Ok(differences) => {
-                let named: Vec<&str> = differences
-                    .iter()
-                    .filter_map(|d| d.lines().next())
-                    .take(5)
-                    .collect();
-                status!(
-                    "plan: recording the whole plan: the generated build file differs from the \
-                     standard build for this configuration in {} place(s) — {}{}",
-                    differences.len(),
-                    named.join("; "),
-                    if differences.len() > named.len() { "; …" } else { "" }
-                );
-                whole()
-            }
-            Err(e) => {
-                status!("plan: recording the whole plan: {e:#}");
-                whole()
-            }
-        }
-    }
-
-    /// Whether the committed plan file is this repository's build — a whole plan,
-    /// or its options for the standard build — rather than something generated
-    /// from a build configuration that is still in the tree. Such a file is read
-    /// and never rewritten.
-    pub fn built_from_its_plan_file(&self) -> bool {
-        self.spec.is_some() || self.standard_file
-    }
-
+    /// repository with no build configuration to re-read. A repository built from
+    /// its file resolves the file again, which for a build of the repository's
+    /// own yields the same targets under either value: the file already carries
+    /// both branches, which is the point of writing them down.
     pub fn configuration_under(&self, flag: &str, value: &str) -> Option<makefile::MakeModel> {
+        // A repository keeps its own rules in one place or the other: its
+        // `owlmake.yaml` once it has one, its `<id>.Makefile` until then.
+        if let Some(spec) = &self.spec {
+            return configuration(
+                self.builtin.as_ref(),
+                &self.dir,
+                &self.seeded_vars,
+                &[(flag, value)],
+                OwnRules::Stated(spec),
+            )
+            .ok();
+        }
         if let Some(config) = &self.builtin {
-            // A repository keeps its own rules in one place or the other: its
-            // `owlmake.yaml` once it has one, its `<id>.Makefile` until then.
-            let own = if self.standard_file {
-                OwnRules::Targets {
-                    targets: &self.own_targets,
-                    phony: &self.own_phony,
-                    switches: &self.own_switches,
-                    transient: &self.own_transient,
-                }
-            } else {
-                OwnRules::File
-            };
-            return builtin_configuration(config, &self.dir, &self.seeded_vars, &[(flag, value)], own)
+            return configuration(Some(config), &self.dir, &self.seeded_vars, &[(flag, value)], OwnRules::File)
                 .ok();
         }
         let main_mk = self.dir.join("Makefile");
@@ -907,89 +802,43 @@ impl OdkRepo {
     }
 
     pub fn plan(&self, only: &[String]) -> Result<crate::plan::Plan> {
-        // A spec-driven repo's plan is the committed `owlmake.json` itself.
+        let mut plan = planner::build(self, only)?;
+        // The rules have been resolved with the file's targets, imports and
+        // switches in them; what the file states beyond those is laid over the
+        // result.
         if let Some(spec) = &self.spec {
-            let mut plan = spec.clone().into_plan(&self.dir);
-            if !only.is_empty() {
-                let id = plan.id.clone();
-                let named = |t: &str| {
-                    only.iter().any(|o| {
-                        t == *o || t == format!("{id}-{o}.owl") || t == format!("{id}.{o}")
-                    })
-                };
-                // Naming a release product names the rules that make its inputs
-                // too. `mp-base.owl` is built from `tmp/mp-preprocess.owl`, which
-                // the plan records as a rule of its own; keeping only the named
-                // targets leaves that rule out, and the subset plan then reports
-                // its own prerequisite as a file it has no way to build.
-                let mut keep: std::collections::HashSet<String> = plan
-                    .artefacts
-                    .iter()
-                    .filter(|a| named(&a.target))
-                    .map(|a| a.target.clone())
-                    .collect();
-                loop {
-                    let mut grew = false;
-                    for a in &plan.artefacts {
-                        if !keep.contains(&a.target) {
-                            continue;
-                        }
-                        for n in a.needs.iter().chain(a.input.iter()) {
-                            if !keep.contains(n)
-                                && plan.artefacts.iter().any(|b| b.target == *n)
-                            {
-                                keep.insert(n.clone());
-                                grew = true;
-                            }
-                        }
-                    }
-                    if !grew {
-                        break;
-                    }
-                }
-                plan.artefacts.retain(|a| keep.contains(&a.target));
-            }
-            return Ok(plan);
+            spec.overlay(&mut plan);
         }
-        planner::build(self, only)
+        Ok(plan)
     }
 }
 
-/// Scaffold a starter [`OwlmakeSpec`] for a new ontology `id`. Produces the
-/// canonical stock release (primary `<id>.owl`, `<id>-base.owl`, and `obo`/`json`
-/// exports, built merge→reason→relax→reduce→annotate over `edit`) so the result is
-/// an immediately-buildable `owlmake.json` the author can extend. `dir` is the
-/// directory the plan will live in; the edit file need not exist yet.
-pub fn seed_spec(id: &str, edit: Option<&str>, dir: &Path) -> Result<OwlmakeSpec> {
+/// Scaffold a starter [`OwlmakeSpec`] for a new ontology `id`: the standard build
+/// over `edit`, with its export formats and no SPARQL checks yet, so the result
+/// is an immediately-buildable `owlmake.yaml` the author extends by stating
+/// options. `dir` is the directory the plan will live in; the edit file need not
+/// exist yet.
+pub fn seed_spec(id: &str, edit: Option<&str>, _dir: &Path) -> Result<OwlmakeSpec> {
     let edit = edit.map(str::to_string).unwrap_or_else(|| format!("{id}-edit.obo"));
-    let yaml = OdkYaml {
-        id: id.to_string(),
-        reasoner: Some("ELK".into()),
-        release_artefacts: vec!["base".into(), "full".into()],
-        export_formats: vec!["owl".into(), "obo".into(), "json".into()],
-        ..Default::default()
-    };
-    let repo = OdkRepo {
-        built: Default::default(),
-        failed: Default::default(),
-        dir: dir.to_path_buf(),
-        root: dir.to_path_buf(),
-        yaml,
-        make: makefile::MakeModel::default(),
-        edit_file: Some(edit),
-        seeded: false,
-        seeded_vars: Vec::new(),
-        spec: None,
-        builtin: None,
-        own_targets: Vec::new(),
-        own_phony: Vec::new(),
-        own_imports: Vec::new(),
-        own_dosdp: None,
-        own_switches: BTreeMap::new(),
-        own_transient: Vec::new(),
-        standard_file: false,
-    };
-    Ok(OwlmakeSpec::from_plan(&repo.plan(&[])?))
+    let format = Path::new(&edit).extension().and_then(|e| e.to_str()).unwrap_or("owl").to_string();
+    let mut options = serde_json::Map::new();
+    options.insert("id".into(), id.into());
+    if format != "owl" {
+        options.insert("edit_format".into(), format.clone().into());
+    }
+    options.insert("export_formats".into(), serde_json::json!(["owl", "obo", "json"]));
+    // A new ontology has no queries yet; the checks that need none still run.
+    options.insert(
+        "report".into(),
+        serde_json::json!({ "custom_sparql_checks": [], "custom_sparql_exports": [] }),
+    );
+    let mut spec = OwlmakeSpec::for_options(options, true)?;
+    // The standard build reads `<id>-edit.<format>`; an edit file named
+    // otherwise is stated, and every rule reads it instead.
+    if edit != format!("{id}-edit.{format}") {
+        spec.edit_file = Some(edit);
+    }
+    Ok(spec)
 }
 
 /// Find a committed `owlmake.json` for `path`: the file itself if named so, else

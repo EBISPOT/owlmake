@@ -250,6 +250,9 @@ pub fn today() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
+/// `Default` is the empty plan: the base a build of the repository's own is
+/// stated against, which derives nothing.
+#[derive(Default)]
 pub struct Plan {
     pub id: String,
     /// The release version to stamp, as a DEFAULT: a literal the build

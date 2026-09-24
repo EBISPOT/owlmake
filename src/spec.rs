@@ -1,8 +1,10 @@
-//! `owlmake.json` — the declarative build plan.
+//! `owlmake.yaml` — the declarative build plan.
 //!
-//! This is the on-disk, hand-editable description of a release build, and the
-//! whole of it: owlmake reads [`OwlmakeSpec`] straight from `owlmake.json` and
-//! consults nothing else about how the repository is built.
+//! This is the on-disk, hand-editable description of a build: a repository's
+//! options over owlmake's standard build, and what it states beyond them.
+//! owlmake reads [`OwlmakeSpec`] from the file, resolves the standard build for
+//! its options, lays the file's statements over it, and consults nothing else
+//! about how the repository is built.
 //!
 //! The format is decoupled from owlmake's internal runtime types ([`Plan`],
 //! [`Op`], [`Step`]) on purpose, so the file stays a stable, documented contract
@@ -110,20 +112,24 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 
 /// What a repository commits: `owlmake.yaml`.
 ///
-/// It comes in two shapes, told apart by whether it states the ontology's
-/// `version` and `ontology_iri`. A whole plan has to; in the standard build the
-/// options decide both, so a file asking for it states neither.
+/// One shape. The file is a set of options over owlmake's standard build, and
+/// statements about the plan those options resolve to. Its top-level keys are
+/// the repository's options — `release_artefacts`, `import_group`, `components`,
+/// `report`, … (see [`crate::odk::builtin::Config`]) — and beside them what the
+/// repository states outright: a target it builds in a way of its own, an
+/// import or the pattern products it obtains its own way, the release version,
+/// the ontology IRI, the output conventions it emulates. A statement overrides
+/// or extends what the standard build derives; what the file leaves out is
+/// derived. A file with no statements is the standard build for its options; a
+/// file that states every target is a build of the repository's own; and every
+/// file in between means what it says.
 ///
-/// A file that states neither asks for the STANDARD build. Its top-level keys are the
-/// repository's options — `release_artefacts`, `import_group`, `components`,
-/// `report`, … (see [`crate::odk::builtin::Config`]) — and `targets` holds
-/// only what the repository builds in a way of its own. Everything else is
-/// owlmake's built-in rules for those options.
+/// A repository whose build is all its own — one with no standard build to lean
+/// on — says so with `standard_build: false`. Nothing is then derived: the file
+/// names every target, every path and every switch, and an option of the
+/// standard build is refused because nothing would read it.
 ///
-/// A file that states them is a whole plan: every target, step and switch, for a
-/// repository whose build is all its own.
-///
-/// An unknown key is an error in either shape ([`OwlmakeSpec::check_shape`]).
+/// An unknown key is an error ([`OwlmakeSpec::check`]).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OwlmakeSpec {
     /// Optional pointer to a (shared) JSON Schema for editor/CI validation. Not
@@ -143,32 +149,48 @@ pub struct OwlmakeSpec {
     /// accepted by every version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_owlmake_version: Option<String>,
-    /// The ODK release this repo's outputs were made under, e.g. `"1.6"`.
+    /// Whether owlmake's standard build underlies this file. It does unless the
+    /// file says otherwise: the built-in rules for the options resolve to every
+    /// target, path and switch the file does not state itself.
     ///
-    /// This is the fact a repo actually states — in its `run.sh.conf`, or the
-    /// `container:` of its workflows — and it settles more than the tool version
-    /// does: the OBO extended prefix map is baked into the image, and the two
-    /// releases' maps differ by 388 prefixes. Prefer it to
-    /// [`Self::emulate_robot_version`], which a repo only names when it runs a
-    /// tool of its own rather than the image's.
+    /// `false` for a repository whose build is all its own. The file is then the
+    /// whole build — every target under `targets`, every import under `imports`,
+    /// the release `version`, the `ontology_iri`, the `reasoner` — and nothing is
+    /// derived from a convention. An option of the standard build is refused in
+    /// such a file, because nothing would read it.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub standard_build: bool,
+    /// The ODK release whose output this build emulates, e.g. `"1.6.1"`: the
+    /// bytes its artefacts carry, not the rules that build them. The standard
+    /// build is owlmake's own whatever this says.
+    ///
+    /// A release settles more than a tool version does — the OBO extended prefix
+    /// map is baked into the image, and the two releases' maps differ by 388
+    /// prefixes — and a release neither writes nor reads OBO `[Instance]` frames.
+    /// Absent, the artefacts are written under owlmake's own conventions: the
+    /// current tool generation, and `[Instance]` frames written and read. A
+    /// repository migrating from the release records it; one that wants its
+    /// individuals in its OBO export deletes the line and keeps everything else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emulate_odk_version: Option<String>,
-    /// The artefact-format generation this repo builds to, e.g. `"1.9.8"`. Two
-    /// byte-level behaviours flip at 1.9.9 — see `Plan::emulate_robot_version` for both.
-    /// Absent means the current generation.
+    /// The artefact-format generation this build emulates, e.g. `"1.9.8"`. Two
+    /// byte-level behaviours flip at 1.9.9 — see `Plan::emulate_robot_version`
+    /// for both. Absent, it follows from `emulate_odk_version`, or is the current
+    /// generation when that is absent too.
     ///
-    /// A repo that runs the image's own tool states only its ODK release, and this
-    /// follows from it. A repo that ships its own — EFO launches `../../bin/robot`
-    /// at 1.9.7 inside an ODK 1.6.1 image — states this instead, and the two are
-    /// then genuinely different facts. Recording BOTH is an error unless they
-    /// agree, because a plan that says two things about one behaviour cannot be
-    /// obeyed: see [`OwlmakeSpec::check_emulation_versions`].
+    /// Stated by a repository that ships its own tool — EFO launches
+    /// `../../bin/robot` at 1.9.7 — and so emulates a tool version and no
+    /// release. Recording BOTH is an error unless they agree, because a plan that
+    /// says two things about one behaviour cannot be obeyed: see
+    /// [`OwlmakeSpec::check_emulation_versions`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emulate_robot_version: Option<String>,
-    /// Ontology short id (e.g. `oba`).
+    /// Ontology short id (e.g. `oba`). The one key every file states.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub id: String,
-    /// Release version (typically a date, `YYYY-MM-DD`).
+    /// The release version to stamp, as a default (typically `{today}`, the date
+    /// of the build). Stated, it replaces the one the standard build derives; a
+    /// build of the repository's own must state it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
     /// Optional: the repo file the release version is read from, relative to the
@@ -176,31 +198,42 @@ pub struct OwlmakeSpec {
     /// [`version`](Self::version) is only the fallback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_file: Option<String>,
-    /// The ontology IRI of the primary product.
+    /// The ontology IRI of the primary product. Stated, it replaces the one the
+    /// standard build derives from `uribase` and `id`; a build of the
+    /// repository's own must state it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ontology_iri: String,
-    /// Reasoner backend (`ELK`, `whelk`, …).
+    /// Reasoner backend (`ELK`, `whelk`, …). An option of the standard build as
+    /// well as a plan field; a build of the repository's own must state it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reasoner: String,
     /// The repository's options for the standard build, held as written and in the
     /// order they were written.
     #[serde(flatten)]
     pub options: serde_json::Map<String, serde_json::Value>,
-    /// Whether imports are squashed into a single base-merged module.
+    /// Whether imports are squashed into a single base-merged module. The standard
+    /// build takes this from `import_group`; a build of the repository's own
+    /// states it here.
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_base_merging: bool,
-    /// IRI patterns dropped from the merged import.
+    /// IRI patterns dropped from the merged import. From `import_group` in the
+    /// standard build.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_iri_patterns: Vec<String>,
     /// How individuals are handled in the merged import — the `--individuals`
     /// setting of its module extraction:
-    /// `include`/`minimal`/`definitions`/`exclude`.
+    /// `include`/`minimal`/`definitions`/`exclude`. From `import_group` in the
+    /// standard build.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slme_individuals: Option<String>,
-    /// Import products feeding the release.
+    /// Import products feeding the release. Each entry is the whole of how that
+    /// import is obtained and cut: with the standard build it replaces the
+    /// standard import of its id, and must be a product of `import_group`; a
+    /// build of the repository's own lists every import here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<ImportSpec>,
-    /// The single merged-import file, when base-merging is on.
+    /// The single merged-import file, when base-merging is on. The standard build
+    /// derives it from `import_group`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_import: Option<String>,
     /// The ontology IRI to stamp on the merged import module. Without it the IRI is
@@ -218,56 +251,64 @@ pub struct OwlmakeSpec {
     /// (`mondo-000.owl`, …). Default 10 MiB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_import_shard_bytes: Option<usize>,
-    /// What a bare `owlmake` builds, RESOLVED at plan time. A goal NAME (`all`)
-    /// would need something outside the plan to say what it covered; the resolved
-    /// list needs nothing. EFO's `all` covers `all_imports all_gwas all_components
-    /// release qc`, so a bare build that stopped at the release artefacts would
-    /// leave the QC unrun.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub default_targets: Vec<String>,
-    /// Targets the repo declares `.PHONY` — always out of date, never satisfied
-    /// by a same-named file.
+    /// What a bare `owlmake` builds, RESOLVED. A goal NAME (`all`) would need
+    /// something outside the plan to say what it covered; the resolved list needs
+    /// nothing. Stated, it is the whole list and replaces the one the standard
+    /// build derives from its default goal. EFO's `all` covers `all_imports
+    /// all_gwas all_components release qc`, so a bare build that stopped at the
+    /// release artefacts would leave the QC unrun.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_targets: Option<Vec<String>>,
+    /// Targets that name no file — always out of date, never satisfied by a
+    /// same-named file. Joined to the standard build's phony names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phony: Vec<String>,
     /// Paths the build writes on its way to something else and does not keep — a
     /// file it reaches only through a pattern, never named outright. Removed once
-    /// the chain that needed it is done.
+    /// the chain that needed it is done. Joined to the standard build's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transient_targets: Vec<String>,
     /// Paths owlmake's own engines produce without a recorded rule — the DOSDP
     /// pattern products and the per-import mirrors. A prerequisite naming one of
-    /// these is satisfied by the build even though nothing in `artefacts` or
-    /// `prerequisites` targets it.
+    /// these is satisfied by the build even though no target produces it. Joined
+    /// to the standard build's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native_targets: Vec<String>,
-    /// The edit ontology, relative to the ontology directory. Named here rather
-    /// than probed by extension at build time.
+    /// The edit ontology, relative to the ontology directory. The standard build
+    /// reads `<id>-edit.<edit_format>`; stated, this is the file every rule reads
+    /// instead. A build of the repository's own names it here or has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_file: Option<String>,
     /// The `owl:imports` catalog file, relative to the ontology directory. The
     /// plan names it; execution reads it. Not inlined — Protégé writes that file.
+    /// An option of the standard build as well as a plan field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_file: Option<String>,
-    /// The DOSDP pattern set, enumerated at plan time.
+    /// The DOSDP pattern set, enumerated at plan time. Stated, it replaces the set
+    /// the standard build enumerates from the pattern directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dosdp: Option<DosdpSpec>,
     /// `--strict` parsing: structurally-broken RDF is rejected rather than
-    /// repaired, so it decides which axioms survive a parse. Resolved at ingest.
+    /// repaired, so it decides which axioms survive a parse.
     #[serde(default, skip_serializing_if = "is_false")]
     pub strict: bool,
     /// `-x`/`--xml-entities` output: `&prefix;` entity references in RDF/XML, a
-    /// byte-level change to every RDF/XML artefact. Resolved at ingest.
+    /// byte-level change to every RDF/XML artefact.
     #[serde(default, skip_serializing_if = "is_false")]
     pub xml_entities: bool,
     /// The rebuild switches this plan exposes — the target groups a run may ask
     /// to rebuild rather than reuse. The VALUES are run inputs and are not
-    /// recorded; the parameter space is.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub refresh_groups: Vec<crate::plan::RefreshGroup>,
+    /// recorded; the parameter space is. Stated, it is the whole list and
+    /// replaces the groups the build derives from its switches; a target that
+    /// exists only under a switch says so with `when`, and joins that switch's
+    /// group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_groups: Option<Vec<crate::plan::RefreshGroup>>,
     /// The build-configuration variables whose value decides which rules exist,
-    /// and the value this plan describes. A run may assign one, but only to the
-    /// value recorded here: the plan holds the rules of one branch, so a run
-    /// asking for the other is refused rather than quietly given this one.
+    /// and the value this repository gives each. A run may assign one, but only
+    /// to the value recorded here: the plan holds the rules of one branch, so a
+    /// run asking for the other is refused rather than quietly given this one.
+    /// Joined to the standard build's, the stated value winning.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub gating_flags: std::collections::BTreeMap<String, String>,
     /// Build variables the executor reads at build time rather than at plan time
@@ -275,7 +316,8 @@ pub struct OwlmakeSpec {
     /// recorded so a plan-only repo builds exactly what the plan was generated
     /// from: without `ODK_VERSION_MAKEFILE` the OBO Graphs writer silently stops
     /// nesting axiom-annotation `meta`, and without `OTHER_SRC` the merged-import
-    /// seed loses whole component branches.
+    /// seed loses whole component branches. A stated variable is bound before the
+    /// standard build's rules are built, so they read it too.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub variables: std::collections::BTreeMap<String, String>,
     /// Steps in the rules that BUILD declared components which owlmake cannot
@@ -283,22 +325,22 @@ pub struct OwlmakeSpec {
     /// recorded rather than silently re-derived as empty on load.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub component_gaps: Vec<String>,
-    /// Generated files the artefacts and imports depend on — plugin provisioning,
-    /// filter seeds, tag subsets, generated components. Built in the order listed
-    /// (dependencies first), before any artefact. Recorded here so the build is
-    /// fully described by this file, and a step that can only be a shell command
-    /// is written as one.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prerequisites: Vec<ArtefactSpec>,
-    /// Release artefacts, each a pipeline of steps over an input.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub artefacts: Vec<ArtefactSpec>,
-    /// In a file that asks for the standard build: the targets the repository
-    /// builds in a way of its own. Each replaces the standard target of that name,
-    /// or is one the standard build does not have — unless it says `extends`, and
-    /// then its `needs` join the standard target's and the standard steps stand.
+    /// The targets the repository builds in a way of its own — or, in a build of
+    /// the repository's own, every target. Each replaces the standard target of
+    /// that name, or is one the standard build does not have — unless it says
+    /// `extends`, and then its `needs` join the standard target's and the standard
+    /// steps stand. `artefact` makes it a release artefact; `when` names the
+    /// switches it exists under.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<ArtefactSpec>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 /// One import product.
@@ -535,16 +577,22 @@ pub struct ArtefactSpec {
     /// the target is not built and the committed file stands.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub branches: Vec<BranchSpec>,
-    /// In a standard-build file: this entry ADDS its `needs` to the standard target
-    /// of the same name, whose steps stand. Without it an entry is the whole of how
-    /// the target is built, steps or none.
+    /// This entry ADDS its `needs` to the standard target of the same name, whose
+    /// steps stand. Without it an entry is the whole of how the target is built,
+    /// steps or none.
     #[serde(default, skip_serializing_if = "is_false")]
     pub extends: bool,
-    /// In a standard-build file: the rebuild switches this target exists under
-    /// (`MIR`, `IMP`, …). Switched off, the target is not rebuilt and the file on
-    /// disk stands, as for a standard target of the same group.
+    /// The rebuild switches this target exists under (`MIR`, `IMP`, …): it joins
+    /// each switch's group. Switched off, the target is not rebuilt and the file
+    /// on disk stands, as for a standard target of the same group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub when: Vec<String>,
+    /// The target is a release artefact: built by the release pipeline together
+    /// with the other artefacts, in dependency order, and published with them.
+    /// Said only of a target the standard build does not already build as one;
+    /// a build of the repository's own says it of each of its artefacts.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub artefact: bool,
 }
 
 impl ImportSpec {
@@ -649,6 +697,7 @@ impl ArtefactSpec {
                 .collect(),
             extends: false,
             when: Vec::new(),
+            artefact: false,
         }
     }
 }
@@ -1278,35 +1327,41 @@ pub struct AnnotationSpec {
 // --- Conversions: runtime Plan → spec ------------------------------------------
 
 impl OwlmakeSpec {
-    /// Build a spec from a freshly-derived [`Plan`] (the result of ingest), ready
-    /// to serialize into `owlmake.json`. Diagnostic fields (coverage gaps, cache
-    /// state) are dropped — they are re-derived on load.
+    /// The whole of a [`Plan`] as a file states it: every target, import and
+    /// setting, with no standard build underneath (`standard_build: false`), so
+    /// that [`into_plan`](Self::into_plan) reads it back without deriving
+    /// anything. Diagnostic fields (coverage gaps, cache state) are dropped —
+    /// they are re-derived on load.
     pub fn from_plan(plan: &Plan) -> Self {
+        let mut targets: Vec<ArtefactSpec> =
+            plan.prerequisites.iter().map(ArtefactSpec::from_plan).collect();
+        targets.extend(plan.artefacts.iter().map(|a| ArtefactSpec {
+            artefact: true,
+            ..ArtefactSpec::from_plan(a)
+        }));
         OwlmakeSpec {
             // No per-repo `$schema` pointer: the schema is the same for every
-            // `owlmake.json` and is emitted on demand by `owlmake schema`. Users
+            // `owlmake.yaml` and is emitted on demand by `owlmake schema`. Users
             // who want editor validation can add a `$schema` pointing at a shared
             // copy; the loader validates against the built-in schema regardless.
             schema: None,
-            default_targets: plan.default_targets.clone(),
+            standard_build: false,
+            default_targets: Some(plan.default_targets.clone()),
             phony: plan.phony.clone(),
             transient_targets: plan.transient_targets.clone(),
             native_targets: plan.native_targets.clone(),
             edit_file: plan.edit_file.clone(),
             catalog_file: plan.catalog_file.clone(),
             dosdp: plan.dosdp.clone(),
-            // The ODK release is what a repo states when it runs the image's own
-            // tool; the tool version is what it states when it ships one. Ingest
-            // resolves whichever the repo actually says and records that one, so a
-            // round trip never invents the other and never has to reconcile them.
             emulate_odk_version: plan.emulate_odk_version.map(format_version),
-            emulate_robot_version: plan
-                .emulate_odk_version
-                .is_none()
-                .then(|| format_version(plan.emulate_robot_version)),
+            // The tool generation is written only where the release does not
+            // already imply it, so a file never says one thing twice.
+            emulate_robot_version: (plan.emulate_robot_version
+                != implied_robot_version(plan.emulate_odk_version))
+            .then(|| format_version(plan.emulate_robot_version)),
             strict: plan.strict,
             xml_entities: plan.xml_entities,
-            refresh_groups: plan.refresh_groups.clone(),
+            refresh_groups: Some(plan.refresh_groups.clone()),
             gating_flags: plan.gating_flags.clone(),
             // The FORMAT floor, not the generator's version. Stamping
             // `CARGO_PKG_VERSION` would make every plan claim a minimum it does
@@ -1322,29 +1377,23 @@ impl OwlmakeSpec {
             use_base_merging: plan.use_base_merging,
             exclude_iri_patterns: plan.exclude_iri_patterns.clone(),
             slme_individuals: plan.slme_individuals.clone(),
-            imports: plan
-                .imports
-                .iter()
-                .map(ImportSpec::from_plan)
-                .collect(),
+            imports: plan.imports.iter().map(ImportSpec::from_plan).collect(),
             merged_import: plan.merged_import.clone(),
             merged_import_iri: plan.merged_import_iri.clone(),
             merged_import_shards: plan.merged_import_shards.clone(),
             merged_import_shard_bytes: plan.merged_import_shard_bytes,
-            targets: Vec::new(),
+            targets,
             options: Default::default(),
             variables: plan.variables.clone(),
             component_gaps: plan.component_gaps.clone(),
-            prerequisites: plan
-                .prerequisites
-                .iter()
-                .map(ArtefactSpec::from_plan)
-                .collect(),
-            artefacts: plan.artefacts.iter().map(ArtefactSpec::from_plan).collect(),
         }
     }
 
-    /// Materialize a runtime [`Plan`] from this spec.
+    /// The [`Plan`] this spec states, read as a complete statement: nothing is
+    /// derived, so this is the reverse of [`from_plan`](Self::from_plan) and the
+    /// in-memory round trip a run binds its version through. A file is not read
+    /// this way — the standard build for its options is resolved first and the
+    /// file laid over it (`OdkRepo::from_file`).
     ///
     /// `dir` is the ONTOLOGY DIRECTORY, and it is used only to observe which
     /// files are already on disk — a fact about this filesystem right now, not a
@@ -1357,13 +1406,6 @@ impl OwlmakeSpec {
     pub fn into_plan(self, dir: &Path) -> Plan {
         let merged_cached =
             self.use_base_merging && dir.join("imports/merged_import.owl").exists();
-        // The OBO PURL base a `-base` product URL is built from, as the recorded
-        // `OBOBASE` variable defines it.
-        let obobase = self
-            .variables
-            .get("OBOBASE")
-            .map(|s| s.trim_end_matches('/').to_string())
-            .unwrap_or_else(|| "http://purl.obolibrary.org/obo".to_string());
         let imports: Vec<ImportPlan> = self
             .imports
             .into_iter()
@@ -1381,16 +1423,17 @@ impl OwlmakeSpec {
         // files ingest read — that is, everywhere except the plan-only build the
         // check exists for, where a declared source deleted after planning would
         // leave a stale output standing and the build calling it up to date.
-        let mut prerequisites = self
-            .prerequisites
-            .into_iter()
-            .map(ArtefactSpec::into_plan)
-            .collect::<Vec<ArtefactPlan>>();
-        let mut artefacts = self
-            .artefacts
-            .into_iter()
-            .map(ArtefactSpec::into_plan)
-            .collect::<Vec<ArtefactPlan>>();
+        let (mut prerequisites, mut artefacts): (Vec<ArtefactPlan>, Vec<ArtefactPlan>) =
+            (Vec::new(), Vec::new());
+        for t in self.targets {
+            let is_artefact = t.artefact;
+            let planned = t.into_plan();
+            if is_artefact {
+                artefacts.push(planned);
+            } else {
+                prerequisites.push(planned);
+            }
+        }
         {
             // Everything the build produces, by any route: a recorded rule, one of
             // owlmake's own engines, or another rule's recipe writing a file it
@@ -1416,29 +1459,24 @@ impl OwlmakeSpec {
             }
         }
 
+        let emulate_odk_version = self.emulate_odk_version.as_deref().and_then(parse_version);
         Plan {
-            default_targets: self.default_targets,
+            default_targets: self.default_targets.unwrap_or_default(),
             phony: self.phony,
             transient_targets: self.transient_targets,
             native_targets: self.native_targets,
             edit_file: self.edit_file,
             catalog_file: self.catalog_file,
             dosdp: self.dosdp,
-            emulate_odk_version: self.emulate_odk_version.as_deref().and_then(parse_version),
-            // A plan that names its ODK release implies the tool version; one that
-            // names the tool states it outright. `check_emulation_versions` has
-            // already refused the case where both are present and disagree, so
-            // preferring the ODK release here cannot silently override anything.
+            emulate_odk_version,
             emulate_robot_version: self
-                .emulate_odk_version
+                .emulate_robot_version
                 .as_deref()
                 .and_then(parse_version)
-                .map(crate::odk::workflows::odk_robot_version)
-                .or_else(|| self.emulate_robot_version.as_deref().and_then(parse_version))
-                .unwrap_or(CURRENT_ROBOT),
+                .unwrap_or_else(|| implied_robot_version(emulate_odk_version)),
             strict: self.strict,
             xml_entities: self.xml_entities,
-            refresh_groups: self.refresh_groups,
+            refresh_groups: self.refresh_groups.unwrap_or_default(),
             gating_flags: self.gating_flags,
             id: self.id,
             version: self.version,
@@ -1459,6 +1497,99 @@ impl OwlmakeSpec {
             artefacts,
         }
     }
+
+    /// Lay this file's statements over `plan`, the standard build resolved for
+    /// its options with its targets, imports and switches already threaded in
+    /// (`OdkRepo::from_file`). What remains is the settings the rules never
+    /// decide: each replaces what was derived, or joins it where the field is a
+    /// list the file may only add to.
+    ///
+    /// The output conventions are the file's whatever the rules derived: absent,
+    /// they are owlmake's own, which is what a repository that deletes its
+    /// `emulate_odk_version` line is asking for.
+    pub fn overlay(&self, plan: &mut Plan) {
+        if !self.version.is_empty() {
+            plan.version = self.version.clone();
+        }
+        if self.version_file.is_some() {
+            plan.version_file = self.version_file.clone();
+        }
+        if !self.ontology_iri.is_empty() {
+            plan.ontology_iri = self.ontology_iri.clone();
+        }
+        if !self.reasoner.is_empty() {
+            plan.reasoner = self.reasoner.clone();
+        }
+        if self.edit_file.is_some() {
+            plan.edit_file = self.edit_file.clone();
+        }
+        if self.catalog_file.is_some() {
+            plan.catalog_file = self.catalog_file.clone();
+        }
+        if let Some(targets) = &self.default_targets {
+            plan.default_targets = targets.clone();
+        }
+        if let Some(groups) = &self.refresh_groups {
+            plan.refresh_groups = groups.clone();
+        }
+        for (name, value) in &self.gating_flags {
+            plan.gating_flags.insert(name.clone(), value.clone());
+        }
+        for (name, value) in &self.variables {
+            plan.variables.insert(name.clone(), value.clone());
+        }
+        let join = |into: &mut Vec<String>, from: &[String]| {
+            for t in from {
+                if !into.contains(t) {
+                    into.push(t.clone());
+                }
+            }
+            into.sort();
+        };
+        join(&mut plan.phony, &self.phony);
+        join(&mut plan.transient_targets, &self.transient_targets);
+        join(&mut plan.native_targets, &self.native_targets);
+        for gap in &self.component_gaps {
+            if !plan.component_gaps.contains(gap) {
+                plan.component_gaps.push(gap.clone());
+            }
+        }
+        plan.strict |= self.strict;
+        plan.xml_entities |= self.xml_entities;
+        plan.emulate_odk_version = self.emulate_odk_version.as_deref().and_then(parse_version);
+        plan.emulate_robot_version = self
+            .emulate_robot_version
+            .as_deref()
+            .and_then(parse_version)
+            .unwrap_or_else(|| implied_robot_version(plan.emulate_odk_version));
+        if self.use_base_merging {
+            plan.use_base_merging = true;
+        }
+        if !self.exclude_iri_patterns.is_empty() {
+            plan.exclude_iri_patterns = self.exclude_iri_patterns.clone();
+        }
+        if self.slme_individuals.is_some() {
+            plan.slme_individuals = self.slme_individuals.clone();
+        }
+        if self.merged_import.is_some() {
+            plan.merged_import = self.merged_import.clone();
+        }
+        if self.merged_import_iri.is_some() {
+            plan.merged_import_iri = self.merged_import_iri.clone();
+        }
+        if self.merged_import_shards.is_some() {
+            plan.merged_import_shards = self.merged_import_shards.clone();
+        }
+        if self.merged_import_shard_bytes.is_some() {
+            plan.merged_import_shard_bytes = self.merged_import_shard_bytes;
+        }
+    }
+}
+
+/// The tool generation an emulated release implies, or the current one where no
+/// release is emulated.
+fn implied_robot_version(odk: Option<(u32, u32, u32)>) -> (u32, u32, u32) {
+    odk.map_or(CURRENT_ROBOT, crate::odk::workflows::odk_robot_version)
 }
 
 /// Bind a run's release version into a plan.
@@ -2560,33 +2691,30 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
     }
     let spec: OwlmakeSpec = serde_json::from_value(value)
         .with_context(|| format!("interpreting {}", path.display()))?;
-    spec.check_shape().with_context(|| format!("in {}", path.display()))?;
+    spec.check().with_context(|| format!("in {}", path.display()))?;
     check_version(&spec, path)?;
-    spec.check_emulation_versions()
-        .with_context(|| format!("in {}", path.display()))?;
     Ok(spec)
 }
 
 impl OwlmakeSpec {
-    /// A file asking for the standard build for `id`, with nothing else said yet.
-    pub fn standard(id: &str) -> OwlmakeSpec {
-        serde_json::from_value(serde_json::json!({
-            "min_owlmake_version": PLAN_FORMAT_MIN_VERSION,
-            "emulate_odk_version": crate::odk::builtin::BEHAVIOUR_SET,
-            "id": id,
-        }))
-        .expect("a standard-build file needs only its id")
+    /// A file stating `options` — the repository's options for the standard
+    /// build, `id` among them — over the standard build or, with `standard_build`
+    /// off, over nothing, and nothing else yet.
+    pub fn for_options(
+        options: serde_json::Map<String, serde_json::Value>,
+        standard_build: bool,
+    ) -> Result<OwlmakeSpec> {
+        let mut document = serde_json::Map::new();
+        document.insert("min_owlmake_version".into(), PLAN_FORMAT_MIN_VERSION.into());
+        document.insert("standard_build".into(), standard_build.into());
+        document.extend(options);
+        serde_json::from_value(serde_json::Value::Object(document))
+            .context("reading the repository's options")
     }
 
-    /// Whether this file asks for the standard build rather than being a whole
-    /// plan: it leaves the version and the ontology IRI to its options.
-    pub fn is_standard(&self) -> bool {
-        self.version.is_empty() && self.ontology_iri.is_empty()
-    }
-
-    /// The options of a standard-build file as one document: the keys this struct
-    /// holds as fields of its own, and the rest as written.
-    pub fn standard_options(&self) -> serde_json::Value {
+    /// The options as one document: the keys this struct holds as fields of its
+    /// own, and the rest as written.
+    pub fn options(&self) -> serde_json::Value {
         let mut all = serde_json::Map::new();
         all.insert("id".into(), self.id.clone().into());
         if !self.reasoner.is_empty() {
@@ -2605,8 +2733,15 @@ impl OwlmakeSpec {
         matches!(key, "id" | "reasoner" | "catalog_file")
     }
 
-    /// Refuse a file that is neither shape, or that holds a key nothing reads.
-    pub fn check_shape(&self) -> Result<()> {
+    /// Refuse a file that holds a key nothing reads, or that says something its
+    /// base cannot honour.
+    ///
+    /// With the standard build, the merged import is decided by `import_group`, so
+    /// the fields that would state it a second way are refused. Without it, an
+    /// option of the standard build sets nothing and is refused by name, and the
+    /// identity of the ontology has to be stated because nothing else can derive
+    /// it.
+    pub fn check(&self) -> Result<()> {
         for key in self.options.keys() {
             if let Some(reason) = crate::odk::builtin::tool_only_reason(key) {
                 bail!("`{key}` sets {reason}; leave it out");
@@ -2615,42 +2750,47 @@ impl OwlmakeSpec {
                 bail!("unknown key `{key}`: it is neither part of a plan nor an option of the standard build");
             }
         }
-        if self.is_standard() {
-            if self.id.is_empty() {
-                bail!("the file names no `id`");
-            }
-            let whole_plan_only = [
-                ("artefacts", !self.artefacts.is_empty()),
-                ("prerequisites", !self.prerequisites.is_empty()),
+        if self.id.is_empty() {
+            bail!("the file names no `id`");
+        }
+        if self.standard_build {
+            let stated = [
+                ("use_base_merging", self.use_base_merging),
+                ("exclude_iri_patterns", !self.exclude_iri_patterns.is_empty()),
+                ("slme_individuals", self.slme_individuals.is_some()),
                 ("merged_import", self.merged_import.is_some()),
+                ("merged_import_iri", self.merged_import_iri.is_some()),
+                ("merged_import_shards", self.merged_import_shards.is_some()),
+                ("merged_import_shard_bytes", self.merged_import_shard_bytes.is_some()),
             ];
-            if let Some((key, _)) = whole_plan_only.iter().find(|(_, set)| *set) {
+            if let Some((key, _)) = stated.iter().find(|(_, set)| *set) {
                 bail!(
-                    "`{key}` belongs to a whole plan, which states its `version` and \
-                     `ontology_iri`; in a file asking for the standard build, what the \
-                     repository builds in a way of its own goes under `targets`"
+                    "`{key}` states the merged import, which the standard build decides from \
+                     `import_group`: state it there, or state the whole build with \
+                     `standard_build: false`"
                 );
             }
         } else {
-            if !self.options.is_empty() || !self.targets.is_empty() {
-                let stray: Vec<&str> = self
-                    .options
-                    .keys()
-                    .map(String::as_str)
-                    .chain((!self.targets.is_empty()).then_some("targets"))
-                    .collect();
+            if let Some(key) = self.options.keys().next() {
                 bail!(
-                    "this file states its `version` and `ontology_iri`, which makes it a whole \
-                     plan, and also sets {stray:?}, which only the standard build reads"
+                    "`{key}` is an option of the standard build, and this file has none \
+                     (`standard_build: false`): nothing would read it"
                 );
             }
-            for (name, value) in [("id", &self.id), ("version", &self.version), ("ontology_iri", &self.ontology_iri), ("reasoner", &self.reasoner)] {
+            for (name, value) in [
+                ("version", &self.version),
+                ("ontology_iri", &self.ontology_iri),
+                ("reasoner", &self.reasoner),
+            ] {
                 if value.is_empty() {
-                    bail!("a whole plan must state `{name}`");
+                    bail!(
+                        "a build of the repository's own (`standard_build: false`) must state \
+                         `{name}`: there is no standard build to derive it from"
+                    );
                 }
             }
         }
-        Ok(())
+        self.check_emulation_versions()
     }
 
     /// A plan states which ODK release it emulates, or which tool version, or
@@ -2685,6 +2825,199 @@ impl OwlmakeSpec {
             );
         }
         Ok(())
+    }
+
+    /// State in this file what `mine` builds that `base` does not — `base` being
+    /// the plan this file's options and `standard_build` resolve to with nothing
+    /// else stated, and `mine` the build the repository actually has.
+    ///
+    /// This is the half of the file the graph is built from: its targets, with
+    /// `artefact` where `mine` releases what `base` does not, `extends` where only
+    /// prerequisites were added, and `when` for the switches each exists under;
+    /// its imports and pattern products; its phony names, intermediates, switch
+    /// values and variables; and, for a build of the repository's own, its
+    /// identity. What the graph derives from these is stated afterwards, by
+    /// [`state_rest`](Self::state_rest).
+    pub fn state_build(&mut self, mine: &Plan, base: &Plan) {
+        use std::collections::HashMap;
+        let json = |v: &dyn erased::Json| v.json();
+        let same = |a: &ArtefactSpec, b: &ArtefactSpec| json(a) == json(b);
+        let base_targets: HashMap<&str, ArtefactSpec> = base
+            .prerequisites
+            .iter()
+            .chain(base.artefacts.iter())
+            .map(|t| (t.target.as_str(), ArtefactSpec::from_plan(t)))
+            .collect();
+        let base_artefacts: std::collections::HashSet<&str> =
+            base.artefacts.iter().map(|a| a.target.as_str()).collect();
+        let switches = |target: &str| -> Vec<String> {
+            mine.refresh_groups
+                .iter()
+                .filter(|g| !g.flag.is_empty() && g.targets.iter().any(|t| t == target))
+                .map(|g| g.flag.clone())
+                .collect()
+        };
+        let targets = mine
+            .prerequisites
+            .iter()
+            .map(|t| (t, false))
+            .chain(mine.artefacts.iter().map(|t| (t, true)));
+        for (t, released) in targets {
+            let mut own = ArtefactSpec::from_plan(t);
+            // Said only where the base does not already release it.
+            let artefact = released && !base_artefacts.contains(t.target.as_str());
+            match base_targets.get(t.target.as_str()) {
+                Some(theirs) if same(&own, theirs) => {
+                    if !artefact {
+                        continue;
+                    }
+                    // The standard target as it stands, released.
+                    own = ArtefactSpec { extends: true, ..ArtefactSpec::named(&t.target) };
+                }
+                // The standard target with prerequisites added: record the additions.
+                Some(theirs) => {
+                    let mut grown = theirs.clone();
+                    grown.needs = own.needs.clone();
+                    grown.order_only = own.order_only.clone();
+                    grown.input = own.input.clone();
+                    let added = |all: &[String], had: &[String]| -> Vec<String> {
+                        all.iter().filter(|n| !had.contains(n)).cloned().collect()
+                    };
+                    if same(&own, &grown) && theirs.needs.iter().all(|n| own.needs.contains(n)) {
+                        own = ArtefactSpec {
+                            extends: true,
+                            needs: added(&own.needs, &theirs.needs),
+                            order_only: added(&own.order_only, &theirs.order_only),
+                            ..ArtefactSpec::named(&t.target)
+                        };
+                    }
+                }
+                None => {}
+            }
+            own.artefact = artefact;
+            own.when = switches(&t.target);
+            self.targets.push(own);
+        }
+        self.phony = mine.phony.iter().filter(|p| !base.phony.contains(p)).cloned().collect();
+        // What its own rules decide beyond their targets: the switches they test,
+        // with the values the repository gives them, and the targets they reach
+        // only as intermediates.
+        self.gating_flags = mine
+            .gating_flags
+            .iter()
+            .filter(|(k, v)| base.gating_flags.get(*k) != Some(*v))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        self.transient_targets = mine
+            .transient_targets
+            .iter()
+            .filter(|t| !base.transient_targets.contains(t))
+            .cloned()
+            .collect();
+        self.variables = mine
+            .variables
+            .iter()
+            .filter(|(k, v)| base.variables.get(*k) != Some(*v))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        // The natively built products are not targets, so what the repository does
+        // its own way with one shows up in the import, or in the pattern spec.
+        for import in &mine.imports {
+            let own = ImportSpec::from_plan(import);
+            let standard =
+                base.imports.iter().find(|i| i.id == import.id).map(ImportSpec::from_plan);
+            if standard.map(|s| json(&s)) != Some(json(&own)) {
+                self.imports.push(own);
+            }
+        }
+        if mine.dosdp.as_ref().map(|d| json(d)) != base.dosdp.as_ref().map(|d| json(d)) {
+            self.dosdp = mine.dosdp.clone();
+        }
+        if mine.reasoner != base.reasoner {
+            self.reasoner = mine.reasoner.clone();
+        }
+        if mine.edit_file != base.edit_file {
+            self.edit_file = mine.edit_file.clone();
+        }
+        if mine.catalog_file != base.catalog_file {
+            self.catalog_file = mine.catalog_file.clone();
+        }
+        if !self.standard_build {
+            // Nothing derives these; the file is the whole build.
+            self.version = mine.version.clone();
+            self.ontology_iri = mine.ontology_iri.clone();
+            self.use_base_merging = mine.use_base_merging;
+            self.exclude_iri_patterns = mine.exclude_iri_patterns.clone();
+            self.slme_individuals = mine.slme_individuals.clone();
+            self.merged_import = mine.merged_import.clone();
+            self.merged_import_iri = mine.merged_import_iri.clone();
+            self.merged_import_shards = mine.merged_import_shards.clone();
+            self.merged_import_shard_bytes = mine.merged_import_shard_bytes;
+        }
+    }
+
+    /// State in this file what `mine` says that `derived` — the plan this file
+    /// resolves to as it stands — does not: what a bare build makes, the switches
+    /// the plan exposes, the natively built paths, the component gaps, and the
+    /// settings no rule decides. Each is written only where the derivation falls
+    /// short, so the file carries what the repository decided and nothing that
+    /// follows from it.
+    pub fn state_rest(&mut self, mine: &Plan, derived: &Plan) {
+        if mine.default_targets != derived.default_targets {
+            self.default_targets = Some(mine.default_targets.clone());
+        }
+        let groups = |plan: &Plan| -> Vec<(String, String, Vec<String>, crate::plan::Freshness)> {
+            plan.refresh_groups
+                .iter()
+                .map(|g| {
+                    let mut targets = g.targets.clone();
+                    targets.sort();
+                    (g.name.clone(), g.flag.clone(), targets, g.default)
+                })
+                .collect()
+        };
+        if groups(mine) != groups(derived) {
+            self.refresh_groups = Some(mine.refresh_groups.clone());
+        }
+        self.native_targets = mine
+            .native_targets
+            .iter()
+            .filter(|t| !derived.native_targets.contains(t))
+            .cloned()
+            .collect();
+        self.component_gaps = mine
+            .component_gaps
+            .iter()
+            .filter(|g| !derived.component_gaps.contains(g))
+            .cloned()
+            .collect();
+        if mine.version != derived.version {
+            self.version = mine.version.clone();
+        }
+        if mine.version_file != derived.version_file {
+            self.version_file = mine.version_file.clone();
+        }
+        if mine.ontology_iri != derived.ontology_iri {
+            self.ontology_iri = mine.ontology_iri.clone();
+        }
+        self.strict = mine.strict && !derived.strict;
+        self.xml_entities = mine.xml_entities && !derived.xml_entities;
+        self.emulate_odk_version = mine.emulate_odk_version.map(format_version);
+        self.emulate_robot_version = (mine.emulate_robot_version
+            != implied_robot_version(mine.emulate_odk_version))
+        .then(|| format_version(mine.emulate_robot_version));
+    }
+}
+
+/// Comparing two recorded things by what they would write.
+mod erased {
+    pub trait Json {
+        fn json(&self) -> Option<serde_json::Value>;
+    }
+    impl<T: serde::Serialize> Json for T {
+        fn json(&self) -> Option<serde_json::Value> {
+            serde_json::to_value(self).ok()
+        }
     }
 }
 
@@ -3129,7 +3462,17 @@ mod format_floor_tests {
         // property assertions would reason without them and release an
         // ontology missing what the plan says it holds. That is the silent
         // case, so the floor moves to 0.3.2.
-        const PLAN_SCHEMA_DIGEST: &str = "222f1830c071e35f";
+        //
+        // One shape of file. `standard_build` says whether the standard build
+        // underlies it; `artefacts` and `prerequisites` are one `targets` list
+        // whose entries may say `artefact`; `default_targets` and
+        // `refresh_groups` are stated or derived, so they are optional; and the
+        // two emulation versions are plain options with defaults. A 0.3.2
+        // build reading a file of this shape refuses it — `standard_build` and
+        // `artefact` are unknown to it, loudly — and this build refuses the
+        // old `artefacts` key the same way, so nothing is silently built
+        // differently and the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "aeb700b377ac78fa";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3175,7 +3518,21 @@ mod round_trip_tests {
                 .into_iter()
                 .collect(),
             component_gaps: vec![],
-            prerequisites: vec![],
+            prerequisites: vec![ArtefactPlan {
+                target: "tmp/seed.txt".into(),
+                input: None,
+                needs: vec![],
+                order_only: vec![],
+                steps: vec![Step::File(crate::build::recipe::FileOp::Touch {
+                    paths: vec!["tmp/seed.txt".into()],
+                })],
+                gaps: vec![],
+                missing_rule: false,
+                side_effect_only: false,
+                stdout_file: None,
+                intermediate: false,
+                branches: vec![],
+            }],
             artefacts: vec![ArtefactPlan {
                 target: "tiny.owl".into(),
                 input: Some("tiny-edit.ofn".into()),
@@ -3225,6 +3582,12 @@ mod round_trip_tests {
         // Every field the executor reads must survive. Listed one by one rather
         // than compared wholesale so a NEW field forces a decision here.
         assert_eq!(back.id, plan.id);
+        // A target's place in the release survives: the one list of targets says
+        // which are artefacts, and the split comes back as it went.
+        assert_eq!(back.artefacts.len(), 1, "the artefact was not read back as one");
+        assert_eq!(back.artefacts[0].target, "tiny.owl");
+        assert_eq!(back.prerequisites.len(), 1, "the prerequisite was not read back as one");
+        assert_eq!(back.prerequisites[0].target, "tmp/seed.txt");
         assert_eq!(back.version, plan.version);
         assert_eq!(back.ontology_iri, plan.ontology_iri);
         assert_eq!(back.reasoner, plan.reasoner);

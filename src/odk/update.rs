@@ -101,11 +101,13 @@ fn declared_imports(c: &Config) -> Vec<(String, String)> {
 }
 
 pub fn update_repo(repo: &OdkRepo) -> Result<()> {
-    let Some(config) = repo.builtin.as_ref().filter(|_| repo.standard_file) else {
+    let Some(config) = repo.builtin.as_ref().filter(|_| repo.built_from_file()) else {
         bail!(
             "`update_repo` brings a repository's files into step with the options in its \
              owlmake.yaml, and this repository is not built from one: where a generated \
-             Makefile is the build, regenerating it is ODK's to do"
+             Makefile is the build, regenerating it is ODK's to do; where the build is \
+             the repository's own (`standard_build: false`), there are no options to \
+             bring anything into step with"
         );
     };
     let mut wrote = 0;
