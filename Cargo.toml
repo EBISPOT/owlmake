@@ -128,16 +128,16 @@ flate2 = "1"
 # role-automaton construction, and wasm support (no `remote`, serial
 # classification, a wasm-safe clock). A general dependency that builds for wasm,
 # so DL reasoning is available in the browser too. Depends on
-# horned-owl ^1.4, redirected by the root `[patch.crates-io]`.
-hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "2bc25331bbb9e62ea00bfd87ec814d91ef27d5e6" }
+# horned-owl ^4.0, redirected by the root `[patch.crates-io]`.
+hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "ea56f4c01efb3467b22e95f1f4e02b008cf43ded" }
 
 # whelk-rs: native Rust OWL 2 EL reasoner (`--reasoner whelk`). From the
 # EBISPOT/whelk-rs fork, which requests horned-owl without `remote` so it builds
 # for wasm — the whelk-rs EL reasoner is available in the browser too. A general
-# dependency. Depends on horned-owl ^1.4,
+# dependency. Depends on horned-owl ^4.0,
 # redirected by the root `[patch.crates-io]` so the object model is identical
 # across the boundary.
-whelk = { git = "https://github.com/EBISPOT/whelk-rs", rev = "6b5e7ce" }
+whelk = { git = "https://github.com/EBISPOT/whelk-rs", rev = "7b28364" }
 
 # HTTP client. `native-certs` makes HTTPS trust the system CA store (works behind
 # a TLS-intercepting proxy, like git does), not just bundled roots. It is enabled
@@ -158,7 +158,7 @@ ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native build: horned-owl with default features (the OWL object model the whole
 # crate is built on). See the note at the top of [dependencies].
-horned-owl = "1.4.0"
+horned-owl = "4.0.0"
 mimalloc = "0.1"
 # SQLite, the engine `sssom dosql` runs its queries on. The dialect is the
 # contract, not an implementation detail: type affinity, NULL handling, LIKE,
@@ -208,7 +208,7 @@ grep = { version = "0.4", default-features = false }
 # crate in the wasm graph pulls ureq/rustls. hermit-rs and whelk both request
 # horned-owl without `remote` too, so both build for wasm and are general
 # dependencies (see above).
-horned-owl = { version = "1.4.0", default-features = false }
+horned-owl = { version = "4.0.0", default-features = false }
 # oxigraph's `js` feature routes its clock (oxsdatatypes) through js_sys::Date
 # instead of std SystemTime::now(), which traps on wasm — needed for SPARQL
 # `query` (the NOW()/date machinery) to run in the browser. Feature-unified with
@@ -240,14 +240,15 @@ debug = 1
 # EBISPOT/horned-owl fork. (A dependency's own `[patch]` is ignored by Cargo;
 # only this root patch applies, so it governs the horned-owl every crate sees.)
 [patch.crates-io]
-# EBISPOT/horned-owl `devel`, rebased onto upstream phillord/horned-owl `devel`
-# (v2.x, edition 2024, pretty_rdf vendored in-tree as horned-pretty-rdf) with
-# owlmake's patches on top: the entity-grouped OFN writer, lenient RDF parsing,
-# FxHash hot paths, wasm. Its [package] version is pinned to 1.4.0 so this patch
-# also satisfies hermit-rs/whelk-rs's `horned-owl = "^1.4"`, keeping one shared
-# model. Pinned by rev, not by branch, so a build is reproducible without the
-# lockfile; bump it when devel moves.
-horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "f8315a0" }
+# EBISPOT/horned-owl `devel`, upstream phillord/horned-owl `devel` (v4.0.0,
+# edition 2024, pretty_rdf vendored in-tree as horned-pretty-rdf) merged with
+# owlmake's patches: the entity-grouped OFN writer, lenient RDF parsing, FxHash
+# hot paths, wasm. Its [package] version follows upstream (4.0.0), and
+# hermit-rs/whelk-rs request `horned-owl = "4.0.0"` to match, so this one patch
+# satisfies every requirement in the graph and keeps one shared model. Pinned
+# by rev, not by branch, so a build is reproducible without the lockfile; bump
+# it when devel moves.
+horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "186a160" }
 # pretty_rdf is no longer a separate dependency: horned-owl now vendors it as the
 # `horned-pretty-rdf` workspace member, so no patch is needed here.
 # oxigraph SPARQL optimizer (sparopt) — kept in-tree under deps/ (the one

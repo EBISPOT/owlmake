@@ -1877,8 +1877,9 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
     // equivalences over RO_* relations) would lose those class expressions on
     // re-read. `--strict` turns the RDF reader's lax repair off, so
     // structurally-broken triples error instead of being defaulted/dropped.
+    let lax = !run_options().strict;
     let mut cfg = ParserConfiguration::default();
-    cfg.lax = !run_options().strict;
+    cfg.lax = lax;
     match fmt {
         Format::RdfXml => {
             // RDF/XML carries no formal prefix map, so buffer the bytes and scan the
@@ -1911,8 +1912,12 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // out where the parse left it.
             let b = horned_owl::model::Build::new_rc();
             b.set_bnode_base(anon_counter() as i64);
+            // The RDF reader takes its `Build` inside the configuration, and this
+            // parse must share `b` so the counter can be read back afterwards.
+            let mut rdf_cfg = ParserConfiguration::new(&b);
+            rdf_cfg.lax = lax;
             let (rdfo, _incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
-                horned_owl::io::rdf::reader::read_with_build(&mut buf.as_slice(), &b, cfg)
+                horned_owl::io::rdf::reader::read(&mut buf.as_slice(), rdf_cfg.into())
                     .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
             if let Some(n) = b.bnode_base() {
                 set_anon_counter(n as u64);
@@ -2425,7 +2430,7 @@ fn write_to_with<W: Write>(
                     .collect();
                 let cm = take_cm(model);
                 let mut buf: Vec<u8> = Vec::new();
-                let r = horned_owl::io::rdf::writer::write_with_prefixes(
+                let r = horned_owl::io::rdf::writer::write(
                     &mut buf,
                     &cm,
                     Some(&doc_prefixes),
@@ -2440,7 +2445,7 @@ fn write_to_with<W: Write>(
                     .map_err(|e| anyhow::anyhow!("RDF/XML write error: {e}"))?;
             } else {
                 let cm = take_cm(model);
-                let r = horned_owl::io::rdf::writer::write_with_prefixes(
+                let r = horned_owl::io::rdf::writer::write(
                     &mut writer,
                     &cm,
                     Some(&doc_prefixes),
