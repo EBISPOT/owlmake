@@ -293,6 +293,69 @@ fn a_standard_file_builds_a_release() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A standard-build file need not name the ODK release its rules came from.
+/// Without it the same rules build under the current conventions, so the OBO
+/// export carries the ontology's individuals as `[Instance]` frames; naming the
+/// release emulates its ROBOT, which wrote none.
+#[test]
+fn a_standard_file_without_an_odk_release_writes_instance_frames() {
+    let repo = |name: &str, version_line: &str| {
+        let mut root = std::env::temp_dir();
+        root.push(format!("owlmake_builtin_{}_{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let ont = root.join("src/ontology");
+        std::fs::create_dir_all(&ont).unwrap();
+        std::fs::write(
+            root.join("owlmake.yaml"),
+            format!(
+                "{version_line}id: tiny\n\
+                 uribase: http://example.org\n\
+                 edit_format: ofn\n\
+                 release_artefacts:\n- full\n\
+                 export_formats:\n- owl\n- obo\n\
+                 report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            ont.join("tiny-edit.ofn"),
+            "Prefix(tiny:=<http://example.org/tiny/>)\n\
+             Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+             Ontology(<http://example.org/tiny.owl>\n\
+             Declaration(Class(tiny:TINY_0000001))\n\
+             Declaration(NamedIndividual(tiny:TINY_0000002))\n\
+             AnnotationAssertion(rdfs:label tiny:TINY_0000001 \"cohort\")\n\
+             AnnotationAssertion(rdfs:label tiny:TINY_0000002 \"a cohort\")\n\
+             ClassAssertion(tiny:TINY_0000001 tiny:TINY_0000002)\n\
+             )\n",
+        )
+        .unwrap();
+        root
+    };
+
+    let root = repo("noodk", "");
+    let (out, said) = om_in(&root, &["make", "tiny.obo"]);
+    assert!(out.status.success(), "a file without `emulate_odk_version` builds:\n{said}");
+    let obo = std::fs::read_to_string(root.join("src/ontology/tiny.obo")).unwrap();
+    assert!(
+        obo.contains("[Instance]") && obo.contains("id: tiny:TINY_0000002") && obo.contains("instance_of: tiny:TINY_0000001"),
+        "the OBO export carries the individual as an [Instance] frame:\n{obo}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+
+    let root = repo("odk", "emulate_odk_version: 1.6.1\n");
+    let (out, said) = om_in(&root, &["make", "tiny.obo"]);
+    assert!(out.status.success(), "{said}");
+    let obo = std::fs::read_to_string(root.join("src/ontology/tiny.obo")).unwrap();
+    assert!(!obo.contains("[Instance]"), "under ODK emulation the OBO export has no [Instance] frames:\n{obo}");
+    let _ = std::fs::remove_dir_all(&root);
+
+    let root = repo("other", "emulate_odk_version: 1.5.2\n");
+    let (out, said) = om_in(&root, &["make", "tiny.obo"]);
+    assert!(!out.status.success() && said.contains("written against the standard build of 1.5.2"), "{said}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A release that something it needs failed is built as far as it goes and left
 /// unpublished, and the run says so and fails.
 #[test]

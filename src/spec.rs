@@ -102,7 +102,7 @@ fn format_version(v: (u32, u32, u32)) -> String {
 }
 
 /// `"1.9.8"` → `(1, 9, 8)`; a missing component reads as zero.
-fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
+pub(crate) fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     let s = s.trim().trim_start_matches('v');
     let mut it = s.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
     Some((it.next()?, it.next().unwrap_or(0), it.next().unwrap_or(0)))
@@ -151,6 +151,11 @@ pub struct OwlmakeSpec {
     /// releases' maps differ by 388 prefixes. Prefer it to
     /// [`Self::emulate_robot_version`], which a repo only names when it runs a
     /// tool of its own rather than the image's.
+    ///
+    /// Optional in both shapes. A file asking for the standard build gets the
+    /// built-in rules either way; naming the release also emulates its output
+    /// (the ROBOT it ran, which drops individuals from OBO), while leaving it
+    /// out builds under the current conventions, OBO `[Instance]` frames included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emulate_odk_version: Option<String>,
     /// The artefact-format generation this repo builds to, e.g. `"1.9.8"`. Two

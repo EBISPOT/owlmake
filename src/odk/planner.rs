@@ -527,7 +527,11 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     let mut plan = Plan {
         // What the repo itself states. A repo running the image's own tool names
         // its ODK release and nothing else; one shipping its own names the tool.
-        emulate_odk_version: odk_declared_version(&repo.root, make),
+        emulate_odk_version: if repo.standard_file {
+            repo.standard_odk_version
+        } else {
+            odk_declared_version(&repo.root, make)
+        },
         native_targets,
         // What a bare `owlmake` builds: the repo's default goal, RESOLVED to the
         // targets it names — because after the Makefile is deleted nothing else
@@ -558,7 +562,16 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             }
         },
         catalog_file: catalog_file(&repo.dir),
-        emulate_robot_version: emulate_robot_version(&repo.root, make),
+        emulate_robot_version: if repo.standard_file {
+            // The release the file names implies the tool; a tool it names is
+            // stated outright; neither means the current generation.
+            repo.standard_odk_version
+                .map(super::workflows::odk_robot_version)
+                .or(repo.standard_robot_version)
+                .unwrap_or(CURRENT_ROBOT)
+        } else {
+            emulate_robot_version(&repo.root, make)
+        },
         // The global `--strict` / `-x` flags, as the repo's own `$(ROBOT)` launcher
         // declares them: they change which axioms survive a parse and the bytes
         // of every RDF/XML artefact, so they are recorded rather than left to

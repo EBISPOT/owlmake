@@ -174,6 +174,13 @@ pub struct OdkRepo {
     /// The repository was loaded from an `owlmake.yaml` that asks for the standard
     /// build: its options and its own targets are that file's.
     pub standard_file: bool,
+    /// What that file says its outputs are made as: the ODK release it names
+    /// (`emulate_odk_version`), whose conventions the build then emulates, and
+    /// the tool version it names instead (`emulate_robot_version`). Both `None`
+    /// when it names neither, which builds under the current conventions. Only
+    /// a standard file says this; an ODK repository states it in its own files.
+    pub standard_odk_version: Option<workflows::Version>,
+    pub standard_robot_version: Option<workflows::Version>,
     /// The command-line assignments that SURVIVED the conditional filter above,
     /// kept so the same configuration can be resolved again under another value
     /// of a switch (see [`OdkRepo::configuration_under`]) and the two models
@@ -357,6 +364,8 @@ impl OdkRepo {
             own_switches: BTreeMap::new(),
             own_transient: Vec::new(),
             standard_file: false,
+            standard_odk_version: None,
+            standard_robot_version: None,
         })
     }
 
@@ -437,6 +446,8 @@ impl OdkRepo {
                     own_switches: BTreeMap::new(),
                     own_transient: Vec::new(),
                     standard_file: false,
+                    standard_odk_version: None,
+                    standard_robot_version: None,
                 });
             }
             // No edit file either: a non-ODK repo that just ships its ontology as
@@ -479,6 +490,8 @@ impl OdkRepo {
                     own_switches: BTreeMap::new(),
                     own_transient: Vec::new(),
                     standard_file: false,
+                    standard_odk_version: None,
+                    standard_robot_version: None,
                 });
             }
             bail!(
@@ -554,6 +567,8 @@ impl OdkRepo {
             own_switches: BTreeMap::new(),
             own_transient: Vec::new(),
             standard_file: false,
+            standard_odk_version: None,
+            standard_robot_version: None,
         })
     }
 
@@ -677,6 +692,13 @@ impl OdkRepo {
 
     /// Load a repository whose `owlmake.yaml` asks for the standard build: the
     /// built-in rules for its options, with the targets it lists taken as written.
+    ///
+    /// The rules are ODK [`builtin::BEHAVIOUR_SET`]'s, whether or not the file
+    /// names that release. Naming it (`emulate_odk_version`) also asks for that
+    /// release's output conventions: the ROBOT it ran, which writes no OBO
+    /// `[Instance]` frames. A file that leaves it out gets the same rules under
+    /// the current conventions, individuals included. Naming another release is
+    /// an error, because these are not its rules.
     fn load_standard(parsed: OwlmakeSpec, root: PathBuf, dir: PathBuf) -> Result<OdkRepo> {
         match parsed.emulate_odk_version.as_deref() {
             Some(v) if v == builtin::BEHAVIOUR_SET => {}
@@ -685,11 +707,7 @@ impl OdkRepo {
                  this owlmake implements {}",
                 builtin::BEHAVIOUR_SET
             ),
-            None => bail!(
-                "a file that asks for the standard build must say which one \
-                 (`emulate_odk_version: {}`)",
-                builtin::BEHAVIOUR_SET
-            ),
+            None => {}
         }
         let options = parsed.standard_options();
         let config = builtin::Config::from_options(options.clone())?;
@@ -731,6 +749,8 @@ impl OdkRepo {
             own_switches: parsed.gating_flags,
             own_transient: parsed.transient_targets,
             standard_file: true,
+            standard_odk_version: parsed.emulate_odk_version.as_deref().and_then(crate::spec::parse_version),
+            standard_robot_version: parsed.emulate_robot_version.as_deref().and_then(crate::spec::parse_version),
         })
     }
 
@@ -802,6 +822,8 @@ impl OdkRepo {
             own_switches: BTreeMap::new(),
             own_transient: Vec::new(),
             standard_file: false,
+            standard_odk_version: None,
+            standard_robot_version: None,
         })
     }
 
@@ -988,6 +1010,8 @@ pub fn seed_spec(id: &str, edit: Option<&str>, dir: &Path) -> Result<OwlmakeSpec
         own_switches: BTreeMap::new(),
         own_transient: Vec::new(),
         standard_file: false,
+        standard_odk_version: None,
+        standard_robot_version: None,
     };
     Ok(OwlmakeSpec::from_plan(&repo.plan(&[])?))
 }
