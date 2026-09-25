@@ -149,7 +149,7 @@ There is ONE kind of file. Anything else it states — a `version`, an
 what the standard build derives, so a file states as little or as much as it
 likes and reading it never has to guess which of two shapes it was given. A
 repository whose build is ALL its own (EFO's hand-written Makefile) has no
-standard build to lean on: its file says `standard_build: false` and states
+standard build to lean on: its file says `use_builtin_rules: false` and states
 everything, and an option of the standard build is refused there because
 nothing would read it. An unknown key is an error in either case.
 
@@ -226,7 +226,7 @@ Ingesting a generated Makefile stays, in two roles only. It is the **migration
 tool**: read a repo's ODK yaml and its own `<id>.Makefile`, write the short
 `owlmake.yaml` — and only when the generated file is what the standard build
 generates for that configuration; otherwise say what differs and write the build
-as the repository's own (`standard_build: false`, every target stated). And it
+as the repository's own (`use_builtin_rules: false`, every target stated). And it
 is the **oracle**: for any configuration, the built-in rules must
 resolve to the same plan as ingesting the Makefile ODK generated for it
 (`odk::builtin::differences_from_generated`).

@@ -106,7 +106,7 @@ pub fn update_repo(repo: &OdkRepo) -> Result<()> {
             "`update_repo` brings a repository's files into step with the options in its \
              owlmake.yaml, and this repository is not built from one: where a generated \
              Makefile is the build, regenerating it is ODK's to do; where the build is \
-             the repository's own (`standard_build: false`), there are no options to \
+             the repository's own (`use_builtin_rules: false`), there are no options to \
              bring anything into step with"
         );
     };

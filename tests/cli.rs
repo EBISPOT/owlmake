@@ -971,7 +971,7 @@ fn odk_checks_the_committed_plan_against_the_build_config() {
     assert!(out.status.success(), "schema command failed");
     let schema_text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        schema_text.contains("\"targets\"") && schema_text.contains("standard_build"),
+        schema_text.contains("\"targets\"") && schema_text.contains("use_builtin_rules"),
         "schema output looks wrong:\n{schema_text}"
     );
 

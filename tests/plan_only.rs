@@ -886,7 +886,7 @@ fn a_cached_custom_module_is_kept_whole_by_the_merged_import() {
     write(
         &root.join("owlmake.yaml"),
         &format!(
-            "standard_build: false\n\
+            "use_builtin_rules: false\n\
              id: x\n\
              version: '1'\n\
              ontology_iri: http://example.org/x.owl\n\
@@ -995,7 +995,7 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
     write(
         &root.join("owlmake.yaml"),
         &format!(
-            "standard_build: false\n\
+            "use_builtin_rules: false\n\
              id: x\n\
              version: '1'\n\
              ontology_iri: http://example.org/x.owl\n\

@@ -125,8 +125,8 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
 /// file in between means what it says.
 ///
 /// A repository whose build is all its own — one with no standard build to lean
-/// on — says so with `standard_build: false`. Nothing is then derived: the file
-/// names every target, every path and every switch, and an option of the
+/// on — says so with `use_builtin_rules: false`. Nothing is then derived: the
+/// file names every target, every path and every switch, and an option of the
 /// standard build is refused because nothing would read it.
 ///
 /// An unknown key is an error ([`OwlmakeSpec::check`]).
@@ -149,9 +149,9 @@ pub struct OwlmakeSpec {
     /// accepted by every version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_owlmake_version: Option<String>,
-    /// Whether owlmake's standard build underlies this file. It does unless the
-    /// file says otherwise: the built-in rules for the options resolve to every
-    /// target, path and switch the file does not state itself.
+    /// Whether owlmake's built-in rules — the standard build — underlie this
+    /// file. They do unless the file says otherwise: the rules for the options
+    /// resolve to every target, path and switch the file does not state itself.
     ///
     /// `false` for a repository whose build is all its own. The file is then the
     /// whole build — every target under `targets`, every import under `imports`,
@@ -159,7 +159,7 @@ pub struct OwlmakeSpec {
     /// derived from a convention. An option of the standard build is refused in
     /// such a file, because nothing would read it.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
-    pub standard_build: bool,
+    pub use_builtin_rules: bool,
     /// The ODK release whose output this build emulates, e.g. `"1.6.1"`: the
     /// bytes its artefacts carry, not the rules that build them. The standard
     /// build is owlmake's own whatever this says.
@@ -1328,7 +1328,7 @@ pub struct AnnotationSpec {
 
 impl OwlmakeSpec {
     /// The whole of a [`Plan`] as a file states it: every target, import and
-    /// setting, with no standard build underneath (`standard_build: false`), so
+    /// setting, with no standard build underneath (`use_builtin_rules: false`), so
     /// that [`into_plan`](Self::into_plan) reads it back without deriving
     /// anything. Diagnostic fields (coverage gaps, cache state) are dropped —
     /// they are re-derived on load.
@@ -1345,7 +1345,7 @@ impl OwlmakeSpec {
             // who want editor validation can add a `$schema` pointing at a shared
             // copy; the loader validates against the built-in schema regardless.
             schema: None,
-            standard_build: false,
+            use_builtin_rules: false,
             default_targets: Some(plan.default_targets.clone()),
             phony: plan.phony.clone(),
             transient_targets: plan.transient_targets.clone(),
@@ -2698,15 +2698,15 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
 
 impl OwlmakeSpec {
     /// A file stating `options` — the repository's options for the standard
-    /// build, `id` among them — over the standard build or, with `standard_build`
-    /// off, over nothing, and nothing else yet.
+    /// build, `id` among them — over the built-in rules or, with
+    /// `use_builtin_rules` off, over nothing, and nothing else yet.
     pub fn for_options(
         options: serde_json::Map<String, serde_json::Value>,
-        standard_build: bool,
+        use_builtin_rules: bool,
     ) -> Result<OwlmakeSpec> {
         let mut document = serde_json::Map::new();
         document.insert("min_owlmake_version".into(), PLAN_FORMAT_MIN_VERSION.into());
-        document.insert("standard_build".into(), standard_build.into());
+        document.insert("use_builtin_rules".into(), use_builtin_rules.into());
         document.extend(options);
         serde_json::from_value(serde_json::Value::Object(document))
             .context("reading the repository's options")
@@ -2753,7 +2753,7 @@ impl OwlmakeSpec {
         if self.id.is_empty() {
             bail!("the file names no `id`");
         }
-        if self.standard_build {
+        if self.use_builtin_rules {
             let stated = [
                 ("use_base_merging", self.use_base_merging),
                 ("exclude_iri_patterns", !self.exclude_iri_patterns.is_empty()),
@@ -2767,14 +2767,14 @@ impl OwlmakeSpec {
                 bail!(
                     "`{key}` states the merged import, which the standard build decides from \
                      `import_group`: state it there, or state the whole build with \
-                     `standard_build: false`"
+                     `use_builtin_rules: false`"
                 );
             }
         } else {
             if let Some(key) = self.options.keys().next() {
                 bail!(
-                    "`{key}` is an option of the standard build, and this file has none \
-                     (`standard_build: false`): nothing would read it"
+                    "`{key}` is an option of the standard build, and this file does not use \
+                     its rules (`use_builtin_rules: false`): nothing would read it"
                 );
             }
             for (name, value) in [
@@ -2784,7 +2784,7 @@ impl OwlmakeSpec {
             ] {
                 if value.is_empty() {
                     bail!(
-                        "a build of the repository's own (`standard_build: false`) must state \
+                        "a build of the repository's own (`use_builtin_rules: false`) must state \
                          `{name}`: there is no standard build to derive it from"
                     );
                 }
@@ -2828,7 +2828,7 @@ impl OwlmakeSpec {
     }
 
     /// State in this file what `mine` builds that `base` does not — `base` being
-    /// the plan this file's options and `standard_build` resolve to with nothing
+    /// the plan this file's options and `use_builtin_rules` resolve to with nothing
     /// else stated, and `mine` the build the repository actually has.
     ///
     /// This is the half of the file the graph is built from: its targets, with
@@ -2942,7 +2942,7 @@ impl OwlmakeSpec {
         if mine.catalog_file != base.catalog_file {
             self.catalog_file = mine.catalog_file.clone();
         }
-        if !self.standard_build {
+        if !self.use_builtin_rules {
             // Nothing derives these; the file is the whole build.
             self.version = mine.version.clone();
             self.ontology_iri = mine.ontology_iri.clone();
@@ -3463,16 +3463,16 @@ mod format_floor_tests {
         // ontology missing what the plan says it holds. That is the silent
         // case, so the floor moves to 0.3.2.
         //
-        // One shape of file. `standard_build` says whether the standard build
+        // One shape of file. `use_builtin_rules` says whether the standard build
         // underlies it; `artefacts` and `prerequisites` are one `targets` list
         // whose entries may say `artefact`; `default_targets` and
         // `refresh_groups` are stated or derived, so they are optional; and the
         // two emulation versions are plain options with defaults. A 0.3.2
-        // build reading a file of this shape refuses it — `standard_build` and
+        // build reading a file of this shape refuses it — `use_builtin_rules` and
         // `artefact` are unknown to it, loudly — and this build refuses the
         // old `artefacts` key the same way, so nothing is silently built
         // differently and the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "aeb700b377ac78fa";
+        const PLAN_SCHEMA_DIGEST: &str = "704dd007916b61de";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

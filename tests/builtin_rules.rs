@@ -803,14 +803,14 @@ fn a_file_is_refused_for_what_its_base_cannot_honour() {
     let cases: [(&str, &str, &[&str]); 5] = [
         (
             "own-with-option",
-            "standard_build: false\nid: tiny\nversion: '1'\nontology_iri: http://example.org/tiny.owl\n\
+            "use_builtin_rules: false\nid: tiny\nversion: '1'\nontology_iri: http://example.org/tiny.owl\n\
              reasoner: ELK\nrelease_artefacts:\n- full\n",
-            &["release_artefacts", "standard_build"],
+            &["release_artefacts", "use_builtin_rules"],
         ),
         (
             "own-without-version",
-            "standard_build: false\nid: tiny\nontology_iri: http://example.org/tiny.owl\nreasoner: ELK\n",
-            &["version", "standard_build: false"],
+            "use_builtin_rules: false\nid: tiny\nontology_iri: http://example.org/tiny.owl\nreasoner: ELK\n",
+            &["version", "use_builtin_rules: false"],
         ),
         ("merged-beside-group", &format!("{TINY_OPTIONS}use_base_merging: true\n"), &["use_base_merging", "import_group"]),
         (

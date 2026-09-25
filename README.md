@@ -95,7 +95,7 @@ Any other target defined in the repo's Makefile is dispatched too — `om <targe
 om seed --id myont
 ```
 
-This writes a short `owlmake.yaml` asking for the standard build of `myont` over `myont-edit.obo` — its primary and base products in OWL, OBO and JSON — which a bare `om` then builds. Every `owlmake.yaml` is the same kind of file: the repository's options for the standard build (`release_artefacts`, `import_group`, `components`, …) plus whatever it states outright — a target of its own under `targets`, a `version`, an `ontology_iri`, the output conventions it emulates — each of which overrides what the standard build derives. A repository whose build is all its own says `standard_build: false` and states everything; `om make --plan-only` prints the resolved plan either way.
+This writes a short `owlmake.yaml` asking for the standard build of `myont` over `myont-edit.obo` — its primary and base products in OWL, OBO and JSON — which a bare `om` then builds. Every `owlmake.yaml` is the same kind of file: the repository's options for the standard build (`release_artefacts`, `import_group`, `components`, …) plus whatever it states outright — a target of its own under `targets`, a `version`, an `ontology_iri`, the output conventions it emulates — each of which overrides what the standard build derives. A repository whose build is all its own says `use_builtin_rules: false` and states everything; `om make --plan-only` prints the resolved plan either way.
 
 ### As a ROBOT implementation
 
