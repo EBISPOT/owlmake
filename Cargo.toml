@@ -129,7 +129,7 @@ flate2 = "1"
 # classification, a wasm-safe clock). A general dependency that builds for wasm,
 # so DL reasoning is available in the browser too. Depends on
 # horned-owl ^4.0, redirected by the root `[patch.crates-io]`.
-hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "ea56f4c01efb3467b22e95f1f4e02b008cf43ded" }
+hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "6c145821752587fefd96d4b945bb7a3f28d40e13" }
 
 # whelk-rs: native Rust OWL 2 EL reasoner (`--reasoner whelk`). From the
 # EBISPOT/whelk-rs fork, which requests horned-owl without `remote` so it builds
