@@ -135,8 +135,10 @@ const VARIANTS: &[&str] = &[
     "basic",
 ];
 
-/// The behaviour set these rules implement: the build an ODK release of this
-/// version generates for the same configuration.
+/// The ODK release whose generated build these rules reproduce, for the same
+/// configuration: the oracle the rules are measured against
+/// ([`differences_from_generated`]), and the value the standard build's
+/// `ODK_VERSION_MAKEFILE` carries for a repository's own rules that read it.
 pub const BEHAVIOUR_SET: &str = "1.6.1";
 
 // === Configuration ==========================================================
@@ -987,6 +989,11 @@ impl Config {
     fn imports(&self) -> &[ImportProduct] {
         self.import_group.as_ref().map(|g| g.products.as_slice()).unwrap_or(&[])
     }
+
+    /// The ids of the import modules this configuration builds.
+    pub fn import_ids(&self) -> Vec<&str> {
+        self.imports().iter().map(|p| p.id.as_str()).collect()
+    }
     fn subsets(&self) -> &[SubsetProduct] {
         self.subset_group.as_ref().map(|g| g.products.as_slice()).unwrap_or(&[])
     }
@@ -998,13 +1005,15 @@ impl Config {
 // === Agreement with a generated file ==========================================
 
 /// A plan as comparable data: every top-level field, with its targets keyed by
-/// name so that a difference names the target it is in.
+/// name so that a difference names the target it is in. A target's entry says
+/// whether it is a release artefact, so a plan that releases what another only
+/// builds differs there.
 pub fn comparable(plan: &crate::plan::Plan) -> std::collections::BTreeMap<String, serde_json::Value> {
     let spec = serde_json::to_value(crate::spec::OwlmakeSpec::from_plan(plan)).unwrap_or_default();
     let mut out = std::collections::BTreeMap::new();
     for (key, value) in spec.as_object().into_iter().flatten() {
         match (key.as_str(), value) {
-            ("prerequisites" | "artefacts", serde_json::Value::Array(targets)) => {
+            ("targets", serde_json::Value::Array(targets)) => {
                 for t in targets {
                     let name = t.get("target").and_then(|n| n.as_str()).unwrap_or_default();
                     out.insert(format!("target {name}"), t.clone());

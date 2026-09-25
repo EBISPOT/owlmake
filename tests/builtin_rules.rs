@@ -131,7 +131,7 @@ fn a_standard_file_alone_resolves_to_the_same_plan() {
         let name = fixture.file_name().unwrap().to_string_lossy().to_string();
         let root = repository_for(fixture, "standard");
         let before = resolved(&OdkRepo::load_with_builtin_rules(&root).expect("loading"));
-        let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+        let spec = OdkRepo::spec_for(&root).expect("writing the standard file");
         let file = root.join("owlmake.yaml");
         owlmake::spec::save(&spec, &file).expect("saving owlmake.yaml");
         let lines = std::fs::read_to_string(&file).unwrap().lines().count();
@@ -293,10 +293,11 @@ fn a_standard_file_builds_a_release() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A standard-build file need not name the ODK release its rules came from.
-/// Without it the same rules build under the current conventions, so the OBO
-/// export carries the ontology's individuals as `[Instance]` frames; naming the
-/// release emulates its ROBOT, which wrote none.
+/// Which output conventions a build emulates is a setting of its own, not a
+/// property of which rules build it. Without `emulate_odk_version` the standard
+/// build writes under owlmake's own conventions, so the OBO export carries the
+/// ontology's individuals as `[Instance]` frames; naming a release emulates its
+/// ROBOT, which wrote none — whichever release, since the rules stay owlmake's.
 #[test]
 fn a_standard_file_without_an_odk_release_writes_instance_frames() {
     let repo = |name: &str, version_line: &str| {
@@ -352,7 +353,9 @@ fn a_standard_file_without_an_odk_release_writes_instance_frames() {
 
     let root = repo("other", "emulate_odk_version: 1.5.2\n");
     let (out, said) = om_in(&root, &["make", "tiny.obo"]);
-    assert!(!out.status.success() && said.contains("written against the standard build of 1.5.2"), "{said}");
+    assert!(out.status.success(), "another release's conventions build with the same rules:\n{said}");
+    let obo = std::fs::read_to_string(root.join("src/ontology/tiny.obo")).unwrap();
+    assert!(!obo.contains("[Instance]"), "under that release's emulation the OBO export has no [Instance] frames:\n{obo}");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -415,7 +418,7 @@ fn a_standard_file_alone_resolves_a_real_repository() {
     let mut failed = false;
     for root in repos.split(':').filter(|r| !r.is_empty()).map(Path::new) {
         let before = resolved(&OdkRepo::load_with_builtin_rules(root).expect("loading"));
-        let spec = OdkRepo::standard_spec(root).expect("writing the standard file");
+        let spec = OdkRepo::spec_for(root).expect("writing the standard file");
         let scratch = without_build_files(root);
         let file = scratch.join("owlmake.yaml");
         owlmake::spec::save(&spec, &file).expect("saving owlmake.yaml");
@@ -463,7 +466,7 @@ fn builtin_rules_resolve_to_the_ingested_plan() {
 fn tool_named_options_are_owlmakes_own_in_the_file() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/coho");
     let root = repository_for(&fixture, "keys");
-    let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+    let spec = OdkRepo::spec_for(&root).expect("writing the standard file");
     let file = root.join("owlmake.yaml");
     owlmake::spec::save(&spec, &file).expect("saving owlmake.yaml");
     let text = std::fs::read_to_string(&file).unwrap();
@@ -688,7 +691,7 @@ fn a_kept_import_stage_says_whether_it_rebuilt_the_module() {
 fn a_force_prerequisite_is_covered_from_the_file_alone() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/own-force");
     let root = repository_for(&fixture, "force");
-    let spec = OdkRepo::standard_spec(&root).expect("writing the standard file");
+    let spec = OdkRepo::spec_for(&root).expect("writing the standard file");
     owlmake::spec::save(&spec, &root.join("owlmake.yaml")).expect("saving owlmake.yaml");
     let ont = root.join("src/ontology");
     for name in ["Makefile", "force.Makefile", "force-odk.yaml"] {
@@ -724,4 +727,108 @@ fn a_shell_substitution_runs_the_bundled_tools() {
         .expect("the merge of the pieces is planned");
     assert_eq!(pieces.needs, ["pieces/a.owl", "pieces/b.owl"], "what `ls … | grep -v …` lists");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A two-class repository built from the `owlmake.yaml` given, in a scratch
+/// tree of its own; `name` keeps each test's tree apart.
+fn file_repo(name: &str, file: &str) -> std::path::PathBuf {
+    let mut root = std::env::temp_dir();
+    root.push(format!("owlmake_builtin_{}_{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let ont = root.join("src/ontology");
+    std::fs::create_dir_all(&ont).unwrap();
+    std::fs::write(root.join("owlmake.yaml"), file).unwrap();
+    std::fs::write(
+        ont.join("tiny-edit.ofn"),
+        "Prefix(:=<http://example.org/tiny/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/tiny.owl>\n\
+         Declaration(Class(<http://example.org/tiny/TINY_0000001>))\n\
+         Declaration(Class(<http://example.org/tiny/TINY_0000002>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/tiny/TINY_0000001> \"thing\")\n\
+         SubClassOf(<http://example.org/tiny/TINY_0000002> <http://example.org/tiny/TINY_0000001>)\n\
+         )\n",
+    )
+    .unwrap();
+    root
+}
+
+const TINY_OPTIONS: &str = "id: tiny\n\
+    uribase: http://example.org\n\
+    edit_format: ofn\n\
+    release_artefacts:\n- full\n\
+    export_formats:\n- owl\n\
+    report:\n  custom_sparql_checks: []\n  custom_sparql_exports: []\n";
+
+/// A file states what the standard build would otherwise derive — the release
+/// version, the ontology IRI — and keeps the standard build. Every standard
+/// target is still there, the release is stamped with the stated version, and
+/// the plan names the stated IRI.
+#[test]
+fn a_file_states_its_version_and_iri_over_the_standard_build() {
+    let root = file_repo(
+        "overrides",
+        &format!(
+            "{TINY_OPTIONS}version: '2001-02-03'\n\
+             ontology_iri: http://example.org/tiny-as-named.owl\n"
+        ),
+    );
+    let (out, said) = om_in(&root, &["make", "--list-targets"]);
+    assert!(out.status.success(), "{said}");
+    for standard in ["tiny-full.owl", "test", "prepare_release", "reason_test"] {
+        assert!(
+            said.lines().any(|l| l == standard),
+            "the standard target `{standard}` is missing: stating a version lost the standard build:\n{said}"
+        );
+    }
+    let (out, said) = om_in(&root, &["make", "--plan-only"]);
+    assert!(out.status.success(), "{said}");
+    assert!(said.contains("http://example.org/tiny-as-named.owl"), "the stated IRI is not the plan's:\n{said}");
+    let (out, said) = om_in(&root, &["make", "tiny.owl"]);
+    assert!(out.status.success(), "the build failed:\n{said}");
+    let full = std::fs::read_to_string(root.join("src/ontology/tiny.owl")).unwrap();
+    assert!(
+        full.contains("http://example.org/tiny/releases/2001-02-03/tiny.owl"),
+        "the release is not stamped with the stated version:\n{full}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// What a file cannot say is refused by name: an option of the standard build in
+/// a build of the repository's own, a build of its own that leaves its identity
+/// out, the merged import stated beside `import_group`, an import stated its own
+/// way that the standard build does not have, and a key nothing reads.
+#[test]
+fn a_file_is_refused_for_what_its_base_cannot_honour() {
+    let cases: [(&str, &str, &[&str]); 5] = [
+        (
+            "own-with-option",
+            "use_builtin_rules: false\nid: tiny\nversion: '1'\nontology_iri: http://example.org/tiny.owl\n\
+             reasoner: ELK\nrelease_artefacts:\n- full\n",
+            &["release_artefacts", "use_builtin_rules"],
+        ),
+        (
+            "own-without-version",
+            "use_builtin_rules: false\nid: tiny\nontology_iri: http://example.org/tiny.owl\nreasoner: ELK\n",
+            &["version", "use_builtin_rules: false"],
+        ),
+        ("merged-beside-group", &format!("{TINY_OPTIONS}use_base_merging: true\n"), &["use_base_merging", "import_group"]),
+        (
+            "import-not-listed",
+            &format!(
+                "{TINY_OPTIONS}imports:\n- id: zzz\n  source: http://example.org/zzz.owl\n\
+                 \x20 output: src/ontology/imports/zzz_import.owl\n"
+            ),
+            &["zzz", "import_group"],
+        ),
+        ("old-key", &format!("{TINY_OPTIONS}artefacts: []\n"), &["artefacts"]),
+    ];
+    for (name, file, words) in cases {
+        let root = file_repo(name, file);
+        let err = OdkRepo::load(&root).err().map(|e| format!("{e:#}")).unwrap_or_default();
+        for w in words {
+            assert!(err.contains(w), "{name}: the refusal does not name `{w}`: {err:?}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

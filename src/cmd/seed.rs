@@ -1,7 +1,9 @@
 //! `seed` — scaffold a starter `owlmake.yaml` for a new ontology, so a repo can
-//! begin with a plan instead of writing one by hand. The generated plan is the
-//! stock release (primary + base + obo/json over an edit file) and is
-//! immediately buildable with `owlmake` once the edit ontology is in place.
+//! begin with a file instead of writing one by hand. The file asks for the
+//! standard build over an edit file — the primary and base products, in OWL,
+//! OBO and JSON — and is immediately buildable with `owlmake` once the edit
+//! ontology is in place; every option of the standard build can then be added
+//! to it.
 
 use std::path::PathBuf;
 

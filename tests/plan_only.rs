@@ -240,9 +240,14 @@ fn a_repo_can_delete_its_makefile_and_still_build() {
         "a bare build failed with no Makefile:\n{}",
         String::from_utf8_lossy(&bare.stderr)
     );
+    assert!(ont.join("tiny.owl").is_file(), "the bare build produced no release artefact");
+    // …and publishes it at the root, as the build with the Makefile did: the
+    // file says which of its targets are the release, and a target it merely
+    // builds is not.
     assert!(
-        ont.join("tiny.owl").is_file() || root.join("tiny.owl").is_file(),
-        "the bare build produced no release artefact"
+        root.join("tiny.owl").is_file(),
+        "the release artefact was not published from the plan alone: the plan no longer \
+         knows `tiny.owl` is a release artefact"
     );
 
     let _ = std::fs::remove_dir_all(&root);
@@ -379,9 +384,9 @@ fn a_plan_only_repo_can_keep_a_switched_group() {
     assert!(bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap().status.success());
     let plan_text = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(
-        plan_text.contains("name: bridges") && plan_text.contains("flag: BRI"),
-        "a switch of the repo's own invention must be declared as a group, or a repo with \
-         no build configuration cannot be told to keep it:\n{plan_text}"
+        plan_text.contains("when:\n  - BRI") && plan_text.contains("BRI: 'true'"),
+        "a switch of the repo's own invention must be declared, with the targets that exist \
+         under it, or a repo with no build configuration cannot be told to keep it:\n{plan_text}"
     );
 
     let stash = scratch("bridges_stash");
@@ -875,12 +880,14 @@ fn a_cached_custom_module_is_kept_whole_by_the_merged_import() {
          <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
          </catalog>\n",
     );
-    // A committed plan, EFO's shape: base merging into one merged module, one
-    // plain product and one custom product with a cached module.
+    // A committed plan, EFO's shape: a build of the repository's own, base
+    // merging into one merged module, one plain product and one custom product
+    // with a cached module.
     write(
         &root.join("owlmake.yaml"),
         &format!(
-            "id: x\n\
+            "use_builtin_rules: false\n\
+             id: x\n\
              version: '1'\n\
              ontology_iri: http://example.org/x.owl\n\
              reasoner: elk\n\
@@ -889,7 +896,6 @@ fn a_cached_custom_module_is_kept_whole_by_the_merged_import() {
              merged_import_iri: http://example.org/x/imports/merged_import.owl\n\
              edit_file: src/ontology/x-edit.ofn\n\
              catalog_file: src/ontology/catalog-v001.xml\n\
-             artefacts: []\n\
              imports:\n\
              - id: a\n\
              \x20 source: file://{mirror}\n\
@@ -989,7 +995,8 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
     write(
         &root.join("owlmake.yaml"),
         &format!(
-            "id: x\n\
+            "use_builtin_rules: false\n\
+             id: x\n\
              version: '1'\n\
              ontology_iri: http://example.org/x.owl\n\
              reasoner: elk\n\
@@ -1000,7 +1007,6 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
              merged_import_shard_bytes: 150\n\
              edit_file: src/ontology/x-edit.ofn\n\
              catalog_file: src/ontology/catalog-v001.xml\n\
-             artefacts: []\n\
              imports:\n\
              - id: a\n\
              \x20 source: file://{mirror}\n\

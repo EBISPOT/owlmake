@@ -144,10 +144,14 @@ switches it exists under. An import, a mirror or the pattern products built the
 repository's own way are recorded under `imports` and `dosdp`: owlmake builds
 those with its own engines, so they are not targets.
 
-A repository whose build is ALL its own (EFO's hand-written Makefile) has no
-standard build to lean on, and its file is the whole plan. The two shapes share
-one file and are told apart by `version` and `ontology_iri`, which a whole plan
-must state and the standard build decides. An unknown key is an error in either.
+There is ONE kind of file. Anything else it states — a `version`, an
+`ontology_iri`, `default_targets`, the output conventions it emulates — overrides
+what the standard build derives, so a file states as little or as much as it
+likes and reading it never has to guess which of two shapes it was given. A
+repository whose build is ALL its own (EFO's hand-written Makefile) has no
+standard build to lean on: its file says `use_builtin_rules: false` and states
+everything, and an option of the standard build is refused there because
+nothing would read it. An unknown key is an error in either case.
 
 "Its own" is measured, not declared: the file is written by planning the
 repository from the built-in rules alone and again with the rules it wrote, and
@@ -171,10 +175,12 @@ every path, it records which steps exist, nothing in it is inert.
 `owlmake.yaml` is the resolved plan's **source**, and resolving it is a pure
 function:
 
-- The file **pins the behaviour set** it is written against
-  (`emulate_odk_version`). owlmake refuses a set it does not implement; it never
-  substitutes the nearest one. Same file, same behaviour set, same run inputs ⇒
-  same bytes, so P4 holds across owlmake versions rather than in spite of them.
+- The standard build is owlmake's own: one set of rules (`odk::builtin`), which
+  the file does not choose. `emulate_odk_version` and `emulate_robot_version` are
+  the output conventions — the bytes the artefacts carry, `[Instance]` frames
+  and the prefix map among them — and are plain options of any file, defaulting
+  to owlmake's own conventions; they select no rules. Same file, same owlmake,
+  same run inputs ⇒ same bytes.
 - `--plan-only` prints the resolved plan. Reviewing what a build will do never
   requires reading owlmake's source.
 - A configuration option with no built-in rules yet **fails by name** (P5). It is
@@ -218,9 +224,10 @@ Not any of these, each of which has been proposed and turned down:
 
 Ingesting a generated Makefile stays, in two roles only. It is the **migration
 tool**: read a repo's ODK yaml and its own `<id>.Makefile`, write the short
-`owlmake.yaml` — and only when the generated file is what the behaviour set
-generates for that configuration; otherwise say what differs and write the whole
-plan. And it is the **oracle**: for any configuration, the built-in rules must
+`owlmake.yaml` — and only when the generated file is what the standard build
+generates for that configuration; otherwise say what differs and write the build
+as the repository's own (`use_builtin_rules: false`, every target stated). And it
+is the **oracle**: for any configuration, the built-in rules must
 resolve to the same plan as ingesting the Makefile ODK generated for it
 (`odk::builtin::differences_from_generated`).
 
