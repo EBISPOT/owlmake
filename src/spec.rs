@@ -3134,7 +3134,11 @@ mod format_floor_tests {
         // property assertions would reason without them and release an
         // ontology missing what the plan says it holds. That is the silent
         // case, so the floor moves to 0.3.2.
-        const PLAN_SCHEMA_DIGEST: &str = "222f1830c071e35f";
+        //
+        // `emulate_odk_version` is described as optional in both shapes of
+        // file. Only its description changed: the field was already optional
+        // and is read as before, so the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "e4c9006b4197d1ad";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
