@@ -350,8 +350,12 @@ pub struct ImportSpec {
     pub id: String,
     /// Upstream source URL, or `<custom mirror script>` for project scripts. The
     /// pipeline input is this ontology (mirrored under `mirror/<id>.owl`).
+    /// An entry that `extends` leaves it out: the standard build derives it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
     /// Output module path, relative to `src/ontology` (`imports/<id>_import.owl`).
+    /// An entry that `extends` leaves it out: the standard build derives it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub output: String,
     /// The mirror→module pipeline: the ordered operations that turn the source
     /// ontology into the committed import module (`extract`/`filter`/`remove`/
@@ -371,6 +375,16 @@ pub struct ImportSpec {
     /// mirror rule threads no model, so these are whole-command shell steps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirror_steps: Vec<StepEntry>,
+    /// Appends this entry's `steps` to the end of the standard mirror→module
+    /// pipeline for this import, which otherwise stands: the source, the output
+    /// and the standard steps are derived as usual and need not be stated. This
+    /// is how a repository states one extra operation over a module — COHO
+    /// removes the subset properties its NCIT slice drags along with
+    /// `remove --term oboInOwl:SubsetProperty --select children` — without
+    /// restating the pipeline. Without it, the entry is the whole pipeline,
+    /// taken as written.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extends: bool,
     /// Files the mirror steps read that another rule makes (MONDO's
     /// `mirror/hgnc_gene.nt`, `mirror/ncbi_gene.nt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -602,6 +616,7 @@ impl ImportSpec {
             source: i.source.clone(),
             output: i.output.clone(),
             steps: i.steps.iter().map(StepEntry::from_step).collect(),
+            extends: false,
             product: i.product.clone(),
             mirror_steps: i.mirror_steps.iter().map(StepEntry::from_step).collect(),
             mirror_inputs: i.mirror_inputs.clone(),
@@ -2790,6 +2805,32 @@ impl OwlmakeSpec {
                 }
             }
         }
+        for i in &self.imports {
+            if i.extends {
+                if !self.use_builtin_rules {
+                    bail!(
+                        "import `{}` says `extends`, and this file does not use the standard \
+                         build's rules (`use_builtin_rules: false`): there is no standard \
+                         pipeline to extend",
+                        i.id
+                    );
+                }
+                if i.steps.is_empty() {
+                    bail!("import `{}` says `extends` but states no `steps` to append", i.id);
+                }
+            } else {
+                for (name, value) in [("source", &i.source), ("output", &i.output)] {
+                    if value.is_empty() {
+                        bail!(
+                            "import `{}` states no `{name}`: an entry that is the whole \
+                             pipeline states both, and one that only appends steps says \
+                             `extends`",
+                            i.id
+                        );
+                    }
+                }
+            }
+        }
         self.check_emulation_versions()
     }
 
@@ -3115,6 +3156,55 @@ mod tests {
                 if matches!(*inner, Step::Op(crate::plan::step::Op::Query { .. }))),
             "a plan that says may_fail reads back as a step that may fail"
         );
+    }
+
+    /// An import entry either states its whole pipeline (and with it its source
+    /// and output) or says `extends` and appends steps to the standard one —
+    /// `check` refuses the shapes in between, where the plan would silently
+    /// build less than the file says.
+    #[test]
+    fn an_import_entry_is_whole_or_extends() {
+        let yaml = |imports: &str| -> OwlmakeSpec {
+            serde_yaml::from_str(&format!("id: tiny
+imports:
+{imports}")).unwrap()
+        };
+        let extends_no_steps = yaml("- id: ncit
+  extends: true
+");
+        let err = extends_no_steps.check().unwrap_err().to_string();
+        assert!(err.contains("no `steps` to append"), "{err}");
+
+        let whole_without_source = yaml("- id: ncit
+  output: imports/ncit_import.owl
+");
+        let err = whole_without_source.check().unwrap_err().to_string();
+        assert!(err.contains("states no `source`"), "{err}");
+
+        let extends: OwlmakeSpec = yaml(
+            "- id: ncit
+  extends: true
+  steps:
+  - op: remove-terms
+    terms:
+    - oboInOwl:SubsetProperty
+    selects:
+    - children
+",
+        );
+        extends.check().expect("an extending entry with steps is well-formed");
+
+        let mut own_build = yaml("- id: ncit
+  extends: true
+  steps:
+  - op: relax
+");
+        own_build.use_builtin_rules = false;
+        own_build.version = "2026-01-01".into();
+        own_build.ontology_iri = "http://example.com/tiny.owl".into();
+        own_build.reasoner = "elk".into();
+        let err = own_build.check().unwrap_err().to_string();
+        assert!(err.contains("no standard"), "{err}");
     }
 
     /// An ordinary step writes no `may_fail` at all — the flag is the exception,
@@ -3472,7 +3562,13 @@ mod format_floor_tests {
         // `artefact` are unknown to it, loudly — and this build refuses the
         // old `artefacts` key the same way, so nothing is silently built
         // differently and the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "704dd007916b61de";
+        // An import entry gains `extends` — append the entry's steps to the
+        // standard pipeline — and with it `source` and `output` become optional,
+        // since an extending entry derives both. An older build reading a plan
+        // that uses either refuses it loudly (`ImportSpec` denies unknown fields,
+        // and an old full entry still states source and output), so nothing is
+        // silently built differently and the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "81c800a22a269d61";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

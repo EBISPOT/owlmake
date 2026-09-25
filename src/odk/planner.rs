@@ -113,13 +113,17 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             // pipeline synthesized from the product's flags.
             // An import the repository records as built its own way is taken as
             // written, as a recorded target is.
-            if let Some(own) = repo.own_imports().iter().find(|i| i.id == p.id) {
+            if let Some(own) = repo.own_imports().iter().find(|i| i.id == p.id && !i.extends) {
                 let merged_cached =
                     use_base_merging && repo.dir.join("imports/merged_import.owl").exists();
                 imports.push(own.clone().into_plan(&repo.dir, merged_cached));
                 continue;
             }
-            let steps = import_pipeline(repo, p, &obobase);
+            let mut steps = import_pipeline(repo, p, &obobase);
+            // One that only `extends` appends its steps to that standard pipeline.
+            if let Some(own) = repo.own_imports().iter().find(|i| i.id == p.id && i.extends) {
+                steps.extend(own.steps.clone().into_iter().map(crate::spec::StepEntry::into_step));
+            }
             imports.push(ImportPlan {
                 id: p.id.clone(),
                 source,
