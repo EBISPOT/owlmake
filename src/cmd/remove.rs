@@ -254,18 +254,26 @@ pub fn remove_with(
         model.detach_import_closure();
     }
     // `--select complement --select <type>` removes every entity of that TYPE that
-    // is NOT in the term set. Both the object-property and the annotation-property
-    // forms are handled: HPO's `imports/merged_import.owl` step — `remove --term
-    // <the annotation properties to keep> --term-file … --select complement
-    // --select annotation-properties` — needs the latter to strip
+    // is NOT in the term set. HPO's `imports/merged_import.owl` step — `remove
+    // --term <the annotation properties to keep> --term-file … --select complement
+    // --select annotation-properties` — needs the annotation-property form to strip
     // `uberon/core#HOMOLOGY` with its fourteen `SynonymTypeProperty` siblings and
     // `cl#added_for_HCA` before they reach `hp-full.owl`, `hp.owl` and
-    // `hp-international.owl`.
+    // `hp-international.owl`. The class and individual forms are what the
+    // `minimal` module type emits (`--select complement --select "classes
+    // individual annotation-properties"`): without them the step stripped only the
+    // foreign annotation properties and a "minimal" module kept every class of the
+    // BOT extraction — COHO's mondo import carried 2,122 classes for a 344-term
+    // seed. ODK writes the singular `individual` for a product of the repository's
+    // own, so both spellings select.
     let is_complement = select_toks.iter().any(|s| s == "complement");
     let obj_complement = is_complement && select_toks.iter().any(|s| s == "object-properties");
     let ann_complement =
         is_complement && select_toks.iter().any(|s| s == "annotation-properties");
-    let type_complement = obj_complement || ann_complement;
+    let cls_complement = is_complement && select_toks.iter().any(|s| s == "classes");
+    let ind_complement = is_complement
+        && select_toks.iter().any(|s| s == "individuals" || s == "individual");
+    let type_complement = obj_complement || ann_complement || cls_complement || ind_complement;
     // `--select ontology` selects the ontology itself, so its annotations are
     // removed.
     let rm_ontology = select_toks.iter().any(|s| s == "ontology");
@@ -501,6 +509,35 @@ pub fn remove_with(
     } else {
         HashSet::new()
     };
+    // The class complement drops every class the keep set does not name — the
+    // step that cuts a `minimal` module down to its seed. The same punning guard
+    // as the annotation-property set: an IRI that is also a property keeps its
+    // other senses' axioms, so only the pure classes go.
+    let removed_classes: HashSet<String> = if cls_complement {
+        let ent = select::signature_entities(&model);
+        ent.classes
+            .difference(&terms)
+            .filter(|e| {
+                !ent.object_properties.contains(*e) && !ent.annotation_properties.contains(*e)
+            })
+            .cloned()
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    // Likewise for individuals, guarding against OBO-style class/individual
+    // punning: dropping the individual sense by IRI would take the class's axioms
+    // with it, so a punned IRI stays.
+    let removed_individuals: HashSet<String> = if ind_complement {
+        let ent = select::signature_entities(&model);
+        ent.individuals
+            .difference(&terms)
+            .filter(|e| !ent.classes.contains(*e))
+            .cloned()
+            .collect()
+    } else {
+        HashSet::new()
+    };
 
     // Gap spanning runs over the COMPLEMENT of the removal set — the entities that
     // SURVIVE — against the pre-removal ontology, so it re-asserts each retained
@@ -532,7 +569,13 @@ pub fn remove_with(
     // survives into its removal set and the rule does not apply.
     let anon_selected = is_complement && !type_complement;
     let removal_set: HashSet<String> = if type_complement {
-        removed_props.union(&removed_ann_props).cloned().collect()
+        removed_props
+            .iter()
+            .chain(&removed_ann_props)
+            .chain(&removed_classes)
+            .chain(&removed_individuals)
+            .cloned()
+            .collect()
     } else {
         terms.clone()
     };
@@ -567,6 +610,8 @@ pub fn remove_with(
             // ontology even though every axiom that used it had gone.
             || (obj_complement && term_match_ac(ac_full, &removed_props, true, ann_values))
             || (ann_complement && term_match_ac(ac_full, &removed_ann_props, true, ann_values))
+            || (cls_complement && term_match_ac(ac_full, &removed_classes, true, ann_values))
+            || (ind_complement && term_match_ac(ac_full, &removed_individuals, true, ann_values))
             || (rm_annotation && annotation_axiom_match(comp, &terms, trim, named_terms, ann_values))
             || (!generic_axiom_cats.is_empty()
                 && generic_axiom_cats

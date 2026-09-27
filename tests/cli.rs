@@ -1768,6 +1768,58 @@ fn trim_false_keeps_an_annotation_whose_property_is_excluded() {
     assert!(!r2.contains("\"a label\""), "under --trim true the label goes too:\n{r2}");
 }
 
+/// `remove --select complement --select "classes individual annotation-properties"`
+/// is the cut the `minimal` module type makes: keep the seed, drop every other
+/// class and individual, and bridge the hierarchy across what goes. Only the
+/// object- and annotation-property complements were implemented, so the step
+/// stripped stray annotation properties and left every class of the BOT
+/// extraction in place — COHO's mondo import kept 2,122 classes for a 344-term
+/// seed, and OLS showed hundreds of leaf diseases no cohort refers to. ODK
+/// writes the singular `individual` for a product of the repository's own, so
+/// that spelling must select too.
+#[test]
+fn class_complement_cuts_a_minimal_module_to_its_seed() {
+    let inp = tmp("minimalmod.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://x.org/>)\n\
+         Ontology(<http://x.org/m>\n\
+         Declaration(Class(<http://x.org/Seed>))\n\
+         Declaration(Class(<http://x.org/Mid>))\n\
+         Declaration(Class(<http://x.org/Top>))\n\
+         Declaration(Class(<http://x.org/Stray>))\n\
+         Declaration(NamedIndividual(<http://x.org/i1>))\n\
+         Declaration(NamedIndividual(<http://x.org/i2>))\n\
+         SubClassOf(<http://x.org/Seed> <http://x.org/Mid>)\n\
+         SubClassOf(<http://x.org/Mid> <http://x.org/Top>)\n\
+         SubClassOf(<http://x.org/Stray> <http://x.org/Top>)\n\
+         ClassAssertion(<http://x.org/Stray> <http://x.org/i1>)\n\
+         ClassAssertion(<http://x.org/Seed> <http://x.org/i2>)\n\
+         AnnotationAssertion(rdfs:label <http://x.org/Seed> \"seed\")\n\
+         AnnotationAssertion(rdfs:label <http://x.org/Stray> \"stray\")\n\
+         )\n",
+    )
+    .unwrap();
+    let out = tmp("minimalmod-o.ofn");
+    assert!(bin().args(["remove", "-i"]).arg(&inp)
+        .args(["--term", "rdfs:label",
+               "--term", "http://x.org/Seed", "--term", "http://x.org/Top",
+               "--term", "http://x.org/i2",
+               "--select", "complement",
+               "--select", "classes individual annotation-properties", "-o"])
+        .arg(&out).status().unwrap().success());
+    let r = std::fs::read_to_string(&out).unwrap();
+    assert!(r.contains("\"seed\""), "the seed keeps its annotations:\n{r}");
+    assert!(!r.contains("Stray"), "a class outside the seed goes:\n{r}");
+    assert!(!r.contains("/Mid"), "so does an intermediate above the seed:\n{r}");
+    assert!(!r.contains("/i1"), "an individual outside the seed goes:\n{r}");
+    assert!(r.contains("<http://x.org/i2>"), "a seeded individual stays:\n{r}");
+    assert!(
+        r.contains("SubClassOf(<http://x.org/Seed> <http://x.org/Top>)"),
+        "the hierarchy bridges across the removed intermediate:\n{r}"
+    );
+}
+
 /// `filter --axioms <types>` selects axioms BY TYPE, and a declaration is a type
 /// like any other — it survives only when the request names it. Retaining
 /// declarations unconditionally does not dangle (the writer re-declares whatever
