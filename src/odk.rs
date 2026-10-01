@@ -118,7 +118,7 @@ pub struct OdkRepo {
     /// `test_obo` writes `hp.obo`; without a run-wide memo, rebuilding `hp.owl`
     /// afterwards makes it newer, the release rule re-makes `hp.obo`, and the build
     /// ships its own conversion instead of the product `test_obo` wrote.
-    pub built: std::cell::RefCell<std::collections::HashSet<String>>,
+    pub built: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Targets whose build FAILED in this invocation.
     ///
     /// Distinct from "not built yet", and the distinction cannot be recovered
@@ -127,7 +127,11 @@ pub struct OdkRepo {
     /// prerequisite reaches its staleness test with that prerequisite missing;
     /// read as "not newer" it declares the target up to date and whatever is on
     /// disk survives. This is the record that lets the test tell the two apart.
-    pub failed: std::cell::RefCell<std::collections::HashSet<String>>,
+    pub failed: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The targets being built right now, so that a second builder of one waits
+    /// for the first rather than racing it or taking a half-written file for a
+    /// finished one. See [`crate::build::Claims`].
+    pub claims: crate::build::Claims,
     /// The `src/ontology` directory.
     pub dir: PathBuf,
     /// The repository root — where `owlmake.json` lives (the nearest `.git`
@@ -308,6 +312,7 @@ impl OdkRepo {
         let root = repo_root(&dir);
         Ok(OdkRepo {
             built: Default::default(),
+            claims: Default::default(),
             failed: Default::default(),
             dir,
             root,
@@ -381,6 +386,7 @@ impl OdkRepo {
                 let root = repo_root(&dir);
                 return Ok(OdkRepo {
                     built: Default::default(),
+            claims: Default::default(),
                     failed: Default::default(),
                     dir,
                     root,
@@ -416,6 +422,7 @@ impl OdkRepo {
                 let root = repo_root(&dir);
                 return Ok(OdkRepo {
                     built: Default::default(),
+            claims: Default::default(),
                     failed: Default::default(),
                     dir,
                     root,
@@ -484,6 +491,7 @@ impl OdkRepo {
         let root = repo_root(&dir);
         Ok(OdkRepo {
             built: Default::default(),
+            claims: Default::default(),
             failed: Default::default(),
             dir,
             root,
@@ -579,6 +587,7 @@ impl OdkRepo {
         }
         Ok(OdkRepo {
             built: Default::default(),
+            claims: Default::default(),
             failed: Default::default(),
             dir,
             root,

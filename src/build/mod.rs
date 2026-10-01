@@ -14,6 +14,7 @@ use anyhow::{bail, Context, Result};
 use crate::cmd;
 
 pub mod recipe;
+pub mod schedule;
 
 use crate::plan::{ArtefactPlan, Plan};
 use crate::plan::step::{Op, Step};
@@ -84,11 +85,17 @@ pub struct Repo<'a> {
     /// TWICE (24 fetches).
     /// Borrowed from [`crate::odk::OdkRepo`], which lives for the whole run — a
     /// `Repo` is rebuilt per phase and could not carry this itself.
-    pub built: &'a std::cell::RefCell<std::collections::HashSet<String>>,
+    pub built: &'a std::sync::Mutex<std::collections::HashSet<String>>,
     /// Targets whose build FAILED in this invocation — see [`crate::odk::OdkRepo`].
     /// A target naming one of these as a prerequisite cannot be up to date,
     /// however old the file sharing its name is.
-    pub failed: &'a std::cell::RefCell<std::collections::HashSet<String>>,
+    pub failed: &'a std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The targets being built right now — see [`Claims`].
+    pub claims: &'a Claims,
+    /// How many targets may be built at once. One builds them in plan order on
+    /// the calling thread; more builds every target whose prerequisites are
+    /// done, in plan order of readiness, on that many threads.
+    pub jobs: usize,
     /// This run's `--assume-new` files (see [`ExecOpts::assume_new`]).
     pub assume_new: Vec<String>,
     /// Where release artefacts are written — the repo root for an ODK layout.
@@ -122,6 +129,8 @@ impl<'a> Repo<'a> {
             kept_groups: Vec::new(),
             built: &repo.built,
             failed: &repo.failed,
+            claims: &repo.claims,
+            jobs: 1,
             assume_new: Vec::new(),
             output_dir: repo.root.clone(),
         }
@@ -149,6 +158,8 @@ impl<'a> Repo<'a> {
                 .collect(),
             built: &repo.built,
             failed: &repo.failed,
+            claims: &repo.claims,
+            jobs: opts.jobs.max(1),
             assume_new: opts.assume_new.clone(),
             output_dir: opts.output_dir.clone(),
         }
@@ -560,6 +571,71 @@ pub struct ExecOpts {
     /// `-W`/`--assume-new`: files to treat as just modified. A target depending
     /// on one runs its recipe; the file itself is neither rebuilt nor touched.
     pub assume_new: Vec<String>,
+    /// `-j`/`--jobs`: how many targets to build at once.
+    pub jobs: usize,
+}
+
+/// The targets being built at this moment.
+///
+/// A target is built at most once per run, and `Repo::built` records the ones
+/// that are done. With more than one builder that record is not enough: a
+/// target reached from two directions while its recipe is still running would
+/// be taken as done by the second, which then reads a file half written. A
+/// builder therefore CLAIMS a target first, and a second claimant waits until
+/// the first has finished and then finds it built.
+#[derive(Default)]
+pub struct Claims {
+    in_progress: std::sync::Mutex<std::collections::HashSet<String>>,
+    settled: std::sync::Condvar,
+}
+
+/// A claimed target: the holder is the one building it. Dropping the claim
+/// releases it; [`Claim::succeed`] records the target as built as well.
+struct Claim<'a> {
+    repo: &'a Repo<'a>,
+    key: String,
+    succeeded: bool,
+}
+
+impl Claim<'_> {
+    /// Record the target as built, so no later visit builds it again.
+    fn succeed(&mut self) {
+        self.succeeded = true;
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        let mut in_progress = self.repo.claims.in_progress.lock().unwrap();
+        in_progress.remove(&self.key);
+        if self.succeeded {
+            self.repo.built.lock().unwrap().insert(std::mem::take(&mut self.key));
+        }
+        self.repo.claims.settled.notify_all();
+    }
+}
+
+/// Claim `key` for building. `None` means it is already built — by this run
+/// earlier, or by another builder this waited for — and there is nothing to do.
+fn claim<'a>(repo: &'a Repo<'a>, key: &str) -> Option<Claim<'a>> {
+    let dir_rel = repo
+        .dir
+        .strip_prefix(&repo.root)
+        .ok()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut in_progress = repo.claims.in_progress.lock().unwrap();
+    loop {
+        if memo_has(repo, key) {
+            return None;
+        }
+        if in_progress.iter().any(|m| same_target(m, key, &dir_rel)) {
+            in_progress = repo.claims.settled.wait(in_progress).unwrap();
+            continue;
+        }
+        in_progress.insert(key.to_string());
+        return Some(Claim { repo, key: key.to_string(), succeeded: false });
+    }
 }
 
 /// Build the plan. The ingested repo supplies its directories and nothing else —
@@ -644,7 +720,7 @@ pub fn build_import_module(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpt
     std::fs::create_dir_all(&work)?;
     build_one_import(&r, plan, imp, &catalog, &work)
         .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
-    r.built.borrow_mut().insert(imp.output.clone());
+    r.built.lock().unwrap().insert(imp.output.clone());
     Ok(())
 }
 
@@ -896,13 +972,14 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         .filter(|a| !a.missing_rule)
         .map(|p| (p.target.as_str(), p))
         .collect();
-    let mut prereq_done: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let prereq_done: std::sync::Mutex<std::collections::HashSet<String>> = Default::default();
 
     // --- Release artefacts -------------------------------------------------
-    let mut failed: Vec<String> = Vec::new();
-    for &i in &buildable {
-        idx += 1;
-        let a = &plan.artefacts[i];
+    let failed: std::sync::Mutex<Vec<String>> = Default::default();
+    let stage_no = std::sync::atomic::AtomicUsize::new(idx);
+    let build_one = |pos: usize| -> Result<()> {
+        let a = &plan.artefacts[buildable[pos]];
+        let idx = stage_no.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let (head, detail) = crate::plan::describe_artefact(a);
         let stage = Stage::start(idx, total, &head, &detail, None);
         let out = opts.output_dir.join(&a.target);
@@ -933,7 +1010,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                 status!("make: `{}` pinned ({switch}), absent — nothing demands it", a.target);
             }
             stage.finish_ok();
-            continue;
+            return Ok(());
         }
         // Resolve this artefact's prerequisites now rather than in one pass up
         // front: a prerequisite may itself depend on an *artefact*
@@ -945,7 +1022,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                     repo,
                     need,
                     &prereq_index,
-                    &mut prereq_done,
+                    &prereq_done,
                     &catalog,
                     &tmp,
                     opts,
@@ -956,18 +1033,11 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         if let Err(e) = prereqs {
             stage.finish_err();
             // `-k` applies to a PREREQUISITE failure exactly as it does to a
-            // recipe failure below. Returning unconditionally here meant one
-            // unbuildable artefact still took the whole release down: UBERON's
-            // `composite-metazoan-basic.owl` fails, and the run died on the next
-            // target that needs it — abandoning the 111 subset artefacts that do
-            // not depend on it at all. GNU make `-k` builds them.
-            if !opts.keep_going {
-                return Err(e).with_context(|| format!("building {}", a.target));
-            }
-            status!("make: *** [{}] {e:#}", a.target);
-            repo.failed.borrow_mut().insert(a.target.clone());
-            failed.push(a.target.clone());
-            continue;
+            // recipe failure below: the scheduler carries on with the targets
+            // that do not depend on this one. When UBERON's
+            // `composite-metazoan-basic.owl` fails, the 111 subset artefacts that
+            // do not depend on it are still built.
+            return Err(e);
         }
         // The staleness rule: a target that already exists and is NEWER than
         // every one of its prerequisites is up to date, and its recipe is not run.
@@ -993,10 +1063,10 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // carry `ontology: hp.obo` instead of `ontology: test_obo`, a stray
         // `owl:versionInfo`, and 16 Typedef stanzas `test.owl`'s filtered term
         // list excludes.
-        if memo_has(repo, &a.target) {
+        let Some(mut held) = claim(repo, &a.target) else {
             stage.finish_ok();
-            continue;
-        }
+            return Ok(());
+        };
         // A prerequisite that FAILED is not a prerequisite that is merely absent.
         // Both look identical to the staleness test below — no file to stat — and
         // reading the failure as "not newer" declares the target up to date, so
@@ -1007,18 +1077,9 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // target up to date and kept a file from a previous run. GNU make says
         // `Target 'x' not remade because of errors`, and P5 says the same: a
         // declared file that is missing is an error, not a filter.
-        if let Some(bad) = a.needs.iter().find(|n| repo.failed.borrow().contains(*n)) {
+        if let Some(bad) = a.needs.iter().find(|n| repo.failed.lock().unwrap().contains(*n)) {
             stage.finish_err();
-            let e = anyhow::anyhow!(
-                "not remade because of errors: prerequisite `{bad}` failed in this run"
-            );
-            if !opts.keep_going {
-                return Err(e).with_context(|| format!("building {}", a.target));
-            }
-            status!("make: *** [{}] {e:#}", a.target);
-            repo.failed.borrow_mut().insert(a.target.clone());
-            failed.push(a.target.clone());
-            continue;
+            bail!("not remade because of errors: prerequisite `{bad}` failed in this run");
         }
         // A phony target names no file, so it is out of date however old the file
         // that happens to share its name is. `-B`/`--always-make` runs the
@@ -1029,7 +1090,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         {
             status!("make: `{}` is up to date", a.target);
             stage.finish_ok();
-            continue;
+            return Ok(());
         }
         // Every artefact goes through the one step pipeline. A shell step
         // (perl/grep/sed, an `if`/`for` construct, a `jq`/`sssom` call, …) runs
@@ -1038,20 +1099,57 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         match run_artefact(repo, a, &catalog, &tmp, &opts.output_dir, &out) {
             Ok(()) => {
                 mirror_into_ontology_dir(repo, &a.target, &out);
-                repo.built.borrow_mut().insert(a.target.clone());
-                stage.finish_ok()
+                held.succeed();
+                stage.finish_ok();
+                Ok(())
             }
             Err(e) => {
                 stage.finish_err();
-                if !opts.keep_going {
-                    return Err(e).with_context(|| format!("building {}", a.target));
+                Err(e)
+            }
+        }
+    };
+    // A failure is recorded against the target whatever `-k` says, so the
+    // staleness test of anything that needs it sees a failed prerequisite and
+    // not a merely absent one; `-k` decides only whether the run goes on.
+    let job = |pos: usize| -> Result<()> {
+        let target = &plan.artefacts[buildable[pos]].target;
+        build_one(pos).map_err(|e| {
+            repo.failed.lock().unwrap().insert(target.clone());
+            failed.lock().unwrap().push(target.clone());
+            if opts.keep_going {
+                status!("make: *** [{target}] {e:#}");
+            }
+            e.context(format!("building {target}"))
+        })
+    };
+    let graph = artefact_graph(plan, &buildable);
+    crate::progress::set_parallel(repo.jobs > 1);
+    let outcomes = schedule::run(&graph, repo.jobs, opts.keep_going, &job);
+    crate::progress::set_parallel(false);
+    let mut first_error = None;
+    for (pos, outcome) in outcomes.into_iter().enumerate() {
+        let target = &plan.artefacts[buildable[pos]].target;
+        match outcome {
+            schedule::Outcome::Done | schedule::Outcome::Unstarted => {}
+            schedule::Outcome::Failed(e) => {
+                if first_error.is_none() {
+                    first_error = Some(e);
                 }
-                status!("make: *** [{}] {e:#}", a.target);
-                repo.failed.borrow_mut().insert(a.target.clone());
-                failed.push(a.target.clone());
+            }
+            schedule::Outcome::Skipped { dependency } => {
+                status!(
+                    "make: *** [{target}] not remade because of errors: `{dependency}` failed in this run"
+                );
+                repo.failed.lock().unwrap().insert(target.clone());
+                failed.lock().unwrap().push(target.clone());
             }
         }
     }
+    if let (Some(e), false) = (first_error, opts.keep_going) {
+        return Err(e);
+    }
+    let failed = failed.into_inner().unwrap();
     if !failed.is_empty() {
         bail!("{} target(s) failed: {}", failed.len(), failed.join(", "));
     }
@@ -1064,6 +1162,44 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The build order among `buildable` artefacts (plan indices, in build order)
+/// as a graph for the scheduler: an artefact depends on every earlier one that
+/// produces something it needs — as its target, or as a file its recipe writes
+/// beside its target — so the two are never built side by side.
+fn artefact_graph(plan: &Plan, buildable: &[usize]) -> schedule::Graph {
+    let names = |need: &str, target: &str| {
+        need == target || need.strip_suffix(target).is_some_and(|p| p.ends_with('/'))
+    };
+    let produces: Vec<Vec<String>> = buildable
+        .iter()
+        .map(|&i| {
+            let a = &plan.artefacts[i];
+            let mut v = vec![a.target.clone()];
+            v.extend(crate::plan::gaps::recipe_outputs(&a.steps));
+            v
+        })
+        .collect();
+    let deps = buildable
+        .iter()
+        .enumerate()
+        .map(|(pos, &i)| {
+            let a = &plan.artefacts[i];
+            let mut v: Vec<usize> = (0..buildable.len())
+                .filter(|&other| other != pos)
+                .filter(|&other| {
+                    a.needs
+                        .iter()
+                        .chain(a.input.iter())
+                        .any(|need| produces[other].iter().any(|p| names(need, p)))
+                })
+                .collect();
+            v.sort_unstable();
+            v
+        })
+        .collect();
+    schedule::Graph { names: buildable.iter().map(|&i| plan.artefacts[i].target.clone()).collect(), deps }
 }
 
 /// Topologically order artefact indices so every artefact is built after the
@@ -1295,7 +1431,7 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
                 if seen.insert(sub.clone()) && !memo_has(repo, sub) {
                     build_one_import(repo, plan, imp, &catalog, &work)
                         .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
-                    repo.built.borrow_mut().insert(sub.clone());
+                    repo.built.lock().unwrap().insert(sub.clone());
                 }
                 continue;
             }
@@ -1328,7 +1464,7 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
             ensure_mirror(repo, imp, !repo.mirrors_pinned)?;
             build_one_import(repo, plan, imp, &catalog, &work)
                 .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
-            repo.built.borrow_mut().insert(imp.output.clone());
+            repo.built.lock().unwrap().insert(imp.output.clone());
         }
         return Ok(());
     }
@@ -1863,7 +1999,7 @@ fn memo_has(repo: &Repo, target: &str) -> bool {
         .ok()
         .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default();
-    repo.built.borrow().iter().any(|m| same_target(m, target, &dir_rel))
+    repo.built.lock().unwrap().iter().any(|m| same_target(m, target, &dir_rel))
 }
 
 /// Whether two target spellings name the same file.
@@ -1917,9 +2053,10 @@ fn ensure_import_module(
     name: &str,
     seen: &mut std::collections::HashSet<String>,
 ) -> Result<bool> {
-    if !seen.insert(name.to_string()) || memo_has(repo, name) {
+    if !seen.insert(name.to_string()) {
         return Ok(false);
     }
+    let Some(mut held) = claim(repo, name) else { return Ok(false) };
     let present = repo.dir.join(name).exists() || repo.root.join(&imp.output).exists();
     if present && !repo.refresh_imports {
         return Ok(false);
@@ -1938,7 +2075,7 @@ fn ensure_import_module(
     std::fs::create_dir_all(&work)?;
     build_one_import(repo, repo.plan, imp, &catalog, &work)
         .with_context(|| format!("building import module `{}`", imp.id))?;
-    repo.built.borrow_mut().insert(name.to_string());
+    held.succeed();
     Ok(true)
 }
 
@@ -1950,10 +2087,13 @@ fn run_target_recipe_inner(
     // Per-run, not per-entry-point: see `Repo::built`. `seen` still guards the
     // local recursion, but the run-wide set is what makes a target's recipe run
     // once however many callers reach it.
-    if !seen.insert(target.to_string()) || memo_has(repo, target) {
+    if !seen.insert(target.to_string()) {
         return Ok(());
     }
-    repo.built.borrow_mut().insert(target.to_string());
+    let Some(mut held) = claim(repo, target) else { return Ok(()) };
+    // Visited is built, whatever comes of it: a target that failed is not tried
+    // again by the next path that reaches it.
+    held.succeed();
     let a = repo.target(target).ok_or_else(|| {
         anyhow::anyhow!(
             "no rule to make target `{target}`: the plan defines no such target. \
@@ -2021,7 +2161,13 @@ fn run_target_recipe_inner(
     // Build prerequisites the plan knows how to build (phony sub-targets like
     // `sparql_test`, or file targets); plain source files are left for the steps
     // to consume.
+    //
+    // With more than one job the prerequisites are built side by side: each is
+    // a job of its own, and what two of them share — a sub-target both need —
+    // is built once, by whichever claims it first, while the other waits.
     let mut failures: Vec<(String, anyhow::Error)> = Vec::new();
+    // The prerequisites this target builds, after the ones it leaves alone.
+    let mut to_build: Vec<&String> = Vec::new();
     for pre in &a.needs {
         // `all_robot_plugins` provisions plugin JARs (kgcl, uberon, …) into a
         // plugin directory. owlmake implements every one of those commands itself
@@ -2047,21 +2193,59 @@ fn run_target_recipe_inner(
         if skip_missing_intermediate(repo, target, pre) {
             continue;
         }
-        if !aggregate {
-            run_target_recipe_inner(repo, pre, seen)?;
-            continue;
+        to_build.push(pre);
+    }
+    if repo.jobs > 1 && to_build.len() > 1 {
+        let graph = schedule::Graph {
+            names: to_build.iter().map(|p| p.to_string()).collect(),
+            deps: vec![Vec::new(); to_build.len()],
+        };
+        let job = |i: usize| -> Result<()> {
+            let pre = to_build[i];
+            // Already built via another path: it ran, and reporting it twice
+            // would be a lie about how much work this target did.
+            if aggregate && memo_has(repo, pre) {
+                status!("[ ok ] {pre} (already run)");
+                return Ok(());
+            }
+            let mut seen = std::collections::HashSet::new();
+            let r = run_target_recipe_inner(repo, pre, &mut seen);
+            if aggregate {
+                match &r {
+                    Ok(()) => status!("[PASS] {pre}"),
+                    Err(e) => status!("[FAIL] {pre}: {e:#}"),
+                }
+            }
+            r
+        };
+        let outcomes = schedule::run(&graph, repo.jobs, aggregate, &job);
+        for (i, outcome) in outcomes.into_iter().enumerate() {
+            seen.insert(to_build[i].clone());
+            if let schedule::Outcome::Failed(e) = outcome {
+                if !aggregate {
+                    return Err(e);
+                }
+                failures.push((to_build[i].clone(), e));
+            }
         }
-        // Already visited via another path: it ran, and reporting it twice would
-        // be a lie about how much work this target did.
-        if seen.contains(pre) {
-            status!("[ ok ] {pre} (already run)");
-            continue;
-        }
-        match run_target_recipe_inner(repo, pre, seen) {
-            Ok(()) => status!("[PASS] {pre}"),
-            Err(e) => {
-                status!("[FAIL] {pre}: {e:#}");
-                failures.push((pre.clone(), e));
+    } else {
+        for pre in to_build {
+            if !aggregate {
+                run_target_recipe_inner(repo, pre, seen)?;
+                continue;
+            }
+            // Already visited via another path: it ran, and reporting it twice
+            // would be a lie about how much work this target did.
+            if seen.contains(pre) {
+                status!("[ ok ] {pre} (already run)");
+                continue;
+            }
+            match run_target_recipe_inner(repo, pre, seen) {
+                Ok(()) => status!("[PASS] {pre}"),
+                Err(e) => {
+                    status!("[FAIL] {pre}: {e:#}");
+                    failures.push((pre.clone(), e));
+                }
             }
         }
     }
@@ -2114,7 +2298,8 @@ fn run_target_recipe_inner(
         .iter()
         .any(|n| is_native_pattern_product(repo, n) && !ruled(n) && !repo.dir.join(n).exists())
     {
-        if repo.built.borrow_mut().insert("\u{1}patterns".to_string()) {
+        if let Some(mut held) = claim(repo, "\u{1}patterns") {
+            held.succeed();
             if repo.regenerate_patterns {
                 regenerate_patterns_planned(repo, repo.plan)
                     .with_context(|| "regenerating the DOSDP pattern products")?;
@@ -2892,7 +3077,7 @@ fn remove_transient(repo: &Repo, path: &str) {
 /// A run that did not remake one leaves it where it found it: the build removes
 /// what it wrote, not what was already there.
 pub fn sweep_transients(repo: &crate::odk::OdkRepo, plan: &Plan, goals: &[String]) {
-    let built = repo.built.borrow();
+    let built = repo.built.lock().unwrap();
     for target in &plan.transient_targets {
         if !built.iter().any(|b| same_path(b, target)) {
             continue;
@@ -3704,7 +3889,10 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
 
     // Already made this run, or pinned by `MIR=false` — either way it is final.
     let once = format!("\u{1}mirror:{}", imp.id);
-    if dest.exists() && (!refresh || repo.built.borrow().contains(&once)) {
+    // Claimed for the whole of the build below: a second builder of the same
+    // mirror waits here and then finds it on disk.
+    let held = claim(repo, &once);
+    if dest.exists() && (!refresh || held.is_none()) {
         if !refresh && !crate::progress::stage_active() {
             status!("mirror: {} pinned (MIR=false), reusing {}", imp.id, dest.display());
         }
@@ -3732,9 +3920,13 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
         // about this run (P5) — and the fetch announces itself.
         status!("make: mirror `{}` is kept by default but absent — fetching it this once", imp.id);
     }
-    if !repo.built.borrow_mut().insert(once) && dest.exists() {
-        return Ok(dest);
-    }
+    let Some(mut held) = held else {
+        if dest.exists() {
+            return Ok(dest);
+        }
+        bail!("mirror `{}` was built by an earlier step of this run, and {} is not there", imp.id, dest.display());
+    };
+    held.succeed();
     if !imp.mirror_steps.is_empty() {
         run_mirror_pipeline(repo, imp, &dest)?;
         install_staged_mirror(repo, &imp.id, &dest)?;
@@ -5336,12 +5528,12 @@ fn ensure_prerequisite(
     repo: &Repo,
     target: &str,
     by_target: &std::collections::HashMap<&str, &crate::plan::ArtefactPlan>,
-    done: &mut std::collections::HashSet<String>,
+    done: &std::sync::Mutex<std::collections::HashSet<String>>,
     catalog: &BTreeMap<String, PathBuf>,
     work: &Path,
     opts: &ExecOpts,
 ) -> Result<()> {
-    if done.contains(target) {
+    if done.lock().unwrap().contains(target) {
         return Ok(());
     }
     // A target whose recipe already ran — or was already judged up to date — earlier
@@ -5353,11 +5545,9 @@ fn ensure_prerequisite(
     // file the release ships — a different ontology id and 16 extra Typedef
     // stanzas. The artefact loop already skips its own targets on this memo;
     // prerequisites need the same rule.
-    if memo_has(repo, target) {
-        return Ok(());
-    }
-    done.insert(target.to_string());
-    repo.built.borrow_mut().insert(target.to_string());
+    let Some(mut held) = claim(repo, target) else { return Ok(()) };
+    held.succeed();
+    done.lock().unwrap().insert(target.to_string());
     // A pinned target's rules are not in play, so the file on disk is final and
     // the walk must not descend through it. It has to be
     // decided HERE, before the recursion below — `imports/merged_import.owl` is
@@ -6142,17 +6332,16 @@ fn staged_target(
     Some(dst.clone())
 }
 
-thread_local! {
-    /// Every target the plan builds as an artefact of its own. A step's `-o` that
-    /// names one of these must NOT be written here: it is a CO-TARGET of a
-    /// multi-output rule (MONDO's `$(ONT).owl tmp/mondo.owl.ofn: reasoned.owl`),
-    /// and writing it early makes it newer than its prerequisites, so the artefact
-    /// that would have built it properly is skipped as up to date. That costs
-    /// `tmp/mondo.owl.ofn` its `#idspaces`/`#explicit-prefixes` cache markers and
-    /// `mondo.obo` 29 of its 35 `idspace:` lines.
-    static PLANNED_TARGETS: std::cell::RefCell<std::collections::HashSet<String>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
-}
+/// Every target the plan builds as an artefact of its own. A step's `-o` that
+/// names one of these must NOT be written here: it is a CO-TARGET of a
+/// multi-output rule (MONDO's `$(ONT).owl tmp/mondo.owl.ofn: reasoned.owl`),
+/// and writing it early makes it newer than its prerequisites, so the artefact
+/// that would have built it properly is skipped as up to date. That costs
+/// `tmp/mondo.owl.ofn` its `#idspaces`/`#explicit-prefixes` cache markers and
+/// `mondo.obo` 29 of its 35 `idspace:` lines. Set once per run, read by every
+/// builder thread.
+static PLANNED_TARGETS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
 
 /// Record the plan's own artefact targets for [`write_step_output`].
 fn set_planned_targets(plan: &Plan) {
@@ -6162,18 +6351,16 @@ fn set_planned_targets(plan: &Plan) {
         .map(|a| a.target.clone())
         .chain(plan.prerequisites.iter().map(|p| p.target.clone()))
         .collect();
-    PLANNED_TARGETS.with(|t| *t.borrow_mut() = names);
+    *PLANNED_TARGETS.lock().unwrap() = names;
 }
 
 fn is_planned_target(path: &str) -> bool {
-    PLANNED_TARGETS.with(|t| {
-        let t = t.borrow();
-        t.contains(path)
-            || Path::new(path)
-                .file_name()
-                .and_then(|f| f.to_str())
-                .is_some_and(|base| t.iter().any(|p| p == base || p.ends_with(&format!("/{base}"))))
-    })
+    let t = PLANNED_TARGETS.lock().unwrap();
+    t.contains(path)
+        || Path::new(path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .is_some_and(|base| t.iter().any(|p| p == base || p.ends_with(&format!("/{base}"))))
 }
 
 /// Write a step's own `-o/--output` when it names a file OTHER than the artefact.

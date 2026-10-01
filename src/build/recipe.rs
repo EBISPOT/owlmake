@@ -855,7 +855,7 @@ pub fn run_line(
     robot_prefix: &str,
     env: &[(String, String)],
 ) -> Result<()> {
-    RUN_ENV.with(|c| *c.borrow_mut() = env.to_vec());
+    *RUN_ENV.lock().unwrap() = env.to_vec();
     let line = &serve_image_assets(line, dir);
     // Strip the per-line recipe prefixes: `@` (silent), `+` (always run), and a
     // leading `-` (ignore errors).
@@ -1092,24 +1092,19 @@ fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Resul
     Ok(())
 }
 
-thread_local! {
-    /// This invocation's `VAR=value` assignments, applied to every child this
-    /// recipe spawns. Scoped to the run rather than written into owlmake's own
-    /// environment, so one invocation's variables cannot reach a later
-    /// invocation in the same process.
-    static RUN_ENV: std::cell::RefCell<Vec<(String, String)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
+/// This invocation's `VAR=value` assignments, applied to every child a recipe
+/// spawns, on whichever thread it runs. Scoped to the run rather than written
+/// into owlmake's own environment, so one invocation's variables cannot reach a
+/// later invocation in the same process.
+static RUN_ENV: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// Apply this run's command-line variable assignments to a child: a `VAR=value`
 /// given on the command line is exported into every recipe environment, so the
 /// commands a recipe spawns see it too.
 fn apply_run_env(cmd: &mut Command) {
-    RUN_ENV.with(|c| {
-        for (k, v) in c.borrow().iter() {
-            cmd.env(k, v);
-        }
-    });
+    for (k, v) in RUN_ENV.lock().unwrap().iter() {
+        cmd.env(k, v);
+    }
 }
 
 /// Run a command line through `sh -c`. The tools named directly in the line are

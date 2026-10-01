@@ -261,6 +261,19 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// can stay quiet rather than scribbling over the live spinner line.
 static STAGE_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether stages run side by side. One spinner line cannot stand for several
+/// stages at once, so while this is set a stage prints its headline and its
+/// result and no spinner between them.
+static PARALLEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_parallel(on: bool) {
+    PARALLEL.store(on, Ordering::Relaxed);
+}
+
+pub fn parallel() -> bool {
+    PARALLEL.load(Ordering::Relaxed)
+}
+
 /// Whether a live stage spinner currently owns the terminal's last line.
 pub fn stage_active() -> bool {
     STAGE_ACTIVE.load(Ordering::Relaxed)
@@ -359,7 +372,7 @@ impl Stage {
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         // The animated spinner only makes sense on a TTY; off-TTY we stay silent
         // until `finish` appends the result line.
-        let handle = if on && tty {
+        let handle = if on && tty && !parallel() {
             STAGE_ACTIVE.store(true, Ordering::Relaxed);
             let done = done.clone();
             let start = Instant::now();

@@ -42,6 +42,13 @@ pub struct Args {
     #[arg(short = 'k', long = "keep-going")]
     pub keep_going: bool,
 
+    /// `-j`/`--jobs`: build up to this many targets at once. A target starts
+    /// once everything it needs is built, and targets that need nothing of each
+    /// other run side by side; with one job, targets are built one after another
+    /// in plan order.
+    #[arg(short = 'j', long = "jobs", value_name = "N", default_value_t = 1)]
+    pub jobs: usize,
+
     /// `-W`/`--assume-new`: pretend the named file was just modified. Targets
     /// that depend on it run their recipes; the file itself is neither rebuilt
     /// nor touched. This is how `recreate-components` forces the component
@@ -791,6 +798,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         run_env: make_vars.env.clone(),
         always_make: args.always_make,
         keep_going: args.keep_going,
+        jobs: args.jobs,
         assume_new: args.assume_new.clone(),
     };
     let run_one = |t: &str, kind: &Kind, repo: &OdkRepo, plan: &Plan| -> Result<()> {
@@ -924,6 +932,7 @@ fn make_target(
         targets: std::iter::once(target.to_string()).chain(assignments.iter().cloned()).collect(),
         always_make: false,
         keep_going: false,
+        jobs: 1,
         assume_new: Vec::new(),
         repo: repo.to_path_buf(),
         rebuild: Vec::new(),
