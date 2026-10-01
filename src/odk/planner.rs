@@ -138,6 +138,8 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             });
         }
     }
+    let own = own_mirrors(repo, &imports, merged_cached);
+    imports.extend(own);
     let merged_import = use_base_merging.then(|| "imports/merged_import.owl".to_string());
 
     let components: Vec<String> = declared_components(repo);
@@ -1705,12 +1707,30 @@ fn switch_groups(
 /// the reference build too, whose meaning lives in the NAME of
 /// `refresh-imports-excluding-large` and reaches owlmake that way. A repository
 /// that does gate rules on it gets a `large-imports` group like any other switch.
-fn switch_group_name(flag: &str) -> String {
+pub(crate) fn switch_group_name(flag: &str) -> String {
     match flag {
+        "MIR" => "mirrors".to_string(),
+        "IMP" => "imports".to_string(),
+        "PAT" => "patterns".to_string(),
         "BRI" => "bridges".to_string(),
         "COMP" => "components".to_string(),
         "IMP_LARGE" => "large-imports".to_string(),
         other => other.to_ascii_lowercase(),
+    }
+}
+
+/// The switch a group answers to: the inverse of [`switch_group_name`], which is
+/// how a file's `when` — written as group names — reaches the rule model as the
+/// guard its own conditional was.
+pub(crate) fn switch_flag(group: &str) -> String {
+    match group {
+        "mirrors" => "MIR".to_string(),
+        "imports" => "IMP".to_string(),
+        "patterns" => "PAT".to_string(),
+        "bridges" => "BRI".to_string(),
+        "components" => "COMP".to_string(),
+        "large-imports" => "IMP_LARGE".to_string(),
+        other => other.to_ascii_uppercase(),
     }
 }
 
@@ -2847,6 +2867,13 @@ fn mirror_steps(repo: &OdkRepo, id: &str) -> Vec<Step> {
     // the fetch entirely.
     for target in [format!("mirror-{id}"), format!("mirror/{id}.owl")] {
         let Some((rule, stem)) = repo.make.rule_for(&target) else { continue };
+        // Installing the staged mirror — comparing `tmp/mirror-<id>.owl` with
+        // `mirror/<id>.owl` and copying it over when they differ — is what
+        // owlmake does with every mirror once its steps have run, so a rule that
+        // does only that is not a step of the mirror.
+        if installs_staged_mirror(rule) {
+            continue;
+        }
         let mut autos = Autos::default();
         autos.set("@", &target);
         if let Some(first) = rule.prereqs.first() {
@@ -2884,6 +2911,75 @@ fn mirror_steps(repo: &OdkRepo, id: &str) -> Vec<Step> {
         }
     }
     steps
+}
+
+/// Whether a rule does nothing but install the staged mirror: compare
+/// `$(TMPDIR)/mirror-$*.owl` with its target and copy it over when the two
+/// differ. The standard build's `$(MIRRORDIR)/%.owl` rule is exactly that, and so
+/// is a repository's own spelling of it with a switch test in front.
+fn installs_staged_mirror(rule: &super::makefile::Rule) -> bool {
+    let text: String = rule.recipe.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let staged = "$(TMPDIR)/mirror-$*.owl";
+    text.contains(&format!("cmp -s {staged} $@"))
+        && text.contains(&format!("cp {staged} $@"))
+        && !text.contains("curl ")
+        && !text.contains("$(ROBOT)")
+}
+
+/// The mirrors a repository keeps for its own targets, beyond the import
+/// products: each is a phony `mirror-<id>` of its own, read from `mirror/<id>.owl`
+/// by its rules and made into no module. UBERON has nineteen, feeding its
+/// composite pipeline. Each is recorded as an import with `mirror_steps` alone, so
+/// the executor fetches, processes and installs it as it does every mirror, and
+/// its switch group pins it as it pins theirs.
+fn own_mirrors(repo: &OdkRepo, imports: &[ImportPlan], merged_cached: bool) -> Vec<ImportPlan> {
+    use crate::build::recipe::FileOp;
+    let mirrordir = mirror_dir(&repo.make);
+    let known = |id: &str| imports.iter().any(|i| i.id == id);
+    let mut out: Vec<ImportPlan> = Vec::new();
+    // Stated by the repository's file.
+    for own in repo.own_imports() {
+        if own.output.is_empty() && own.steps.is_empty() && !known(&own.id) {
+            out.push(own.clone().into_plan(&repo.dir, merged_cached));
+        }
+    }
+    // Found in its rules.
+    let mut ids: Vec<&str> = repo
+        .make
+        .phony
+        .iter()
+        .filter_map(|p| p.strip_prefix("mirror-"))
+        .filter(|id| !id.is_empty() && *id != "merged" && !known(id))
+        .filter(|id| !out.iter().any(|i| i.id == *id))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    for id in ids {
+        let steps = mirror_steps(repo, id);
+        if steps.is_empty() {
+            continue;
+        }
+        let source = steps
+            .iter()
+            .find_map(|s| match s {
+                Step::File(FileOp::Fetch { url, .. }) => Some(url.clone()),
+                _ => None,
+            })
+            .or_else(|| mirror_input_iri(repo, id))
+            .unwrap_or_else(|| "<custom mirror script>".to_string());
+        out.push(ImportPlan {
+            id: id.to_string(),
+            source,
+            output: String::new(),
+            steps: Vec::new(),
+            cached: repo.dir.join(format!("{mirrordir}/{id}.owl")).exists(),
+            gaps: Vec::new(),
+            product: None,
+            mirror_steps: steps,
+            mirror_inputs: mirror_inputs(repo, id),
+        });
+    }
+    out
 }
 
 /// Whether a recipe line invokes robot at all — as against running a script, a

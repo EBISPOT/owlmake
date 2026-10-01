@@ -632,6 +632,9 @@ pub fn build_import_module(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpt
     let Some(imp) = plan.imports.iter().find(|i| i.id == id) else {
         bail!("no import `{id}` in the plan");
     };
+    if imp.is_mirror_only() {
+        bail!("`{id}` is a mirror and is made into no module: `om make mirror/{id}.owl` builds it");
+    }
     if opts.imports_pinned {
         status!("make: `{}` pinned (IMP=false)", imp.output);
         return Ok(());
@@ -831,7 +834,8 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     // the `fresh`/merged paths are a single bulk step.
     let stage_imports =
         matches!(opts.imports_mode, ImportsMode::Cached) && plan.merged_import.is_none();
-    let total = buildable.len() + if stage_imports { plan.imports.len() } else { 0 };
+    let modules = plan.imports.iter().filter(|i| !i.is_mirror_only()).count();
+    let total = buildable.len() + if stage_imports { modules } else { 0 };
     let mut idx = 0usize;
 
     // --- Imports -----------------------------------------------------------
@@ -842,7 +846,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     if stage_imports {
         let mut seen = std::collections::HashSet::new();
         let mut rebuilt = 0usize;
-        for imp in &plan.imports {
+        for imp in plan.imports.iter().filter(|i| !i.is_mirror_only()) {
             idx += 1;
             let (head, detail) = imp.describe(&repo.dir);
             let stage = Stage::start(idx, total, &head, &detail, None);
@@ -858,8 +862,8 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                 }
             }
         }
-        if !plan.imports.is_empty() {
-            status!("imports: {} kept, {rebuilt} rebuilt", plan.imports.len() - rebuilt);
+        if modules > 0 {
+            status!("imports: {} kept, {rebuilt} rebuilt", modules - rebuilt);
         }
     } else {
         prepare_imports(repo, plan, opts)?;
@@ -1237,7 +1241,7 @@ fn rebuild_imports_from_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Resul
     // or an import with no rule of its own) still have to be built — except under
     // base merging, where the group names the merged module alone precisely
     // because no per-product module is ever written.
-    for imp in &plan.imports {
+    for imp in plan.imports.iter().filter(|i| !i.is_mirror_only()) {
         if merged_name.is_none() && !group.contains(&imp.output) {
             build_one_import(repo, plan, imp, &catalog, &work)
                 .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
@@ -1821,7 +1825,7 @@ fn build_all_imports_planned(repo: &Repo, plan: &Plan) -> Result<()> {
         }
         return Ok(());
     }
-    for imp in &plan.imports {
+    for imp in plan.imports.iter().filter(|i| !i.is_mirror_only()) {
         build_one_import(repo, plan, imp, &catalog, &work)
             .with_context(|| format!("building import module `{}`", imp.id))?;
     }
@@ -3733,6 +3737,7 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
     }
     if !imp.mirror_steps.is_empty() {
         run_mirror_pipeline(repo, imp, &dest)?;
+        install_staged_mirror(repo, &imp.id, &dest)?;
         if !dest.exists() {
             bail!(
                 "import `{}`: the plan's mirror steps produced no {}",
@@ -3820,6 +3825,7 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
         }
         return Ok(());
     }
+    let staged = staged_mirror(repo, &imp.id);
 
     let src = match fetched {
         Some(p) => p,
@@ -3857,11 +3863,50 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     };
     let model = crate::io::load(&src)?;
     let rel = dest.strip_prefix(&repo.dir).unwrap_or(dest).to_string_lossy().to_string();
-    // `writes_model_after: false` — the recipe's own closing `cp
-    // tmp/mirror-<id>.owl mirror/<id>.owl` is what puts the file there, and
-    // nothing else will.
-    run_steps(repo, rest, model, &catalog, &work, Some(&rel), false, Some(&src))
+    // The steps stage the mirror at `tmp/mirror-<id>.owl` by their own outputs,
+    // and `install_staged_mirror` puts it in place; the model is written there
+    // only for a pipeline that names no output of its own.
+    let mut model = run_steps(repo, rest, model, &catalog, &work, Some(&rel), false, Some(&src))
         .with_context(|| format!("building mirror for import `{}`", imp.id))?;
+    if !staged.exists() && !dest.exists() {
+        if let Some(parent) = staged.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::io::save(&mut model, &staged)?;
+    }
+    Ok(())
+}
+
+/// Where a mirror's steps stage their result before it is installed.
+fn staged_mirror(repo: &Repo, id: &str) -> PathBuf {
+    repo.tmp_dir().join(format!("mirror-{id}.owl"))
+}
+
+/// Put the staged mirror in place: `mirror/<id>.owl` becomes the staged file
+/// when the two differ, and is left untouched — timestamp included — when they
+/// are the same, so nothing built from an unchanged mirror is rebuilt. No staged
+/// file means the steps wrote the mirror themselves, or nothing; the caller
+/// checks that it exists.
+fn install_staged_mirror(repo: &Repo, id: &str, dest: &Path) -> Result<()> {
+    let staged = staged_mirror(repo, id);
+    if !staged.is_file() {
+        return Ok(());
+    }
+    let same = dest.is_file() && {
+        let a = std::fs::read(&staged)?;
+        let b = std::fs::read(dest)?;
+        a == b
+    };
+    if same {
+        status!("mirror: {id} unchanged");
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(&staged, dest)
+        .with_context(|| format!("installing {} as {}", staged.display(), dest.display()))?;
+    status!("mirror: {id} updated");
     Ok(())
 }
 

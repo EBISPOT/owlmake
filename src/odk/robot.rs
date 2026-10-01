@@ -2064,12 +2064,14 @@ mod requires_tests {
     }
 
     /// A quoted regex is one argument however many `|` it holds. UBERON's
-    /// orphan report pipes four `obo-grep.pl` calls, two of them over
-    /// alternations, and the only thing the machine has to provide is the script.
+    /// orphan report pipes four stanza-filter calls, two of them over
+    /// alternations, and the only thing the machine has to provide is the script
+    /// — and when the script is `obo-grep.pl`, owlmake provides that too.
     #[test]
     fn a_quoted_alternation_is_not_a_pipeline() {
-        let cmd = r#"../scripts/obo-grep.pl --neg -r "(is_a|intersection_of|is_obsolete):" uberon.obo |  ../scripts/obo-grep.pl -r Term - |  ../scripts/obo-grep.pl --neg -r "id: UBERON:(0001062|0000000)" - |  ../scripts/obo-grep.pl -r Term - > reports/uberon-orphans.tmp"#;
-        assert_eq!(requires(cmd), vec!["../scripts/obo-grep.pl"]);
+        let cmd = r#"../scripts/obo-filter.pl --neg -r "(is_a|intersection_of|is_obsolete):" uberon.obo |  ../scripts/obo-filter.pl -r Term - |  ../scripts/obo-filter.pl --neg -r "id: UBERON:(0001062|0000000)" - |  ../scripts/obo-filter.pl -r Term - > reports/uberon-orphans.tmp"#;
+        assert_eq!(requires(cmd), vec!["../scripts/obo-filter.pl"]);
+        assert!(requires(&cmd.replace("obo-filter.pl", "obo-grep.pl")).is_empty());
         let cmd = "(egrep '^(id|name):'  reports/uberon-orphans.tmp > reports/uberon-orphans || echo ok)";
         assert!(requires(cmd).is_empty(), "{:?}", requires(cmd));
     }

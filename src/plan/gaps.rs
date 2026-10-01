@@ -237,6 +237,11 @@ pub fn prerequisite_gaps(
 /// exists, so an unguarded existence test marks every unresolvable import as
 /// present and lets the release build without it.
 pub fn import_state(dir: &Path, imp: &ImportPlan, merged_cached: bool) -> (bool, Vec<String>) {
+    if imp.is_mirror_only() {
+        // Nothing but the mirror itself to be on disk, and its steps say how to
+        // make it.
+        return (dir.join(format!("mirror/{}.owl", imp.id)).exists(), Vec::new());
+    }
     let cached = (!imp.output.is_empty() && dir.join(&imp.output).exists()) || merged_cached;
     let mut gaps = Vec::new();
     if imp.output.is_empty() {

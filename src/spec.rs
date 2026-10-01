@@ -354,7 +354,10 @@ pub struct ImportSpec {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
     /// Output module path, relative to `src/ontology` (`imports/<id>_import.owl`).
-    /// An entry that `extends` leaves it out: the standard build derives it.
+    /// An entry that `extends` leaves it out: the standard build derives it. So
+    /// does a mirror the repository keeps for its own targets and makes into no
+    /// module: that entry states `source` and `mirror_steps` alone, and its
+    /// `mirror/<id>.owl` is built and kept as any other mirror is.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub output: String,
     /// The mirror→module pipeline: the ordered operations that turn the source
@@ -596,9 +599,10 @@ pub struct ArtefactSpec {
     /// steps or none.
     #[serde(default, skip_serializing_if = "is_false")]
     pub extends: bool,
-    /// The rebuild switches this target exists under (`MIR`, `IMP`, …): it joins
-    /// each switch's group. Switched off, the target is not rebuilt and the file
-    /// on disk stands, as for a standard target of the same group.
+    /// The rebuild groups this target exists under (`mirrors`, `imports`,
+    /// `bridges`, …), as `--rebuild` and `--keep` spell them: it joins each.
+    /// Kept, the target is not rebuilt and the file on disk stands, as for a
+    /// standard target of the same group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub when: Vec<String>,
     /// The target is a release artefact: built by the release pipeline together
@@ -703,7 +707,7 @@ impl ArtefactSpec {
                 .branches
                 .iter()
                 .map(|b| BranchSpec {
-                    flag: b.flag.clone(),
+                    group: crate::odk::planner::switch_group_name(&b.flag),
                     value: b.value.clone(),
                     input: b.input.clone(),
                     needs: b.needs.clone(),
@@ -732,7 +736,7 @@ pub(crate) fn steps_differ(a: &[Step], b: &[Step]) -> bool {
 impl BranchSpec {
     fn into_branch(self) -> crate::plan::Branch {
         crate::plan::Branch {
-            flag: self.flag,
+            flag: crate::odk::planner::switch_flag(&self.group),
             value: self.value,
             input: self.input,
             needs: self.needs,
@@ -746,9 +750,10 @@ impl BranchSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BranchSpec {
-    /// The switch this pipeline belongs to.
-    pub flag: String,
-    /// The value of that switch which selects it.
+    /// The rebuild group whose switch this pipeline belongs to (`bridges`,
+    /// `mirrors`, …), as `when` spells it.
+    pub group: String,
+    /// The value of that group's switch which selects it.
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
@@ -2818,13 +2823,27 @@ impl OwlmakeSpec {
                 if i.steps.is_empty() {
                     bail!("import `{}` says `extends` but states no `steps` to append", i.id);
                 }
+            } else if i.output.is_empty() && i.steps.is_empty() {
+                // A mirror of the repository's own: fetched and kept, made into
+                // no module.
+                if i.mirror_steps.is_empty() {
+                    bail!(
+                        "import `{}` states neither a module (`output` and `steps`) nor a \
+                         mirror (`mirror_steps`)",
+                        i.id
+                    );
+                }
+                if i.source.is_empty() {
+                    bail!("import `{}` is a mirror and states no `source`", i.id);
+                }
             } else {
                 for (name, value) in [("source", &i.source), ("output", &i.output)] {
                     if value.is_empty() {
                         bail!(
                             "import `{}` states no `{name}`: an entry that is the whole \
-                             pipeline states both, and one that only appends steps says \
-                             `extends`",
+                             pipeline states both, one that only appends steps says \
+                             `extends`, and a mirror made into no module states `source` \
+                             and `mirror_steps` alone",
                             i.id
                         );
                     }
@@ -2895,7 +2914,7 @@ impl OwlmakeSpec {
             mine.refresh_groups
                 .iter()
                 .filter(|g| !g.flag.is_empty() && g.targets.iter().any(|t| t == target))
-                .map(|g| g.flag.clone())
+                .map(|g| g.name.clone())
                 .collect()
         };
         let targets = mine
@@ -3568,7 +3587,16 @@ mod format_floor_tests {
         // that uses either refuses it loudly (`ImportSpec` denies unknown fields,
         // and an old full entry still states source and output), so nothing is
         // silently built differently and the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "81c800a22a269d61";
+        //
+        // A target's `when` and a branch's `group` name the rebuild group
+        // (`mirrors`, `bridges`) where they named its switch (`MIR`, `BRI`), and
+        // an import may be a mirror alone — `source` and `mirror_steps` with no
+        // module. A 0.4.3 build reading `when: [mirrors]` would make a group of
+        // that name beside the real one, so its `MIR=false` would not pin the
+        // target: that is the silent case, and the floor would move to the
+        // version this ships in. No plan exists outside this repository, so it
+        // moves with the next release rather than ahead of the crate version.
+        const PLAN_SCHEMA_DIGEST: &str = "7395bc366905aafa";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

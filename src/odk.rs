@@ -244,11 +244,11 @@ fn configuration(
                 });
             }
             for t in &spec.targets {
-                // A target that exists only under a switch makes the switch one
-                // of the build's, as the conditional around its rule did.
-                for flag in &t.when {
-                    make.switch_vars.insert(flag.clone());
-                }
+                // A target that exists only under a group's switch makes the
+                // switch one of the build's, as the conditional around its rule
+                // did.
+                let guards: Vec<String> = t.when.iter().map(|g| planner::switch_flag(g)).collect();
+                make.switch_vars.extend(guards.iter().cloned());
                 let needs: Vec<String> =
                     t.needs.iter().filter(|n| !t.order_only.contains(n)).cloned().collect();
                 let rule = makefile::Rule {
@@ -256,7 +256,7 @@ fn configuration(
                     prereqs: needs,
                     order_only: t.order_only.clone(),
                     recipe: Vec::new(),
-                    guards: t.when.clone(),
+                    guards,
                 };
                 if t.extends {
                     // Its prerequisites join the standard target's.
@@ -525,7 +525,10 @@ impl OdkRepo {
         // nothing merges.
         if let Some(config) = &config {
             for import in &spec.imports {
-                if !config.import_ids().contains(&import.id.as_str()) {
+                // A mirror made into no module is the repository's own, and the
+                // products list only what is made into one.
+                let mirror_only = import.output.is_empty() && import.steps.is_empty();
+                if !mirror_only && !config.import_ids().contains(&import.id.as_str()) {
                     bail!(
                         "`imports` states `{}`, which `import_group` does not list: add it there, \
                          and state under `imports` only how it is built",
