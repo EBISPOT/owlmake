@@ -311,6 +311,9 @@ impl MergedAxioms {
 
 pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
     let source = ontology_iri(other);
+    if !merged.banner_docs.is_empty() {
+        merged.banner_docs.push(crate::cmd::banner_doc_of(other, false));
+    }
     let mut present = MergedAxioms::of(merged);
 
     // A merge keeps the PRIMARY's identity — but where there is no primary

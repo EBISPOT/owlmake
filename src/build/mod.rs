@@ -4858,8 +4858,13 @@ fn run_artefact(
                 | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
                 _ => None,
             });
-            model.banner_labels =
-                closure_banner_labels(&model, &repo.dir, catalog, write_version.as_deref());
+            model.banner_docs = closure_banner_docs(&model, &repo.dir, catalog);
+            let root_iri = model_ontology_id(&model).0;
+            model.banner_labels = crate::cmd::fold_banner_docs(
+                &model.banner_docs,
+                root_iri.as_deref(),
+                write_version.as_deref().or(model_ontology_id(&model).1.as_deref()),
+            );
             crate::io::set_anon_counter(mark);
         }
         // Named the way `Op::Merge` will name it, so `merge -i $<` recognises the
@@ -4964,8 +4969,13 @@ fn run_artefact(
                 | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
                 _ => None,
             });
-            m.banner_labels =
-                closure_banner_labels(&m, &repo.dir, catalog, write_version.as_deref());
+            m.banner_docs = closure_banner_docs(&m, &repo.dir, catalog);
+            let root_iri = model_ontology_id(&m).0;
+            m.banner_labels = crate::cmd::fold_banner_docs(
+                &m.banner_docs,
+                root_iri.as_deref(),
+                write_version.as_deref().or(model_ontology_id(&m).1.as_deref()),
+            );
             crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
@@ -7352,47 +7362,27 @@ fn writes_functional_syntax(steps: &[Step]) -> bool {
 /// pipeline sets) overrides the version it was read with, so a banner pick
 /// tracks the run's release date. Best-effort — a closure file that cannot be
 /// read contributes nothing, and banners fall back to the entity IRI.
-fn closure_banner_labels(
+/// The documents a functional write's banners are drawn from, as the pipeline
+/// opens: the document itself and every document its import closure names.
+/// What the pipeline merges in later joins the list as it is merged.
+fn closure_banner_docs(
     model: &crate::model::Model,
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
-    write_version_iri: Option<&str>,
-) -> std::collections::HashMap<String, String> {
-    let main_id = model_ontology_id(model);
-    let main_version = write_version_iri.map(str::to_string).or(main_id.1);
-    if std::env::var("OM_BANNER_DEBUG").is_ok() {
-        eprintln!("[banner] input document id={:?} write version={:?}", main_id.0, main_version);
-    }
-    let mut docs: Vec<(i32, std::collections::HashMap<String, String>)> = vec![(
-        crate::owlapi_hash::ontology_id_hash(main_id.0.as_deref(), main_version.as_deref()),
-        crate::cmd::rdfs_labels(model),
-    )];
+) -> Vec<crate::model::BannerDoc> {
+    let mut docs = vec![crate::cmd::banner_doc_of(model, true)];
     let mut seen = std::collections::HashSet::new();
     if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
         for f in &files {
             let Ok(m) = crate::io::load(f) else { continue };
-            let (iri, ver) = model_ontology_id(&m);
-            docs.push((
-                crate::owlapi_hash::ontology_id_hash(iri.as_deref(), ver.as_deref()),
-                crate::cmd::rdfs_labels(&m),
-            ));
+            docs.push(crate::cmd::banner_doc_of(&m, false));
         }
     }
-    let hashes: Vec<i32> = docs.iter().map(|(h, _)| *h).collect();
-    let mut out = std::collections::HashMap::new();
-    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
-        if std::env::var("OM_BANNER_DEBUG").is_ok() {
-            eprintln!("[banner] doc#{i} id-hash={} labels={}", hashes[i], docs[i].1.len());
-        }
-        for (subj, label) in &docs[i].1 {
-            out.entry(subj.clone()).or_insert_with(|| label.clone());
-        }
-    }
-    out
+    docs
 }
 
 /// The ontology IRI and version IRI a model's document identifies itself by.
-fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+pub(crate) fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
     use horned_owl::model::Component;
     for ac in model.ont.iter() {
         if let Component::OntologyID(id) = &ac.component {
@@ -7526,6 +7516,9 @@ pub(crate) fn merge_loaded_into_as(
     role: MergeRole,
 ) -> Result<()> {
     use horned_owl::model::{Component, MutableOntology};
+    if !model.banner_docs.is_empty() {
+        model.banner_docs.push(crate::cmd::banner_doc_of(other, false));
+    }
     let mut present = crate::cmd::merge::MergedAxioms::of(model);
     for ac in other.ont.iter() {
         if matches!(
