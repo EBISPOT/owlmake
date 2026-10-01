@@ -526,6 +526,7 @@ pub enum PatternsMode {
     Cached,
 }
 
+#[derive(Clone)]
 pub struct ExecOpts {
     pub imports_mode: ImportsMode,
     pub patterns_mode: PatternsMode,
@@ -573,6 +574,10 @@ pub struct ExecOpts {
     pub assume_new: Vec<String>,
     /// `-j`/`--jobs`: how many targets to build at once.
     pub jobs: usize,
+    /// The artefacts this run was asked for, in the order asked. They are built
+    /// in that order, each after what it needs; what the plan holds beyond them
+    /// follows in the plan's own order.
+    pub goals: Vec<String>,
 }
 
 thread_local! {
@@ -912,7 +917,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     // Build artefacts source-fed first, then those fed by another artefact (e.g.
     // `<id>.owl` ⟵ `<id>-full.owl`), so inputs exist when needed.
     set_planned_targets(plan);
-    let order = artefact_order(plan);
+    let order = artefact_order(plan, &opts.goals);
     let buildable: Vec<usize> = order
         .iter()
         .copied()
@@ -1264,7 +1269,7 @@ fn artefact_graph(plan: &Plan, buildable: &[usize]) -> schedule::Graph {
 /// `reports/mondo_obsoletioncandidates.tsv` — an artefact in its own right —
 /// only as a further prerequisite, so following `input` alone leaves the python
 /// script reading a file that does not exist yet.
-fn artefact_order(plan: &Plan) -> Vec<usize> {
+fn artefact_order(plan: &Plan, goals: &[String]) -> Vec<usize> {
     let n = plan.artefacts.len();
     // A prerequisite names an artefact when it IS that target, or ends with it
     // after a path separator — never on a bare suffix, which would tie
@@ -1292,9 +1297,17 @@ fn artefact_order(plan: &Plan) -> Vec<usize> {
         })
         .collect();
 
+    // The goals come first, in the order they were asked for: a target that
+    // reads a file the plan builds without declaring it — an import module
+    // reached through an edit file's closure — sees what an earlier goal
+    // produced, exactly as a sequence of goals does.
+    let goal_positions: Vec<usize> = goals
+        .iter()
+        .filter_map(|g| plan.artefacts.iter().position(|a| &a.target == g))
+        .collect();
     let mut state = vec![0u8; n]; // 0=unvisited, 1=on-stack, 2=done
     let mut order = Vec::with_capacity(n);
-    for s in 0..n {
+    for s in goal_positions.into_iter().chain(0..n) {
         if state[s] == 2 {
             continue;
         }
@@ -6062,8 +6075,6 @@ pub(crate) fn load_closure(
     catalog: &BTreeMap<String, PathBuf>,
 ) -> Result<Option<crate::model::Model>> {
     let dir = &repo.dir;
-    // What the closure holds is read after the run has brought it up to date.
-    ensure_closure_current(repo, crate::cmd::imports_of(model), catalog)?;
     // The build reaches the closure here rather than through
     // `resolve_import_closure`, so it reports itself here too — otherwise
     // `OM_IMPORT_DEBUG` is silent on this path while the closure IS loaded, and
@@ -6563,17 +6574,6 @@ fn apply_op(
                     merge_file_into(&mut model, &p)?;
                 }
             }
-            // The closure's plan-built members are brought up to date before
-            // they are read, whether they are merged here or reasoned over later.
-            let mut iris = crate::cmd::imports_of(&model);
-            for inp in inputs {
-                if let Some(p) = resolve_repo_file(repo, inp, work) {
-                    if let Ok(text) = std::fs::read_to_string(&p) {
-                        iris.extend(import_iris(&text));
-                    }
-                }
-            }
-            ensure_closure_current(repo, iris, catalog)?;
             if *collapse_import_closure == Some(false) {
                 // Keep imports as declarations and do NOT merge their axioms — they
                 // stay a read-only reasoning closure (`--collapse-import-closure
@@ -8086,42 +8086,6 @@ pub(crate) fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-/// Bring the plan-built members of an import closure up to date before they
-/// are read. An import module, or any target the plan builds, is a recipe's
-/// input as much as the file the recipe names: reading the committed copy of
-/// one the run is about to rebuild merges the previous release's import into
-/// this one. UBERON's `tmp/uberon-edit.owl` read a committed
-/// `imports/orcidio_import.owl` seven contributors short of the one the same
-/// run wrote an hour later. Walked by IRI through the catalog from `iris`, so
-/// the imports followed are those of the module as rebuilt.
-fn ensure_closure_current(
-    repo: &Repo,
-    iris: Vec<String>,
-    catalog: &BTreeMap<String, PathBuf>,
-) -> Result<()> {
-    let mut queue = iris;
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut built: std::collections::HashSet<String> = std::collections::HashSet::new();
-    while let Some(iri) = queue.pop() {
-        if !seen.insert(iri.clone()) {
-            continue;
-        }
-        let Some(path) = crate::cmd::catalog_resolve(catalog, &iri) else { continue };
-        let rel = path.strip_prefix(&repo.dir).unwrap_or(&path).to_string_lossy().into_owned();
-        if let Some(imp) = import_module_for(repo.plan, &rel) {
-            ensure_import_module(repo, imp, &rel, &mut built)
-                .with_context(|| format!("bringing import `{rel}` up to date before it is read"))?;
-        } else if repo.target(&rel).is_some() {
-            run_target_recipe_inner(repo, &rel, &mut built)
-                .with_context(|| format!("bringing `{rel}` up to date before it is read"))?;
-        }
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            queue.extend(import_iris(&text));
-        }
-    }
-    Ok(())
 }
 
 /// Resolve the import closure of `file` to local paths via the catalog.

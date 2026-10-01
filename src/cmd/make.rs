@@ -771,7 +771,6 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // and then the QC, in that order, which is what the repo asked for.
     let artefacts: Vec<String> =
         kinds.iter().filter(|(_, k)| matches!(k, Kind::Artefact)).map(|(t, _)| t.clone()).collect();
-    let split = kinds.iter().position(|(_, k)| matches!(k, Kind::Artefact));
 
     // This run's inputs, shared by every phase: a non-artefact target has to see
     // `-B` and the `VAR=value` assignments exactly as the artefact path does.
@@ -795,6 +794,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         keep_going: args.keep_going,
         jobs: args.jobs,
         assume_new: args.assume_new.clone(),
+        goals: artefacts.clone(),
     };
     let run_one = |t: &str, kind: &Kind, repo: &OdkRepo, plan: &Plan| -> Result<()> {
         match kind {
@@ -835,32 +835,55 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         }
     };
 
-    let before = split.unwrap_or(kinds.len());
-    for (t, kind) in kinds.iter().take(before) {
-        let r = run_one(t, kind, &repo, &full_plan);
-        report(t, r);
-    }
-    // Under `-k` an artefact failure is reported and the targets AFTER the
-    // artefacts still run: they are separate targets, and the ones that do not
-    // depend on the failed artefact are buildable. Stopping here skipped
-    // `check_rdfxml_assets`, the `.db.gz` products and `release_diff` — declared
-    // default targets — because one unrelated artefact could not be built, and
-    // the run reported only the artefact, so the skip was invisible.
+    // The goals run in the order given. A defaulted build builds every artefact
+    // together where the first one stands, so the release artefacts share one
+    // merge/reason pipeline; named goals build each unbroken run of artefacts
+    // together, and what comes between them runs between them — the order a
+    // caller lists its goals in is part of what it asked for.
     let mut artefact_err: Option<anyhow::Error> = None;
-    if !artefacts.is_empty() {
+    let mut defaulted_built = false;
+    let mut i = 0usize;
+    while i < kinds.len() {
+        let (t, kind) = &kinds[i];
+        if !matches!(kind, Kind::Artefact) {
+            let r = run_one(t, kind, &repo, &full_plan);
+            report(t, r);
+            i += 1;
+            continue;
+        }
+        let batch: Vec<String> = if defaulted {
+            i += 1;
+            if defaulted_built {
+                continue;
+            }
+            defaulted_built = true;
+            artefacts.clone()
+        } else {
+            let run: Vec<String> = kinds[i..]
+                .iter()
+                .take_while(|(_, k)| matches!(k, Kind::Artefact))
+                .map(|(t, _)| t.clone())
+                .collect();
+            i += run.len();
+            run
+        };
         // A defaulted build hands `build_plan` the FULL plan; a named subset gets
         // a subset plan. Partial replay of a full artefact set rewrites artefacts
         // the full plan produces, at the wrong sizes.
         let publish = publish && !publish_after;
+        let batch_opts = ExecOpts { goals: batch.clone(), ..run_opts.clone() };
         let r = if defaulted {
-            build_plan(&repo, &full_plan, &run_opts, publish)
+            build_plan(&repo, &full_plan, &batch_opts, publish)
         } else {
             let plan = spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&batch)?, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?,
                 &switches,
             );
-            build_plan(&repo, &plan, &run_opts, publish)
+            build_plan(&repo, &plan, &batch_opts, publish)
         };
+        // Under `-k` an artefact failure is reported and the targets AFTER the
+        // artefacts still run: they are separate targets, and the ones that do
+        // not depend on the failed artefact are buildable.
         match r {
             Ok(()) => {}
             Err(e) if args.keep_going => {
@@ -869,10 +892,6 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             }
             Err(e) => return Err(e),
         }
-    }
-    for (t, kind) in kinds.iter().skip(before) {
-        let r = run_one(t, kind, &repo, &full_plan);
-        report(t, r);
     }
     // A release whose checks, reports or artefacts failed is built as far as it
     // goes and left unpublished.
