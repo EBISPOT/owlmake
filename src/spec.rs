@@ -2678,7 +2678,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.3.2";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.4";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3593,9 +3593,7 @@ mod format_floor_tests {
         // an import may be a mirror alone — `source` and `mirror_steps` with no
         // module. A 0.4.3 build reading `when: [mirrors]` would make a group of
         // that name beside the real one, so its `MIR=false` would not pin the
-        // target: that is the silent case, and the floor would move to the
-        // version this ships in. No plan exists outside this repository, so it
-        // moves with the next release rather than ahead of the crate version.
+        // target: that is the silent case, so the floor moves to 0.4.4.
         const PLAN_SCHEMA_DIGEST: &str = "7395bc366905aafa";
         let actual = super::schema_digest();
         assert_eq!(
