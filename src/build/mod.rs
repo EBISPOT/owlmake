@@ -3722,6 +3722,9 @@ fn run_steps(
         );
     }
     let mut model = model;
+    if let Some(t) = target {
+        prime_banner_docs(repo, &mut model, catalog, t, steps);
+    }
     let mut model_on_disk = false;
     let mut staged_by_shell = false;
     // The file the CURRENT invocation's model was loaded from. It changes at every
@@ -3765,6 +3768,9 @@ fn run_steps(
                 }
                 model_on_disk = false;
                 staged_by_shell = false;
+                if let Some(t) = target {
+                    prime_banner_docs(repo, &mut model, catalog, t, steps);
+                }
             }
             Step::Op(op) | Step::Partial { op, .. } => {
                 // The documents the banners draw on survive a step that builds
@@ -4866,7 +4872,7 @@ fn run_artefact(
         // (`normalize_src` re-serialises the edit file, whose pattern classes
         // are labelled only by the imported definitions module). The read spends
         // no blank-node ids — see the artefact path.
-        if model.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+        if model.banner_labels.is_empty() && writes_functional_syntax(&a.target, &a.steps) {
             let mark = crate::io::anon_counter();
             // The document's identity at write time: the last version IRI a step
             // of this pipeline sets, if any.
@@ -4973,7 +4979,7 @@ fn run_artefact(
         // Only for a rule that writes functional syntax: reading the closure costs
         // a load of every imported document, and no other serialization has these
         // banners to fill in.
-        if m.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+        if m.banner_labels.is_empty() && writes_functional_syntax(&a.target, &a.steps) {
             // …and it spends no blank-node ids either. The documents are read for
             // their labels and dropped, so the ids their anonymous individuals
             // would take are ids this artefact never writes; leaving the count
@@ -7370,15 +7376,27 @@ fn fetch_import_iri(iri: &str, dir: &Path) -> Result<PathBuf> {
 /// Files imported (`owl:imports`) by the current model, resolved via the catalog.
 /// Does this recipe write OWL functional syntax — the one serialization whose
 /// per-entity banners carry labels?
-fn writes_functional_syntax(steps: &[Step]) -> bool {
-    steps.iter().any(|s| {
-        matches!(
-            s,
-            Step::Op(Op::Convert { format: Some(f), .. })
-                | Step::Partial { op: Op::Convert { format: Some(f), .. }, .. }
-            if matches!(crate::io::Format::from_name(f), Ok(crate::io::Format::Functional))
-        )
-    })
+fn writes_functional_syntax(target: &str, steps: &[Step]) -> bool {
+    let format = steps_format(target, steps)
+        .or_else(|| crate::io::Format::from_path(Path::new(target)).ok());
+    matches!(format, Some(crate::io::Format::Functional))
+}
+
+/// Give a model the documents its banners draw on — itself and its import
+/// closure — when the target it is bound for is written in functional syntax
+/// and it does not have them yet.
+fn prime_banner_docs(
+    repo: &Repo,
+    model: &mut crate::model::Model,
+    catalog: &BTreeMap<String, PathBuf>,
+    target: &str,
+    steps: &[Step],
+) {
+    if model.banner_docs.is_empty() && writes_functional_syntax(target, steps) {
+        let mark = crate::io::anon_counter();
+        model.banner_docs = closure_banner_docs(model, &repo.dir, catalog);
+        crate::io::set_anon_counter(mark);
+    }
 }
 
 /// The banner label set for a document with an import closure. Each document —

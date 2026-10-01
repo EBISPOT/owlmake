@@ -2505,6 +2505,14 @@ fn write_to_with<W: Write>(
             } else {
                 model.banner_labels.clone()
             };
+            if let Ok(dbg) = std::env::var("OM_BANNER_DEBUG") {
+                eprintln!(
+                    "[banner-write] docs={} labels={} {dbg}={:?}",
+                    model.banner_docs.len(),
+                    labels.len(),
+                    labels.get(&dbg)
+                );
+            }
             let labels_opt = if labels.is_empty() { None } else { Some(&labels) };
             let order = model.import_order.clone();
             let order_opt = if order.is_empty() { None } else { Some(order.as_slice()) };

@@ -661,6 +661,9 @@ pub(crate) fn fold_banner_docs(
             eprintln!("[banner] doc#{i} id-hash={} labels={} root={}", hashes[i], labels.len(), i == 0);
         }
         for (subj, label) in labels.iter() {
+            if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == *subj) && !out.contains_key(subj) {
+                eprintln!("[banner] {subj} ← doc#{i}: {label}");
+            }
             out.entry(subj.clone()).or_insert_with(|| label.clone());
         }
     }

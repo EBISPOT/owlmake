@@ -774,13 +774,16 @@ fn declare_referenced_entities(
     // declaration is the document's own and no import can stand in for it; one
     // named as a `property_value:` predicate is ours to withdraw once the closure
     // is known to type it.
+    // Every property the OBO vocabulary itself names — a tag's property, a
+    // qualifier's — is introduced by the line that used it, so its declaration
+    // is the document's own whatever an import declares.
     let builtin: BTreeSet<String> =
         obo_builtin_annotation_properties().into_iter().map(|(iri, _)| iri).collect();
     for p in ann_props.difference(&declared_a) {
         ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
             b.annotation_property(p.as_str()),
         )));
-        if !builtin.contains(p) {
+        if !builtin.contains(p) && !p.starts_with(OIO) {
             materialised.insert(format!("ap\u{0}{p}"));
         }
     }
