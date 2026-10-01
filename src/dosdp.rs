@@ -1827,6 +1827,13 @@ pub fn terms(pattern_yaml: &str, data_tsv: &str) -> Result<Vec<String>> {
     for la in &pattern.logical_axioms {
         logical.push(' ');
         logical.push_str(&la.text);
+        // A repeating clause names its relation in the clause, not in the
+        // axiom's own text: UBERON's vein pattern says `'tributary of' some %s`
+        // only under `multi_clause`, and the relation belongs in the seed as
+        // much as one a plain `text` names.
+        if let Some(mc) = &la.multi_clause {
+            clause_texts(mc, &mut logical);
+        }
     }
     // A dictionary KEY is what a template names (`'fractured'`, `part_of`); map
     // the ones that appear to their IRIs. What "appears" means is decided by the
@@ -1888,6 +1895,20 @@ pub fn terms(pattern_yaml: &str, data_tsv: &str) -> Result<Vec<String>> {
     let items: Vec<(String, i32)> =
         out.into_iter().map(|t| { let h = crate::owlapi_hash::java_string_hash(&t); (t, h) }).collect();
     Ok(crate::hash_trie::order(&items))
+}
+
+/// Every `text` under a repeating clause, sub-clauses included, appended to
+/// `out` as logical text.
+fn clause_texts(mc: &MultiClause, out: &mut String) {
+    for c in &mc.clauses {
+        if let Some(t) = &c.text {
+            out.push(' ');
+            out.push_str(t);
+        }
+        for sub in &c.sub_clauses {
+            clause_texts(sub, out);
+        }
+    }
 }
 
 /// Generate prototypical axioms from a pattern with no data: each variable is
@@ -3333,4 +3354,26 @@ pub fn validate_data(data_tsv: &str) -> Result<()> {
         bail!("empty data table");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod multi_clause_terms_tests {
+    /// A relation named only inside a repeating clause is one of the pattern's
+    /// terms: UBERON's vein pattern says `'tributary of' some %s` under
+    /// `multi_clause` alone, and its seed must carry RO:0002376.
+    #[test]
+    fn a_relation_named_in_a_repeating_clause_is_a_term() {
+        let yaml = "pattern_name: vein\n\
+                    pattern_iri: http://example.org/vein\n\
+                    classes:\n  vessel: \"UBERON:0001981\"\n\
+                    relations:\n  part of: \"BFO:0000050\"\n  tributary of: \"RO:0002376\"\n\
+                    vars:\n  parent: \"'vessel'\"\n\
+                    list_vars:\n  tributary_of: \"'vessel'\"\n\
+                    logical_axioms:\n\
+                    \x20 - axiom_type: subClassOf\n    text: \"'part of' some %s\"\n    vars:\n      - parent\n\
+                    \x20 - axiom_type: subClassOf\n    multi_clause:\n      sep: \" and \"\n      clauses:\n        - text: \"'tributary of' some %s\"\n          vars:\n            - tributary_of\n";
+        let terms = super::terms(yaml, "defined_class\tparent\ttributary_of\n").unwrap();
+        assert!(terms.contains(&"http://purl.obolibrary.org/obo/RO_0002376".to_string()), "{terms:?}");
+        assert!(terms.contains(&"http://purl.obolibrary.org/obo/BFO_0000050".to_string()), "{terms:?}");
+    }
 }
