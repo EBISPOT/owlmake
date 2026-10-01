@@ -261,6 +261,19 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// can stay quiet rather than scribbling over the live spinner line.
 static STAGE_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether stages run side by side. One spinner line cannot stand for several
+/// stages at once, so while this is set a stage prints its headline and its
+/// result and no spinner between them.
+static PARALLEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_parallel(on: bool) {
+    PARALLEL.store(on, Ordering::Relaxed);
+}
+
+pub fn parallel() -> bool {
+    PARALLEL.load(Ordering::Relaxed)
+}
+
 /// Whether a live stage spinner currently owns the terminal's last line.
 pub fn stage_active() -> bool {
     STAGE_ACTIVE.load(Ordering::Relaxed)
@@ -359,7 +372,7 @@ impl Stage {
         let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         // The animated spinner only makes sense on a TTY; off-TTY we stay silent
         // until `finish` appends the result line.
-        let handle = if on && tty {
+        let handle = if on && tty && !parallel() {
             STAGE_ACTIVE.store(true, Ordering::Relaxed);
             let done = done.clone();
             let start = Instant::now();
@@ -402,17 +415,24 @@ impl Stage {
     }
 
     /// End the stage successfully — a green `✓` and the elapsed time.
-    pub fn finish_ok(mut self) {
+    pub fn finish_ok(self) {
+        self.finish_ok_as("done");
+    }
+
+    /// End the stage successfully, closing on `outcome` in place of `done`: a
+    /// stage that may leave its output as it found it says which it did
+    /// (`✓ kept`, `✓ rebuilt`).
+    pub fn finish_ok_as(mut self, outcome: &str) {
         clear_detail();
-        self.finish(true);
+        self.finish(true, outcome);
     }
 
     /// End the stage in failure — a red `✗` and the elapsed time.
     pub fn finish_err(mut self) {
-        self.finish(false);
+        self.finish(false, "failed");
     }
 
-    fn finish(&mut self, ok: bool) {
+    fn finish(&mut self, ok: bool, word: &str) {
         if self.finished {
             return;
         }
@@ -426,10 +446,10 @@ impl Stage {
             return;
         }
         let el = fmt_hms(self.start.elapsed().as_secs_f64());
-        let (glyph, word) = if ok {
-            (styled("✓", Style::new().green().bold()), "done")
+        let glyph = if ok {
+            styled("✓", Style::new().green().bold())
         } else {
-            (styled("✗", Style::new().red().bold()), "failed")
+            styled("✗", Style::new().red().bold())
         };
         let mut err = std::io::stderr().lock();
         if self.tty {
@@ -447,7 +467,7 @@ impl Drop for Stage {
         // A stage dropped without an explicit finish (e.g. via `?` propagating an
         // error out of the stage body) is reported as failed so the spinner thread
         // is always joined and the line is closed off.
-        self.finish(false);
+        self.finish(false, "failed");
     }
 }
 

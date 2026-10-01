@@ -1,0 +1,22 @@
+id: reps
+namespaces:
+  - http://purl.obolibrary.org/obo/REPS_
+robot_report:
+  fail_on: WARN
+  use_labels: false
+  custom_profile: true
+  release_reports: true
+  ensure_owl2dl_profile: false
+  upper_ontology: http://purl.obolibrary.org/obo/bfo.owl
+  report_on:
+    - edit
+    - reps-base.owl
+  sparql_test_on:
+    - edit
+    - reps.owl
+    - reps-base.owl
+  custom_sparql_checks:
+    - owldef-self-reference
+    - taxon-range
+  custom_sparql_exports:
+    - basic-report

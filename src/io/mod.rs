@@ -90,8 +90,10 @@ pub mod obo;
 pub mod obograph;
 pub mod ofncache;
 pub mod owlfunc;
+pub mod owlapi_ttl;
 pub mod owlrdf;
 pub mod turtle;
+pub mod jena_ttl;
 
 /// A serialization format for OWL ontologies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +171,26 @@ impl Format {
     }
 }
 
+/// Whether `path` names the null sink — a caller asking for the output to be
+/// thrown away. `om reason -i x.owl -r elk -o /dev/null` is a *check*: the run is
+/// wanted for its verdict, the document is not. There is nothing to infer a
+/// format from and nothing to serialize, so a discard path skips the write
+/// entirely rather than failing on the extension it does not have.
+pub fn is_discard_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    // Only the platform's own null device counts: `nul` is a device name on
+    // Windows and an ordinary file name everywhere else, and a repo that names a
+    // target `nul` must still get its bytes.
+    #[cfg(windows)]
+    {
+        s.eq_ignore_ascii_case("nul") || s.eq_ignore_ascii_case(r"\\.\nul")
+    }
+    #[cfg(not(windows))]
+    {
+        s == "/dev/null"
+    }
+}
+
 /// Whether `path` is an *empty* file — zero bytes, or only whitespace. Such a
 /// file denotes an empty ontology (no axioms): notably a build *stamp*, `touch`ed
 /// as a marker whose real outputs are written elsewhere (e.g. UBERON's
@@ -189,8 +211,32 @@ pub fn is_empty_ontology_file(path: &Path) -> bool {
 /// the `.owl`/`.rdf` extensions are ambiguous — such a file may hold RDF/XML *or*
 /// Functional Syntax — so the file's leading bytes are sniffed to pick the right
 /// parser.
+/// Whether `path` names a gzipped file (`x.owl.gz`, `x.ofn.gz`, …). The format
+/// is taken from the extension inside the `.gz`, as [`Format::from_path`] does.
+pub fn is_gzipped_path(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("gz"))
+}
+
+/// Read an ontology file, transparently gunzipping a `.gz` one (or any file that
+/// starts with the gzip magic, whatever it is called). GitHub refuses files over
+/// 100 MB, so a large import module is committed gzipped: EFO's untrimmed OBA
+/// module is 106 MB as RDF/XML and 2 MB gzipped, and the OWL API (Protégé,
+/// ROBOT) resolves a catalog entry to a `.gz` module transparently.
+fn read_ontology_bytes(path: &Path) -> Result<Vec<u8>> {
+    let raw = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+    if !(is_gzipped_path(path) || raw.starts_with(&[0x1f, 0x8b])) {
+        return Ok(raw);
+    }
+    use std::io::Read;
+    let mut out = Vec::with_capacity(raw.len() * 8);
+    flate2::read::GzDecoder::new(&raw[..])
+        .read_to_end(&mut out)
+        .with_context(|| format!("gunzipping {}", path.display()))?;
+    Ok(out)
+}
+
 pub fn load(path: &Path) -> Result<Model> {
-    let bytes = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+    let bytes = read_ontology_bytes(path)?;
     let fmt = match Format::from_path(path) {
         Ok(f) => disambiguate(f, &bytes),
         Err(_) => sniff(&bytes)
@@ -281,7 +327,7 @@ pub fn load_with(path: &Path, format: Option<&str>) -> Result<Model> {
     match format {
         Some(name) => {
             let fmt = Format::from_name(name)?;
-            let bytes = std::fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+            let bytes = read_ontology_bytes(path)?;
             IN_PATH.with(|c| *c.borrow_mut() = Some(path.to_path_buf()));
             let r = parse_bytes(bytes, fmt, &display_name(path))
                 .with_context(|| format!("parsing {}", path.display()));
@@ -901,7 +947,7 @@ fn scan_owl_body_genids(bytes: &[u8]) -> std::collections::HashMap<String, Vec<S
 /// A subject with two labels names one of them in the `! …` comments that
 /// reference it, and where the two land in the same slot of the assertion set the
 /// choice falls to the order they were read in. horned's model is unordered, so
-/// that order is scanned here (the analog of [`scan_owl_reif_order`]).
+/// that order is scanned here.
 fn scan_label_order(bytes: &[u8]) -> std::collections::HashMap<String, Vec<String>> {
     let text = String::from_utf8_lossy(bytes);
     let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
@@ -951,35 +997,6 @@ fn unescape_attr(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// Per subject IRI, the ordered [`crate::io::owlrdf::reif_signature`]s of the
-/// `<owl:Axiom>` reification blocks in the source RDF/XML — so the writer can
-/// replay the order the source carried them in, which is not reconstructible from
-/// horned's unordered model.
-fn scan_owl_reif_order(bytes: &[u8]) -> std::collections::HashMap<String, Vec<String>> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    let open = "    <owl:Axiom>\n";
-    let close = "    </owl:Axiom>\n";
-    let mut idx = 0usize;
-    while let Some(rel) = text[idx..].find(open) {
-        let s = idx + rel;
-        let Some(e_rel) = text[s..].find(close) else { break };
-        let end = s + e_rel + close.len();
-        let block = &text[s..end];
-        let src = "<owl:annotatedSource rdf:resource=\"";
-        if let Some(a) = block.find(src) {
-            let a = a + src.len();
-            if let Some(q) = block[a..].find('"') {
-                let subject = block[a..a + q].to_string();
-                let sig = crate::io::owlrdf::reif_signature(block);
-                out.entry(subject).or_default().push(sig);
-            }
-        }
-        idx = end;
-    }
-    out
-}
-
 /// The bare `<rdf:Description>` blocks (no `rdf:about`) an RDF/XML document carries
 /// in its Individuals section for annotation assertions on ANONYMOUS individuals
 /// (EFO's obsolescence records). horned's RDF reader discards anonymous-subject
@@ -1014,8 +1031,13 @@ fn scan_owl_anon_individual_blocks(bytes: &[u8]) -> Vec<AnonBlock> {
     let mut out: Vec<AnonBlock> = Vec::new();
     for (s, end) in top_level_anon_descriptions(&text) {
         let block = &text[s..end];
-        let renders_from_model = block.contains("owl:distinctMembers")
-            || block.contains("owl:members")
+        // Matched by local name, not by the `owl:` prefix: a document that
+        // binds the OWL namespace as its DEFAULT xmlns writes these elements
+        // unprefixed (`<distinctMembers>`), and a block missed here is written
+        // twice — once replayed verbatim, once rendered from its component.
+        let renders_from_model = block.contains("distinctMembers")
+            || block.contains(":members")
+            || block.contains("<members")
             || block.contains("http://www.w3.org/2003/11/swrl#");
         if !renders_from_model {
             // The block's own parse-time blank node is the allocation made AT its
@@ -1167,15 +1189,22 @@ fn anon_description_end(text: &str, from: usize, open_tag: &str, close: &str) ->
     }
 }
 
-/// The blank-node counter. Anonymous individuals are numbered upwards from 2^31
-/// for the life of the process, so `_:genid2147483648` is the first one any parse
-/// in this run mints.
-static ANON_COUNTER: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(2_147_483_648);
+thread_local! {
+    /// The blank-node counter. Anonymous individuals are numbered upwards from
+    /// 2^31, so `_:genid2147483648` is the first one a parse mints. One counter
+    /// per thread: a target's recipe lines run on one thread and number on from
+    /// each other, and targets built beside each other on other threads do not
+    /// change what this one mints.
+    static ANON_COUNTER: std::cell::Cell<u64> = const { std::cell::Cell::new(2_147_483_648) };
+}
 
 /// Reserve `n` consecutive blank-node ids and return the first.
 fn mint_anon_ids(n: usize) -> u64 {
-    let first = ANON_COUNTER.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+    let first = ANON_COUNTER.with(|c| {
+        let first = c.get();
+        c.set(first + n as u64);
+        first
+    });
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
         eprintln!("[anon] mint {n} from {first} ({})", out_name());
     }
@@ -1183,20 +1212,17 @@ fn mint_anon_ids(n: usize) -> u64 {
 }
 
 /// The id the next blank node takes.
-fn anon_counter() -> u64 {
-    ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
+pub(crate) fn anon_counter() -> u64 {
+    ANON_COUNTER.with(|c| c.get())
 }
 
 /// Carry the counter forward to where a parse left it, so the next document
 /// numbers on from there rather than over the top of it.
-fn set_anon_counter(n: u64) {
+pub(crate) fn set_anon_counter(n: u64) {
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
-        eprintln!(
-            "[anon] carry {} -> {n}",
-            ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
-        );
+        eprintln!("[anon] carry {} -> {n}", anon_counter());
     }
-    ANON_COUNTER.store(n, std::sync::atomic::Ordering::Relaxed);
+    ANON_COUNTER.with(|c| c.set(n));
 }
 
 /// Start the blank-node counter over.
@@ -1207,12 +1233,9 @@ fn set_anon_counter(n: u64) {
 /// artefact ids the first one's parses had already used up.
 pub fn reset_anon_counter() {
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
-        eprintln!(
-            "[anon] reset from {}",
-            ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
-        );
+        eprintln!("[anon] reset from {}", anon_counter());
     }
-    ANON_COUNTER.store(2_147_483_648, std::sync::atomic::Ordering::Relaxed);
+    ANON_COUNTER.with(|c| c.set(2_147_483_648));
 }
 
 /// The byte spans of the `_:label` node ids a functional-syntax document states,
@@ -1308,25 +1331,17 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
     (std::borrow::Cow::Owned(out), labels)
 }
 
-/// The verbatim anonymous-individual blocks, in the order a released RDF/XML file
-/// carries them.
+/// The verbatim anonymous-individual blocks, in canonical byte order.
 ///
-/// That order is neither document order nor label order. An anonymous individual is
-/// RE-NUMBERED when the section is rendered, and the renumbering visits them in
-/// hash order of their PARSE-TIME `_:genid<N>` label: buckets ascending, document
-/// order within a bucket. Reproducing it is what keeps a re-serialized file from
-/// reshuffling a section whose content has not changed, so a release diff shows
-/// real edits and nothing else.
+/// OWLAPI orders these blocks by a hash of their transient parse-time blank-node
+/// ids. That is not a canonical order: writing the document changes which block
+/// receives each id on the next parse, so another conversion applies the same
+/// permutation again. EFO 3.93 demonstrates a two-state cycle under ROBOT 1.9.7.
 ///
-/// `N` is `anon_alloc_base` (everything the import closure consumed first) plus
-/// the block's own document-relative position, over the counter seed below. EFO's
-/// edit file puts its fourteen obsolescence records at 2148125419… .
-///
-/// The bucket mask is the hash table's capacity, which owlmake does NOT model: for
-/// fourteen entries the answer is the same at every capacity from 256 up, and a
-/// document with few enough anonymous individuals to sit below that has too few
-/// for the mask to separate them differently. `HASH_CAPACITY` is therefore fixed
-/// well above any real count.
+/// owlmake instead sorts on the only stable identity available here: the verbatim
+/// block bytes. This deliberately differs from ROBOT for documents with multiple
+/// bare anonymous individuals, but makes an RDF/XML write a fixed point. Equal
+/// blocks need no secondary key because swapping equal bytes cannot change output.
 ///
 /// A block that is an OWL CONSTRUCT rather than an individual is dropped, not
 /// ordered: an `owl:inverseOf` renders inline within its property frame and a
@@ -1334,42 +1349,17 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
 /// model. The input scan sees only `<rdf:Description>` and mis-collects them.
 pub(crate) fn anon_individual_order(
     blocks: &[AnonBlock],
-    base: u64,
-    capacity: u64,
-    imports_end: u64,
+    _base: u64,
+    _capacity: u64,
+    _imports_end: u64,
 ) -> Vec<&String> {
-    /// The fallback when the document's own capacity is not known — a non-RDF/XML
-    /// source, or a model assembled rather than parsed. Taken larger than any real
-    /// anonymous-individual count so the mask at least never splits a small set.
-    const HASH_CAPACITY: u64 = 1 << 20;
-    let capacity = if capacity == 0 { HASH_CAPACITY } else { capacity };
-    /// Blank-node ids run upwards from 2^31, so the first one allocated is
-    /// `_:genid2147483648`. The seed is part of the hashed STRING, so it cannot
-    /// be dropped as a common offset.
-    const COUNTER_SEED: u64 = 2_147_483_648;
     // The type is named as an IRI in an `rdf:resource`, not as an element, so it
     // is matched on the local name alone.
     let is_construct =
         |t: &str| t.contains("owl:inverseOf") || t.contains("NegativePropertyAssertion");
     let mut kept: Vec<&AnonBlock> =
         blocks.iter().filter(|b| !is_construct(&b.text)).collect();
-    if std::env::var("OM_ANON_DEBUG").is_ok() {
-        eprintln!("[anon] base={base} capacity={capacity} blocks={}", kept.len());
-        for b in &kept {
-            let bb = if b.offset > imports_end { base } else { 0 };
-            eprintln!("[anon]   alloc={} id=_:genid{}", b.alloc, COUNTER_SEED + bb + b.alloc);
-        }
-    }
-    // A stable sort by bucket leaves same-bucket blocks in document order, which
-    // is the insertion order within a bucket.
-    // A block the document allocates BEFORE its `owl:imports` is numbered without
-    // the closure — an import is loaded when its triple streams past, so a header at
-    // the bottom of the file charges nothing to what precedes it. For one document
-    // written both ways, header first gives base 3 and header last gives base 0.
-    let base_for = |b: &AnonBlock| if b.offset > imports_end { base } else { 0 };
-    kept.sort_by_key(|b| {
-        java_hash_bucket(&format!("_:genid{}", COUNTER_SEED + base_for(b) + b.alloc), capacity)
-    });
+    kept.sort_by(|a, b| a.text.cmp(&b.text));
     kept.into_iter().map(|b| &b.text).collect()
 }
 
@@ -1388,17 +1378,6 @@ pub(crate) fn hash_map_capacity(n: u64) -> u64 {
         cap <<= 1;
     }
     cap
-}
-
-/// The bucket a string key falls in: the 31-multiplier hash over its UTF-16 code
-/// units, spread by `h ^ (h >> 16)` across the 32-bit value, masked to the table
-/// size.
-fn java_hash_bucket(key: &str, capacity: u64) -> u64 {
-    let mut h: u32 = 0;
-    for c in key.encode_utf16() {
-        h = h.wrapping_mul(31).wrapping_add(c as u32);
-    }
-    ((h ^ (h >> 16)) as u64) & (capacity - 1)
 }
 
 /// The byte offset of every blank node an RDF/XML document allocates, in document
@@ -1899,8 +1878,9 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
     // equivalences over RO_* relations) would lose those class expressions on
     // re-read. `--strict` turns the RDF reader's lax repair off, so
     // structurally-broken triples error instead of being defaulted/dropped.
+    let lax = !run_options().strict;
     let mut cfg = ParserConfiguration::default();
-    cfg.lax = !run_options().strict;
+    cfg.lax = lax;
     match fmt {
         Format::RdfXml => {
             // RDF/XML carries no formal prefix map, so buffer the bytes and scan the
@@ -1915,9 +1895,8 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // through the writer that consumes them. Anything that made the scans
             // conditional would leave that writer with no record of the source on an
             // ordinary build.
-            let (owl_genid_refs, owl_reif_order, owl_anon_blocks, owl_label_order) = (
+            let (owl_genid_refs, owl_anon_blocks, owl_label_order) = (
                 scan_owl_body_genids(&buf),
-                scan_owl_reif_order(&buf),
                 scan_owl_anon_individual_blocks(&buf),
                 scan_label_order(&buf),
             );
@@ -1934,8 +1913,12 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // out where the parse left it.
             let b = horned_owl::model::Build::new_rc();
             b.set_bnode_base(anon_counter() as i64);
+            // The RDF reader takes its `Build` inside the configuration, and this
+            // parse must share `b` so the counter can be read back afterwards.
+            let mut rdf_cfg = ParserConfiguration::new(&b);
+            rdf_cfg.lax = lax;
             let (rdfo, _incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
-                horned_owl::io::rdf::reader::read_with_build(&mut buf.as_slice(), &b, cfg)
+                horned_owl::io::rdf::reader::read(&mut buf.as_slice(), rdf_cfg.into())
                     .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
             if let Some(n) = b.bnode_base() {
                 set_anon_counter(n as u64);
@@ -1947,7 +1930,6 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             model.idspaces = idspaces;
             model.rdf_prefixes = rdf_prefixes;
             model.owl_genid_refs = owl_genid_refs;
-            model.owl_reif_order = owl_reif_order;
             model.owl_label_order = owl_label_order;
             model.owl_anon_blocks = owl_anon_blocks;
             let raw = String::from_utf8_lossy(&buf);
@@ -2121,6 +2103,9 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
 
 /// Save `model` to `path`, inferring the format from its extension.
 pub fn save(model: &mut Model, path: &Path) -> Result<()> {
+    if is_discard_path(path) {
+        return Ok(());
+    }
     let fmt = Format::from_path(path)?;
     save_as(model, path, fmt)
 }
@@ -2250,6 +2235,9 @@ pub fn normalize_set_operands(model: &mut Model) {
 }
 
 pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
+    if is_discard_path(path) {
+        return Ok(());
+    }
     // Create the output's parent directory if needed — steps write into `subsets/`,
     // `tmp/`, `reports/` etc. which a fresh checkout may not contain and which no
     // earlier step is required to have made.
@@ -2294,6 +2282,26 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
         )
     });
     OUT_NAME.with(|c| *c.borrow_mut() = display_name(path));
+    if is_gzipped_path(path) {
+        // Serialise in memory, then gzip to disk. The serialisers stream through
+        // a `Write`, so the gzip could wrap the file directly — but the OFN cache
+        // markers below read the written bytes back, and a gzipped output carries
+        // none, so the plain bytes are kept in hand instead.
+        PENDING_MARKERS.with(|c| *c.borrow_mut() = None);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut pw = crate::progress::ProgressWriter::new(&mut buf, format!("write {}", display_name(path)));
+        write_to_with(model, &mut pw, fmt, RdfXmlWriter::Owlapi)
+            .with_context(|| format!("writing {}", path.display()))?;
+        pw.finish().with_context(|| format!("writing {}", path.display()))?;
+        let file = File::create(path).with_context(|| format!("creating {}", path.display()))?;
+        let mut enc = flate2::write::GzEncoder::new(BufWriter::new(file), flate2::Compression::default());
+        enc.write_all(&buf).with_context(|| format!("gzipping {}", path.display()))?;
+        enc.finish()
+            .and_then(|mut w| w.flush())
+            .with_context(|| format!("gzipping {}", path.display()))?;
+        PENDING_MARKERS.with(|c| c.borrow_mut().take());
+        return Ok(());
+    }
     let file = File::create(path).with_context(|| format!("creating {}", path.display()))?;
     let mut pw =
         crate::progress::ProgressWriter::new(BufWriter::new(file), format!("write {}", display_name(path)));
@@ -2431,7 +2439,7 @@ fn write_to_with<W: Write>(
                     .collect();
                 let cm = take_cm(model);
                 let mut buf: Vec<u8> = Vec::new();
-                let r = horned_owl::io::rdf::writer::write_with_prefixes(
+                let r = horned_owl::io::rdf::writer::write(
                     &mut buf,
                     &cm,
                     Some(&doc_prefixes),
@@ -2446,7 +2454,7 @@ fn write_to_with<W: Write>(
                     .map_err(|e| anyhow::anyhow!("RDF/XML write error: {e}"))?;
             } else {
                 let cm = take_cm(model);
-                let r = horned_owl::io::rdf::writer::write_with_prefixes(
+                let r = horned_owl::io::rdf::writer::write(
                     &mut writer,
                     &cm,
                     Some(&doc_prefixes),
@@ -2540,7 +2548,10 @@ fn write_to_with<W: Write>(
         Format::Obo => obo::save(model, &mut writer)?,
         Format::OboGraph => obograph::save(model, &mut writer)?,
         Format::Manchester => manchester::save(model, &mut writer)?,
-        Format::Turtle => turtle::save(model, &mut writer)?,
+        Format::Turtle => match owlapi_ttl::render(model) {
+            Some(bytes) => writer.write_all(&bytes)?,
+            None => turtle::save(model, &mut writer)?,
+        },
         Format::NTriples => {
             turtle::save_as(model, &mut writer, oxigraph::io::RdfFormat::NTriples)?
         }
@@ -2876,6 +2887,11 @@ fn default_ofn_prefixes(model: &Model) -> PrefixMapping {
         ("xsd", "http://www.w3.org/2001/XMLSchema#"),
         ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
     ] {
+        let _ = out.add_prefix(p, ns);
+    }
+    // What the ontology's own construction bound is declared all the same (see
+    // `Model::built_prefixes`).
+    for (p, ns) in &model.built_prefixes {
         let _ = out.add_prefix(p, ns);
     }
     out

@@ -1,0 +1,9 @@
+id: mapsj
+use_mappings: true
+sssom_mappingset_group:
+  release_mappings: true
+  mapping_extractor: sssom-java
+  products:
+    - id: xrefs
+      maintenance: extract
+    - id: hand

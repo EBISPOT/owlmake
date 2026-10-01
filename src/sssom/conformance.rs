@@ -73,7 +73,7 @@ pub const SLOTS_ADDED_1_1: &[&str] = &[
 
 /// Mapping-set-level slots added in 1.1 (they pre-existed on `Mapping`); their
 /// presence in *set metadata* also forces 1.1.
-const SET_SLOTS_ADDED_1_1: &[&str] = &["similarity_measure", "curation_rule", "curation_rule_text"];
+pub const SET_SLOTS_ADDED_1_1: &[&str] = &["similarity_measure", "curation_rule", "curation_rule_text"];
 
 /// Infer the lowest SSSOM version that defines every feature the set uses.
 pub fn infer_version(ms: &MappingSet) -> &'static str {

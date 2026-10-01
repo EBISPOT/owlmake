@@ -109,6 +109,143 @@ that changes output is a bug.
 **P5 — Honesty.** No silent skip. A check that cannot run **fails**. A step in
 the plan **runs**. A declared file that is missing is an **error**, not a filter.
 
+## What goes in `owlmake.yaml`
+
+**A repository's `owlmake.yaml` holds what that repository decided, and nothing
+else.**
+
+The test for anything in the file:
+
+- Is it explicit in the repo's own configuration — a setting in its
+  `<id>-odk.yaml`, or a rule the repo wrote itself in its `<id>.Makefile`? Then it
+  may be explicit in `owlmake.yaml`.
+- Otherwise it is standard behaviour — what ODK's *generated* `Makefile` does for
+  every repo with that configuration — and it is **built into owlmake**, not
+  written into the file.
+
+The generated Makefile carries no information. It is a function of the ODK yaml
+and the ODK version and of nothing else, so recording what ingest finds in it
+writes down the *expansion* of a repo's decisions in place of the decisions. The
+cohort ontology is the measure: three imports, five template components, four
+subsets and one override of the component rules came out as a 1,917-line plan, of
+which about forty lines were anything the repo had chosen. Nobody can review
+that, and nobody should be asked to commit it.
+
+So the file's top-level keys ARE the repository's options — `release_artefacts`,
+`import_group`, `components`, `report`, … There is no `config:` wrapper:
+an option and any other key of the file are the same kind of thing, something the
+repository said. What it builds in a way of its own goes under `targets`, as
+resolved targets (target / needs / steps) in owlmake's own vocabulary — not as
+rules with recipes, which would make the generated file's variable names
+(`$(ROBOT)`, `$(ANNOTATE_CONVERT_FILE)`) a permanent part of what repositories
+commit. An entry replaces the standard target of its name or adds one; `extends`
+makes it add its `needs` to the standard target instead; `when` names the rebuild
+switches it exists under. An import, a mirror or the pattern products built the
+repository's own way are recorded under `imports` and `dosdp`: owlmake builds
+those with its own engines, so they are not targets.
+
+There is ONE kind of file. Anything else it states — a `version`, an
+`ontology_iri`, `default_targets`, the output conventions it emulates — overrides
+what the standard build derives, so a file states as little or as much as it
+likes and reading it never has to guess which of two shapes it was given. A
+repository whose build is ALL its own (EFO's hand-written Makefile) has no
+standard build to lean on: its file says `use_builtin_rules: false` and states
+everything, and an option of the standard build is refused there because
+nothing would read it. An unknown key is an error in either case.
+
+"Its own" is measured, not declared: the file is written by planning the
+repository from the built-in rules alone and again with the rules it wrote, and
+keeping what differs. That catches what reading its `<id>.Makefile` for targets
+would miss — a standard target that came out differently because the repository
+reassigned a variable it reads (CL appends to `RELEASE_ASSETS`). It also catches
+what its rules decide beyond their targets: the switches they test, with the
+values the repository gives them (`gating_flags` — UBERON's `BRI = true`), and
+the targets they reach only as intermediates (`transient_targets`). A recorded
+target is a rule of its own, so without those two the file alone would lose the
+switch's default and keep every intermediate.
+
+### The file and the resolved plan
+
+"The plan" everywhere else in this document is the **resolved plan**: the
+built-in rules for the behaviour set the file names, plus what the file itself
+says, with the file's own rules winning where both name a target. That is what
+the executor obeys, and every principle above is a statement about it — it names
+every path, it records which steps exist, nothing in it is inert.
+
+`owlmake.yaml` is the resolved plan's **source**, and resolving it is a pure
+function:
+
+- The standard build is owlmake's own: one set of rules (`odk::builtin`), which
+  the file does not choose. `emulate_odk_version` and `emulate_robot_version` are
+  the output conventions — the bytes the artefacts carry, `[Instance]` frames
+  and the prefix map among them — and are plain options of any file, defaulting
+  to owlmake's own conventions; they select no rules. Same file, same owlmake,
+  same run inputs ⇒ same bytes.
+- `--plan-only` prints the resolved plan. Reviewing what a build will do never
+  requires reading owlmake's source.
+- A configuration option with no built-in rules yet **fails by name** (P5). It is
+  never skipped, and it never falls back to replaying a generated Makefile.
+
+### How built-in behaviour is built in
+
+As **rules, as data**: one function from a repo's configuration to the rule
+model the planner already consumes — targets, prerequisites, recipes — with the
+recipes written in owlmake's own command language. Where the generated Makefile
+loops over imports, components or subsets in its template, that function loops in
+Rust. Everything downstream is the one existing path: the same recipe parser, the
+same planner, the same executor.
+
+The variables those rules define are the vocabulary a repository's
+`<id>.Makefile` was written against, and they stay LAZY — a list defined in terms
+of the list before it — because such a file extends their inputs after the fact.
+
+Not any of these, each of which has been proposed and turned down:
+
+- **Steps built by hand per target.** A second implementation of what the
+  planner already derives from rules, which bypasses exactly the knowledge that
+  makes builds come out identical — import seeding, mirror pinning, the rebuild
+  switches, transient targets. See "Two shapes most defects turn out to have".
+- **An embedded Makefile or template text.** The rule model is data; producing it
+  needs no Make syntax and no template language inside owlmake.
+- **Shorthand the serializer expands** — a "standard block plus deviations",
+  dropping targets that equal a default. That hides the graph in the file format
+  instead of putting the behaviour where it belongs.
+- **Shortening the replayed plan** — folding bookkeeping steps, dropping inert
+  targets, compacting argument lists. It makes a file that should not exist
+  smaller. (The planner does record what a recipe's tail DOES rather than how it
+  staged it, and drops a generated file's self-management targets; that is so
+  the oracle below can compare exactly, not to save lines.)
+- **A repository's own rules kept as rules** — targets, prerequisites and recipe
+  lines with `$(VAR)` references, in the file. It handles a variable append
+  without effort and commits the generated file's language for good. Measured
+  over six repositories' own Makefiles (about 2,300 lines, 330 targets), a
+  standard variable is reassigned five times in all; the rest is whole targets and
+  prerequisites added to `test`, which resolved targets and `extends` cover.
+
+Ingesting a generated Makefile stays, in two roles only. It is the **migration
+tool**: read a repo's ODK yaml and its own `<id>.Makefile`, write the short
+`owlmake.yaml` — and only when the generated file is what the standard build
+generates for that configuration; otherwise say what differs and write the build
+as the repository's own (`use_builtin_rules: false`, every target stated). And it
+is the **oracle**: for any configuration, the built-in rules must
+resolve to the same plan as ingesting the Makefile ODK generated for it
+(`odk::builtin::differences_from_generated`).
+
+`tests/builtin_rules.rs` holds both halves up. Its fixtures are generated by
+ODK's OWN generator (`scripts/gen_odk_fixture.sh <name> <config.yaml>`), so the
+expected side is never written by hand; add one for any option you touch. It
+then writes each fixture's `owlmake.yaml`, takes the Makefile, the repository's
+own rules and its configuration OUT of the tree, and requires the same plan from
+the file alone — and, with `OM_ORACLE_REPOS` naming working repositories, does
+the same over a linked copy of each. What the fixtures taught, so that nobody
+learns it twice: in ODK's template `x is defined` is ALWAYS true (an unset group
+is `None`, which is defined) and only `is not none` tests anything; an option
+turned off leaves its variable UNDEFINED, so recipes naming it name nothing;
+`.PRECIOUS` lines decide what the planner treats as an intermediate;
+ODK's `robot_report` (owlmake's `report`) is a plain dictionary, so a configuration that states any of it
+gets none of the config class's defaults; and ODK ignores a key it does not know,
+where a committed `owlmake.yaml` refuses one.
+
 ## owlmake ships nothing
 
 A repo built with owlmake has no ROBOT, no ODK, no Java, no `dicer-cli`, no
@@ -242,12 +379,35 @@ state you would design from scratch, not the one that minimises churn.
 ### Comments
 
 Although we functionally mirror other tooling, this tooling may not be relevant 
-forever and we need to assume owlmake will be. So code comments should be written
-as if owlmake is the only tooling that exists. Describe OUR behavior, not how it
-relates to other tools.
+forever and we need to assume owlmake will be from the perspective of our comments
+(because we ARE owlmake). So code comments should be written as if owlmake is the
+main tooling that exists. Describe OUR behavior, not how it relates to other tools.
 
 Also, don't describe in comments how we achieved our current behavior (e.g. explaining
 how old versions of owlmake broke something and how we fixed it). This is completely
-irrelevant as old versions of owlmake were never published. We just describe what we have
+irrelevant as old versions of owlmake were never deployed. We just describe what we have
 now.
 
+
+### Commit messages
+
+**Do not take the style from the existing log.** Most of it was written by
+agents and none of it is a model to copy. Two habits in there to avoid
+specifically: subjects written as aphorisms or as invariants that now hold
+(`A file the build reads is named by the plan`), and subjects written as a
+lowercase area prefix plus a declarative clause (`query: a path drives the row
+order`). Follow the rules here instead.
+
+Write the subject in the imperative, naming concretely what changed:
+`Match ROBOT on --input-iri, unmerge, query format, GCI reification and owl:Thing`.
+If one commit touches several areas, list them.
+
+The body says what changed and why, and ends with the evidence: the artefacts
+compared, the tool and version compared against, and the byte counts before and
+after. Numbers must be ones actually measured — see "A number is only as good as
+what it was measured over".
+
+Unlike code comments, a commit message IS history, so it may name other tooling
+and say what the behaviour used to be. That is the one place the Comments rules
+above do not apply. Keep it proportionate: a one-line fix does not need ten
+paragraphs.

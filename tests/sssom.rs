@@ -918,3 +918,52 @@ fn inject_applies_a_rule_block() {
         "the block's create_axiom() did not run:\n{text}"
     );
 }
+
+/// A rule's template keeps text that is not ASCII as written around the slots it
+/// fills: the annotation reads `stade de décès — xénope`.
+#[test]
+fn inject_keeps_template_text_that_is_not_ascii() {
+    let ont = tmp(
+        "accents.ofn",
+        "Prefix(obo:=<http://purl.obolibrary.org/obo/>)\n\
+         Ontology(<http://x.org/accents>\n\
+         Declaration(Class(obo:XAO_0000437))\n\
+         )\n",
+    );
+    let map = tmp(
+        "accents.sssom.tsv",
+        "#curie_map:\n\
+         #  UBERON: http://purl.obolibrary.org/obo/UBERON_\n\
+         #  XAO: http://purl.obolibrary.org/obo/XAO_\n\
+         #  semapv: https://w3id.org/semapv/vocab/\n\
+         subject_id\tsubject_label\tpredicate_id\tobject_id\tmapping_justification\n\
+         UBERON:0000071\tstade de décès\tsemapv:crossSpeciesExactMatch\tXAO:0000437\tsemapv:UnspecifiedMatching\n",
+    );
+    let rules = tmp(
+        "accents.rules",
+        "prefix UBERON: <http://purl.obolibrary.org/obo/UBERON_>\n\
+         prefix XAO: <http://purl.obolibrary.org/obo/XAO_>\n\
+         prefix IAO: <http://purl.obolibrary.org/obo/IAO_>\n\
+         subject==UBERON:* predicate==semapv:crossSpeciesExactMatch -> {\n\
+         \x20   annotate(%{object_id}, IAO:0000589, \"%{subject_label} — xénope\");\n\
+         }\n",
+    );
+    let out = tmp("accents-out.ofn", "");
+    let (_, err, code) = run(
+        &[
+            "sssom:inject",
+            "-i",
+            ont.to_str().unwrap(),
+            "--sssom",
+            map.to_str().unwrap(),
+            "--ruleset",
+            rules.to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert_eq!(code, 0, "inject failed: {err}");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.contains("\"stade de décès — xénope\""), "the template's own text changed:\n{text}");
+}

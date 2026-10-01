@@ -67,6 +67,9 @@ pub enum Command {
     Materialize(cmd::materialize::Args),
     /// Inject subset / synonym-type subproperty declarations (`odk:normalize`).
     Normalize(cmd::normalize::Args),
+    /// Check that the ontology's classes sit under an upper ontology
+    /// (`odk:check-align`).
+    CheckAlign(cmd::check_align::Args),
     /// Convert a Babelon translation TSV into OWL annotation axioms.
     Babelon(cmd::babelon::Args),
     /// Regenerate textual definitions (FlyBase `rewrite-def`: DOT/SUB definitions).
@@ -164,7 +167,8 @@ pub enum Command {
     /// `owlmake.yaml`, or one regenerated from its build configuration), then run
     /// the requested targets. Defaults to the current directory.
     Make(cmd::make::Args),
-    /// Build every release artefact (`prepare_release`).
+    /// Build what the release needs — its checks, reports and artefacts, and
+    /// whatever the repository adds to it — then publish it (`prepare_release`).
     #[command(visible_aliases = ["prepare_release", "all"])]
     PrepareRelease(cmd::make::TargetArgs),
     /// Rebuild the import modules from upstream (`refresh-imports`).
@@ -175,6 +179,11 @@ pub enum Command {
     AllImports(cmd::make::RepoArgs),
     /// Run the repository's QC checks (`test`).
     Test(cmd::make::RepoArgs),
+    /// Bring the repository's files into step with the options in its
+    /// `owlmake.yaml`: the edit file's imports, the XML catalog, and the files the
+    /// build reads (`update_repo`).
+    #[command(visible_alias = "update_repo")]
+    UpdateRepo(cmd::make::RepoArgs),
     /// Scaffold a starter `owlmake.json` for a new ontology.
     Seed(cmd::seed::Args),
     /// Print the JSON Schema for `owlmake.json` (for editor/CI validation).
@@ -287,6 +296,13 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
     // chose them. Both are results decided by something other than the run that
     // produced them.
     crate::cmd::reset_invocation_options();
+    // An owlmake process a build starts is told the build's emulation ahead of its
+    // command, and runs under it: its conventions are the plan's, not those of a
+    // run no plan governs.
+    if let Err(e) = crate::build::take_emulation_args(&mut argv) {
+        eprintln!("Error: {e:?}");
+        return 2;
+    }
     // A leading `robot` token is accepted and dropped, so an existing invocation
     // spelled `owlmake robot reason …` behaves exactly like `owlmake reason …`.
     if argv.first().map(String::as_str) == Some("robot") {
@@ -352,8 +368,14 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
         // `fastobo-validator <ont>.obo` — the OBO 1.4 syntax check in HPO's
         // `test` target.
         Some("fastobo-validator") => return crate::cmd::fastobo_validator::main(&argv[1..]),
+        // `runoak -i pronto:<ont>.obo ontology-metadata` — MONDO's OBO parse
+        // check in its `test` target.
+        Some("runoak") => return crate::cmd::runoak::main(&argv[1..]),
         // `check-rdfxml <product>.owl` — the RDF/XML parse check over a product.
         Some("check-rdfxml") => return crate::cmd::check_rdfxml::main(&argv[1..]),
+        // `obo-grep -r <regex> <file>` — the stanza filter UBERON's and MONDO's
+        // text pipelines run, under the name of the script they used to call.
+        Some("obo-grep") | Some("obo-grep.pl") => return crate::cmd::obo_grep::main(&argv[1..]),
         // MONDO's `pattern_schema_checks`, a member of its `test` target.
         Some("simple_pattern_tester.py") | Some("simple-pattern-tester") => {
             return crate::cmd::pattern_tester::main(&argv[1..])
@@ -369,6 +391,15 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
         // subcommand is spelled `make`, which is also one of owlmake's, so the
         // line has to be read whole rather than split at the chaining harness.
         Some("semsql") => return crate::cmd::semsql::main(&argv[1..]),
+        // `tsvalid <table>.tsv --comment "#"` — the table lint the standard
+        // build runs over mapping sets and pattern tables.
+        Some("tsvalid") => return crate::cmd::tsvalid::main(&argv[1..]),
+        // `context2csv < context.json > prefixes.csv` — the prefix table the
+        // SQL database export reads.
+        Some("context2csv") => return crate::cmd::context2csv::main(&argv[1..]),
+        // `make-release-assets.py --release <tag> <files>` — how a repository
+        // that releases with `github_python` attaches its files.
+        Some("make-release-assets.py") => return crate::cmd::release_assets::main(&argv[1..]),
         _ => {}
     }
     // `owlmake dosdp <generate|terms|…>` uses the subcommand grammar; the bare
@@ -628,7 +659,7 @@ pub fn run_chain(argv: &[String]) -> Result<()> {
     // SSSOM OWL-chain handler. These commands are terminal in the recipes that use
     // them (they write a mapping file or bridge ontologies and/or `-o` the result),
     // so everything from the `sssom:` token onward is the SSSOM segment.
-    if let Some(k) = argv.iter().position(|t| t.starts_with("sssom:")) {
+    if let Some(k) = argv.iter().position(|t| is_sssom_command(t)) {
         let sub = argv[k].trim_start_matches("sssom:").to_string();
         // A standalone SSSOM CLI command that reached here because globals
         // preceded it — they have just been hoisted onto it, so it now leads the
@@ -641,29 +672,33 @@ pub fn run_chain(argv: &[String]) -> Result<()> {
             }
             return Ok(());
         }
-        // `sssom:rename` is a *producing* step: it reads/transforms the ontology
-        // and the chain continues (`sssom:rename … remove … convert …`). Split its
+        // `sssom:rename` and `sssom:inject` are *producing* steps: each transforms
+        // the ontology and the chain continues (`sssom:rename … remove … convert …`,
+        // `sssom:inject … annotate … convert …`). Split the step's
         // own option segment off (up to the next chained command), apply it, then
         // run the remainder with the renamed model as the initial state.
-        if sub == "rename" {
+        if sub == "rename" || sub == "inject" {
             let pre = if k > 0 { run_clap_chain(&argv[..k], &names, &flags, None)? } else { None };
             let mut end = k + 1;
             while end < argv.len()
                 && !names.contains_key(&argv[end])
-                && !argv[end].starts_with("sssom:")
+                && !is_sssom_command(&argv[end])
             {
                 end += 1;
             }
             if end >= argv.len() {
-                // Terminal rename: `chain_step` applies it and honours its own -o.
+                // Terminal: `chain_step` applies it and honours its own -o.
                 return crate::sssom::owl::chain_step(pre, &sub, &argv[k + 1..]);
             }
-            let renamed = crate::sssom::owl::rename(pre, &argv[k + 1..end])?;
-            return run_clap_chain(&argv[end..], &names, &flags, Some(renamed)).map(|_| ());
+            let produced = match sub.as_str() {
+                "rename" => crate::sssom::owl::rename(pre, &argv[k + 1..end])?,
+                _ => crate::sssom::owl::inject(pre, &argv[k + 1..end])?,
+            };
+            return run_clap_chain(&argv[end..], &names, &flags, Some(produced)).map(|_| ());
         }
-        // Terminal SSSOM step (`sssom:inject`, `sssom:xref-extract`), possibly
-        // preceded by ontology commands (`merge … sssom:inject …`); k may be 0
-        // for a standalone `sssom:inject -i …`.
+        // Terminal SSSOM step (`sssom:xref-extract`), possibly preceded by ontology
+        // commands (`merge … sssom:xref-extract …`); k may be 0 for a standalone
+        // `sssom:xref-extract -i …`.
         let model = if k > 0 { run_clap_chain(&argv[..k], &names, &flags, None)? } else { None };
         return crate::sssom::owl::chain_step(model, &sub, &argv[k + 1..]);
     }
@@ -874,13 +909,22 @@ fn default_to_make(argv: &[String], names: &HashMap<String, ()>) -> bool {
                 && !names.contains_key(first)
                 // A leading `sssom:` plugin step (`sssom:rename … remove …`,
                 // `sssom:inject …`) is a chain, not a reason to default to `make`.
-                && !first.starts_with("sssom:")
+                && !is_sssom_command(first)
         }
     }
 }
 
 /// The SSSOM steps that act on the ontology flowing through a ROBOT chain, so
 /// they are run by [`run_chain`] rather than by the standalone SSSOM CLI.
+/// Whether a token is an SSSOM plugin command (`sssom:inject`) — and not a value
+/// that merely starts the same way, as the prefix declaration
+/// `--add-prefix 'sssom: https://w3id.org/sssom/'` does.
+fn is_sssom_command(token: &str) -> bool {
+    token.strip_prefix("sssom:").is_some_and(|sub| {
+        !sub.is_empty() && sub.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+    })
+}
+
 const PLUGIN_CHAIN_STEPS: &[&str] = &["rename", "inject", "xref-extract"];
 
 /// The global options, which may precede the first command. Each maps to a
@@ -933,7 +977,7 @@ fn hoist_global_options(argv: &[String], names: &HashMap<String, ()>) -> Option<
     if globals.is_empty() || i >= argv.len() {
         return None;
     }
-    let is_command = names.contains_key(&argv[i]) || argv[i].starts_with("sssom:");
+    let is_command = names.contains_key(&argv[i]) || is_sssom_command(&argv[i]);
     if !is_command {
         return None;
     }
@@ -1048,6 +1092,7 @@ fn dispatch(state: Option<Model>, command: Command) -> Result<Option<Model>> {
         Command::Relax(a) => cmd::relax::step(state, &a)?,
         Command::Materialize(a) => cmd::materialize::step(state, &a)?,
         Command::Normalize(a) => cmd::normalize::step(state, &a)?,
+        Command::CheckAlign(a) => cmd::check_align::step(state, &a)?,
         Command::Babelon(a) => cmd::babelon::step(state, &a)?,
         Command::RewriteDef(a) => cmd::rewrite_def::step(state, &a)?,
         Command::Diff(a) => cmd::diff::step(state, &a)?,
@@ -1096,6 +1141,10 @@ fn dispatch(state: Option<Model>, command: Command) -> Result<Option<Model>> {
         }
         Command::Test(a) => {
             cmd::make::test(&a)?;
+            None
+        }
+        Command::UpdateRepo(a) => {
+            cmd::make::update_repo(&a)?;
             None
         }
         Command::Seed(a) => cmd::seed::step(state, &a)?,

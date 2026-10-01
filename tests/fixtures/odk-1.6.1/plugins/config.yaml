@@ -1,0 +1,6 @@
+id: plug
+robot_plugins:
+  plugins:
+    - name: flybase
+      mirror_from: https://example.org/flybase.jar
+    - name: local

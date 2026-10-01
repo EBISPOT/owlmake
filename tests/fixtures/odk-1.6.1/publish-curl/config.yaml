@@ -1,0 +1,8 @@
+id: pubc
+edit_format: obo
+github_org: example-org
+repo: pubc-ontology
+public_release: github_curl
+public_release_assets:
+  - pubc.owl
+  - pubc.obo

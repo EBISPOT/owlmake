@@ -29,6 +29,18 @@ pub fn separator(serialisation: &str) -> char {
 
 /// Parse a SSSOM table (TSV or CSV) from `text`. An external metadata YAML may be
 /// supplied (used when the table has no embedded `# ` header, or to override it).
+/// A cell whose text is one of the table reader's null markers holds no value:
+/// the string `None` in an object_label column is an absent label, not a label
+/// spelled "None", and it round-trips to an empty cell. The marker set is the
+/// dataframe convention this table dialect inherits.
+fn is_na_cell(val: &str) -> bool {
+    matches!(
+        val,
+        "#N/A" | "#N/A N/A" | "#NA" | "-1.#IND" | "-1.#QNAN" | "-NaN" | "-nan" | "1.#IND"
+            | "1.#QNAN" | "<NA>" | "N/A" | "NA" | "NULL" | "NaN" | "None" | "n/a" | "nan" | "null"
+    )
+}
+
 pub fn read_table(text: &str, sep: char, external_meta: Option<&str>) -> Result<MappingSet> {
     let mut header_yaml = String::new();
     let mut body_start = 0usize;
@@ -82,7 +94,7 @@ pub fn read_table(text: &str, sep: char, external_meta: Option<&str>) -> Result<
             let mut rec = BTreeMap::new();
             for (j, col) in columns.iter().enumerate() {
                 if let Some(val) = cells.get(j) {
-                    if !val.is_empty() {
+                    if !val.is_empty() && !is_na_cell(val) {
                         rec.insert(col.clone(), val.clone());
                     }
                 }
@@ -146,6 +158,16 @@ fn apply_metadata(ms: &mut MappingSet, map: serde_yaml::Mapping) {
             }
         } else if key == "mappings" {
             // Inline mappings (JSON-style) are handled by the JSON reader.
+        } else if key == "global_metadata"
+            || key == "source_metadata"
+            || key == "relations"
+            || key == "subject_prefixes"
+            || key == "object_prefixes"
+        {
+            // Configuration for how a multi-source ingest would merge metadata,
+            // not header content: a parsed set's header carries neither block,
+            // and the license/id defaults below stand unless the input itself
+            // states them.
         } else {
             ms.metadata.insert(key, v);
         }

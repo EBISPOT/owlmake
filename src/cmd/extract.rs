@@ -259,7 +259,7 @@ fn subset_module(
     // A materialized subset is a NEW ontology, so it takes no version from its
     // source. Its `<owl:Axiom>` blocks are ordered by the blank-node counter, not
     // by the source document: `reduce` builds its result from parts, which starts
-    // `owl_reif_order` empty, and the writer orders reifications by genid anyway.
+    // and the writer orders reifications by genid anyway.
     {
         use horned_owl::model::{Component, MutableOntology, OntologyID};
         let ids: Vec<_> = out

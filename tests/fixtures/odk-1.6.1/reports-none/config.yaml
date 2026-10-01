@@ -1,0 +1,6 @@
+id: norep
+robot_report:
+  use_base_iris: false
+  custom_sparql_checks: []
+  custom_sparql_exports: []
+  upper_ontology: http://purl.obolibrary.org/obo/cob.owl

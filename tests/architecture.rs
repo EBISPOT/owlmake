@@ -74,6 +74,10 @@ fn only_ingest_names_the_makefile_or_the_odk_yaml() {
 fn no_new_environment_variables_decide_output() {
     // Diagnostic only: they change what is PRINTED, never what is written.
     const ALLOWED: &[&str] = &[
+        // Banner-label resolution tracing: the input document's identity at
+        // write time and the consultation order of the closure's documents.
+        // Diagnostic only — stderr, no output bytes depend on it.
+        "OM_BANNER_DEBUG",
         // genid/reification tracing
         "OM_ANON_DEBUG",
         "OM_GENID_DEBUG",
@@ -86,6 +90,14 @@ fn no_new_environment_variables_decide_output() {
         "OM_GENID_MISSLOG",
         "OM_GENID_REIF",
         "OM_GENID_REUSED",
+        // Counter value at the start of each owning entity — per-entity spend,
+        // which localises a drift to the entity that over- or under-allocates.
+        "OM_GENID_STARTS",
+        // shared_anon population after relax records derived-super sharing.
+        "OM_RELAX_DEBUG",
+        // shared_anon arity entering each pipeline op — names the op that drops
+        // carried document state.
+        "OM_PIPE_DEBUG",
         "OM_GENID_REUSELOG",
         "OM_GENID_STARTS",
         "OM_GENID_TRACE",
@@ -291,7 +303,8 @@ fn every_step_variant_reaches_both_dispatch_loops() {
         let pat = format!("Step::{v}");
         // `Op` is matched as `Step::Op(op)`; the shell-shaped variants are routed
         // through the `is_shell_step` guard rather than by name.
-        let shell_routed = ["Shell", "Fallback", "Jq", "Sssom", "Oort", "CliRobot", "UnknownRobot"];
+        let shell_routed =
+            ["Shell", "Fallback", "Jq", "Sssom", "Oort", "OwlmakeCli", "UnsupportedSubcommand"];
         let in_prereq = prereq_loop.contains(&pat)
             || (shell_routed.contains(&v.as_str()) && prereq_loop.contains("is_shell_step"));
         let in_artefact = artefact_loop.contains(&pat)

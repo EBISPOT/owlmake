@@ -42,6 +42,20 @@ pub struct Args {
     #[arg(short = 'k', long = "keep-going")]
     pub keep_going: bool,
 
+    /// `-j`/`--jobs`: build up to this many targets at once. A target starts
+    /// once everything it needs is built, and targets that need nothing of each
+    /// other run side by side; with one job, targets are built one after another
+    /// in plan order.
+    #[arg(short = 'j', long = "jobs", value_name = "N", default_value_t = 1)]
+    pub jobs: usize,
+
+    /// `-W`/`--assume-new`: pretend the named file was just modified. Targets
+    /// that depend on it run their recipes; the file itself is neither rebuilt
+    /// nor touched. This is how `recreate-components` forces the component
+    /// recipes over their stamps.
+    #[arg(short = 'W', long = "assume-new", value_name = "FILE")]
+    pub assume_new: Vec<String>,
+
     /// Directory of the ontology repo to build (its root, the `src/ontology`
     /// directory, or the `<id>-odk.yaml` file). Defaults to the current
     /// directory.
@@ -137,6 +151,9 @@ pub struct TargetArgs {
     /// How to obtain import modules: `cached` (default) or `fresh`.
     #[arg(long, default_value = "cached")]
     pub imports: String,
+    /// `VAR=value` assignments, as `om make` takes them (`IMP=true`, `PAT=false`).
+    #[arg(value_name = "VAR=VALUE")]
+    pub assignments: Vec<String>,
     /// How to obtain `patterns/definitions.owl`: `regenerate` (`PAT=true`;
     /// default) or `cached` (`PAT=false`).
     #[arg(long, default_value = "regenerate")]
@@ -153,6 +170,9 @@ pub struct RefreshArgs {
     /// Skip imports flagged `is_large_import` (`refresh-imports-excluding-large`).
     #[arg(long)]
     pub exclude_large: bool,
+    /// `VAR=value` assignments, as `om make` takes them (`MIR=false`).
+    #[arg(value_name = "VAR=VALUE")]
+    pub assignments: Vec<String>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -163,6 +183,9 @@ pub struct RefreshArgs {
 pub struct RepoArgs {
     #[arg(short = 'C', long = "directory", visible_alias = "repo", value_name = "DIR", default_value = ".")]
     pub repo: PathBuf,
+    /// `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`).
+    #[arg(value_name = "VAR=VALUE")]
+    pub assignments: Vec<String>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -176,17 +199,25 @@ pub fn run(args: Args) -> Result<()> {
 enum Kind {
     /// A release artefact (built by the native pipeline).
     Artefact,
-    /// `all` / `prepare_release` — build every artefact.
+    /// `prepare_release` — what its plan entry needs, then publication (see
+    /// [`release_selection`]); and `all` on a plan that does not define it —
+    /// every artefact, published.
     Release,
     /// `refresh-imports` family — rebuild import modules natively.
     RefreshImports { exclude_large: bool },
     /// `all_imports` — rebuild every individual import module.
     AllImports,
+    /// `update_repo` — bring the repository's files into step with its options.
+    UpdateRepo,
     /// `patterns` / `dosdp` — regenerate `definitions.owl` from the DOSDP patterns.
     Patterns,
     /// One mirror, by file (`mirror/<id>.owl`) or by the phony that fetches it
     /// (`mirror-<id>`). The payload is the import id.
     Mirror(String),
+    /// One import module (`imports/<id>_import.owl`), built by its product's
+    /// recorded pipeline rather than by the replayed rule the plan may also
+    /// carry for the same file. The payload is the import id.
+    ImportModule(String),
     /// Any other target the plan defines — QC targets included — run by
     /// executing the recipe the plan records for it.
     Recipe,
@@ -277,7 +308,10 @@ fn classify(plan: &Plan, target: &str) -> Kind {
     // RULE — but they are release artefacts, and a target that cannot be named
     // cannot be asked for, so they are classified here: `om make
     // ../patterns/definitions.owl` runs the pattern stage that produces it.
-    if is_pattern_product(plan, target) {
+    // Only when the plan carries no rule for it, though: a repo may build its
+    // own `pattern.owl` beside the DOSDP output — MONDO reasons and reduces one
+    // from `pattern-with-imports.owl` — and that recorded recipe wins.
+    if is_pattern_product(plan, target) && !plan_target(plan, target) {
         return Kind::Patterns;
     }
     // The mirrors are the same shape as the pattern products: the executor builds
@@ -303,6 +337,13 @@ fn classify(plan: &Plan, target: &str) -> Kind {
     if plan.merged_import.as_deref() == Some(target) && !plan_target(plan, target) {
         return Kind::AllImports;
     }
+    // An import module the plan records as a product runs the product's own
+    // pipeline. The plan may carry the replayed rule for the same file too, and
+    // `Kind::Recipe` would run that instead — the rule agrees with the product
+    // only until the product is edited.
+    if let Some(imp) = crate::build::import_module_for(plan, target) {
+        return Kind::ImportModule(imp.id.clone());
+    }
     // The well-known phony target names are underscore-separated; owlmake accepts
     // the dashed form too, so normalize before matching them.
     match target.replace('-', "_").as_str() {
@@ -311,10 +352,9 @@ fn classify(plan: &Plan, target: &str) -> Kind {
         "refresh_imports_excluding_large" => Kind::RefreshImports { exclude_large: true },
         "all_imports" => Kind::AllImports,
         "patterns" | "dosdp" => Kind::Patterns,
-        "update_repo" => Kind::Unsupported(
-            "regenerates the ODK scaffolding from a downloaded ODK release; owlmake does not manage ODK setup",
-        ),
-        "clean" => Kind::Unsupported("removes build outputs; delete them yourself or use `git clean`"),
+        "update_repo" => Kind::UpdateRepo,
+        // `clean` runs from its recorded recipe like any other target: the
+        // recipe's own realpath guard keeps the removals inside the repo.
         "seed" | "seed_via_docker" => {
             Kind::Unsupported("bootstraps a new ODK repository; use the ODK seed tooling")
         }
@@ -363,11 +403,13 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     let plan_format = spec::PlanFormat::parse(&args.plan_format)?;
     let plan_write = if args.regenerate { PlanWrite::Regenerate } else { PlanWrite::Check };
     let full_plan =
-        obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref(), make_vars.today.as_deref())?;
+        obtain_plan(&repo, plan_format, plan_write, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?;
     // The plan's recorded `emulate_robot_version` selects the two version-dependent byte
     // behaviours — whether OBO Graphs JSON nests axiom-annotation `meta`, and
-    // whether a SPARQL update inherits the document's prefixes. Read from the
-    // plan, so a plan-only repo produces the same bytes as the repo it came from.
+    // whether a SPARQL update inherits the document's prefixes — and its
+    // `emulate_odk_version` whether OBO `[Instance]` frames are written and read.
+    // Read from the plan, so a plan-only repo produces the same bytes as the repo
+    // it came from.
     crate::build::set_robot_behaviours(&full_plan);
 
     // A switch this plan cannot vary is REFUSED, not ignored. Which rules exist
@@ -536,8 +578,16 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // `owlmake <those targets>` are literally the same code path. What the
     // default means was decided at plan time (EFO's `all` ends in `qc`); nothing
     // downstream re-derives it.
+    // `test` on a repo whose QC target is spelled `qc` (EFO) means that one.
+    let named = |t: &String| {
+        if t == "test" && !plan_target(&full_plan, "test") && plan_target(&full_plan, "qc") {
+            "qc".to_string()
+        } else {
+            t.clone()
+        }
+    };
     let mut selection: Vec<String> =
-        targets.iter().chain(args.artefacts.iter()).cloned().collect();
+        targets.iter().chain(args.artefacts.iter()).map(named).collect();
     let defaulted = selection.is_empty();
     if defaulted {
         selection = full_plan.default_targets.clone();
@@ -548,12 +598,14 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             );
         }
     }
-    // `release`/`all` names the artefact set: splice it in rather than handling
-    // it in the runner, so every index of `selection` is covered by exactly one
-    // phase below. Left for the runner, a `Kind::Release` sitting at the artefact
-    // split index would be dropped and `om make prepare_release` would silently
-    // do nothing.
+    // A release target is spliced into what it stands for rather than handled in
+    // the runner, so every index of `selection` is covered by exactly one phase
+    // below: `prepare_release` into what its plan entry needs, and `all` on a plan
+    // that does not define it into the artefact set.
     let mut publish = defaulted;
+    // `prepare_release` publishes once everything it needs has run, and only if
+    // none of it failed.
+    let mut publish_after = false;
     {
         let mut spliced: Vec<String> = Vec::with_capacity(selection.len());
         for t in selection {
@@ -585,6 +637,16 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 }
             }
             if matches!(classify(&full_plan, &t), Kind::Release) {
+                if let Some(needs) = release_selection(&full_plan, &t) {
+                    status!("make: `{t}` runs {}", describe_release(&full_plan, &needs));
+                    publish_after = true;
+                    for n in needs {
+                        if !spliced.contains(&n) {
+                            spliced.push(n);
+                        }
+                    }
+                    continue;
+                }
                 publish = true;
                 for a in full_plan.artefacts.iter().filter(|a| !a.missing_rule) {
                     if !spliced.contains(&a.target) {
@@ -622,7 +684,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             full_plan
         } else {
             spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?,
                 &switches,
             )
         };
@@ -718,16 +780,21 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // points that mean "rebuild the imports" would otherwise overrule it.
     let imports_pinned = matches!(make_vars.imports, Some(ImportsMode::Cached))
         || args.keep.iter().any(|g| g == "imports");
+    let mirrors_pinned =
+        make_vars.mir == Some(false) || args.keep.iter().any(|g| g == "mirrors");
     let run_opts = ExecOpts {
         imports_mode,
         patterns_mode,
         refresh_mirrors,
         imports_pinned,
+        mirrors_pinned,
         kept_groups,
         output_dir: output_dir.clone(),
         run_env: make_vars.env.clone(),
         always_make: args.always_make,
         keep_going: args.keep_going,
+        jobs: args.jobs,
+        assume_new: args.assume_new.clone(),
     };
     let run_one = |t: &str, kind: &Kind, repo: &OdkRepo, plan: &Plan| -> Result<()> {
         match kind {
@@ -736,6 +803,10 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 build::refresh_imports(repo, plan, *exclude_large, &run_opts)
             }
             Kind::AllImports => build::build_all_imports(repo, plan, &run_opts),
+            #[cfg(not(target_arch = "wasm32"))]
+            Kind::UpdateRepo => crate::odk::update::update_repo(repo),
+            #[cfg(target_arch = "wasm32")]
+            Kind::UpdateRepo => bail!("`update_repo` rewrites a repository's files, which the wasm build has none of"),
             Kind::Patterns => {
                 if !build::regenerate_patterns(repo, plan, &run_opts)? {
                     status!("make: no DOSDP patterns configured");
@@ -743,6 +814,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
                 Ok(())
             }
             Kind::Mirror(id) => build::refresh_one_mirror(repo, plan, id, &run_opts),
+            Kind::ImportModule(id) => build::build_import_module(repo, plan, id, &run_opts),
             Kind::Recipe => build::run_target_recipe(repo, plan, t, &run_opts),
             Kind::Unsupported(_) | Kind::Unknown => unreachable!(),
         }
@@ -779,11 +851,12 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         // A defaulted build hands `build_plan` the FULL plan; a named subset gets
         // a subset plan. Partial replay of a full artefact set rewrites artefacts
         // the full plan produces, at the wrong sizes.
+        let publish = publish && !publish_after;
         let r = if defaulted {
             build_plan(&repo, &full_plan, &run_opts, publish)
         } else {
             let plan = spec::bind_switches(
-                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref())?,
+                bind_run_version(&repo, &repo.plan(&artefacts)?, make_vars.version.as_deref(), make_vars.today.as_deref(), make_vars.clock.as_deref())?,
                 &switches,
             );
             build_plan(&repo, &plan, &run_opts, publish)
@@ -800,6 +873,15 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     for (t, kind) in kinds.iter().skip(before) {
         let r = run_one(t, kind, &repo, &full_plan);
         report(t, r);
+    }
+    // A release whose checks, reports or artefacts failed is built as far as it
+    // goes and left unpublished.
+    if publish_after {
+        if !failures.is_empty() || artefact_err.is_some() {
+            status!("make: not publishing the release: a target it needs failed");
+        } else if run_opts.output_dir == repo.dir && repo.root != repo.dir {
+            publish_release(&repo, &full_plan, &run_opts.output_dir)?;
+        }
     }
     // Whatever this run wrote on its way to something else and does not keep —
     // excluding the targets the caller actually asked for, which are goals rather
@@ -820,99 +902,82 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
 }
 
 // --- Curated build commands -----------------------------------------------
+//
+// Each is `om make <target>` under a name of its own, and runs as exactly that:
+// one path decides what a switch means, what the plan's groups default to and
+// how a target is dispatched, so `om test IMP=false` and `om make test IMP=false`
+// cannot come to differ.
+
+/// Run `target` as `om make <target> <assignments…>` would.
+fn make_target(
+    repo: &std::path::Path,
+    target: &str,
+    assignments: &[String],
+    common: &crate::cmd::CommonArgs,
+    configure: impl FnOnce(&mut Args),
+) -> Result<()> {
+    let (targets, _) = partition_make_args(assignments);
+    if let Some(t) = targets.first() {
+        bail!(
+            "`{t}` is not a `VAR=value` assignment, and this command builds `{target}` only: \
+             name other targets with `om make {target} {t}`"
+        );
+    }
+    let mut args = Args {
+        targets: std::iter::once(target.to_string()).chain(assignments.iter().cloned()).collect(),
+        always_make: false,
+        keep_going: false,
+        jobs: 1,
+        assume_new: Vec::new(),
+        repo: repo.to_path_buf(),
+        rebuild: Vec::new(),
+        keep: Vec::new(),
+        list_targets: false,
+        plan_only: false,
+        plan_format: "yaml".to_string(),
+        regenerate: false,
+        imports: None,
+        patterns: "regenerate".to_string(),
+        output_dir: None,
+        artefacts: Vec::new(),
+        common: common.clone(),
+    };
+    configure(&mut args);
+    step(None, &args).map(|_| ())
+}
 
 /// `prepare-release` / `all`: build every release artefact.
 pub fn prepare_release(a: &TargetArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    // A release never rewrites the committed plan: `--regenerate` is a
-    // deliberate, separate act, not something a build does on the way past.
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    let output_dir = a.output_dir.clone().unwrap_or_else(|| repo.dir.clone());
-    let imports_mode = parse_imports(&a.imports)?;
-    let opts = ExecOpts {
-        imports_mode,
-        patterns_mode: parse_patterns(&a.patterns)?,
-        refresh_mirrors: true,
-        // `--imports cached` on this command IS the caller pinning them.
-        imports_pinned: matches!(imports_mode, ImportsMode::Cached),
-        // This command takes no switches, so every group does what the plan says.
-        kept_groups: default_kept_groups(&plan),
-        output_dir,
-        run_env: Vec::new(),
-        always_make: false,
-        keep_going: false,
-    };
-    build_plan(&repo, &plan, &opts, true)?;
-    // A curated whole-release command names no individual target, so nothing here
-    // is a goal in the command-line sense and everything transient is swept.
-    build::sweep_transients(&repo, &plan, &[]);
-    Ok(())
+    make_target(&a.repo, "prepare_release", &a.assignments, &a.common, |args| {
+        args.imports = Some(a.imports.clone());
+        args.patterns = a.patterns.clone();
+        args.output_dir = a.output_dir.clone();
+    })
 }
 
 /// `refresh-imports`: rebuild import modules from upstream (native).
 pub fn refresh_imports(a: &RefreshArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    build::refresh_imports(&repo, &plan, a.exclude_large, &default_exec_opts(&repo))
+    let target = if a.exclude_large { "refresh-imports-excluding-large" } else { "refresh-imports" };
+    make_target(&a.repo, target, &a.assignments, &a.common, |_| {})
 }
 
 /// `all-imports`: rebuild every individual import module from upstream.
 pub fn all_imports(a: &RepoArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    let plan = bind_run_version(&repo, &repo.plan(&[])?, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    build::build_all_imports(&repo, &plan, &default_exec_opts(&repo))
+    make_target(&a.repo, "all_imports", &a.assignments, &a.common, |_| {})
 }
 
-/// `test` / `qc`: run the repository's own QC target, from the plan.
+/// `update-repo`: bring the repository's files into step with its options.
+pub fn update_repo(a: &RepoArgs) -> Result<()> {
+    make_target(&a.repo, "update_repo", &a.assignments, &a.common, |_| {})
+}
+
+/// `test`: run the repository's own QC target, from the plan.
 ///
 /// There is no built-in QC pipeline: whatever the repo declares under this name
-/// is what runs, exactly as `owlmake make test` would. The checks those recipes
-/// ask for are `om report`, `om reason` and `om verify`, so a QC run needs
-/// nothing beyond the `om` binary itself.
+/// is what runs. The checks those recipes ask for are `om report`, `om reason`
+/// and `om verify`, so a QC run needs nothing beyond the `om` binary itself.
 pub fn test(a: &RepoArgs) -> Result<()> {
-    let repo = OdkRepo::load(&a.repo)?;
-    let plan = obtain_plan(&repo, spec::PlanFormat::Yaml, PlanWrite::Check, None, None)?;
-    let plan = {
-        let switches = default_switches(&plan);
-        spec::bind_switches(plan, &switches)
-    };
-    let name = ["test", "qc"]
-        .into_iter()
-        .find(|n| plan_target(&plan, n))
-        .ok_or_else(|| anyhow::anyhow!(
-            "this repo declares no `test` or `qc` target\navailable targets: {}",
-            known_targets(&plan)
-        ))?;
-    build::run_target_recipe(&repo, &plan, name, &default_exec_opts(&repo))
-}
-
-/// The run inputs of a curated build command, which takes none of its own.
-fn default_exec_opts(repo: &OdkRepo) -> ExecOpts {
-    ExecOpts {
-        imports_mode: ImportsMode::Cached,
-        patterns_mode: PatternsMode::Regenerate,
-        refresh_mirrors: true,
-        // These commands take no flags, so the caller has pinned nothing: an
-        // `all-imports`/`refresh-imports` entry point still means "rebuild".
-        imports_pinned: false,
-        kept_groups: Vec::new(),
-        output_dir: repo.dir.clone(),
-        run_env: Vec::new(),
-        always_make: false,
-        keep_going: false,
-    }
+    make_target(&a.repo, "test", &a.assignments, &a.common, |_| {})
 }
 
 // --- helpers --------------------------------------------------------------
@@ -967,28 +1032,14 @@ fn obtain_plan(
     write: PlanWrite,
     version: Option<&str>,
     today: Option<&str>,
+    clock: Option<&str>,
 ) -> Result<Plan> {
-    let plan = if repo.spec.is_some() {
+    let plan = if repo.built_from_file() {
         repo.plan(&[])?
     } else {
         regen_plan(repo, format, write)?
     };
-    bind_run_version(repo, &plan, version, today)
-}
-
-/// The switch values an entry point that takes none resolves to: whatever the
-/// plan says an ordinary build of this repository does. A curated command still
-/// has to CHOOSE, because a target whose recipe differs by branch has no recipe
-/// until one is chosen.
-fn default_switches(plan: &Plan) -> Vec<(String, String)> {
-    plan.refresh_groups
-        .iter()
-        .filter(|g| !g.flag.is_empty())
-        .map(|g| {
-            let on = matches!(g.default, crate::plan::Freshness::Rebuild);
-            (g.flag.clone(), if on { "true".to_string() } else { "false".to_string() })
-        })
-        .collect()
+    bind_run_version(repo, &plan, version, today, clock)
 }
 
 /// Resolve this run's release version against the plan's default and bind it in.
@@ -1002,9 +1053,25 @@ fn bind_run_version(
     plan: &Plan,
     requested: Option<&str>,
     today: Option<&str>,
+    clock: Option<&str>,
 ) -> Result<Plan> {
-    let version = crate::plan::release_version(&plan.version, requested);
-    spec::bind_version(plan, &version, today, &repo.dir)
+    // A plan that names a version FILE is asking for the version the file holds
+    // on the day of the build, not the one it held when the plan was written —
+    // bumping it is ordinary curation, and it must not require regenerating the
+    // plan. An explicit `VERSION=` still wins, and a file that has gone missing
+    // falls back to the default the plan recorded rather than failing the build.
+    let from_file = requested.is_none().then(|| plan.version_file.as_deref()).flatten().and_then(
+        |rel| {
+            let text = std::fs::read_to_string(repo.dir.join(rel)).ok()?;
+            let v = text.trim().to_string();
+            (!v.is_empty()).then_some(v)
+        },
+    );
+    let version = match from_file {
+        Some(v) => v,
+        None => crate::plan::release_version(&plan.version, requested),
+    };
+    spec::bind_version(plan, &version, today, clock, &repo.dir)
 }
 
 /// Regenerate the plan (at the repo root) from the repo's build configuration and
@@ -1017,7 +1084,7 @@ fn bind_run_version(
 fn regen_plan(repo: &OdkRepo, format: spec::PlanFormat, write: PlanWrite) -> Result<Plan> {
     let plan_path = repo.root.join(format.file_name());
     let full = repo.plan(&[])?;
-    let spec = OwlmakeSpec::from_plan(&full);
+    let spec = repo.plan_file(&full)?;
     if write == PlanWrite::Check && plan_path.is_file() {
         check_committed_plan(&plan_path, &spec)?;
         return Ok(full);
@@ -1074,8 +1141,22 @@ fn check_committed_plan(path: &Path, fresh: &OwlmakeSpec) -> Result<()> {
     // such value, on a plan owlmake itself had just written.
     let fresh = round_trip(fresh, path)?;
 
-    let old = serde_json::to_value(&committed)?;
-    let new = serde_json::to_value(&fresh)?;
+    let mut old = serde_json::to_value(&committed)?;
+    let mut new = serde_json::to_value(&fresh)?;
+    // A plan that names a `version_file` records the version as a DEFAULT read
+    // from that file, and the run re-reads it. Bumping the file for a release is
+    // therefore a run input, and a run input must never make the plan stale: the
+    // repo a "regenerate it" instruction points at is exactly what the plan
+    // exists to replace, so answering that to `3.92.0 -> 3.93.0` would demand a
+    // plan rewrite for every release. The two plans still have to agree on WHICH
+    // file the version comes from, which is what the comparison keeps.
+    if fresh.version_file.is_some() && committed.version_file == fresh.version_file {
+        for v in [&mut old, &mut new] {
+            if let Some(obj) = v.as_object_mut() {
+                obj.remove("version");
+            }
+        }
+    }
     if old == new {
         return Ok(());
     }
@@ -1199,17 +1280,6 @@ fn brief(v: &serde_json::Value) -> String {
     s
 }
 
-/// The groups an entry point that takes no switches keeps: whichever the plan
-/// says an ordinary build does not refresh.
-fn default_kept_groups(plan: &Plan) -> Vec<String> {
-    plan.refresh_groups
-        .iter()
-        .filter(|g| !["mirrors", "imports", "patterns"].contains(&g.name.as_str()))
-        .filter(|g| matches!(g.default, crate::plan::Freshness::Keep))
-        .map(|g| g.name.clone())
-        .collect()
-}
-
 /// `VAR=value` assignments pulled out of the positional target list.
 #[derive(Default)]
 struct MakeVars {
@@ -1234,6 +1304,7 @@ struct MakeVars {
     /// about the date — so only `TODAY=` sets this, and a run that names neither
     /// falls back to the clock.
     today: Option<String>,
+    clock: Option<String>,
     /// Other `VAR=value` assignments, placed in each recipe's spawn environment
     /// (e.g. `ROBOT_ENV`, `ROBOT_JAVA_ARGS`) for any recipe target that reads them.
     env: Vec<(String, String)>,
@@ -1289,13 +1360,15 @@ fn apply_make_var(vars: &mut MakeVars, name: &str, value: &str) {
         // mirrors. IMP=false → reuse the committed imports (`--imports cached`);
         // IMP=true → re-mirror from upstream (`--imports fresh`).
         "IMP" => vars.imports = Some(if truthy { ImportsMode::Fresh } else { ImportsMode::Cached }),
-        // `MIR`: whether to refresh the mirror downloads. It's subordinate to
-        // IMP here — only fill in an import mode if IMP hasn't already set one.
-        "MIR" => {
-            vars.mir = Some(truthy);
-            let mode = if truthy { ImportsMode::Fresh } else { ImportsMode::Cached };
-            vars.imports.get_or_insert(mode);
-        }
+        // `MIR`: whether to refresh the mirror downloads — and nothing else.
+        // It used to fill in the import mode too, so a positional `MIR=false`
+        // pinned the modules as well: `om make imports/obi_import.owl --rebuild
+        // imports MIR=false` reported the module "pinned (IMP=false)" and rebuilt
+        // nothing, and `--imports fresh MIR=false` likewise. `IMP` and `MIR` are
+        // independent switches, and what `MIR` implies for the import mode
+        // (`MIR=true` alone still runs the import path) is decided where the mode
+        // is resolved, with the flags and the plan in view.
+        "MIR" => vars.mir = Some(truthy),
         // `PAT`: whether to regenerate `patterns/definitions.owl` from the
         // DOSDP patterns (PAT=true) or reuse the committed file (PAT=false).
         "PAT" => {
@@ -1314,6 +1387,10 @@ fn apply_make_var(vars: &mut MakeVars, name: &str, value: &str) {
             }
             vars.env.push((name.to_string(), value.to_string()));
         }
+        // The calendar day for the recipes that read the clock itself rather
+        // than the release date. It defaults to the day the build runs; naming
+        // it makes such a build reproducible on any later day.
+        "CLOCK" => vars.clock = Some(value.trim().to_string()),
         // Anything else (ROBOT_ENV, ROBOT_JAVA_ARGS, …) is placed in the spawn
         // environment of the recipe targets that read it. owlmake's own steps read
         // none of these values themselves; they are carried through untouched so a
@@ -1427,10 +1504,113 @@ fn known_targets(plan: &Plan) -> String {
 
 /// Whether the plan defines `target` as something it can build.
 fn plan_target(plan: &Plan, target: &str) -> bool {
+    plan_entry(plan, target).is_some()
+}
+
+/// The plan's entry for `target`, when it defines it as something it can build.
+fn plan_entry<'a>(plan: &'a Plan, target: &str) -> Option<&'a crate::plan::ArtefactPlan> {
     plan.artefacts
         .iter()
         .chain(plan.prerequisites.iter())
-        .any(|a| a.target == target && !a.missing_rule)
+        .find(|a| a.target == target && !a.missing_rule)
+}
+
+/// What `prepare_release` runs: what its plan entry needs, in the plan's order,
+/// with every grouping target (one with prerequisites and no steps) through which
+/// it reaches the files the release publishes opened into its members, and the
+/// release artefacts — every one, built together by the release pipeline — where
+/// the first published file is reached. So the checks and reports grouped with
+/// the artefacts run where they stand, and the import modules are left to the
+/// release pipeline. `prepare_release_fast` is the same release. `None` for any
+/// other target, and for a plan that records no prerequisites for the release.
+fn release_selection(plan: &Plan, target: &str) -> Option<Vec<String>> {
+    if !matches!(target.replace('-', "_").as_str(), "prepare_release" | "prepare_release_fast") {
+        return None;
+    }
+    let needs = &plan_entry(plan, "prepare_release")?.needs;
+    if needs.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    open_release_needs(plan, needs, &mut out, &mut std::collections::HashSet::new());
+    Some(out)
+}
+
+fn open_release_needs(
+    plan: &Plan,
+    needs: &[String],
+    out: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    for n in needs {
+        if !seen.insert(n.clone()) {
+            continue;
+        }
+        if published(plan, n) {
+            for a in plan.artefacts.iter().filter(|a| !a.missing_rule) {
+                if !out.contains(&a.target) {
+                    out.push(a.target.clone());
+                }
+            }
+        } else if crate::build::import_module_for(plan, n).is_some() {
+            // The release pipeline builds the import modules, kept or rebuilt as
+            // the run's import mode says.
+        } else if let Some(members) = grouped(plan, n).filter(|_| reaches_published(plan, n)) {
+            open_release_needs(plan, members, out, seen);
+        } else if !out.contains(n) {
+            out.push(n.clone());
+        }
+    }
+}
+
+/// The members of a grouping target: one with prerequisites and no steps.
+fn grouped<'a>(plan: &'a Plan, target: &str) -> Option<&'a [String]> {
+    plan_entry(plan, target)
+        .filter(|a| a.steps.is_empty() && !a.needs.is_empty())
+        .map(|a| a.needs.as_slice())
+}
+
+/// Whether `target` is a file the release publishes: an artefact at the top of
+/// the build directory (see [`publish_release`]).
+fn published(plan: &Plan, target: &str) -> bool {
+    !target.contains('/') && plan.artefacts.iter().any(|a| a.target == target && !a.missing_rule)
+}
+
+/// Whether `target` is a grouping target with a published file among its members,
+/// or among the members of a grouping target it holds.
+fn reaches_published(plan: &Plan, target: &str) -> bool {
+    let mut stack = vec![target];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(t) = stack.pop() {
+        if !seen.insert(t) {
+            continue;
+        }
+        for m in grouped(plan, t).unwrap_or_default() {
+            if published(plan, m) {
+                return true;
+            }
+            stack.push(m.as_str());
+        }
+    }
+    false
+}
+
+/// The release's selection as the run announces it, the artefacts counted
+/// rather than listed.
+fn describe_release(plan: &Plan, selection: &[String]) -> String {
+    let artefact = |n: &String| plan.artefacts.iter().any(|a| &a.target == n && !a.missing_rule);
+    let mut parts: Vec<String> = Vec::new();
+    let mut counted = false;
+    for n in selection {
+        if !artefact(n) {
+            parts.push(format!("`{n}`"));
+        } else if !counted {
+            counted = true;
+            let k = selection.iter().filter(|n| artefact(n)).count();
+            parts.push(format!("the {k} release artefact(s)"));
+        }
+    }
+    parts.join(", ")
 }
 
 #[cfg(test)]
@@ -1439,6 +1619,21 @@ mod tests {
 
     fn split(args: &[&str]) -> (Vec<String>, MakeVars) {
         partition_make_args(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
+    /// `MIR=false` pins the mirrors and says nothing about the modules: the
+    /// import mode stays unset so `--rebuild imports` / `--imports fresh` can
+    /// decide it. It used to fill in `Cached`, and the flags were overridden.
+    #[test]
+    fn mir_alone_does_not_decide_the_import_mode() {
+        let (targets, vars) = split(&["imports/obi_import.owl", "MIR=false"]);
+        assert_eq!(targets, vec!["imports/obi_import.owl"]);
+        assert_eq!(vars.mir, Some(false));
+        assert!(vars.imports.is_none(), "MIR=false must not pin the imports");
+        let (_, vars) = split(&["MIR=true"]);
+        assert!(vars.imports.is_none(), "MIR=true's implication is resolved with the flags, not here");
+        let (_, vars) = split(&["IMP=true", "MIR=false"]);
+        assert!(matches!(vars.imports, Some(ImportsMode::Fresh)));
     }
 
     /// CL's `qc.yml`: `make ROBOT_ENV='ROBOT_JAVA_ARGS=-Xmx6G' test IMP=false PAT=false MIR=false`.
@@ -1490,14 +1685,17 @@ mod tests {
 
     #[test]
     fn imp_takes_precedence_over_mir_regardless_of_order() {
-        // IMP is the primary import control; MIR only fills in when IMP is absent.
+        // IMP is the import control; MIR pins or refreshes the mirrors and is
+        // never read as an import mode, whichever order the two arrive in.
         let (_, a) = split(&["MIR=true", "IMP=false"]);
         assert!(matches!(a.imports, Some(ImportsMode::Cached)));
+        assert_eq!(a.mir, Some(true));
         let (_, b) = split(&["IMP=false", "MIR=true"]);
         assert!(matches!(b.imports, Some(ImportsMode::Cached)));
-        // MIR alone still applies.
+        // MIR alone leaves the import mode to the flags and the plan.
         let (_, c) = split(&["MIR=false"]);
-        assert!(matches!(c.imports, Some(ImportsMode::Cached)));
+        assert!(c.imports.is_none());
+        assert_eq!(c.mir, Some(false));
     }
 
     #[test]

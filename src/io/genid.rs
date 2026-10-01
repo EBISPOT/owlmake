@@ -279,6 +279,13 @@ pub struct Genids {
     /// super can reuse them (the relax pattern). Only equiv operands are
     /// recorded — an inline `SubClassOf` restriction is NOT a reuse target.
     record_operands: bool,
+    /// Signatures whose intern id was minted by a NESTED operand walk (an
+    /// equivalence intersection member) rather than by an axiom-level target.
+    /// A `SubClassOf` super never takes such a node: each axiom owns its
+    /// expression's blank node, so the super mints a fresh one and the operand
+    /// keeps rendering inline. Cleared for a signature once an axiom-level
+    /// target claims it with its own id.
+    operand_minted: std::collections::HashSet<String>,
     pub reuse_count: u64,
     /// Ablation: how many times each reuse clause fired (sub_sigs, this-run shared,
     /// carried provenance, wildcard, shared_key, annotated). Clauses overlap.
@@ -382,7 +389,11 @@ impl Genids {
             self.record_operands = false;
             if record {
                 if let Some(oid) = oid {
-                    self.intern.entry(ce_sig(sorted[i])).or_insert(oid);
+                    let sig = ce_sig(sorted[i]);
+                    if !self.intern.contains_key(&sig) {
+                        self.operand_minted.insert(sig.clone());
+                    }
+                    self.intern.entry(sig).or_insert(oid);
                 }
             }
         }
@@ -496,15 +507,21 @@ impl Genids {
                     }
                 }
             }
-            if let Some(&id) = self.intern.get(&ce_sig(ce)) {
+            if let Some(&id) = self.intern.get(&ce_sig(ce)).filter(|_| {
+                // An operand-minted node is not a reuse target on structural
+                // equality alone — each axiom owns its expression — but identity
+                // evidence shares the node: carried provenance (relax made the
+                // operand and the derived super one object), or the source
+                // document referencing one `rdf:nodeID` from both positions.
+                !self.operand_minted.contains(&ce_sig(ce))
+                    || self.carried_shared.contains(&crate::io::anon_sig_hash(&ce_sig(ce)))
+                    || shared_key(ce)
+                        .is_some_and(|k| self.owner_shared_in_source.contains(&k))
+            }) {
                 if self.trace.as_deref() == Some(self.cur_owner.as_str()) {
                     eprintln!("  [trace {}] REUSE-intern genid{id}", self.cur_owner);
                 }
                 self.reuse_count += 1;
-                self.reused
-                    .entry(self.cur_owner.clone())
-                    .or_default()
-                    .insert(ce_sig(ce));
                 if self.reuse_log.len() < 20 {
                     self.reuse_log.push((self.cur_owner.clone(), id));
                 }
@@ -820,6 +837,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         sub_sigs: Default::default(),
         shared_seq: Default::default(),
         reused: Default::default(),
+        operand_minted: Default::default(),
         owner_shared_in_source: Default::default(),
         have_scan_evidence: false,
         carried_shared: Default::default(),
@@ -1247,6 +1265,13 @@ impl Genids {
     /// Translate one axiom, assigning genids to its anonymous nodes and, for an
     /// annotated axiom with an anonymous CE object, recording the shared genid.
     fn translate_axiom(&mut self, owner: &str, ac: &AnnotatedComponent<RcStr>) {
+        // A pending group belongs to ONE axiom's translation. A translation that
+        // short-circuits before its take() leaves the flag armed, and the next
+        // axiom — possibly another OWNER's equivalence — would hand its target
+        // the group's node. The SubClassOf arm re-derives both below; every
+        // other arm must start clean.
+        self.span_pending = None;
+        self.cross_pending = None;
         match &ac.component {
             Component::SubClassOf(ax) => {
                 let sub = if matches!(ax.sub, CE::Class(_)) {
@@ -1334,7 +1359,11 @@ impl Genids {
                 if carried_here {
                     self.carried_used.insert(sup_sig.clone());
                 }
-                if reuse && !matches!(ax.sup, CE::Class(_)) {
+                // Only evidence-backed sharing may turn a nested operand into a
+                // reference: a structural twin reuse (`sub_sigs`, `annotated_sigs`)
+                // shares the NODE ID between the twin axioms but the operand of a
+                // plain equivalence still renders inline, as its own object.
+                if (carried_here || c_star || c_key) && !matches!(ax.sup, CE::Class(_)) {
                     self.reused.entry(owner.to_string()).or_default().insert(sup_sig.clone());
                 }
                 // A `spanGaps` re-link shares one blank node with every other
@@ -1384,7 +1413,8 @@ impl Genids {
                         // leaves `reuse = true` finding nothing and allocating
                         // anyway.
                         self.sub_sigs.insert(sup_sig.clone());
-                        self.intern.entry(sup_sig).or_insert(id);
+                        self.operand_minted.remove(&sup_sig);
+                        self.intern.insert(sup_sig, id);
                     }
                     if !ac.ann.is_empty() {
                         self.record_shared(owner, &ax.sup, id);

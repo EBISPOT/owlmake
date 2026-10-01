@@ -35,6 +35,8 @@ const IN_SUBSET: &str = "http://www.geneontology.org/formats/oboInOwl#inSubset";
 const SUBSET_PROPERTY: &str = "http://www.geneontology.org/formats/oboInOwl#SubsetProperty";
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+/// NCBITaxon's `cellular organisms`, the tree `--prune-taxa` prunes.
+const TAXON_ROOT: &str = "http://purl.obolibrary.org/obo/NCBITaxon_131567";
 
 /// The "cross-taxon" relation properties (homology and descent). Axioms over
 /// these are removed before reasoning so homology links do not propagate taxon
@@ -82,6 +84,10 @@ pub struct Args {
     /// Keep non-subset classes in the output (default: remove them).
     #[arg(long = "no-remove")]
     pub no_remove: bool,
+    /// When removing, also remove every taxon under cellular organisms that is
+    /// neither the taxon nor one of its ancestors or descendants.
+    #[arg(long = "prune-taxa")]
+    pub prune_taxa: bool,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -129,11 +135,15 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
 
     // Removal pass (unless --no-remove): drop every class not in the subset.
     if !args.no_remove {
-        let excluded: Vec<String> = select::entities(&model)
+        let mut excluded: Vec<String> = select::entities(&model)
             .classes
             .into_iter()
             .filter(|c| c != OWL_THING && c != OWL_NOTHING && !subset.contains(c))
             .collect();
+        if args.prune_taxa {
+            let already: HashSet<String> = excluded.iter().cloned().collect();
+            excluded.extend(excluded_taxa(&model, &taxon).into_iter().filter(|t| !already.contains(t)));
+        }
         let opts = TermOptions {
             preserve_structure: Some(false),
             trim: Some(true),
@@ -188,6 +198,33 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
 
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(model))
+}
+
+/// The taxa `--prune-taxa` removes: every class the ontology entails is under
+/// cellular organisms, except `taxon`, its ancestors, its descendants and any
+/// unsatisfiable class (which is a descendant of every class, `taxon` included).
+fn excluded_taxa(model: &Model, taxon: &str) -> Vec<String> {
+    let reasoner = el::Reasoner::classify(model);
+    let unsatisfiable: HashSet<String> = reasoner.unsatisfiable().into_iter().collect();
+    let mut sup_of: std::collections::HashMap<String, HashSet<String>> =
+        std::collections::HashMap::new();
+    for (sub, sup) in reasoner.all_subsumptions() {
+        sup_of.entry(sub).or_default().insert(sup);
+    }
+    let ancestors = sup_of.get(taxon).cloned().unwrap_or_default();
+    let mut taxa: Vec<String> = sup_of
+        .iter()
+        .filter(|(c, sups)| {
+            sups.contains(TAXON_ROOT)
+                && c.as_str() != taxon
+                && !ancestors.contains(*c)
+                && !sups.contains(taxon)
+                && !unsatisfiable.contains(*c)
+        })
+        .map(|(c, _)| c.clone())
+        .collect();
+    taxa.sort();
+    taxa
 }
 
 /// The default species subsetter: assert the taxon on each root, classify once,

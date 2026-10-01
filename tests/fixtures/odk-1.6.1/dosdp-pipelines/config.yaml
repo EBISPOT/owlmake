@@ -1,0 +1,17 @@
+id: pipes
+github_org: example-org
+repo: pipes-ontology
+git_main_branch: trunk
+use_dosdps: true
+dosdp_tools_options: --obo-prefixes=true --restrict-axioms-to=logical
+pattern_pipelines_group:
+  ids:
+    - bare
+  products:
+    - id: manual
+    - id: auto
+      dosdp_tools_options: --obo-prefixes=true --generate-defined-class=true
+  matches:
+    - id: matched
+      ontology: tmp/pipes-merged.owl
+      dosdp_tools_options: --obo-prefixes=true --print-inferred=true

@@ -1,0 +1,15 @@
+Prefix(:=<http://example.org/obo/sink.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/obo/sink.owl>
+Import(<http://example.org/obo/sink/imports/ro_import.owl>)
+Import(<http://example.org/obo/sink/imports/gone_import.owl>)
+
+Declaration(Class(<http://example.org/obo/SINK_0000001>))
+AnnotationAssertion(rdfs:label <http://example.org/obo/SINK_0000001> "thing")
+)

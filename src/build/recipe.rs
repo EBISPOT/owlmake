@@ -31,12 +31,16 @@ use crate::odk::robot::{self, ShellSep};
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FileOp {
-    /// `cp [-r] SRC... DST`
+    /// `cp [-r] SRC... DST`, or `rsync -R SRC... DST` (`relative`: each source's
+    /// own relative path is recreated under the destination, `a/b.owl` landing at
+    /// `DST/a/b.owl` rather than `DST/b.owl`).
     Copy {
         src: Vec<String>,
         dst: String,
         #[serde(default)]
         recursive: bool,
+        #[serde(default)]
+        relative: bool,
     },
     /// `mv SRC... DST`
     Move { src: Vec<String>, dst: String },
@@ -173,10 +177,40 @@ impl FileOp {
                 }
                 let dst = operands.pop().unwrap();
                 if base == "cp" {
-                    Some(FileOp::Copy { src: operands, dst, recursive })
+                    Some(FileOp::Copy { src: operands, dst, recursive, relative: false })
                 } else {
                     Some(FileOp::Move { src: operands, dst })
                 }
+            }
+            "rsync" => {
+                let mut recursive = false;
+                let mut relative = false;
+                let mut operands = Vec::new();
+                for a in rest {
+                    match a.as_str() {
+                        "-R" | "--relative" => relative = true,
+                        "-r" | "--recursive" | "-a" | "--archive" => recursive = true,
+                        // Combined short flags: model only the letters above plus
+                        // the inert verbosity/permission ones.
+                        s if s.starts_with('-') && !s.starts_with("--") && s.len() > 1 => {
+                            for c in s[1..].chars() {
+                                match c {
+                                    'R' => relative = true,
+                                    'r' | 'a' => recursive = true,
+                                    'v' | 'p' | 't' | 'q' => {}
+                                    _ => return None,
+                                }
+                            }
+                        }
+                        s if s.starts_with('-') => return None,
+                        _ => operands.push(a.clone()),
+                    }
+                }
+                if operands.len() < 2 {
+                    return None;
+                }
+                let dst = operands.pop().unwrap();
+                Some(FileOp::Copy { src: operands, dst, recursive, relative })
             }
             "rm" => {
                 let mut recursive = false;
@@ -339,8 +373,14 @@ impl FileOp {
     /// A short human-readable label for the plan view.
     pub fn label(&self) -> String {
         match self {
-            FileOp::Copy { src, dst, recursive } => {
-                format!("cp{} {} → {dst}", if *recursive { " -r" } else { "" }, src.join(" "))
+            FileOp::Copy { src, dst, recursive, relative } => {
+                let flag = match (recursive, relative) {
+                    (true, true) => " -rR",
+                    (true, false) => " -r",
+                    (false, true) => " -R",
+                    (false, false) => "",
+                };
+                format!("cp{flag} {} → {dst}", src.join(" "))
             }
             FileOp::Move { src, dst } => format!("mv {} → {dst}", src.join(" ")),
             FileOp::Remove { paths, .. } => format!("rm {}", paths.join(" ")),
@@ -453,7 +493,7 @@ impl FileOp {
                     t.write(&p(dst))?;
                 }
             }
-            FileOp::Copy { src, dst, recursive } => {
+            FileOp::Copy { src, dst, recursive, relative } => {
                 let dst = p(dst);
                 for s in src {
                     // A `cp` whose source is an image asset reads owlmake's bytes.
@@ -461,7 +501,15 @@ impl FileOp {
                     if *recursive && from.is_dir() {
                         copy_dir_recursive(&from, &dst.join(from.file_name().unwrap_or_default()))?;
                     } else {
-                        let target = if dst.is_dir() {
+                        // Relative mode recreates each source's own relative path
+                        // under the destination.
+                        let target = if *relative {
+                            let t = dst.join(s);
+                            if let Some(par) = t.parent() {
+                                std::fs::create_dir_all(par)?;
+                            }
+                            t
+                        } else if dst.is_dir() {
                             dst.join(from.file_name().context("cp source has no file name")?)
                         } else {
                             dst.clone()
@@ -809,7 +857,7 @@ pub fn run_line(
     robot_prefix: &str,
     env: &[(String, String)],
 ) -> Result<()> {
-    RUN_ENV.with(|c| *c.borrow_mut() = env.to_vec());
+    *RUN_ENV.lock().unwrap() = env.to_vec();
     let line = &serve_image_assets(line, dir);
     // Strip the per-line recipe prefixes: `@` (silent), `+` (always run), and a
     // leading `-` (ignore errors).
@@ -832,7 +880,7 @@ pub fn run_line(
         let r = run_shell(l, dir, exe, robot_prefix);
         if let Err(e) = r {
             if ignore_err {
-                eprintln!("odk:   (ignored) {e:#}");
+                status!("make:   (ignored) {e:#}");
             } else {
                 return Err(e);
             }
@@ -855,7 +903,7 @@ pub fn run_line(
         let r = run_shell(l, dir, exe, robot_prefix);
         return match r {
             Err(e) if ignore_err => {
-                eprintln!("odk:   (ignored) {e:#}");
+                status!("make:   (ignored) {e:#}");
                 Ok(())
             }
             other => other,
@@ -890,7 +938,7 @@ pub fn run_line(
     }
     if let Some(e) = pending_err {
         if ignore_err {
-            eprintln!("odk:   (ignored) {e:#}");
+            status!("make:   (ignored) {e:#}");
         } else {
             return Err(e);
         }
@@ -976,11 +1024,15 @@ const CHILD_ENV_ALLOWED: &[&str] = &[
 /// transform. A recipe's own `sh` line still inherits — a shell step is a
 /// declared escape hatch — but it receives this run's `VAR=value` assignments
 /// explicitly, via `apply_run_env`.
+///
+/// It runs under this run's emulation, which its arguments name ahead of the
+/// command (`build::emulation_args`), as every owlmake process a build starts
+/// does.
 fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Result<()> {
     // As in `run_shell`: the child writes to the inherited stderr.
     let _quiet = crate::progress::Suspend::new();
     let mut cmd = Command::new(exe);
-    cmd.args(args).current_dir(dir);
+    cmd.args(crate::build::emulation_args()).args(args).current_dir(dir);
     cmd.env_clear();
     for (k, v) in std::env::vars_os() {
         if k.to_str().is_some_and(|k| CHILD_ENV_ALLOWED.contains(&k)) {
@@ -1042,24 +1094,19 @@ fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Resul
     Ok(())
 }
 
-thread_local! {
-    /// This invocation's `VAR=value` assignments, applied to every child this
-    /// recipe spawns. Scoped to the run rather than written into owlmake's own
-    /// environment, so one invocation's variables cannot reach a later
-    /// invocation in the same process.
-    static RUN_ENV: std::cell::RefCell<Vec<(String, String)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
+/// This invocation's `VAR=value` assignments, applied to every child a recipe
+/// spawns, on whichever thread it runs. Scoped to the run rather than written
+/// into owlmake's own environment, so one invocation's variables cannot reach a
+/// later invocation in the same process.
+static RUN_ENV: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// Apply this run's command-line variable assignments to a child: a `VAR=value`
 /// given on the command line is exported into every recipe environment, so the
 /// commands a recipe spawns see it too.
 fn apply_run_env(cmd: &mut Command) {
-    RUN_ENV.with(|c| {
-        for (k, v) in c.borrow().iter() {
-            cmd.env(k, v);
-        }
-    });
+    for (k, v) in RUN_ENV.lock().unwrap().iter() {
+        cmd.env(k, v);
+    }
 }
 
 /// Run a command line through `sh -c`. The tools named directly in the line are
@@ -1104,71 +1151,92 @@ pub fn prepend_tool_path(cmd: &mut Command, exe: &Path) {
     cmd.env("PATH", path);
 }
 
-/// Directory of bundled-tool shims for `exe`, created once per binary. (In a
-/// release there is only ever one `exe` — the running owlmake binary — but
-/// keying on it keeps the shims correct under tests, where the live process is
-/// the test harness rather than owlmake.)
+/// Directory of bundled-tool shims for `exe` under this run's emulation, created
+/// once per binary and emulation. (In a release there is only ever one `exe` —
+/// the running owlmake binary — but keying on it keeps the shims correct under
+/// tests, where the live process is the test harness rather than owlmake.)
 fn shim_dir(exe: &Path) -> Option<PathBuf> {
-    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PathBuf>>> =
+    type Key = (PathBuf, Vec<String>);
+    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<Key, PathBuf>>> =
         OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    if let Some(d) = cache.lock().ok()?.get(exe) {
+    let key = (exe.to_path_buf(), crate::build::emulation_args());
+    if let Some(d) = cache.lock().ok()?.get(&key) {
         return Some(d.clone());
     }
-    let dir = install_shims(exe).ok()?;
-    cache.lock().ok()?.insert(exe.to_path_buf(), dir.clone());
+    let dir = install_shims(&key.0, &key.1).ok()?;
+    cache.lock().ok()?.insert(key, dir.clone());
     Some(dir)
 }
 
 /// Write tiny `robot`/`jq`/`sssom`/`sed`/`grep`/`comm` shell scripts that re-exec
 /// `exe`'s matching subcommand (`robot <sub> …` maps to `owlmake <sub> …`, since
 /// owlmake's chaining harness carries those subcommand names), and return their
-/// directory.
-fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
+/// directory. Each starts `exe` with `emulation` ahead of the subcommand, so a
+/// script a recipe runs writes as the build does.
+fn install_shims(exe: &Path, emulation: &[String]) -> std::io::Result<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     exe.hash(&mut h);
+    emulation.hash(&mut h);
     let dir = std::env::temp_dir()
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
-    let shims: [(&str, String); 22] = [
-        ("robot", format!("#!/bin/sh\nexec {exe:?} \"$@\"\n")),
-        ("jq", format!("#!/bin/sh\nexec {exe:?} jq \"$@\"\n")),
+    let exe = format!("{exe:?}{}", emulation.iter().map(|a| format!(" {a}")).collect::<String>());
+    let shims: [(&str, String); 29] = [
+        ("robot", format!("#!/bin/sh\nexec {exe} \"$@\"\n")),
+        ("jq", format!("#!/bin/sh\nexec {exe} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
         // recipe that calls one, and owlmake answers it with its own engine so
         // the refreshed-imports chain needs nothing installed.
-        ("arq", format!("#!/bin/sh\nexec {exe:?} arq \"$@\"\n")),
-        ("sssom", format!("#!/bin/sh\nexec {exe:?} sssom \"$@\"\n")),
+        ("arq", format!("#!/bin/sh\nexec {exe} arq \"$@\"\n")),
+        ("sssom", format!("#!/bin/sh\nexec {exe} sssom \"$@\"\n")),
         // KGX: the `<ont>_nodes.tsv`/`_edges.tsv` release artefacts.
-        ("kgx", format!("#!/bin/sh\nexec {exe:?} kgx \"$@\"\n")),
-        ("dosdp-tools", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
-        ("sssom-cli", format!("#!/bin/sh\nexec {exe:?} sssom transform \"$@\"\n")),
-        ("owltools", format!("#!/bin/sh\nexec {exe:?} owltools \"$@\"\n")),
-        ("sed", format!("#!/bin/sh\nexec {exe:?} sed \"$@\"\n")),
-        ("grep", format!("#!/bin/sh\nexec {exe:?} grep \"$@\"\n")),
-        ("comm", format!("#!/bin/sh\nexec {exe:?} comm \"$@\"\n")),
+        // owlmake itself: a recipe that spells `om …` runs THIS binary, wherever it
+        // is installed and whatever it is called there.
+        ("om", format!("#!/bin/sh\nexec {exe} \"$@\"\n")),
+        // A recipe that recurses (`$(MAKE) …`, or `make …` inside an `if … fi`)
+        // builds the target from this repository's plan: there is no Makefile for
+        // any other `make` to read.
+        ("make", format!("#!/bin/sh\nexec {exe} make \"$@\"\n")),
+        ("kgx", format!("#!/bin/sh\nexec {exe} kgx \"$@\"\n")),
+        ("dosdp-tools", format!("#!/bin/sh\nexec {exe} dosdp \"$@\"\n")),
+        ("sssom-cli", format!("#!/bin/sh\nexec {exe} sssom transform \"$@\"\n")),
+        ("owltools", format!("#!/bin/sh\nexec {exe} owltools \"$@\"\n")),
+        ("sed", format!("#!/bin/sh\nexec {exe} sed \"$@\"\n")),
+        ("grep", format!("#!/bin/sh\nexec {exe} grep \"$@\"\n")),
+        ("comm", format!("#!/bin/sh\nexec {exe} comm \"$@\"\n")),
         // gzip: a release asset is published compressed, and the header a system
         // gzip writes carries the clock — so two builds of one database would
         // differ in their first bytes.
-        ("gzip", format!("#!/bin/sh\nexec {exe:?} gzip \"$@\"\n")),
-        ("gunzip", format!("#!/bin/sh\nexec {exe:?} gunzip \"$@\"\n")),
-        ("zcat", format!("#!/bin/sh\nexec {exe:?} zcat \"$@\"\n")),
+        ("gzip", format!("#!/bin/sh\nexec {exe} gzip \"$@\"\n")),
+        ("gunzip", format!("#!/bin/sh\nexec {exe} gunzip \"$@\"\n")),
+        ("zcat", format!("#!/bin/sh\nexec {exe} zcat \"$@\"\n")),
         // Helper commands a repo's recipes call by name, implemented natively.
         // Nothing else on the box provides them, so without these an `om make
         // test` dies with exit 127 on its first prerequisite.
-        ("dicer-cli", format!("#!/bin/sh\nexec {exe:?} dicer-cli \"$@\"\n")),
-        ("fastobo-validator", format!("#!/bin/sh\nexec {exe:?} fastobo-validator \"$@\"\n")),
-        ("dosdp", format!("#!/bin/sh\nexec {exe:?} dosdp \"$@\"\n")),
-        ("check-rdfxml", format!("#!/bin/sh\nexec {exe:?} check-rdfxml \"$@\"\n")),
+        ("dicer-cli", format!("#!/bin/sh\nexec {exe} dicer-cli \"$@\"\n")),
+        ("fastobo-validator", format!("#!/bin/sh\nexec {exe} fastobo-validator \"$@\"\n")),
+        ("runoak", format!("#!/bin/sh\nexec {exe} runoak \"$@\"\n")),
+        ("dosdp", format!("#!/bin/sh\nexec {exe} dosdp \"$@\"\n")),
+        ("check-rdfxml", format!("#!/bin/sh\nexec {exe} check-rdfxml \"$@\"\n")),
         (
             "simple_pattern_tester.py",
-            format!("#!/bin/sh\nexec {exe:?} simple_pattern_tester.py \"$@\"\n"),
+            format!("#!/bin/sh\nexec {exe} simple_pattern_tester.py \"$@\"\n"),
         ),
-        ("odk-info", format!("#!/bin/sh\nexec {exe:?} odk-info \"$@\"\n")),
-        ("sha256sum", format!("#!/bin/sh\nexec {exe:?} sha256sum \"$@\"\n")),
+        ("odk-info", format!("#!/bin/sh\nexec {exe} odk-info \"$@\"\n")),
+        ("obo-grep.pl", format!("#!/bin/sh\nexec {exe} obo-grep \"$@\"\n")),
+        ("sha256sum", format!("#!/bin/sh\nexec {exe} sha256sum \"$@\"\n")),
         // The ontology SQL database (`semsql make <name>.db`), a release asset
         // for repos that publish one.
-        ("semsql", format!("#!/bin/sh\nexec {exe:?} semsql \"$@\"\n")),
+        ("semsql", format!("#!/bin/sh\nexec {exe} semsql \"$@\"\n")),
+        // Helpers of ODK's own that the standard build's recipes name.
+        ("tsvalid", format!("#!/bin/sh\nexec {exe} tsvalid \"$@\"\n")),
+        ("context2csv", format!("#!/bin/sh\nexec {exe} context2csv \"$@\"\n")),
+        (
+            "make-release-assets.py",
+            format!("#!/bin/sh\nexec {exe} make-release-assets.py \"$@\"\n"),
+        ),
     ];
     for (name, body) in shims {
         let path = dir.join(name);
@@ -1186,8 +1254,14 @@ fn install_shims(exe: &Path) -> std::io::Result<PathBuf> {
 /// the launcher text at command position becomes `<exe>`, and bare `jq`/`sssom`
 /// words become `<exe> jq` / `<exe> sssom`. An explicit path rather than a `PATH`
 /// shim, so a recipe cannot pick up a same-named binary from the environment.
+/// `<exe>` carries this run's emulation (`build::emulation_args`), so what the
+/// line starts writes as the build does.
 pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
-    let exe = exe.display().to_string();
+    let mut exe = exe.display().to_string();
+    for arg in crate::build::emulation_args() {
+        exe.push(' ');
+        exe.push_str(&arg);
+    }
     let mut out = sub.to_string();
     let robot_prefix = robot_prefix.trim();
     if !robot_prefix.is_empty() {
@@ -1238,9 +1312,18 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
     // PATH.
     out = replace_command_word(&out, "dicer-cli", &format!("{exe} dicer-cli"));
     out = replace_command_word(&out, "check-rdfxml", &format!("{exe} check-rdfxml"));
+    out = replace_command_word(&out, "runoak", &format!("{exe} runoak"));
     out = replace_command_word(&out, "odk-info", &format!("{exe} odk-info"));
     out = replace_command_word(&out, "sha256sum", &format!("{exe} sha256sum"));
     out = replace_command_word(&out, "semsql", &format!("{exe} semsql"));
+    // A recursive `make` builds from this repository's plan.
+    out = replace_command_word(&out, "make", &format!("{exe} make"));
+    for tool in ["tsvalid", "context2csv", "make-release-assets.py"] {
+        out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
+    }
+    // A repository's `obo-grep.pl`, called bare or by path (`../scripts/obo-grep.pl`),
+    // is owlmake's own `obo-grep`.
+    out = replace_command_basename(&out, "obo-grep.pl", &format!("{exe} obo-grep"));
     // Recipe `sed`/`grep`/`comm` calls (in pipelines too) route to the in-binary
     // implementations, which accept the script dialect recipes are written in, so
     // builds don't rely on the machine's own text utilities (absent on Windows,
@@ -1249,6 +1332,52 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
         out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
     }
     out
+}
+
+/// Replace every command word whose final path component is `basename` with
+/// `repl`: `obo-grep.pl` and `../scripts/obo-grep.pl` alike, at command
+/// position only.
+fn replace_command_basename(s: &str, basename: &str, repl: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while !rest.is_empty() {
+        let n = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let (tok, tail) = rest.split_at(n);
+        let word = tok.trim_start_matches(['@', '+', '(']);
+        if word.rsplit('/').next() == Some(basename) && at_command_position(s, s.len() - rest.len()) {
+            out.push_str(&tok[..tok.len() - word.len()]);
+            out.push_str(repl);
+        } else {
+            out.push_str(tok);
+        }
+        let m = tail.find(|c: char| !c.is_whitespace()).unwrap_or(tail.len());
+        out.push_str(&tail[..m]);
+        rest = &tail[m..];
+    }
+    out
+}
+
+/// Whether the byte offset `i` of `s` starts a command: the string's start, or
+/// what follows `|`, `;`, `&` or `(` and any whitespace, or a run of leading
+/// `NAME=value` environment assignments after one of those.
+fn at_command_position(s: &str, i: usize) -> bool {
+    let bytes = s.as_bytes();
+    let mut j = i;
+    loop {
+        while j > 0 && bytes[j - 1].is_ascii_whitespace() {
+            j -= 1;
+        }
+        if j == 0 || matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
+            return true;
+        }
+        let end = j;
+        while j > 0 && !bytes[j - 1].is_ascii_whitespace() && !matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
+            j -= 1;
+        }
+        if !is_env_assignment_word(&s[j..end]) {
+            return false;
+        }
+    }
 }
 
 /// Replace `word` with `repl` only where it appears as a command name: at the
@@ -1278,7 +1407,7 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
         let at_cmd_pos = {
             // scan back over whitespace
             let mut j = i;
-            while j > 0 && (bytes[j - 1] as char).is_whitespace() {
+            while j > 0 && bytes[j - 1].is_ascii_whitespace() {
                 j -= 1;
             }
             if j == 0 || matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
@@ -1291,7 +1420,7 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
                 let end = j;
                 let mut k = j;
                 while k > 0
-                    && !(bytes[k - 1] as char).is_whitespace()
+                    && !bytes[k - 1].is_ascii_whitespace()
                     && !matches!(bytes[k - 1], b'|' | b';' | b'&' | b'(')
                 {
                     k -= 1;
@@ -1301,15 +1430,16 @@ fn replace_command_word(s: &str, word: &str, repl: &str) -> String {
         };
         if at_cmd_pos && s[i..].starts_with(word) {
             let after = i + word.len();
-            let boundary = after >= bytes.len() || (bytes[after] as char).is_whitespace();
+            let boundary = after >= bytes.len() || bytes[after].is_ascii_whitespace();
             if boundary {
                 out.push_str(repl);
                 i = after;
                 continue;
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        let c = s[i..].chars().next().expect("i is on a character boundary");
+        out.push(c);
+        i += c.len_utf8();
     }
     out
 }
@@ -1437,9 +1567,25 @@ pub fn has_shell_substitution(s: &str) -> bool {
     s.contains("$(") || s.contains('`')
 }
 
-/// The owlmake binary that runs the bundled tools (cached). Falls back to the
-/// literal name if the current exe can't be resolved.
+/// The owlmake binary a program embedding owlmake has named with
+/// [`run_bundled_tools_as`].
+static BUNDLED_TOOLS_EXE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Run the bundled tools — the `grep`, `sed`, `jq` or `robot` of a recipe or a
+/// `$(shell …)` substitution — as the owlmake binary `exe`. A program that
+/// embeds owlmake without being that binary names it here: a test harness
+/// planning a repository in its own process is one. The first call wins.
+pub fn run_bundled_tools_as(exe: impl Into<PathBuf>) {
+    let _ = BUNDLED_TOOLS_EXE.set(exe.into());
+}
+
+/// The owlmake binary that runs the bundled tools: the one named with
+/// [`run_bundled_tools_as`], else this process. Falls back to the literal name
+/// if the current exe can't be resolved.
 pub fn owlmake_exe() -> PathBuf {
+    if let Some(exe) = BUNDLED_TOOLS_EXE.get() {
+        return exe.clone();
+    }
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("owlmake"))
 }
 
@@ -1458,7 +1604,7 @@ pub fn run_step_command(
 
 /// Invoke the owlmake binary directly with `args` in argv order (no shell, no
 /// redirection), for steps that recorded their tokens rather than a line:
-/// `Jq`, `Sssom`, `CliRobot`.
+/// `Jq`, `Sssom`, `OwlmakeCli`.
 pub fn run_owlmake_args(args: &[String], dir: &Path) -> Result<()> {
     run_tool(&owlmake_exe(), args, dir, &Redirects::default())
 }
@@ -1629,7 +1775,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let first = Path::new(path.split(':').next().unwrap());
-        for tool in ["robot", "jq", "sssom", "sed", "grep", "comm", "dicer-cli", "dosdp", "check-rdfxml", "odk-info", "sha256sum"] {
+        for tool in ["robot", "jq", "sssom", "sed", "grep", "comm", "dicer-cli", "dosdp", "check-rdfxml", "odk-info", "sha256sum", "tsvalid", "context2csv", "make-release-assets.py", "obo-grep.pl"] {
             assert!(first.join(tool).is_file(), "shim dir missing {tool}");
         }
     }
@@ -1652,6 +1798,23 @@ mod robot_prefix_tests {
         assert_eq!(got, "/opt/om --catalog catalog-v001.xml merge -i x.obo -o y.owl");
     }
 
+    /// A command whose text is not ASCII is rewritten around that text and keeps
+    /// it as written: UBERON's check echoes `changes — please normalise`, and the
+    /// second byte of `à` is the byte a no-break space is.
+    #[test]
+    fn a_command_that_is_not_ascii_keeps_its_text() {
+        let exe = std::path::Path::new("/opt/om");
+        let got = super::rewrite_tools(
+            "robot convert -i à.owl && echo \"changes — please normalise\" | jq .",
+            exe,
+            "robot",
+        );
+        assert_eq!(
+            got,
+            "/opt/om convert -i à.owl && echo \"changes — please normalise\" | /opt/om jq ."
+        );
+    }
+
     /// A JVM launcher has no option tail to keep (`-jar` is single-dash).
     #[test]
     fn jvm_launcher_has_no_option_tail() {
@@ -1662,5 +1825,25 @@ mod robot_prefix_tests {
             "java -jar robot.jar",
         );
         assert_eq!(got, "/opt/om merge -i x.obo");
+    }
+}
+
+#[cfg(test)]
+mod command_basename_tests {
+    use super::*;
+
+    /// A script called by path is rewritten at command position only, and in
+    /// every command of a pipeline.
+    #[test]
+    fn a_script_is_rewritten_wherever_it_commands() {
+        let line = "../scripts/obo-grep.pl -r Term x.obo | obo-grep.pl -c -r 'id: ../scripts/obo-grep.pl' - > out";
+        assert_eq!(
+            replace_command_basename(line, "obo-grep.pl", "OM obo-grep"),
+            "OM obo-grep -r Term x.obo | OM obo-grep -c -r 'id: ../scripts/obo-grep.pl' - > out"
+        );
+        assert_eq!(
+            replace_command_basename("X=1 ./obo-grep.pl -r a - && (@obo-grep.pl -c -r b -)", "obo-grep.pl", "OM"),
+            "X=1 OM -r a - && (@OM -c -r b -)"
+        );
     }
 }

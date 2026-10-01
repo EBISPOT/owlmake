@@ -287,6 +287,93 @@ fn template_manchester_and_dsl() {
     let _ = std::fs::remove_file(&owl);
 }
 
+/// Individuals: a `TYPE` cell naming a class makes the row a named individual of
+/// that class (several with `TYPE SPLIT=`), and an `I <prop>` column asserts a
+/// property — to another individual, or to a literal when a row types `<prop>` as
+/// a data property.
+#[test]
+fn template_individual_types_and_property_assertions() {
+    let tmpl = tmp("ind.tsv");
+    std::fs::write(
+        &tmpl,
+        "ID\tLabel\tType\tLocated in\tPopulation\n\
+         ID\tLABEL\tTYPE SPLIT=|\tI EX:located_in\tI 'population' SPLIT=|\n\
+         EX:population\tpopulation\tdata property\t\t\n\
+         EX:europe\tEurope\tEX:Region\t\t\n\
+         EX:austria\tAustria\tEX:Country|EX:Place\tEurope\t9000000^^xsd:integer|about nine million\n",
+    )
+    .unwrap();
+
+    let owl = tmp("ind.ofn");
+    let status = bin()
+        .args(["template", "--template"])
+        .arg(&tmpl)
+        .arg("-o")
+        .arg(&owl)
+        .args(["--format", "ofn"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "template command failed");
+    let text = std::fs::read_to_string(&owl).unwrap();
+    let ex = |local: &str| format!("<http://purl.obolibrary.org/obo/EX_{local}>");
+
+    // The subject is an individual, never a class, and carries each TYPE value.
+    assert!(
+        text.contains(&format!("Declaration(NamedIndividual({}))", ex("austria"))),
+        "expected an individual declaration:\n{text}"
+    );
+    assert!(
+        !text.contains(&format!("Declaration(Class({}))", ex("austria"))),
+        "a row typed by a class is not itself a class:\n{text}"
+    );
+    for class in ["Country", "Place"] {
+        assert!(
+            text.contains(&format!("ClassAssertion({} {})", ex(class), ex("austria"))),
+            "expected a {class} class assertion:\n{text}"
+        );
+    }
+    assert!(
+        text.contains(&format!("ClassAssertion({} {})", ex("Region"), ex("europe"))),
+        "expected a Region class assertion:\n{text}"
+    );
+
+    // `I <prop>` to an individual named by label; the property is never a class.
+    assert!(
+        text.contains(&format!(
+            "ObjectPropertyAssertion({} {} {})",
+            ex("located_in"),
+            ex("austria"),
+            ex("europe")
+        )),
+        "expected an object property assertion:\n{text}"
+    );
+    assert!(
+        !text.contains(&format!("ClassAssertion({}", ex("located_in"))),
+        "the property of an `I <prop>` column is not a type:\n{text}"
+    );
+
+    // `I <prop>` on a data property named by label: typed and plain literals.
+    assert!(
+        text.contains(&format!(
+            "DataPropertyAssertion({} {} \"9000000\"^^xsd:integer)",
+            ex("population"),
+            ex("austria")
+        )),
+        "expected a typed data property assertion:\n{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "DataPropertyAssertion({} {} \"about nine million\")",
+            ex("population"),
+            ex("austria")
+        )),
+        "expected a plain data property assertion:\n{text}"
+    );
+
+    let _ = std::fs::remove_file(&tmpl);
+    let _ = std::fs::remove_file(&owl);
+}
+
 #[test]
 fn explain_finds_justification() {
     // The canonical EL inference; explain must return a non-empty justification.
@@ -952,7 +1039,7 @@ fn odk_checks_the_committed_plan_against_the_build_config() {
     assert!(out.status.success(), "schema command failed");
     let schema_text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        schema_text.contains("artefacts"),
+        schema_text.contains("\"targets\"") && schema_text.contains("use_builtin_rules"),
         "schema output looks wrong:\n{schema_text}"
     );
 
@@ -1106,6 +1193,11 @@ fn seed_then_spec_driven_build() {
     let plan = root.join("owlmake.yaml");
     assert!(plan.exists(), "seed did not write owlmake.yaml");
     let before = std::fs::read_to_string(&plan).unwrap();
+    // The seed asks for the standard build and states nothing it derives.
+    assert!(
+        before.contains("id: foo") && before.contains("edit_format: obo") && !before.contains("targets:"),
+        "the seed should be the repository's options, not a plan spelled out:\n{before}"
+    );
 
     // Provide the edit ontology the seeded plan references.
     std::fs::write(
@@ -1188,12 +1280,13 @@ fn odk_targets_as_commands() {
     )
     .unwrap();
 
-    // An infrastructure-only target owlmake does not run: clear error.
+    // `clean` runs from the repo's own recorded recipe; a repo that defines no
+    // such rule gets the ordinary no-rule error, not a special case.
     let out = bin().current_dir(&ont).arg("clean").output().unwrap();
     assert!(!out.status.success());
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("ODK-infrastructure"),
-        "clean should be rejected clearly: {}",
+        String::from_utf8_lossy(&out.stderr).contains("no rule to make target `clean`"),
+        "a repo with no clean rule should say so: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
@@ -1316,21 +1409,7 @@ fn ogrep_finds_terms_and_their_referrers() {
 }
 
 /// A rule whose recipe merges its own `$<` must produce exactly what `om merge -i`
-/// on that file produces.
-///
-/// The build loads `$<` to start the chain and then reaches the merge op with
-/// `$<` still listed as an input, so the file must not be read a second time.
-/// Axioms and prefixes would survive a double read (both go into sets) but the
-/// blank-node accounting would not: a secondary input contributes its allocation
-/// count to the target's `anon_alloc_base`, so a re-read `$<` adds its own
-/// allocations to its own base and every anonymous individual is numbered — and
-/// therefore ordered — from the wrong origin. Where imports allocate blank nodes
-/// before the edit file's own body is parsed, as they do in EFO, the base is
-/// inflated by the edit file's own allocation count and every anonymous block in
-/// the release is renumbered and reordered.
-///
-/// Equality against the command is the assertion because it needs no hardcoded
-/// ordering: the two routes read the same files and must agree.
+/// on that file produces, and the resulting RDF/XML must be a fixed point.
 #[test]
 fn a_rule_merging_its_own_input_reads_it_once() {
     let root = tmp("merge_self");
@@ -1339,12 +1418,8 @@ fn a_rule_merging_its_own_input_reads_it_once() {
     std::fs::create_dir_all(&ont).unwrap();
     std::fs::create_dir_all(root.join(".git")).unwrap();
 
-    // An import whose anonymous restrictions move the blank-node counter before
-    // the edit file's own body is parsed. Without it every base is 0 and a double
-    // read is invisible — and THREE restrictions, not two, because the fixture only
-    // discriminates if the two bases disagree: with four blocks at base 3 the
-    // order is 3,2,1,0 and at the double-counted base 7 it is 1,3,2,0, whereas
-    // bases 2 and 6 both give 3,2,1,0 and a double read would slip through.
+    // An import with anonymous restrictions exercises the blank-node accounting
+    // around the edit file's own bare anonymous individuals.
     std::fs::write(
         ont.join("imp.owl"),
         r#"<?xml version="1.0"?>
@@ -1470,11 +1545,29 @@ fn a_rule_merging_its_own_input_reads_it_once() {
         "`merge -i $<` in a rule ordered the anonymous individuals differently from \
          `om merge -i` on the same file"
     );
-    // …and not simply in the order they were written, which every base agrees on.
-    assert_ne!(
-        built,
-        order(&std::fs::read_to_string(ont.join("foo-edit.owl")).unwrap()),
-        "fixture is inert: source order already answers, so a wrong base cannot show"
+    // The emitted order must be a fixed point. ROBOT hashes the transient blank-node
+    // ids assigned during each parse, so converting its own output applies the same
+    // permutation again and can cycle forever. owlmake promises deterministic bytes;
+    // a document it has canonicalised once must therefore stay byte-identical when
+    // it is read and written again.
+    let direct_second = root.join("direct-second.owl");
+    let out = bin()
+        .arg("convert")
+        .arg("-i")
+        .arg(&direct)
+        .arg("-o")
+        .arg(&direct_second)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "second conversion failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&direct).unwrap(),
+        std::fs::read(&direct_second).unwrap(),
+        "RDF/XML output changed when owlmake converted its own output"
     );
 
     let _ = std::fs::remove_dir_all(&root);
@@ -1741,6 +1834,58 @@ fn trim_false_keeps_an_annotation_whose_property_is_excluded() {
         .arg(&out2).status().unwrap().success());
     let r2 = std::fs::read_to_string(&out2).unwrap();
     assert!(!r2.contains("\"a label\""), "under --trim true the label goes too:\n{r2}");
+}
+
+/// `remove --select complement --select "classes individual annotation-properties"`
+/// is the cut the `minimal` module type makes: keep the seed, drop every other
+/// class and individual, and bridge the hierarchy across what goes. Only the
+/// object- and annotation-property complements were implemented, so the step
+/// stripped stray annotation properties and left every class of the BOT
+/// extraction in place — COHO's mondo import kept 2,122 classes for a 344-term
+/// seed, and OLS showed hundreds of leaf diseases no cohort refers to. ODK
+/// writes the singular `individual` for a product of the repository's own, so
+/// that spelling must select too.
+#[test]
+fn class_complement_cuts_a_minimal_module_to_its_seed() {
+    let inp = tmp("minimalmod.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://x.org/>)\n\
+         Ontology(<http://x.org/m>\n\
+         Declaration(Class(<http://x.org/Seed>))\n\
+         Declaration(Class(<http://x.org/Mid>))\n\
+         Declaration(Class(<http://x.org/Top>))\n\
+         Declaration(Class(<http://x.org/Stray>))\n\
+         Declaration(NamedIndividual(<http://x.org/i1>))\n\
+         Declaration(NamedIndividual(<http://x.org/i2>))\n\
+         SubClassOf(<http://x.org/Seed> <http://x.org/Mid>)\n\
+         SubClassOf(<http://x.org/Mid> <http://x.org/Top>)\n\
+         SubClassOf(<http://x.org/Stray> <http://x.org/Top>)\n\
+         ClassAssertion(<http://x.org/Stray> <http://x.org/i1>)\n\
+         ClassAssertion(<http://x.org/Seed> <http://x.org/i2>)\n\
+         AnnotationAssertion(rdfs:label <http://x.org/Seed> \"seed\")\n\
+         AnnotationAssertion(rdfs:label <http://x.org/Stray> \"stray\")\n\
+         )\n",
+    )
+    .unwrap();
+    let out = tmp("minimalmod-o.ofn");
+    assert!(bin().args(["remove", "-i"]).arg(&inp)
+        .args(["--term", "rdfs:label",
+               "--term", "http://x.org/Seed", "--term", "http://x.org/Top",
+               "--term", "http://x.org/i2",
+               "--select", "complement",
+               "--select", "classes individual annotation-properties", "-o"])
+        .arg(&out).status().unwrap().success());
+    let r = std::fs::read_to_string(&out).unwrap();
+    assert!(r.contains("\"seed\""), "the seed keeps its annotations:\n{r}");
+    assert!(!r.contains("Stray"), "a class outside the seed goes:\n{r}");
+    assert!(!r.contains("/Mid"), "so does an intermediate above the seed:\n{r}");
+    assert!(!r.contains("/i1"), "an individual outside the seed goes:\n{r}");
+    assert!(r.contains("<http://x.org/i2>"), "a seeded individual stays:\n{r}");
+    assert!(
+        r.contains("SubClassOf(<http://x.org/Seed> <http://x.org/Top>)"),
+        "the hierarchy bridges across the removed intermediate:\n{r}"
+    );
 }
 
 /// `filter --axioms <types>` selects axioms BY TYPE, and a declaration is a type
@@ -2354,13 +2499,16 @@ fn a_recipe_that_names_its_own_input_does_not_also_read_the_first_prerequisite()
     assert_eq!(input, "src/ontology/components/a.ofn", "plan entry:\n{entry}");
 }
 
-/// owlmake's own OFN cache is named for the target it stands in for — the cache
-/// for `x.owl` is `x.owl.ofn` — and only it carries the `#…` state markers. A
-/// `.ofn` a REPO names as a target has no such second extension, and gets the
-/// bytes the repo's own recipe would write, wherever it lives. uPheno's
-/// `$(SRCMERGED)` is `tmp/merged-upheno-edit.ofn`.
+/// An `.ofn` document is byte-clean wherever it is written: the state a cache
+/// carries about the document it stands in for lives in a companion beside it,
+/// never in the document's own bytes.
+///
+/// The companion is written only for owlmake's own cache, which is named for the
+/// target it stands in for — the cache for `x.owl` is `x.owl.ofn`. A `.ofn` a
+/// REPO names as a target has no such second extension and gets no companion,
+/// wherever it lives: uPheno's `$(SRCMERGED)` is `tmp/merged-upheno-edit.ofn`.
 #[test]
-fn a_repo_named_ofn_target_carries_no_cache_markers() {
+fn an_ofn_cache_keeps_its_state_in_a_companion() {
     let dir = tmp("ofn_markers");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("tmp")).unwrap();
@@ -2392,7 +2540,7 @@ fn a_repo_named_ofn_target_carries_no_cache_markers() {
         std::fs::read_to_string(out).unwrap()
     };
 
-    // The repo's own target: no marker, whatever directory it is in.
+    // The repo's own target: its own content, and no companion at all.
     let target = dir.join("tmp/merged-src.ofn");
     let text = convert(&target);
     assert!(
@@ -2400,13 +2548,990 @@ fn a_repo_named_ofn_target_carries_no_cache_markers() {
         "a repo-named .ofn target must start with its own content:\n{}",
         text.lines().next().unwrap_or("")
     );
+    assert!(
+        !dir.join("tmp/.omcache/merged-src.ofn.omcache").exists(),
+        "a repo-named .ofn target is not a cache and gets no companion"
+    );
 
-    // owlmake's cache for `src.owl`: markers are its whole point.
+    // owlmake's cache for `src.owl`: the document is just as clean, and the
+    // source's xmlns is carried beside it, keyed to the bytes it describes.
     let cache = dir.join("tmp/src.owl.ofn");
     let text = convert(&cache);
     assert!(
-        text.starts_with("#rdfxmlns "),
-        "the cache should carry the source's xmlns:\n{}",
+        !text.starts_with('#'),
+        "a cache document carries no markers of its own:\n{}",
         text.lines().next().unwrap_or("")
     );
+    let companion = std::fs::read_to_string(dir.join("tmp/.omcache/src.owl.ofn.omcache"))
+        .expect("the cache should have a companion");
+    assert!(
+        companion.contains("\n#rdfxmlns "),
+        "the companion should carry the source's xmlns:\n{companion}"
+    );
+    assert!(
+        companion.contains(&format!("#doc {}:", text.len())),
+        "the companion should name the bytes it describes:\n{companion}"
+    );
+}
+
+/// A `SELECT` with no `ORDER BY` still has an order: the one the graph answers the
+/// pattern in. An arbitrary-length path drives it — the rows walk out from the
+/// path's object — and a `FILTER (?p IN (…))` is answered one alternative at a
+/// time, so the rows come out grouped by alternative in the order the list names
+/// them. `NOT IN` enumerates nothing and leaves the order alone.
+#[test]
+fn a_path_and_an_in_list_fix_the_row_order() {
+    let inp = tmp("alp.ofn");
+    let mut o = String::from(
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://x.org/o>\n\
+         Declaration(Class(<http://x.org/ROOT>))\n\
+         AnnotationAssertion(rdfs:label <http://x.org/ROOT> \"root\")\n",
+    );
+    // A chain, so a walk from the root has only one order it can produce.
+    for i in 0..6 {
+        let me = format!("http://x.org/C{i}");
+        let parent = if i == 0 { "http://x.org/ROOT".to_string() } else { format!("http://x.org/C{}", i - 1) };
+        o.push_str(&format!("Declaration(Class(<{me}>))\n"));
+        o.push_str(&format!("SubClassOf(<{me}> <{parent}>)\n"));
+        o.push_str(&format!("AnnotationAssertion(rdfs:label <{me}> \"l{i}\")\n"));
+        o.push_str(&format!(
+            "AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <{me}> \"s{i}\")\n"
+        ));
+    }
+    o.push_str(")\n");
+    std::fs::write(&inp, o).unwrap();
+
+    let q = tmp("alp.sparql");
+    std::fs::write(
+        &q,
+        "prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\
+         prefix oio: <http://www.geneontology.org/formats/oboInOwl#>\n\
+         SELECT ?s ?p ?l WHERE { ?s rdfs:subClassOf* <http://x.org/ROOT> . ?s ?p ?l .\n\
+         FILTER ( ?p IN (rdfs:label, oio:hasExactSynonym)) }\n",
+    )
+    .unwrap();
+    let out = tmp("alp.csv");
+    assert!(bin().args(["query", "-f", "csv", "-i"]).arg(&inp).args(["--query"]).arg(&q).arg(&out)
+        .status().unwrap().success());
+    let csv = std::fs::read_to_string(&out).unwrap();
+    let preds: Vec<&str> = csv.lines().skip(1).map(|l| l.split(',').nth(1).unwrap()).collect();
+    let labels = preds.iter().filter(|p| p.ends_with("#label")).count();
+    // Grouped by alternative, in the order the list names them: every label first.
+    assert_eq!(labels, 7, "one label per class:\n{csv}");
+    assert!(
+        preds[..labels].iter().all(|p| p.ends_with("#label"))
+            && preds[labels..].iter().all(|p| p.ends_with("hasExactSynonym")),
+        "rows group by the IN list's order:\n{csv}"
+    );
+    // The walk starts at the path's object and descends the chain.
+    let subs: Vec<&str> = csv.lines().skip(1).take(labels).map(|l| l.split(',').next().unwrap()).collect();
+    assert_eq!(subs[0], "http://x.org/ROOT", "the walk starts at the object:\n{csv}");
+    assert_eq!(subs[1], "http://x.org/C0", "then its own reachers:\n{csv}");
+
+    // `NOT IN` names no alternatives to answer one after another.
+    let qn = tmp("alp-not.sparql");
+    std::fs::write(
+        &qn,
+        "prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\
+         prefix oio: <http://www.geneontology.org/formats/oboInOwl#>\n\
+         SELECT ?s ?p ?l WHERE { ?s rdfs:subClassOf* <http://x.org/ROOT> . ?s ?p ?l .\n\
+         FILTER ( ?p NOT IN (oio:hasExactSynonym)) }\n",
+    )
+    .unwrap();
+    let outn = tmp("alp-not.csv");
+    assert!(bin().args(["query", "-f", "csv", "-i"]).arg(&inp).args(["--query"]).arg(&qn).arg(&outn)
+        .status().unwrap().success());
+    let csvn = std::fs::read_to_string(&outn).unwrap();
+    assert!(!csvn.contains("hasExactSynonym"), "NOT IN excludes:\n{csvn}");
+}
+
+/// The import-closure shape behind EBISPOT/owlmake#2, in two documents: a
+/// Plant-Ontology-like module carrying the hierarchy, a genus-differentia
+/// definition of `Perianth` and the transitive `part_of`, and a root that
+/// imports it and adds EFO's cyclic `part_of` definition, the bridging
+/// existentials, and one OBO-style id (`…/efo/EFO_0000998`) under a namespace
+/// the root binds as `efo:` and no context binds as `EFO`. Returns the root's
+/// path; the catalog sits beside it.
+fn plant_import_fixture(name: &str) -> std::path::PathBuf {
+    let dir = tmp(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("root.ofn"),
+        "Prefix(:=<http://x.org/root#>)\n\
+         Prefix(po:=<http://x.org/po#>)\n\
+         Prefix(efo:=<http://x.org/efo/>)\n\
+         Ontology(<http://x.org/root>\n\
+         Import(<http://x.org/po>)\n\
+         Declaration(Class(:ReproSystem))\n\
+         Declaration(Class(:LeafComponent))\n\
+         Declaration(Class(efo:EFO_0000998))\n\
+         Declaration(ObjectProperty(po:part_of))\n\
+         EquivalentClasses(:ReproSystem ObjectIntersectionOf(po:Structure ObjectSomeValuesFrom(po:part_of :ReproSystem)))\n\
+         EquivalentClasses(:LeafComponent ObjectIntersectionOf(po:Structure ObjectSomeValuesFrom(po:part_of po:Leaf)))\n\
+         SubClassOf(po:Flower ObjectSomeValuesFrom(po:part_of :ReproSystem))\n\
+         SubClassOf(po:Stoma ObjectSomeValuesFrom(po:part_of po:Leaf))\n\
+         SubClassOf(efo:EFO_0000998 po:Structure)\n\
+         )\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("po.ofn"),
+        "Prefix(po:=<http://x.org/po#>)\n\
+         Ontology(<http://x.org/po>\n\
+         Declaration(Class(po:Structure))\n\
+         Declaration(Class(po:Organ))\n\
+         Declaration(Class(po:Tissue))\n\
+         Declaration(Class(po:Flower))\n\
+         Declaration(Class(po:Perianth))\n\
+         Declaration(Class(po:Tepal))\n\
+         Declaration(Class(po:Leaf))\n\
+         Declaration(Class(po:Stoma))\n\
+         Declaration(ObjectProperty(po:part_of))\n\
+         TransitiveObjectProperty(po:part_of)\n\
+         SubClassOf(po:Tepal po:Perianth)\n\
+         EquivalentClasses(po:Perianth ObjectIntersectionOf(po:Organ ObjectSomeValuesFrom(po:part_of po:Flower)))\n\
+         SubClassOf(po:Perianth po:Organ)\n\
+         SubClassOf(po:Organ po:Structure)\n\
+         SubClassOf(po:Flower po:Structure)\n\
+         SubClassOf(po:Stoma po:Tissue)\n\
+         SubClassOf(po:Tissue po:Structure)\n\
+         SubClassOf(po:Leaf po:Structure)\n\
+         )\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://x.org/po\" uri=\"po.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    dir.join("root.ofn")
+}
+
+/// Does `text` state `SubClassOf(sub sup)`, whichever way the writer spelt the
+/// two fixture namespaces (`po:X` / `:X` or the full IRI)?
+fn plant_edge(text: &str, sub: &str, sup: &str) -> bool {
+    let forms = |t: &str| -> Vec<String> {
+        match t.split_once(':') {
+            Some(("po", l)) => vec![format!("po:{l}"), format!("<http://x.org/po#{l}>")],
+            Some(("", l)) => vec![format!(":{l}"), format!("<http://x.org/root#{l}>")],
+            _ => vec![t.to_string()],
+        }
+    };
+    forms(sub)
+        .iter()
+        .any(|s| forms(sup).iter().any(|p| text.contains(&format!("SubClassOf({s} {p})"))))
+}
+
+/// Both classifications the issue reported missing hold, and `explain` derives
+/// them through the catalog under the EL engine and under hermit-rs — saying on
+/// stderr which reasoner decided when it is not the EL engine.
+#[test]
+fn explain_derives_the_imported_plant_shape_under_elk_and_hermit() {
+    let root = plant_import_fixture("plant-explain");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    for reasoner in ["elk", "hermit"] {
+        for (sub, sup) in [
+            ("po:Tepal", "http://x.org/root#ReproSystem"),
+            ("po:Stoma", "http://x.org/root#LeafComponent"),
+        ] {
+            let out = bin()
+                .args(["explain", "-i"])
+                .arg(&root)
+                .arg("--catalog")
+                .arg(&catalog)
+                .args(["--sub", sub, "--sup", sup, "-r", reasoner])
+                .output()
+                .unwrap();
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{reasoner} {sub} ⊑ {sup}: {err}");
+            let text = String::from_utf8_lossy(&out.stdout);
+            assert!(text.contains("1 justification(s)"), "{reasoner} {sub}: {text}");
+            if sub == "po:Tepal" {
+                assert!(
+                    text.contains("TransitiveObjectProperty"),
+                    "the chain through the flower is part of the justification:\n{text}"
+                );
+            }
+            assert_eq!(
+                reasoner == "hermit",
+                err.contains("decided by hermit-rs"),
+                "{reasoner}: the deciding backend must be named exactly when it is not the EL engine:\n{err}"
+            );
+        }
+    }
+}
+
+/// A query term that names no class is an error about the query, never a
+/// verdict about the ontology. `EFO:0000998` against a document that binds
+/// `efo:` — and an OBO context that binds no `EFO` — used to reach the reasoner
+/// as an unknown IRI and come back "not entailed" (EBISPOT/owlmake#2).
+#[test]
+fn explain_rejects_a_term_that_names_no_class_instead_of_calling_it_unentailed() {
+    let root = plant_import_fixture("plant-unbound");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let run = |sub: &str, sup: &str| {
+        let out = bin()
+            .args(["explain", "-i"])
+            .arg(&root)
+            .arg("--catalog")
+            .arg(&catalog)
+            .args(["--sub", sub, "--sup", sup])
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+
+    // An unbound prefix, with the class it almost certainly meant named.
+    let (ok, err) = run("po:Tepal", "EFO:0000998");
+    assert!(!ok, "an unexpanded CURIE must fail:\n{err}");
+    assert!(!err.contains("not entailed"), "not a verdict on the ontology:\n{err}");
+    assert!(
+        err.contains("`EFO:0000998` did not expand")
+            && err.contains("<http://x.org/efo/EFO_0000998>")
+            && err.contains("--prefix \"EFO: http://x.org/efo/EFO_\""),
+        "{err}"
+    );
+
+    // An unbound prefix with nothing to suggest.
+    let (ok, err) = run("ZZQ:Tepal", "http://x.org/root#ReproSystem");
+    assert!(!ok && err.contains("prefix `ZZQ` is bound neither") && !err.contains("not entailed"), "{err}");
+
+    // A bound prefix whose expansion the ontology never uses as a class.
+    let (ok, err) = run("po:Petal", "http://x.org/root#ReproSystem");
+    assert!(!ok && err.contains("<http://x.org/po#Petal> is not a class in the ontology"), "{err}");
+
+    // The document's own spelling of the same term works.
+    let (ok, err) = run("po:Tepal", "efo:EFO_0000998");
+    assert!(!ok && err.contains("is not entailed"), "a real class that is not a superclass:\n{err}");
+}
+
+/// `explain` validates `--reasoner` as `reason` does: a misspelt backend is an
+/// error, not a quiet EL run reporting a verdict the requested reasoner never gave.
+#[test]
+fn explain_rejects_an_unknown_reasoner() {
+    let root = plant_import_fixture("plant-reasoner");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let out = bin()
+        .args(["explain", "-i"])
+        .arg(&root)
+        .arg("--catalog")
+        .arg(&catalog)
+        .args(["--sub", "po:Tepal", "--sup", "http://x.org/root#ReproSystem", "-r", "hermitt"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("unknown reasoner 'hermitt'"), "{err}");
+}
+
+/// `--create-new-ontology` writes a NEW ontology of inferences. An inferred
+/// direct parent that the import also asserts is an inference all the same and
+/// stays in it, as in ROBOT (`--exclude-duplicate-axioms` is the switch that
+/// drops it); the import declaration is kept, as ROBOT keeps it. The processed
+/// root, by contrast, hands back the root: what the import lent is not written
+/// into it. And `--include-indirect` needs redundancy removal switched off to
+/// keep its indirect edges, exactly as it does in ROBOT.
+#[test]
+fn a_fresh_reasoned_ontology_keeps_an_inference_the_import_also_asserts() {
+    let root = plant_import_fixture("plant-fresh");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let reason = |name: &str, extra: &[&str]| -> String {
+        let out = tmp(name);
+        let st = bin()
+            .args(["reason", "-i"])
+            .arg(&root)
+            .arg("--catalog")
+            .arg(&catalog)
+            .args(extra)
+            .args(["-f", "ofn", "-o"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(st.status.success(), "{name}: {}", String::from_utf8_lossy(&st.stderr));
+        std::fs::read_to_string(&out).unwrap()
+    };
+
+    let fresh = reason("plant-fresh-out.ofn", &["--create-new-ontology", "true"]);
+    assert!(
+        plant_edge(&fresh, "po:Tepal", "po:Perianth"),
+        "Tepal ⊑ Perianth is an inferred direct parent even though the import asserts it:\n{fresh}"
+    );
+    // Perianth is itself a ReproSystem, so that is the direct derived edge;
+    // Tepal reaches ReproSystem through it (see the indirect run below).
+    assert!(plant_edge(&fresh, "po:Perianth", ":ReproSystem"), "{fresh}");
+    assert!(plant_edge(&fresh, "po:Stoma", ":LeafComponent"), "{fresh}");
+    assert!(
+        fresh.contains("Import(<http://x.org/po>)"),
+        "a fresh reasoned ontology still declares the root's imports:\n{fresh}"
+    );
+    assert!(
+        !fresh.contains("Declaration(Class(po:Tepal))") && !fresh.contains("TransitiveObjectProperty"),
+        "only inferences, none of the import's own axioms:\n{fresh}"
+    );
+
+    let indirect = reason(
+        "plant-fresh-indirect.ofn",
+        &[
+            "--create-new-ontology",
+            "true",
+            "--include-indirect",
+            "true",
+            "--remove-redundant-subclass-axioms",
+            "false",
+        ],
+    );
+    assert!(plant_edge(&indirect, "po:Tepal", ":ReproSystem"), "{indirect}");
+    assert!(plant_edge(&indirect, "po:Tepal", "po:Structure"), "{indirect}");
+    assert!(plant_edge(&indirect, "po:Tepal", "po:Organ"), "{indirect}");
+
+    let processed = reason("plant-root-out.ofn", &[]);
+    assert!(plant_edge(&processed, "po:Perianth", ":ReproSystem"), "{processed}");
+    assert!(
+        !plant_edge(&processed, "po:Tepal", "po:Perianth"),
+        "the processed root does not carry what its import lent:\n{processed}"
+    );
+    assert!(processed.contains("Import(<http://x.org/po>)"), "{processed}");
+}
+
+/// A `.gz` path is a gzipped file of the format named inside the suffix:
+/// `x.owl.gz` is gzipped RDF/XML, `x.ofn.gz` gzipped functional syntax. Both
+/// directions, so a repository can commit a module GitHub would refuse as plain
+/// text (EFO's untrimmed OBA module: 106 MB, or 2 MB gzipped).
+#[test]
+fn gzipped_ontologies_round_trip() {
+    let a = tmp("gz_a.ofn");
+    std::fs::write(
+        &a,
+        "Prefix(:=<http://ex/>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\nOntology(<http://ex/o.owl>\nDeclaration(Class(:Gz))\nAnnotationAssertion(rdfs:label :Gz \"gzipped class\")\n)\n",
+    )
+    .unwrap();
+    for (mid, back) in [("gz_b.owl.gz", "gz_c.ofn"), ("gz_d.ofn.gz", "gz_e.ofn")] {
+        let m = tmp(mid);
+        let out = bin().args(["convert", "-i"]).arg(&a).arg("-o").arg(&m).output().unwrap();
+        assert!(out.status.success(), "convert to {mid} failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        let bytes = std::fs::read(&m).unwrap();
+        assert!(bytes.starts_with(&[0x1f, 0x8b]), "{mid} must start with the gzip magic");
+        let b = tmp(back);
+        let out = bin().args(["convert", "-i"]).arg(&m).arg("-o").arg(&b).output().unwrap();
+        assert!(out.status.success(), "convert from {mid} failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        let text = std::fs::read_to_string(&b).unwrap();
+        assert!(text.contains("http://ex/Gz") && text.contains("gzipped class"), "round trip through {mid} lost content:\n{text}");
+    }
+}
+
+/// An `owl:imports` the catalog maps to a `.gz` module loads like any other —
+/// the OWL API does the same, so a gzipped module works in Protégé and ROBOT too.
+#[test]
+fn a_catalog_import_may_be_gzipped() {
+    let dir = tmp("gzcat");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let module_ofn = dir.join("mod.ofn");
+    std::fs::write(
+        &module_ofn,
+        "Prefix(:=<http://ex/mod/>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\nOntology(<http://ex/imports/mod_import.owl>\nDeclaration(Class(:M1))\nAnnotationAssertion(rdfs:label :M1 \"module class\")\n)\n",
+    )
+    .unwrap();
+    let module_gz = dir.join("mod_import.owl.gz");
+    assert!(bin().args(["convert", "-i"]).arg(&module_ofn).arg("-o").arg(&module_gz).status().unwrap().success());
+    std::fs::write(
+        dir.join("edit.ofn"),
+        "Prefix(:=<http://ex/edit/>)\nOntology(<http://ex/edit.owl>\nImport(<http://ex/imports/mod_import.owl>)\nDeclaration(Class(:E1))\nSubClassOf(:E1 <http://ex/mod/M1>)\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n  <uri name=\"http://ex/imports/mod_import.owl\" uri=\"mod_import.owl.gz\"/>\n</catalog>\n",
+    )
+    .unwrap();
+    let out_path = dir.join("merged.ofn");
+    let out = bin()
+        .args(["merge", "--catalog"]).arg(dir.join("catalog-v001.xml")).arg("-i").arg(dir.join("edit.ofn")).arg("-o").arg(&out_path)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merge through a gzipped import failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let merged = std::fs::read_to_string(&out_path).unwrap();
+    assert!(merged.contains("module class"), "the gzipped module's content did not reach the merge:\n{merged}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The reasoner that decides an entailment is the reasoner that justifies it.
+///
+/// `:A` here is unsatisfiable only through a cardinality clash — an axiom shape
+/// the EL engine does not see — so under `-r hermit` the class must both be
+/// FOUND unsatisfiable and be explained. Deciding with hermit-rs and minimizing
+/// with EL reports the ontology coherent and returns nothing, which is what the
+/// `elk` half of this test shows.
+#[test]
+fn explain_justifies_a_non_el_unsatisfiability_with_the_reasoner_that_decided_it() {
+    let ont = tmp("cardinality-clash.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         Declaration(Class(:A))\n\
+         Declaration(ObjectProperty(:r))\n\
+         SubClassOf(:A ObjectMinCardinality(2 :r))\n\
+         SubClassOf(:A ObjectMaxCardinality(1 :r))\n\
+         )\n",
+    )
+    .unwrap();
+
+    let run = |reasoner: &str| {
+        let out = bin()
+            .args(["explain", "-i"])
+            .arg(&ont)
+            .args(["-M", "unsatisfiability", "-r", reasoner])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{reasoner}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+
+    let hermit = run("hermit");
+    assert!(
+        hermit.contains("1 justification(s)") && hermit.contains("http://example.org/A"),
+        "hermit must explain the class it found unsatisfiable:\n{hermit}"
+    );
+    assert!(
+        hermit.contains("ObjectMinCardinality") && hermit.contains("ObjectMaxCardinality"),
+        "the justification is the clashing pair:\n{hermit}"
+    );
+
+    // The EL engine cannot see the clash at all, so there is nothing to explain.
+    assert_eq!(run("elk"), "No explanations found.");
+
+    let _ = std::fs::remove_file(&ont);
+}
+
+/// The justification search is bounded by the size of the justification's
+/// neighbourhood, not by the size of the module around it: it grows a set
+/// outward from the terms of the entailment until it entails, and minimizes
+/// that. Both halves are measured here — how many entailment tests the search
+/// asks, and how big the largest ontology it classified was. Contracting the
+/// module itself instead costs one classification of the whole module per axiom
+/// in it, which is hours on a module the size of a real import closure.
+#[test]
+fn explain_does_not_test_every_axiom_of_the_module() {
+    // `:X ⊑ :A`, `:X ⊑ :B` and `DisjointClasses(:A :B)` make `:X` unsatisfiable
+    // in three axioms; the 8,000 others are pulled into the ⊥-module by hanging
+    // off `:A`, and none of them is part of any justification.
+    const N: usize = 4000;
+    let mut text = String::from("Prefix(:=<http://example.org/>)\nOntology(\n");
+    text.push_str("SubClassOf(:X :A)\nSubClassOf(:X :B)\nDisjointClasses(:A :B)\n");
+    for i in 0..N {
+        text.push_str(&format!("SubClassOf(:A ObjectSomeValuesFrom(:p :F{i}))\n"));
+        text.push_str(&format!("SubClassOf(:F{i} :G{i})\n"));
+    }
+    text.push_str(")\n");
+    let ont = tmp("wide-module.ofn");
+    std::fs::write(&ont, text).unwrap();
+
+    let out = bin()
+        .args(["explain", "-i"])
+        .arg(&ont)
+        .args(["-M", "unsatisfiability"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("1 justification(s)") && report.contains("DisjointClasses"),
+        "the three-axiom justification must be found:\n{report}"
+    );
+
+    // The status line carries all three numbers.
+    let line = err
+        .lines()
+        .find(|l| l.contains("entailment tests"))
+        .unwrap_or_else(|| panic!("no search-cost status line:\n{err}"));
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let num = |marker: &str, offset: isize| -> usize {
+        let i = words.iter().position(|w| *w == marker).unwrap_or_else(|| panic!("{marker}: {line}"));
+        words[(i as isize + offset) as usize]
+            .trim_matches(|c: char| !c.is_ascii_digit())
+            .parse()
+            .unwrap_or_else(|_| panic!("{marker}: {line}"))
+    };
+    let (tests, widest, candidates) = (num("entailment", -1), num("widest", 1), num("over", 1));
+    assert!(candidates > 2 * N, "the module must be wide: {line}");
+    assert!(tests * 10 < candidates, "the search must not walk the module: {line}");
+    assert!(
+        widest * 10 < candidates,
+        "the search must not classify the module: {line}"
+    );
+
+    let _ = std::fs::remove_file(&ont);
+}
+
+/// `-o /dev/null` is a discard, not a document: a command run for its verdict
+/// writes nothing and does not need a format to infer.
+#[cfg(unix)]
+#[test]
+fn output_to_dev_null_is_a_discard() {
+    let ont = tmp("discard.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:B :C)\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin()
+        .args(["reason", "-i"])
+        .arg(&ont)
+        .args(["-r", "elk", "-o", "/dev/null"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(!err.contains("cannot infer ontology format"), "{err}");
+    let _ = std::fs::remove_file(&ont);
+}
+
+/// `check-align`: a class is aligned when the reasoner puts it under a class of
+/// the upper ontology. An unaligned class takes its ancestors with it; an obsolete
+/// class is never checked; `--detail` picks which of them the report lists; and
+/// any unaligned class fails the command unless `--fail false`. The expected
+/// reports are the ones the `odk:check-align` plugin (0.3.1) writes for the same
+/// input.
+#[test]
+fn check_align_reports_unaligned_classes() {
+    let upper = tmp("align-upper.ofn");
+    std::fs::write(
+        &upper,
+        "Prefix(:=<http://example.org/upper/>)\n\
+         Ontology(<http://example.org/upper.owl>\n\
+         Declaration(Class(:U1))\nDeclaration(Class(:U2))\nSubClassOf(:U2 :U1)\n)\n",
+    )
+    .unwrap();
+    let ont = tmp("align.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/t/T_>)\n\
+         Prefix(o:=<http://example.org/other/O_>)\n\
+         Prefix(u:=<http://example.org/upper/>)\n\
+         Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+         Ontology(<http://example.org/t.owl>\n\
+         Declaration(Class(:A))\nDeclaration(Class(:B))\nDeclaration(Class(:C))\nDeclaration(Class(:D))\n\
+         Declaration(Class(:E))\nDeclaration(Class(:F))\nDeclaration(Class(:G))\nDeclaration(Class(o:H))\n\
+         Declaration(Class(:I))\nDeclaration(ObjectProperty(:r))\n\
+         SubClassOf(:A u:U1)\nSubClassOf(:B :A)\n\
+         AnnotationAssertion(rdfs:label :C \"unaligned root\")\n\
+         SubClassOf(:D :C)\nSubClassOf(:D ObjectSomeValuesFrom(:r :G))\n\
+         EquivalentClasses(:E u:U2)\n\
+         AnnotationAssertion(owl:deprecated :F \"true\"^^xsd:boolean)\n\
+         SubClassOf(o:H :C)\nSubClassOf(:I o:H)\n)\n",
+    )
+    .unwrap();
+    let report = tmp("align-report.txt");
+    let run = |extra: &[&str]| {
+        let _ = std::fs::remove_file(&report);
+        let out = bin()
+            .args(["check-align", "-i"])
+            .arg(&ont)
+            .arg("-u")
+            .arg(&upper)
+            .arg("--report-output")
+            .arg(&report)
+            .args(extra)
+            .output()
+            .unwrap();
+        (out.status.success(), std::fs::read_to_string(&report).unwrap_or_default())
+    };
+    let t = |n: &str| format!("http://example.org/t/T_{n}\n");
+
+    // By default only the classes with nothing above them: C heads the unaligned
+    // branch, G is only ever mentioned. F is obsolete, E sits under U1 through U2.
+    let (ok, said) = run(&[]);
+    assert!(!ok, "an unaligned class fails the command");
+    assert_eq!(said, format!("{}{}", t("C"), t("G")));
+
+    // Every unaligned class, the out-of-base one included.
+    let (_, said) = run(&["--detail", "all"]);
+    assert_eq!(
+        said,
+        format!("http://example.org/other/O_H\n{}{}{}{}", t("C"), t("D"), t("G"), t("I"))
+    );
+
+    // A class nothing is said about is skipped on request.
+    let (_, said) = run(&["--detail", "all", "--ignore-dangling", "true"]);
+    assert!(!said.contains("T_G") && said.contains("T_C"), "{said}");
+
+    // Reported, not failed.
+    let (ok, said) = run(&["--fail", "false"]);
+    assert!(ok && said == format!("{}{}", t("C"), t("G")), "{said}");
+
+    for f in [&upper, &ont, &report] {
+        let _ = std::fs::remove_file(f);
+    }
+}
+
+/// `sssom:inject --create --direct` — a mapping set exported as an ontology, in
+/// the recipe ODK builds a mappings component with. The expected files are what
+/// ROBOT 1.9.7 with the sssom plugin (1.10.0) writes for the same command: one set
+/// read as SSSOM 1.0, where `predicate_type` is not a slot and decides nothing,
+/// and one declaring 1.1, with every enumerated value and propagated set slots.
+#[test]
+fn sssom_inject_exports_a_mapping_set() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sssom-export");
+    for version in ["v1.0", "v1.1"] {
+        let written = tmp(&format!("sssom-export-{version}.ofn"));
+        let out = bin()
+            .args(["--add-prefix", "sssom: https://w3id.org/sssom/"])
+            .args(["--add-prefix", "semapv: http://w3id.org/semapv/vocab/"])
+            .args(["sssom:inject", "--sssom"])
+            .arg(fixtures.join(format!("{version}.sssom.tsv")))
+            .args(["--create", "--direct", "annotate"])
+            .args(["--ontology-iri", "http://purl.obolibrary.org/obo/x/components/m.owl"])
+            .args(["--version-iri", "http://purl.obolibrary.org/obo/x/releases/2026-09-21/components/m.owl"])
+            .args(["convert", "-f", "ofn", "--output"])
+            .arg(&written)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&written).unwrap(),
+            std::fs::read_to_string(fixtures.join(format!("{version}.ofn"))).unwrap(),
+            "{version}"
+        );
+    }
+}
+
+/// A prefix ADDED on the command line is declared by an ontology built from
+/// nothing, used or not; one given with `--prefix` only reads CURIEs. As ROBOT
+/// 1.9.7 writes them.
+#[test]
+fn an_added_prefix_is_declared_by_a_new_ontology() {
+    let table = tmp("added-prefix.tsv");
+    std::fs::write(&table, "ID\tLabel\nID\tA rdfs:label\nzz:A\ta\n").unwrap();
+    let run = |option: &str, format: &str| {
+        let written = tmp(&format!("added-prefix{option}.{format}"));
+        let out = bin()
+            .args([option, "zz: http://example.org/", "template", "--template"])
+            .arg(&table)
+            .arg("-o")
+            .arg(&written)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        std::fs::read_to_string(&written).unwrap()
+    };
+    let added = run("--add-prefix", "ofn");
+    assert!(added.contains("Prefix(zz:=<http://example.org/>)"), "{added}");
+    assert!(added.contains("Declaration(Class(zz:A))"), "{added}");
+    assert!(run("--add-prefix", "owl").contains("xmlns:zz=\"http://example.org/\""));
+    let read_only = run("--prefix", "ofn");
+    assert!(!read_only.contains("Prefix(zz:"), "{read_only}");
+    assert!(read_only.contains("Declaration(Class(<http://example.org/A>))"), "{read_only}");
+}
+
+/// `tsvalid` — the table lint the standard build runs. The expected findings
+/// are what the Python tool (0.0.5) prints for the same file: on standard error,
+/// in a logger's format, failing nothing unless `--fail` is given.
+#[test]
+fn tsvalid_lints_a_table_as_the_tool_does() {
+    let table = tmp("tsvalid-bad.tsv");
+    std::fs::write(&table, "# comment\na\tb\tb\n 1\t2 \t3\n\n4\t5\r\n6\t7\t\u{e9}").unwrap();
+    let name = table.display().to_string();
+    let out = bin().arg("tsvalid").arg(&table).args(["--comment", "#", "--summary"]).output().unwrap();
+    assert!(out.status.success());
+    let expected: String = [
+        (2, 0, "ERROR", "E10", "Header row has duplicate values, line 2."),
+        (3, 1, "ERROR", "E2", "Redundant leading whitespace in column 1 at line number 3."),
+        (3, 2, "ERROR", "E3", "Redundant trailing whitespace in column 2 at line number 3."),
+        (4, 0, "ERROR", "E4", "Number of tabs in line 4 does not match tabs in header."),
+        (5, 0, "ERROR", "E4", "Number of tabs in line 5 does not match tabs in header."),
+        (5, 0, "ERROR", "E1", "Invalid line break in line 5."),
+        (4, 0, "ERROR", "E5", "Empty line 4."),
+        (6, 3, "WARNING", "W1", "Non ASCII character in column 3 at line number 6."),
+        (5, 0, "ERROR", "E9", "Last row in file should be empty."),
+    ]
+    .iter()
+    .map(|(line, column, level, code, text)| format!("{level}:root:{name}:{line}:{column}: {code}: {text}\n"))
+    .collect();
+    assert_eq!(String::from_utf8_lossy(&out.stderr), expected);
+    let summary = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(summary.starts_with("\n##### TSValid Summary #####\n\nError: duplicate Value In Header Row\n * count: 1\n * error_code: E10\n"), "{summary}");
+    assert!(summary.contains("\nError: number Of Tabs Check\n * count: 2\n * error_code: E4\n"), "{summary}");
+
+    // Skipped by code or by pattern; and `--fail` stops at the first finding.
+    let out = bin().arg("tsvalid").arg(&table).args(["--comment", "#", "--skip", "E.*"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stderr).lines().count(), 1);
+    let out = bin().arg("tsvalid").arg(&table).args(["--comment", "#", "--fail"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(err.lines().count(), 2, "{err}");
+    assert!(err.contains("tsvalid: Validation failed: {'line_number': 2, 'column': 0, "), "{err}");
+}
+
+/// `context2csv` — a JSON-LD context as the prefix table the SQL export reads.
+#[test]
+fn context2csv_writes_the_prefix_table() {
+    use std::io::Write as _;
+    let mut child = bin()
+        .arg("context2csv")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"@context": {"obo": "http://purl.obolibrary.org/obo/", "EX": "http://example.org/EX_"}}"#)
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "prefix,base\nobo,http://purl.obolibrary.org/obo/\nEX,http://example.org/EX_\n"
+    );
+}
+
+/// `make-release-assets.py` — against a stand-in for GitHub's API, which records
+/// what it is asked: an existing release and an existing asset are both replaced
+/// under `--create --force`, and the file goes to the release's upload address.
+#[test]
+fn release_assets_are_uploaded_to_a_release() {
+    use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let mut asked: Vec<String> = Vec::new();
+        for stream in listener.incoming().take(7) {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            reader.read_line(&mut request).unwrap();
+            let (mut length, mut token) = (0usize, String::new());
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                let header = header.trim();
+                if header.is_empty() {
+                    break;
+                }
+                let (name, value) = header.split_once(':').unwrap();
+                match name.to_ascii_lowercase().as_str() {
+                    "content-length" => length = value.trim().parse().unwrap(),
+                    "authorization" => token = value.trim().to_string(),
+                    _ => {}
+                }
+            }
+            let mut body = vec![0u8; length];
+            reader.read_exact(&mut body).unwrap();
+            let request = request.trim().trim_end_matches(" HTTP/1.1").to_string();
+            assert_eq!(token, "token SECRET", "{request}");
+            let answer = match request.as_str() {
+                "GET /repos/org/repo/releases?per_page=100&page=1" => r#"[{"id": 7, "tag_name": "v1"}]"#.to_string(),
+                "POST /repos/org/repo/releases" => r#"{"id": 8}"#.to_string(),
+                "GET /repos/org/repo/releases/tags/v1" => format!(
+                    r#"{{"id": 8, "upload_url": "http://127.0.0.1:{port}/upload/8/assets{{?name,label}}"}}"#
+                ),
+                "GET /repos/org/repo/releases/8/assets?per_page=100&page=1" => {
+                    r#"[{"id": 3, "name": "x.owl", "size": 10, "download_count": 2}]"#.to_string()
+                }
+                "POST /upload/8/assets?name=x.owl&label=" => format!(r#"{{"name": "x.owl", "size": {length}}}"#),
+                _ => String::new(),
+            };
+            asked.push(format!("{request} [{length}]"));
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                answer.len()
+            )
+            .unwrap();
+        }
+        asked
+    });
+
+    let file = tmp("release-assets").join("x.owl");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "<rdf/>").unwrap();
+    let out = bin()
+        .args(["make-release-assets.py", "--api-url", &format!("http://127.0.0.1:{port}"), "-t", "SECRET", "-r", "org/repo", "--release", "v1", "-c", "-f"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let path = file.display();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("Existing assets:\nAsset: x.owl Size: 10 Downloads: 2\nUploading: {path}\nUploaded: x.owl 6 from {path}\n")
+    );
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "GET /repos/org/repo/releases?per_page=100&page=1 [0]",
+            "DELETE /repos/org/repo/releases/7 [0]",
+            "POST /repos/org/repo/releases [72]",
+            "GET /repos/org/repo/releases/tags/v1 [0]",
+            "GET /repos/org/repo/releases/8/assets?per_page=100&page=1 [0]",
+            "DELETE /repos/org/repo/releases/assets/3 [0]",
+            "POST /upload/8/assets?name=x.owl&label= [6]",
+        ]
+    );
+}
+
+/// `reason --axiom-generators PropertyAssertion` asserts the entailed object
+/// property assertions between individuals; with `--reasoner hermit` that
+/// includes the inverse of an asserted assertion.
+#[test]
+fn reason_property_assertion_generator() {
+    let inp = tmp("pa.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://ex/>)\nOntology(\n\
+         Declaration(ObjectProperty(:hasSubCohort))\nDeclaration(ObjectProperty(:isSubCohortOf))\n\
+         Declaration(NamedIndividual(:twingene))\nDeclaration(NamedIndividual(:registry))\n\
+         InverseObjectProperties(:hasSubCohort :isSubCohortOf)\n\
+         ObjectPropertyAssertion(:isSubCohortOf :twingene :registry)\n)\n",
+    )
+    .unwrap();
+    let out = tmp("pa-out.ofn");
+    let status = bin()
+        .args(["reason", "--reasoner", "hermit", "--axiom-generators", "PropertyAssertion"])
+        .args(["--annotate-inferred-axioms", "true", "--exclude-duplicate-axioms", "true"])
+        .arg("-i").arg(&inp).arg("-o").arg(&out).args(["--format", "ofn"])
+        .status()
+        .unwrap();
+    assert!(status.success(), "reason failed");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        text.contains(
+            "ObjectPropertyAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> \"true\") \
+             <http://ex/hasSubCohort> <http://ex/registry> <http://ex/twingene>)"
+        ),
+        "the inverse assertion is asserted and marked inferred:\n{text}"
+    );
+    assert_eq!(
+        text.matches("ObjectPropertyAssertion(").count(),
+        2,
+        "the asserted assertion is not duplicated:\n{text}"
+    );
+}
+
+/// `reason --reasoner hermit` on an inconsistent ontology fails with the
+/// inconsistency error, as it does under the EL reasoner: never with a panic.
+#[test]
+fn reason_hermit_reports_inconsistency_as_an_error() {
+    let inp = tmp("inconsistent.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://ex/>)\nOntology(\nDeclaration(Class(:A))\nDeclaration(NamedIndividual(:a))\n\
+         SubClassOf(:A owl:Nothing)\nClassAssertion(:A :a)\n)\n",
+    )
+    .unwrap();
+    let out = tmp("inconsistent-out.ofn");
+    let output = bin()
+        .args(["reason", "--reasoner", "hermit", "-i"]).arg(&inp).arg("-o").arg(&out)
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "an inconsistent ontology fails reason");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ontology is inconsistent"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+/// `reason --properties` restricts the `PropertyAssertion` generator to the
+/// named object properties, given as CURIEs of the ontology's own prefixes.
+#[test]
+fn reason_property_assertions_restricted_to_named_properties() {
+    let inp = tmp("pa-props.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://ex/>)\nOntology(\n\
+         Declaration(ObjectProperty(:hasSubCohort))\nDeclaration(ObjectProperty(:isSubCohortOf))\n\
+         Declaration(ObjectProperty(:partOf))\n\
+         Declaration(NamedIndividual(:a))\nDeclaration(NamedIndividual(:b))\nDeclaration(NamedIndividual(:c))\n\
+         InverseObjectProperties(:hasSubCohort :isSubCohortOf)\n\
+         TransitiveObjectProperty(:partOf)\n\
+         ObjectPropertyAssertion(:isSubCohortOf :a :b)\n\
+         ObjectPropertyAssertion(:partOf :a :b)\nObjectPropertyAssertion(:partOf :b :c)\n)\n",
+    )
+    .unwrap();
+    let run = |properties: &str| {
+        let out = tmp(&format!("pa-props-out-{}.ofn", properties.len()));
+        let status = bin()
+            .args(["reason", "--reasoner", "hermit", "--axiom-generators", "PropertyAssertion"])
+            .args(["--exclude-duplicate-axioms", "true", "--properties", properties])
+            .arg("-i").arg(&inp).arg("-o").arg(&out).args(["--format", "ofn"])
+            .status()
+            .unwrap();
+        assert!(status.success(), "reason failed");
+        std::fs::read_to_string(&out).unwrap()
+    };
+    let text = run(":hasSubCohort");
+    assert!(
+        text.contains("ObjectPropertyAssertion(<http://ex/hasSubCohort> <http://ex/b> <http://ex/a>)"),
+        "the listed property's inverse assertion is asserted:\n{text}"
+    );
+    assert!(
+        !text.contains("ObjectPropertyAssertion(<http://ex/partOf> <http://ex/a> <http://ex/c>)"),
+        "the transitive closure of an unlisted property is not:\n{text}"
+    );
+    let text = run(":partOf,:hasSubCohort");
+    assert!(
+        text.contains("ObjectPropertyAssertion(<http://ex/partOf> <http://ex/a> <http://ex/c>)")
+            && text.contains("ObjectPropertyAssertion(<http://ex/hasSubCohort> <http://ex/b> <http://ex/a>)"),
+        "both listed properties' inferences are asserted:\n{text}"
+    );
+}
+
+/// `owltools … --list-cycles -f`: the asserted graph's cycles are listed and
+/// counted, and a count above zero fails the command. `A ⊑ B ⊑ part_of some A`
+/// puts A, B and the restriction in one cycle — three for each of A and B.
+#[test]
+fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
+    let cyclic = tmp("cycles.ofn");
+    std::fs::write(
+        &cyclic,
+        "Prefix(:=<http://x.org/>)\n\
+         Ontology(<http://x.org/o>\n\
+         Declaration(Class(:A))\n\
+         Declaration(Class(:B))\n\
+         Declaration(ObjectProperty(:part_of))\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:B ObjectSomeValuesFrom(:part_of :A))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin().args(["owltools", cyclic.to_str().unwrap(), "--list-cycles", "-f"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "a cycle must fail the check:\n{text}");
+    assert!(text.ends_with("Number of cycles: 6\n"), "{text}");
+    assert!(
+        text.contains("http://x.org/B in-cycle-with http://x.org/A // via [http://x.org/part_of some]"),
+        "{text}"
+    );
+
+    // Without `-f` the same cycles are listed, and the command succeeds.
+    let out = bin().args(["owltools", cyclic.to_str().unwrap(), "--list-cycles"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+
+    // An acyclic graph has none.
+    let acyclic = tmp("nocycles.ofn");
+    std::fs::write(
+        &acyclic,
+        "Prefix(:=<http://x.org/>)\n\
+         Ontology(<http://x.org/o>\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:B ObjectSomeValuesFrom(:part_of :C))\n\
+         EquivalentClasses(:C ObjectIntersectionOf(:A ObjectSomeValuesFrom(:part_of :B)))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin().args(["owltools", acyclic.to_str().unwrap(), "--list-cycles", "-f"]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "Number of cycles: 0\n");
+    assert_eq!(out.status.code(), Some(0));
 }

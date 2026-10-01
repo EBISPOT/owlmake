@@ -27,9 +27,14 @@ pub struct CommonArgs {
     #[arg(short = 'P', long = "prefixes", value_name = "FILE")]
     pub prefixes: Option<std::path::PathBuf>,
 
-    /// Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`;
-    /// repeatable). The `-p` short is bound per-command, where it is free.
-    #[arg(long = "prefix", visible_alias = "add-prefix", value_name = "PREFIX")]
+    /// Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p`
+    /// short is bound per-command, where it is free.
+    #[arg(long = "prefix", value_name = "PREFIX")]
+    pub prefix: Vec<String>,
+
+    /// Bind a prefix as `--prefix` does, and declare it in the output as well
+    /// (repeatable).
+    #[arg(long = "add-prefix", value_name = "PREFIX")]
     pub add_prefix: Vec<String>,
 
     /// Add prefixes from a JSON-LD context file (repeatable).
@@ -99,6 +104,39 @@ impl CommonArgs {
         resolve_imports_auto(model, None, input)
     }
 
+    /// The prefixes this command line supplies, in the order given: those of each
+    /// `--prefixes`/`--add-prefixes` context file (both JSON-LD forms, a bare
+    /// namespace string and `{"@id": …, "@prefix": true}`), then each
+    /// `--prefix "name: iri"`. The flag says whether one came from a file.
+    pub fn given_prefixes(&self) -> Result<Vec<(String, String, bool)>> {
+        let mut out = Vec::new();
+        for file in self.prefixes.iter().chain(self.add_prefixes.iter()) {
+            let text = std::fs::read_to_string(file)
+                .with_context(|| format!("reading prefixes file {}", file.display()))?;
+            let json: serde_json::Value = serde_json::from_str(&text)
+                .with_context(|| format!("parsing prefixes JSON {}", file.display()))?;
+            let ctx = json.get("@context").unwrap_or(&json);
+            for (k, v) in ctx.as_object().into_iter().flatten() {
+                let ns = v.as_str().or_else(|| v.get("@id").and_then(|x| x.as_str()));
+                if let Some(ns) = ns {
+                    out.push((k.clone(), ns.to_string(), true));
+                }
+            }
+        }
+        for spec in self.prefix.iter().chain(&self.add_prefix) {
+            let (name, ns) = Self::binding(spec)?;
+            out.push((name, ns, false));
+        }
+        Ok(out)
+    }
+
+    fn binding(spec: &str) -> Result<(String, String)> {
+        let (name, ns) = spec
+            .split_once(':')
+            .with_context(|| format!("bad --prefix (want \"name: iri\"): {spec}"))?;
+        Ok((name.trim().to_string(), ns.trim().to_string()))
+    }
+
     /// Apply prefix-affecting options to a freshly loaded model: they land after
     /// loading, on top of the document's own prefixes (`--noprefixes` clears the
     /// built-in defaults first).
@@ -106,34 +144,29 @@ impl CommonArgs {
         if self.noprefixes {
             model.prefixes = PrefixMapping::default();
         }
-        for file in self.prefixes.iter().chain(self.add_prefixes.iter()) {
-            let text = std::fs::read_to_string(file)
-                .with_context(|| format!("reading prefixes file {}", file.display()))?;
-            let json: serde_json::Value = serde_json::from_str(&text)
-                .with_context(|| format!("parsing prefixes JSON {}", file.display()))?;
-            let ctx = json.get("@context").unwrap_or(&json);
-            if let Some(map) = ctx.as_object() {
-                for (k, v) in map {
-                    // JSON-LD context values are either a bare namespace string or a
-                    // `{"@id": "...", "@prefix": true}` object (mondo's config uses
-                    // both forms).
-                    let ns = v.as_str().or_else(|| v.get("@id").and_then(|x| x.as_str()));
-                    if let Some(ns) = ns {
-                        let _ = model.prefixes.add_prefix(k, ns);
-                        // Track explicitly-provided prefixes so the OBO writer emits
-                        // an `idspace:` for each — regardless of use.
-                        if !model.explicit_prefixes.iter().any(|(p, _)| p == k) {
-                            model.explicit_prefixes.push((k.clone(), ns.to_string()));
-                        }
-                    }
-                }
+        for (name, ns, from_file) in self.given_prefixes()? {
+            let _ = model.prefixes.add_prefix(&name, &ns);
+            // A prefix from a context FILE gets an `idspace:` line in OBO output
+            // whether or not it shortens anything, so those are kept apart.
+            if from_file && !model.explicit_prefixes.iter().any(|(p, _)| *p == name) {
+                model.explicit_prefixes.push((name, ns));
             }
         }
+        // An ADDED prefix is declared by whatever is written next, used or not,
+        // even by an ontology built from nothing, which declares no other. A
+        // `--prefix` is for reading CURIEs only.
+        let mut added = Vec::new();
+        for file in &self.add_prefixes {
+            let only = CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
+            added.extend(only.given_prefixes()?.into_iter().map(|(name, ns, _)| (name, ns)));
+        }
         for spec in &self.add_prefix {
-            let (name, ns) = spec
-                .split_once(':')
-                .with_context(|| format!("bad --add-prefix (want \"name: iri\"): {spec}"))?;
-            let _ = model.prefixes.add_prefix(name.trim(), ns.trim());
+            added.push(Self::binding(spec)?);
+        }
+        for (name, ns) in added {
+            if !model.built_prefixes.iter().any(|(p, _)| *p == name) {
+                model.built_prefixes.push((name, ns));
+            }
         }
         Ok(())
     }
@@ -244,12 +277,12 @@ pub(crate) fn closure_labels(input: Option<&std::path::Path>, common: &crate::cm
 /// horned-owl's serializers. That is workable only because each of them is
 /// established at the START of a run — latched from the command line by
 /// [`CommonArgs::activate`], or set from the plan by
-/// `build::set_robot_behaviours` — and this is the point at which "the start of a
-/// run" is defined.
+/// `build::set_robot_behaviours` (in a process a build starts, from the
+/// arguments it is started with) — and this is the point at which "the start of
+/// a run" is defined.
 pub fn reset_invocation_options() {
     crate::io::set_run_options(crate::io::RunOptions::default());
-    crate::io::obograph::set_nest_axiom_anns(false);
-    crate::cmd::query::set_update_keeps_prefixes(true);
+    crate::build::set_emulation(None);
 }
 
 /// Resolve an output format from an explicit `--format` name, else the output
@@ -265,6 +298,19 @@ pub fn resolve_format(format: Option<&str>, output: &Path) -> Result<Format> {
 /// chain steps simply pass the model along).
 pub fn maybe_save(model: &mut Model, output: Option<&Path>, format: Option<&str>) -> Result<()> {
     if let Some(out) = output {
+        // A discard path writes nothing: the caller ran the command for its
+        // verdict, not its document. The `--format` name is still validated —
+        // throwing the output away is not a reason to accept a format that does
+        // not exist.
+        if io::is_discard_path(out) {
+            if let Some(name) = format {
+                Format::from_name(name)?;
+            }
+            if crate::progress::verbosity() >= 1 {
+                status!("discarding output ({}): {} axioms", out.display(), model.ont.iter().count());
+            }
+            return Ok(());
+        }
         // Write the ROOT ontology. A command works over the whole inlined
         // closure, so the two halves of that inlining are undone together here:
         // the axioms the imports contributed come back out, and the
@@ -278,38 +324,7 @@ pub fn maybe_save(model: &mut Model, output: Option<&Path>, format: Option<&str>
         // (`merge`, `extract`, `subset`) has called
         // `Model::detach_import_closure`, which empties both records, so nothing
         // below applies to it.
-        if !model.imported_components.is_empty() {
-            use horned_owl::model::MutableOntology;
-            let doomed: Vec<_> = model
-                .ont
-                .iter()
-                .filter(|ac| model.imported_components.contains(*ac))
-                .cloned()
-                .collect();
-            for ac in doomed {
-                model.ont.remove(&ac);
-            }
-        }
-        if !model.inlined_imports.is_empty() {
-            use horned_owl::model::{Component, MutableOntology};
-            let existing: std::collections::HashSet<String> = model
-                .ont
-                .iter()
-                .filter_map(|ac| match &ac.component {
-                    Component::Import(i) => Some(i.0.to_string()),
-                    _ => None,
-                })
-                .collect();
-            let iris: Vec<String> = model.inlined_imports.clone();
-            let new: Vec<horned_owl::model::Import<_>> = iris
-                .into_iter()
-                .filter(|iri| !existing.contains(iri))
-                .map(|iri| horned_owl::model::Import(model.build.iri(iri)))
-                .collect();
-            for imp in new {
-                model.ont.insert(imp);
-            }
-        }
+        restore_root_for_save(model);
         let fmt = resolve_format(format, out)?;
         if crate::progress::verbosity() >= 1 {
             status!("saving {}: {} axioms", out.display(), model.ont.iter().count());
@@ -317,6 +332,47 @@ pub fn maybe_save(model: &mut Model, output: Option<&Path>, format: Option<&str>
         io::save_as(model, out, fmt)?;
     }
     Ok(())
+}
+
+/// Undo closure inlining for a save that writes the ROOT ontology: the axioms
+/// the imports contributed come back out of the component set, and the
+/// `owl:imports` declarations that stand for them go back in. Every save of a
+/// closure-inlined model that is NOT itself a collapse (`merge`, `extract`,
+/// `subset` call [`Model::detach_import_closure`] instead) goes through this —
+/// [`maybe_save`], and the owltools emulation's own `-o` save.
+pub(crate) fn restore_root_for_save(model: &mut Model) {
+    if !model.imported_components.is_empty() {
+        use horned_owl::model::MutableOntology;
+        let doomed: Vec<_> = model
+            .ont
+            .iter()
+            .filter(|ac| model.imported_components.contains(*ac))
+            .cloned()
+            .collect();
+        for ac in doomed {
+            model.ont.remove(&ac);
+        }
+    }
+    if !model.inlined_imports.is_empty() {
+        use horned_owl::model::{Component, MutableOntology};
+        let existing: std::collections::HashSet<String> = model
+            .ont
+            .iter()
+            .filter_map(|ac| match &ac.component {
+                Component::Import(i) => Some(i.0.to_string()),
+                _ => None,
+            })
+            .collect();
+        let iris: Vec<String> = model.inlined_imports.clone();
+        let new: Vec<horned_owl::model::Import<_>> = iris
+            .into_iter()
+            .filter(|iri| !existing.contains(iri))
+            .map(|iri| horned_owl::model::Import(model.build.iri(iri)))
+            .collect();
+        for imp in new {
+            model.ont.insert(imp);
+        }
+    }
 }
 
 /// Resolve `model`'s `owl:imports` through the XML `catalog`, merge the whole
@@ -364,7 +420,7 @@ pub(crate) fn resolve_import_closure(
         if !seen.insert(iri.clone()) {
             continue;
         }
-        let path = map.get(&iri).cloned().or_else(|| default_local(&iri, base));
+        let path = catalog_resolve(map, &iri).or_else(|| default_local(&iri, base));
         // …and dedupe on the DOCUMENT too, not only on the name that reached it.
         // Two import IRIs a catalog maps to one file must be parsed once and
         // advance the blank-node counter once. Keyed on the IRI alone, the same
@@ -694,18 +750,55 @@ fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::
     let text = std::fs::read_to_string(path)?;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut map = std::collections::BTreeMap::new();
+    // `<rewriteURI uriStartString="IRI-PREFIX" rewritePrefix="PATH-PREFIX"/>`:
+    // every IRI under the prefix maps to the path under the other, which is how
+    // one catalog line covers a directory of import shards.
+    for frag in text.split("<rewriteURI").skip(1) {
+        let tag = frag.split('>').next().unwrap_or(frag);
+        if let (Some(start), Some(prefix)) = (attr(tag, "uriStartString"), attr(tag, "rewritePrefix")) {
+            let prefix = crate::build::percent_decode(&prefix);
+            let p = std::path::Path::new(&prefix);
+            let resolved = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
+            map.insert(format!("{CATALOG_REWRITE_KEY}{start}"), resolved);
+        }
+    }
     for frag in text.split("<uri").skip(1) {
         let tag = frag.split('>').next().unwrap_or(frag);
         let (name, uri) = match (attr(tag, "name"), attr(tag, "uri")) {
             (Some(n), Some(u)) => (n, u),
             _ => continue,
         };
-        let uri = percent_decode(&uri);
+        let uri = crate::build::percent_decode(&uri);
         let p = std::path::Path::new(&uri);
         let resolved = if p.is_absolute() { p.to_path_buf() } else { dir.join(p) };
         map.insert(name, resolved);
     }
     Ok(map)
+}
+
+/// Marker prefix under which a catalog map carries its `rewriteURI` rules: the
+/// key is the marker plus the IRI prefix, the value the path prefix. Exact
+/// `<uri>` entries are plain keys, and [`catalog_resolve`] consults both.
+pub(crate) const CATALOG_REWRITE_KEY: &str = "\u{2}rewriteURI\u{2}";
+
+/// Resolve an import IRI against a catalog map: an exact `<uri>` entry first,
+/// else the longest `rewriteURI` prefix that matches, with the rest of the IRI
+/// appended to its path prefix.
+pub(crate) fn catalog_resolve(
+    map: &std::collections::BTreeMap<String, std::path::PathBuf>,
+    iri: &str,
+) -> Option<std::path::PathBuf> {
+    if let Some(p) = map.get(iri) {
+        return Some(p.clone());
+    }
+    map.iter()
+        .filter_map(|(k, v)| {
+            let start = k.strip_prefix(CATALOG_REWRITE_KEY)?;
+            let rest = iri.strip_prefix(start)?;
+            Some((start.len(), format!("{}{}", v.display(), rest)))
+        })
+        .max_by_key(|(n, _)| *n)
+        .map(|(_, p)| std::path::PathBuf::from(p))
 }
 
 /// Fallback for an import with no catalog entry: a sibling file named after the
@@ -728,25 +821,6 @@ fn attr(frag: &str, key: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// Decode `%XX` percent-escapes in a catalog `uri` (other bytes untouched).
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 3 <= b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v as char);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i] as char);
-        i += 1;
-    }
-    out
-}
-
 pub mod annotate;
 pub mod babelon;
 pub mod babelon_tsv;
@@ -756,7 +830,9 @@ pub mod collapse;
 // (`<ont>-idranges.owl`) and DOSDP-pattern validation, RDF/XML parseability of
 // each product, the build's tool inventory, and checksums. See each module's
 // header for what it checks.
+pub mod check_align;
 pub mod check_rdfxml;
+pub mod context2csv;
 pub mod pattern_tester;
 pub mod config_check;
 pub mod convert;
@@ -777,6 +853,8 @@ pub mod embeddings;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod map;
 pub mod fastobo_validator;
+pub mod runoak;
+pub mod runoak_diff;
 pub mod extract_strings;
 pub mod extract_upheno_relations;
 pub mod text_tagger;
@@ -789,6 +867,7 @@ pub mod materialize;
 pub mod measure;
 pub mod normalize;
 pub mod ogrep;
+pub mod obo_grep;
 pub mod merge;
 pub mod merge_equivalent_sets;
 pub mod merge_species;
@@ -815,11 +894,37 @@ pub mod select;
 // same reason `crate::semsql` is: SQLite's C has no wasm target.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod semsql;
+// `make-release-assets.py` talks to GitHub, and there is no HTTP client on wasm.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod release_assets;
 pub mod subset;
 pub mod template;
+pub mod tsvalid;
 pub mod ubergraph;
 pub mod unmerge;
 pub mod validate_id_ranges;
 pub mod validate_patterns;
 pub mod validate_profile;
 pub mod verify;
+
+#[cfg(test)]
+mod catalog_tests {
+    /// A catalog's escapes are bytes of UTF-8: `caf%C3%A9_import.owl` names
+    /// `café_import.owl`.
+    #[test]
+    fn a_catalog_uri_decodes_to_the_file_it_names() {
+        let dir = std::env::temp_dir().join(format!("om-catalog-uri-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let catalog = dir.join("catalog-v001.xml");
+        std::fs::write(
+            &catalog,
+            "<catalog xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+             <uri name=\"http://example.org/cafe.owl\" uri=\"imports/caf%C3%A9_import.owl\"/>\n\
+             </catalog>\n",
+        )
+        .unwrap();
+        let map = super::parse_catalog(&catalog).unwrap();
+        assert_eq!(map["http://example.org/cafe.owl"], dir.join("imports/café_import.owl"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

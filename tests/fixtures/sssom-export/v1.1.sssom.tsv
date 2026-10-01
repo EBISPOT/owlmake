@@ -1,0 +1,21 @@
+#curie_map:
+#  EX: http://example.org/EX_
+#  OT: http://example.org/OT_
+#mapping_set_id: https://example.org/m5
+#license: https://creativecommons.org/publicdomain/zero/1.0/
+#sssom_version: "1.1"
+#mapping_set_confidence: 0.8
+#mapping_tool: tool
+#similarity_measure: cosine
+subject_id	predicate_id	object_id	mapping_justification	subject_type	predicate_modifier	mapping_cardinality	record_id	object_label
+EX:0	skos:exactMatch	OT:0	semapv:LexicalMatching	owl class	Not		EX:rec0	
+EX:1	skos:exactMatch	OT:1	semapv:LexicalMatching	owl object property			EX:rec1	
+EX:2	skos:exactMatch	OT:2	semapv:LexicalMatching	owl data property			EX:rec2	
+EX:3	skos:exactMatch	OT:3	semapv:LexicalMatching	owl annotation property			EX:rec3	
+EX:4	skos:exactMatch	OT:4	semapv:LexicalMatching	owl named individual			EX:rec4	
+EX:5	skos:exactMatch	OT:5	semapv:LexicalMatching	skos concept			EX:rec5	
+EX:6	skos:exactMatch	OT:6	semapv:LexicalMatching	rdfs resource			EX:rec6	
+EX:7	skos:exactMatch	OT:7	semapv:LexicalMatching	rdfs class			EX:rec7	
+EX:9	skos:exactMatch	OT:9	semapv:LexicalMatching	rdfs datatype			EX:rec9	
+EX:10	skos:exactMatch	OT:10	semapv:LexicalMatching	rdf property			EX:rec10	
+EX:11	skos:exactMatch	OT:11	semapv:LexicalMatching	composed entity expression			EX:rec11	

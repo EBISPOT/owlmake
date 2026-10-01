@@ -51,14 +51,14 @@ const OBO_EPM_PRE_1_9_9: &str = include_str!("obo.epm.1.9.8.json");
 const OBO_EPM: &str = include_str!("obo.epm.json");
 
 /// Which of the two maps is in hand. Resolved at ingest, recorded as
-/// `Plan::emulate_robot_version`, and set ONCE by `build::set_robot_behaviours` —
-/// the plan is its only writer, as it is for the other version-dependent
-/// switches. There is deliberately no environment override: it decides bytes.
+/// `Plan::emulate_robot_version`, and set by `build::set_emulation` — the plan is
+/// its only writer, as it is for the other version-dependent switches. There is
+/// deliberately no environment override: it decides bytes.
 static EPM_POST_1_9_9: AtomicBool = AtomicBool::new(true);
 
-/// Select the map for the version being emulated — see the static above.
-pub fn set_obo_epm(emulate_robot_version: (u32, u32, u32)) {
-    EPM_POST_1_9_9.store(emulate_robot_version >= (1, 9, 9), Ordering::Relaxed);
+/// Select the map of 1.9.9 and later, or the one before — see the static above.
+pub fn set_obo_epm(post_1_9_9: bool) {
+    EPM_POST_1_9_9.store(post_1_9_9, Ordering::Relaxed);
 }
 
 pub fn obo_epm() -> &'static str {

@@ -111,7 +111,19 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             // recipe (so per-import excludes / renames / extra seed terms are
             // captured faithfully); fall back to the canonical BOT/make-base
             // pipeline synthesized from the product's flags.
-            let steps = import_pipeline(repo, p, &obobase);
+            // An import the repository records as built its own way is taken as
+            // written, as a recorded target is.
+            if let Some(own) = repo.own_imports().iter().find(|i| i.id == p.id && !i.extends) {
+                let merged_cached =
+                    use_base_merging && repo.dir.join("imports/merged_import.owl").exists();
+                imports.push(own.clone().into_plan(&repo.dir, merged_cached));
+                continue;
+            }
+            let mut steps = import_pipeline(repo, p, &obobase);
+            // One that only `extends` appends its steps to that standard pipeline.
+            if let Some(own) = repo.own_imports().iter().find(|i| i.id == p.id && i.extends) {
+                steps.extend(own.steps.clone().into_iter().map(crate::spec::StepEntry::into_step));
+            }
             imports.push(ImportPlan {
                 id: p.id.clone(),
                 source,
@@ -126,14 +138,417 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
             });
         }
     }
+    let own = own_mirrors(repo, &imports, merged_cached);
+    imports.extend(own);
     let merged_import = use_base_merging.then(|| "imports/merged_import.owl".to_string());
 
     let components: Vec<String> = declared_components(repo);
 
     // --- Release artefacts -------------------------------------------------
     // Candidate targets: each release artefact `<id>-<art>.owl`, the primary
-    // `<id>.owl`, and the configured export formats of the primary.
+    // `<id>.owl`, and the configured export formats of the primary — the
+    // conventions of the standard build, which a build of the repository's own
+    // has none of: its file says which of its targets are artefacts.
     let mut candidates: Vec<String> = Vec::new();
+    if !repo.own_build() {
+        conventional_candidates(repo, make, &id, &mut candidates);
+    }
+    for t in repo.own_targets().iter().filter(|t| t.artefact) {
+        if !candidates.contains(&t.target) {
+            candidates.push(t.target.clone());
+        }
+    }
+    // Every candidate with a rule is planned; `only` selects afterwards, over
+    // the planned artefacts and what each of them needs.
+    let mut targets: Vec<(String, bool)> = candidates.into_iter().map(|t| (t, true)).collect();
+
+    // A named target that is not a release product but has a rule of its own is
+    // an on-path intermediate — `tmp/<id>-preprocess.owl`, `components/<x>.owl`,
+    // MONDO's `reasoned.owl`. The plan records those (the walk below adds them
+    // for a full release), so they can be NAMED; naming one on its own has to
+    // plan it, or a target the plan carries could not be run.
+    for o in only {
+        if !targets.iter().any(|(t, _)| t == o) && make.rule_for(o).is_some() {
+            targets.push((o.clone(), true));
+        }
+    }
+
+    // Transitively pull in intermediate targets referenced as a pipeline input
+    // (`$<`) that have their own Makefile rule — e.g. MONDO's `reasoned.owl` (the
+    // merge→reason→relax→reduce product the primary `mondo.owl` is built from), or
+    // ECTO's `<id>-full.owl`. They are not release artefacts themselves but must
+    // be built before whatever consumes them, and their coverage gaps block the
+    // release just the same. The walk stops at source files (no rule).
+    {
+        use std::collections::{HashSet, VecDeque};
+        let mut seen: HashSet<String> = targets.iter().map(|(t, _)| t.clone()).collect();
+        let mut queue: VecDeque<String> = targets.iter().map(|(t, _)| t.clone()).collect();
+        while let Some(t) = queue.pop_front() {
+            if let Some((rule, stem)) = make.rule_for(&t) {
+                if let Some(input) = rule.prereqs.first() {
+                    // Substitute the pattern stem so a pattern rule's prereq names a
+                    // concrete file (`tmp/composite-%.owl`'s prereq `tmp/collected-%.owl`
+                    // → `tmp/collected-lifestages.owl`), not the literal `%` template.
+                    let input = match &stem {
+                        Some(s) => input.replace('%', s),
+                        None => input.clone(),
+                    };
+                    if !input.contains('%')
+                        && !seen.contains(&input)
+                        && make.rule_for(&input).is_some()
+                    {
+                        seen.insert(input.clone());
+                        targets.push((input.clone(), true));
+                        queue.push_back(input);
+                    }
+                }
+            }
+        }
+    }
+    // A pattern-rule target (`tmp/collected-%.owl`) is a template, never a concrete
+    // release artefact — drop any that slipped in.
+    let targets: Vec<_> = targets.into_iter().filter(|(t, _)| !t.contains('%')).collect();
+
+    let robot_prefix = {
+        let p = make.expand("$(ROBOT)");
+        if p.trim().is_empty() { "robot".to_string() } else { p.trim().to_string() }
+    };
+
+    // Components are normally shipped pre-built and merged as-is. But some repos
+    // (e.g. uPheno) *build* their components through custom Makefile rules that
+    // call tooling owlmake can't reproduce (`python3 …`). When a component is not
+    // present on disk and has such a rule, surface those steps as real gaps —
+    // otherwise the plan would silently "pass" over a build it cannot perform.
+    let mut component_gaps: Vec<String> = Vec::new();
+    for c in &components {
+        if repo.dir.join(c).exists() {
+            continue; // shipped pre-built — nothing to build
+        }
+        for gap in component_build_gaps(make, &robot_prefix, c.as_str()) {
+            component_gaps.push(format!("component {c}: {gap}"));
+        }
+    }
+
+    let mut artefacts = Vec::new();
+    for (target, on_path) in targets {
+        match make.rule_for(&target) {
+            Some(_) => {
+                artefacts.push(
+                    plan_rule(repo, make, &robot_prefix, &target, on_path)
+                        .expect("rule_for matched immediately above"),
+                );
+            }
+            None => {
+                // No rule for this target. If it is a *defaulted* candidate
+                // (`base`/`full`/an export format the repo doesn't actually
+                // build — common in minimal pre-ODK Makefiles that only build
+                // `<id>.owl`), it is simply not part of this repo's release:
+                // drop it rather than flag a phantom gap. Only when the user
+                // explicitly named it (`--artefact`) is a missing rule an error.
+                if !only.iter().any(|o| {
+                    target == *o || target == format!("{id}-{o}.owl") || target == format!("{id}.{o}")
+                }) {
+                    continue;
+                }
+                artefacts.push(ArtefactPlan {
+                    target,
+                    input: None,
+                    needs: vec![],
+                    order_only: vec![],
+                    steps: vec![],
+                    gaps: vec![],
+                    missing_rule: true,
+                    side_effect_only: false,
+                    stdout_file: None,
+                    intermediate: false,
+                    branches: vec![],
+                });
+            }
+        }
+    }
+
+    rewrite_oort(&mut artefacts, &id, version, &ontbase);
+
+    // Everything the artefacts depend on, resolved *now*, at plan time, into
+    // ordinary step lists. The Makefile is read here and nowhere else: execution
+    // works purely from the plan (and so from `owlmake.json`), which is the whole
+    // point of owlmake replacing make rather than driving it. Anything that can
+    // only be expressed as a shell command is recorded as one.
+    // Pattern products are built natively (see `native_pattern_targets`), so they
+    // must not survive as ARTEFACTS either — the transitive `$<` walk above pulls
+    // `patterns/definitions.owl`, `patterns/pattern.owl` and the per-pattern
+    // `data/*/*.ofn` in as intermediates, and a planned recipe for them competes
+    // with the DOSDP engine that `PatternsMode` drives.
+    let mut native_patterns = native_patterns(repo, make);
+    native_patterns.extend(native_import_targets(make, &imports, merged_import.as_deref()));
+    let mut artefacts: Vec<ArtefactPlan> =
+        artefacts.into_iter().filter(|a| !native_patterns.contains(&a.target)).collect();
+
+    // The `--artefact` filter: an entry matches by target filename, by
+    // `<id>-<entry>.owl`, or by `<id>.<entry>`. Naming a release product names
+    // the artefacts that make its inputs too. `mp-base.owl` is built from
+    // `tmp/mp-preprocess.owl`, which the plan records as an artefact of its own;
+    // keeping only the named targets leaves that one out, and the subset plan
+    // then reports its own prerequisite as a file it has no way to build.
+    if !only.is_empty() {
+        let matches = |target: &str| -> bool {
+            only.iter().any(|o| {
+                target == o || *target == format!("{id}-{o}.owl") || *target == format!("{id}.{o}")
+            })
+        };
+        let mut keep: std::collections::HashSet<String> =
+            artefacts.iter().filter(|a| matches(&a.target)).map(|a| a.target.clone()).collect();
+        loop {
+            let mut grew = false;
+            for a in &artefacts {
+                if !keep.contains(&a.target) {
+                    continue;
+                }
+                for n in a.needs.iter().chain(a.input.iter()) {
+                    if !keep.contains(n) && artefacts.iter().any(|b| b.target == *n) {
+                        keep.insert(n.clone());
+                        grew = true;
+                    }
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        artefacts.retain(|a| keep.contains(&a.target));
+    }
+
+    let mut prerequisites = plan_prerequisites(repo, make, &robot_prefix, &artefacts, &imports, merged_import.as_deref());
+
+    // Term-file gaps, once, over the finished target set — the loader's formula
+    // exactly (`crate::plan::gaps`), so the two paths cannot disagree about what
+    // a plan can build. That target set is what makes the answer the plan's OWN: a
+    // generated seed such as `tmp/simple_seed.txt` is absent on a clean checkout,
+    // and a build with nothing but the plan would otherwise have to ask the
+    // Makefile whether the seed is buildable — and answer "no" for a file the very
+    // same plan builds.
+
+    // For every target a switch guards, what the OTHER branch of that conditional
+    // builds it by. Done here, over the finished target set, because a branch is
+    // only worth recording for a target the plan actually has.
+    attach_branches(repo, make, &robot_prefix, &mut artefacts, &mut prerequisites);
+    {
+        let mut planned: std::collections::HashSet<String> = artefacts
+            .iter()
+            .chain(prerequisites.iter())
+            .filter(|a| !a.missing_rule)
+            .map(|a| a.target.clone())
+            .collect();
+        // The pattern products carry no plan rule because owlmake writes them
+        // natively (`native_pattern_targets`), but they ARE produced — so a rule
+        // that consumes one is not a gap. `$(IMPORTSEED)` names
+        // `all_pattern_terms.txt`, and without this the plan cannot run
+        // `tmp/seed.txt` at all.
+        planned.extend(native_patterns.iter().cloned());
+        // Same for the mirrors: `mirror/<id>.owl` carries no rule because the
+        // executor builds it from the import's own `source` + `mirror_steps`, but
+        // it IS built — and every ODK import rule names it as a prerequisite.
+        planned.extend(native_mirror_targets(make, &imports));
+        // `.PHONY` names, so a prerequisite that is a marker rather than a file
+        // is not read as a missing input.
+        let phony: std::collections::HashSet<String> = make.phony.iter().cloned().collect();
+        // A file some OTHER rule's recipe writes is produced by the plan even
+        // though no rule NAMES it — see `recipe_outputs`.
+        for a in artefacts.iter().chain(prerequisites.iter()) {
+            planned.extend(crate::plan::gaps::recipe_outputs(&a.steps));
+        }
+        let products: Vec<String> =
+            imports.iter().filter(|i| !i.steps.is_empty()).map(|i| i.output.clone()).collect();
+        for a in artefacts.iter_mut().chain(prerequisites.iter_mut()) {
+            a.gaps.extend(crate::plan::gaps::term_file_gaps(&repo.dir, &a.steps, &planned));
+            a.gaps.extend(crate::plan::gaps::prerequisite_gaps(
+                &repo.dir, &a.needs, &planned, &phony, &products,
+            ));
+        }
+    }
+
+    // Every variable the plan needed has now been expanded, so any Makefile
+    // function this parser does not implement has been met by here. Such a
+    // reference expands to the empty string, which is indistinguishable from an
+    // unset variable and loses whatever it computed WITHOUT failing — a plan that
+    // quietly does less is the one thing this must never produce.
+    let unknown = make.unknown_functions.borrow();
+    if !unknown.is_empty() {
+        let names: Vec<&str> = unknown.iter().map(String::as_str).collect();
+        anyhow::bail!(
+            "unimplemented Makefile function(s): {} — each expands to nothing, so \
+             the plan would silently omit whatever they compute",
+            names.join(", ")
+        );
+    }
+    drop(unknown);
+
+    // `$(eval)` is the one function whose whole effect is a SIDE effect, so the
+    // empty expansion above cannot speak for it. In a recipe it is resolved at
+    // ingest (`parse_eval_assignment`), which is where ODK uses it — `$(eval
+    // TERM_ID := $(TERM_appendicular))` ahead of each of UBERON's fourteen
+    // `$(SUBSETCMD)` subsets. In a VARIABLE DEFINITION nothing resolves it: the
+    // variables it would define are never defined, and every later reference to
+    // them expands to nothing. That is exactly the silent-shortfall this refuses.
+    let eval_vars: Vec<&str> = make
+        .vars
+        .iter()
+        .filter(|(_, v)| v.contains("$(eval") || v.contains("${eval"))
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if !eval_vars.is_empty() {
+        let mut names: Vec<&str> = eval_vars;
+        names.sort_unstable();
+        anyhow::bail!(
+            "`$(eval)` in the definition of {} — owlmake resolves an `$(eval)` \
+             assignment in a RECIPE, but not one that defines variables at parse \
+             time, so whatever it defines would silently be empty",
+            names.join(", ")
+        );
+    }
+
+    // The paths the plan produces WITHOUT a rule of its own, recorded because
+    // nothing downstream can work them out. A rule naming `mirror/cl.owl` or
+    // `tmp/all_pattern_terms.txt` as a prerequisite is satisfied — owlmake writes
+    // both natively — but a loaded plan sees only a path that no artefact and no
+    // prerequisite targets, and would report every one of them as a missing
+    // input. They are derived here from the Makefile, so here is where they are
+    // written down.
+    let native_targets = {
+        let mut v: Vec<String> = native_patterns
+            .iter()
+            .cloned()
+            .chain(native_mirror_targets(make, &imports))
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+
+    // Recorded while the recipes above were expanded: a backtick that reads the
+    // version out of a file names it here. Path fields are `repo.dir`-relative,
+    // as `edit_file` and `catalog_file` are, so it is carried as written.
+    let version_file = make.version_file.borrow().clone();
+
+    let mut plan = Plan {
+        // What the repo itself states. A repo running the image's own tool names
+        // its ODK release and nothing else; one shipping its own names the tool.
+        emulate_odk_version: odk_declared_version(&repo.root, make),
+        native_targets,
+        // What a bare `owlmake` builds: the repo's default goal, RESOLVED to the
+        // targets it names — because after the Makefile is deleted nothing else
+        // knows that EFO's `all` meant "…and then run the QC".
+        refresh_groups: refresh_groups(make, &imports, merged_import.as_deref(), &artefacts, &prerequisites),
+        // Every variable a conditional consulted, with the value that selected
+        // the branch whose rules are recorded above.
+        gating_flags: make.cond_vars.clone(),
+        default_targets: default_targets(repo, make, &artefacts, &prerequisites),
+        phony: {
+            // Sorted: a HashSet's iteration order is not stable, and this is
+            // serialized into a committed plan — an unsorted list would make
+            // `owlmake.yaml` differ between two runs over the same repo.
+            let mut v: Vec<String> = make.phony.iter().cloned().collect();
+            v.sort();
+            v
+        },
+        transient_targets: transient_targets(make, &imports, &artefacts, &prerequisites),
+        // `$(SRC)` when the Makefile sets it, else the ODK `<id>-edit.*`
+        // convention applied ONCE, here — not by the executor probing extensions
+        // in order at build time.
+        edit_file: {
+            let src = make.expand("$(SRC)").trim().to_string();
+            if !src.is_empty() {
+                Some(src)
+            } else if repo.own_build() {
+                None
+            } else {
+                crate::odk::find_edit_file(&repo.dir)
+            }
+        },
+        // The catalog the rules read, as the configuration names it (`CATALOG`,
+        // which the standard build sets from the `catalog_file` option). A
+        // configuration that names none has ODK's file or no catalog; a build of
+        // the repository's own names its own or has none.
+        catalog_file: {
+            let named = make.expand("$(CATALOG)").trim().to_string();
+            if !named.is_empty() {
+                Some(named)
+            } else if repo.own_build() {
+                None
+            } else {
+                catalog_file(&repo.dir)
+            }
+        },
+        emulate_robot_version: emulate_robot_version(&repo.root, make),
+        // The global `--strict` / `-x` flags, as the repo's own `$(ROBOT)` launcher
+        // declares them: they change which axioms survive a parse and the bytes
+        // of every RDF/XML artefact, so they are recorded rather than left to
+        // whoever invokes the build.
+        strict: robot_global_flag(make, &["--strict"]),
+        xml_entities: robot_global_flag(make, &["-x", "--xml-entities"]),
+        // The pattern products the repository records as built its own way are
+        // taken as written.
+        dosdp: if let Some(own) = repo.own_dosdp() {
+            Some(own.clone())
+        } else if repo.own_build() {
+            None
+        } else {
+            let dir = make.expand("$(PATTERNDIR)");
+            let dir = dir.trim();
+            plan_dosdp(
+                &repo.dir,
+                if dir.is_empty() { "../patterns" } else { dir },
+                Some(make),
+                Some(repo),
+                &ontbase,
+                &version,
+            )
+        },
+        id,
+        // The DEFAULT release version. Every other string that needs it holds
+        // `{version}`, a reference to this field, so the run can supply a
+        // different date without the plan being regenerated.
+        //
+        // A configuration that reads the version out of a file gets that file's
+        // CURRENT contents as the default and the file itself as `version_file`,
+        // which the run re-reads. Read here rather than at expansion time because
+        // the recipes that mention the file have all been expanded by now.
+        version: version_file
+            .as_deref()
+            .and_then(|f| read_version_file(&repo.dir, f))
+            .unwrap_or_else(|| make.version_default.clone()),
+        version_file: version_file.clone(),
+        ontology_iri: format!("{ontbase}.owl"),
+        reasoner,
+        use_base_merging,
+        exclude_iri_patterns,
+        slme_individuals,
+        imports,
+        merged_import,
+        merged_import_iri: None,
+        merged_import_shards: None,
+            merged_import_shard_bytes: None,
+        variables: exec_variables(repo),
+        component_gaps,
+        prerequisites,
+        artefacts,
+    };
+    drop_inert_targets(&mut plan);
+    drop_unspelled_robot_launcher(&mut plan);
+    Ok(plan)
+}
+
+/// The release products a build configuration names by convention, in the order
+/// they are planned: each release artefact `<id>-<art>.owl`, the primary
+/// `<id>.owl`, each in every export format, everything the configuration's own
+/// lists of released files name, and — for a configuration whose products live
+/// elsewhere — what its `release` target names.
+fn conventional_candidates(
+    repo: &OdkRepo,
+    make: &super::makefile::MakeModel,
+    id: &str,
+    candidates: &mut Vec<String>,
+) {
     for art in &repo.yaml.release_artefacts {
         // ODK names a `custom-<x>` artefact as `<x>.owl` (no ontology prefix);
         // ordinary artefacts are `<id>-<x>.owl`.
@@ -265,318 +680,112 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
                 .cloned()
                 .collect();
             if !prereqs.is_empty() {
-                candidates = prereqs;
+                *candidates = prereqs;
             }
         }
     }
-    // Apply the `--artefact` filter: an entry matches by target filename, by
-    // `<id>-<entry>.owl`, or by `<id>.<entry>`.
-    let matches = |target: &str| -> bool {
-        only.is_empty()
-            || only.iter().any(|o| {
-                target == o || *target == format!("{id}-{o}.owl") || *target == format!("{id}.{o}")
-            })
+}
+
+/// The pattern products owlmake builds natively, as this repository knows them:
+/// enumerated from its pattern directory where a build configuration or the
+/// standard build reaches one, and as its file states them.
+fn native_patterns(
+    repo: &OdkRepo,
+    make: &super::makefile::MakeModel,
+) -> std::collections::HashSet<String> {
+    let mut out = if repo.own_build() {
+        std::collections::HashSet::new()
+    } else {
+        native_pattern_targets(make, &repo.dir)
     };
-    let mut targets: Vec<(String, bool)> = candidates
-        .into_iter()
-        .filter(|t| matches(t))
-        .map(|t| (t, true))
-        .collect();
+    out.extend(repo.spec.iter().flat_map(|s| s.native_targets.iter().cloned()));
+    out
+}
 
-    // A named target that is not a release product but has a rule of its own is
-    // an on-path intermediate — `tmp/<id>-preprocess.owl`, `components/<x>.owl`,
-    // MONDO's `reasoned.owl`. The plan records those (the walk below adds them
-    // for a full release), so they can be NAMED; naming one on its own has to
-    // plan it, or a target the plan carries could not be run.
-    for o in only {
-        if !targets.iter().any(|(t, _)| t == o) && make.rule_for(o).is_some() {
-            targets.push((o.clone(), true));
-        }
-    }
-
-    // Transitively pull in intermediate targets referenced as a pipeline input
-    // (`$<`) that have their own Makefile rule — e.g. MONDO's `reasoned.owl` (the
-    // merge→reason→relax→reduce product the primary `mondo.owl` is built from), or
-    // ECTO's `<id>-full.owl`. They are not release artefacts themselves but must
-    // be built before whatever consumes them, and their coverage gaps block the
-    // release just the same. The walk stops at source files (no rule).
-    {
-        use std::collections::{HashSet, VecDeque};
-        let mut seen: HashSet<String> = targets.iter().map(|(t, _)| t.clone()).collect();
-        let mut queue: VecDeque<String> = targets.iter().map(|(t, _)| t.clone()).collect();
-        while let Some(t) = queue.pop_front() {
-            if let Some((rule, stem)) = make.rule_for(&t) {
-                if let Some(input) = rule.prereqs.first() {
-                    // Substitute the pattern stem so a pattern rule's prereq names a
-                    // concrete file (`tmp/composite-%.owl`'s prereq `tmp/collected-%.owl`
-                    // → `tmp/collected-lifestages.owl`), not the literal `%` template.
-                    let input = match &stem {
-                        Some(s) => input.replace('%', s),
-                        None => input.clone(),
-                    };
-                    if !input.contains('%')
-                        && !seen.contains(&input)
-                        && make.rule_for(&input).is_some()
-                    {
-                        seen.insert(input.clone());
-                        targets.push((input.clone(), true));
-                        queue.push_back(input);
-                    }
-                }
-            }
-        }
-    }
-    // A pattern-rule target (`tmp/collected-%.owl`) is a template, never a concrete
-    // release artefact — drop any that slipped in.
-    let targets: Vec<_> = targets.into_iter().filter(|(t, _)| !t.contains('%')).collect();
-
-    let robot_prefix = {
-        let p = make.expand("$(ROBOT)");
-        if p.trim().is_empty() { "robot".to_string() } else { p.trim().to_string() }
+/// Drop the targets a generated build configuration carries for managing ITSELF,
+/// and every mention of them.
+///
+/// They are about the tooling that generated the file, not about the ontology:
+/// a banner naming the generator's version, a check that the file is in step
+/// with the configuration it was generated from, a notice about the report
+/// profile, the generator's help text, its own updater, and the provisioning of
+/// reasoner-tool plugins owlmake does not load (every command such a plugin
+/// supplies is one of owlmake's own). None of them builds, checks or groups
+/// anything, so the standard build has no such targets and a plan read from a
+/// generated file does not keep them.
+///
+/// Named, not inferred: a repository's OWN rule that only prints is that
+/// repository's decision, and stays.
+fn drop_inert_targets(plan: &mut Plan) {
+    const SELF_MANAGEMENT: &[&str] = &[
+        "odkversion",
+        "config_check",
+        "check_for_robot_updates",
+        "help",
+        "update_repo",
+        "all_robot_plugins",
+        "custom_robot_plugins",
+        "extra_robot_plugins",
+    ];
+    let inert = |a: &ArtefactPlan| {
+        SELF_MANAGEMENT.contains(&a.target.as_str()) || a.target.ends_with(".jar")
     };
-
-    // Components are normally shipped pre-built and merged as-is. But some repos
-    // (e.g. uPheno) *build* their components through custom Makefile rules that
-    // call tooling owlmake can't reproduce (`python3 …`). When a component is not
-    // present on disk and has such a rule, surface those steps as real gaps —
-    // otherwise the plan would silently "pass" over a build it cannot perform.
-    let mut component_gaps: Vec<String> = Vec::new();
-    for c in &components {
-        if repo.dir.join(c).exists() {
-            continue; // shipped pre-built — nothing to build
-        }
-        for gap in component_build_gaps(make, &robot_prefix, c.as_str()) {
-            component_gaps.push(format!("component {c}: {gap}"));
-        }
-    }
-
-    let mut artefacts = Vec::new();
-    for (target, on_path) in targets {
-        match make.rule_for(&target) {
-            Some(_) => {
-                artefacts.push(
-                    plan_rule(repo, make, &robot_prefix, &target, on_path)
-                        .expect("rule_for matched immediately above"),
-                );
-            }
-            None => {
-                // No rule for this target. If it is a *defaulted* candidate
-                // (`base`/`full`/an export format the repo doesn't actually
-                // build — common in minimal pre-ODK Makefiles that only build
-                // `<id>.owl`), it is simply not part of this repo's release:
-                // drop it rather than flag a phantom gap. Only when the user
-                // explicitly named it (`--artefact`) is a missing rule an error.
-                if only.is_empty() {
-                    continue;
-                }
-                artefacts.push(ArtefactPlan {
-                    target,
-                    input: None,
-                    needs: vec![],
-                    order_only: vec![],
-                    steps: vec![],
-                    gaps: vec![],
-                    missing_rule: true,
-                    stdout_file: None,
-                    branches: vec![],
-                });
-            }
-        }
-    }
-
-    rewrite_oort(&mut artefacts, &id, version, &ontbase);
-
-    // Everything the artefacts depend on, resolved *now*, at plan time, into
-    // ordinary step lists. The Makefile is read here and nowhere else: execution
-    // works purely from the plan (and so from `owlmake.json`), which is the whole
-    // point of owlmake replacing make rather than driving it. Anything that can
-    // only be expressed as a shell command is recorded as one.
-    // Pattern products are built natively (see `native_pattern_targets`), so they
-    // must not survive as ARTEFACTS either — the transitive `$<` walk above pulls
-    // `patterns/definitions.owl`, `patterns/pattern.owl` and the per-pattern
-    // `data/*/*.ofn` in as intermediates, and a planned recipe for them competes
-    // with the DOSDP engine that `PatternsMode` drives.
-    let mut native_patterns = native_pattern_targets(make);
-    native_patterns.extend(native_import_targets(make, &imports, merged_import.as_deref()));
-    let artefacts: Vec<ArtefactPlan> =
-        artefacts.into_iter().filter(|a| !native_patterns.contains(&a.target)).collect();
-
-    let mut prerequisites = plan_prerequisites(repo, make, &robot_prefix, &artefacts, &imports, merged_import.as_deref());
-
-    // Term-file gaps, once, over the finished target set — the loader's formula
-    // exactly (`crate::plan::gaps`), so the two paths cannot disagree about what
-    // a plan can build. That target set is what makes the answer the plan's OWN: a
-    // generated seed such as `tmp/simple_seed.txt` is absent on a clean checkout,
-    // and a build with nothing but the plan would otherwise have to ask the
-    // Makefile whether the seed is buildable — and answer "no" for a file the very
-    // same plan builds.
-    let mut artefacts = artefacts;
-
-    // For every target a switch guards, what the OTHER branch of that conditional
-    // builds it by. Done here, over the finished target set, because a branch is
-    // only worth recording for a target the plan actually has.
-    attach_branches(repo, make, &robot_prefix, &mut artefacts, &mut prerequisites);
-    {
-        let mut planned: std::collections::HashSet<String> = artefacts
-            .iter()
-            .chain(prerequisites.iter())
-            .filter(|a| !a.missing_rule)
-            .map(|a| a.target.clone())
-            .collect();
-        // The pattern products carry no plan rule because owlmake writes them
-        // natively (`native_pattern_targets`), but they ARE produced — so a rule
-        // that consumes one is not a gap. `$(IMPORTSEED)` names
-        // `all_pattern_terms.txt`, and without this the plan cannot run
-        // `tmp/seed.txt` at all.
-        planned.extend(native_patterns.iter().cloned());
-        // Same for the mirrors: `mirror/<id>.owl` carries no rule because the
-        // executor builds it from the import's own `source` + `mirror_steps`, but
-        // it IS built — and every ODK import rule names it as a prerequisite.
-        planned.extend(native_mirror_targets(make, &imports));
-        // `.PHONY` names, so a prerequisite that is a marker rather than a file
-        // is not read as a missing input.
-        let phony: std::collections::HashSet<String> = make.phony.iter().cloned().collect();
-        // A file some OTHER rule's recipe writes is produced by the plan even
-        // though no rule NAMES it — see `recipe_outputs`.
-        for a in artefacts.iter().chain(prerequisites.iter()) {
-            planned.extend(crate::plan::gaps::recipe_outputs(&a.steps));
-        }
-        for a in artefacts.iter_mut().chain(prerequisites.iter_mut()) {
-            a.gaps.extend(crate::plan::gaps::term_file_gaps(&repo.dir, &a.steps, &planned));
-            a.gaps.extend(crate::plan::gaps::prerequisite_gaps(
-                &repo.dir, &a.needs, &planned, &phony,
-            ));
-        }
-    }
-
-    // Every variable the plan needed has now been expanded, so any Makefile
-    // function this parser does not implement has been met by here. Such a
-    // reference expands to the empty string, which is indistinguishable from an
-    // unset variable and loses whatever it computed WITHOUT failing — a plan that
-    // quietly does less is the one thing this must never produce.
-    let unknown = make.unknown_functions.borrow();
-    if !unknown.is_empty() {
-        let names: Vec<&str> = unknown.iter().map(String::as_str).collect();
-        anyhow::bail!(
-            "unimplemented Makefile function(s): {} — each expands to nothing, so \
-             the plan would silently omit whatever they compute",
-            names.join(", ")
-        );
-    }
-    drop(unknown);
-
-    // `$(eval)` is the one function whose whole effect is a SIDE effect, so the
-    // empty expansion above cannot speak for it. In a recipe it is resolved at
-    // ingest (`parse_eval_assignment`), which is where ODK uses it — `$(eval
-    // TERM_ID := $(TERM_appendicular))` ahead of each of UBERON's fourteen
-    // `$(SUBSETCMD)` subsets. In a VARIABLE DEFINITION nothing resolves it: the
-    // variables it would define are never defined, and every later reference to
-    // them expands to nothing. That is exactly the silent-shortfall this refuses.
-    let eval_vars: Vec<&str> = make
-        .vars
+    // The names themselves go too, whether or not this plan has the target: a
+    // repository's own rule may wait on `all_robot_plugins`, and that wait means
+    // nothing here however the standard rules were obtained.
+    let dropped: std::collections::HashSet<String> = plan
+        .prerequisites
         .iter()
-        .filter(|(_, v)| v.contains("$(eval") || v.contains("${eval"))
-        .map(|(k, _)| k.as_str())
+        .chain(plan.artefacts.iter())
+        .filter(|a| inert(a))
+        .map(|a| a.target.clone())
+        .chain(SELF_MANAGEMENT.iter().map(|n| n.to_string()))
         .collect();
-    if !eval_vars.is_empty() {
-        let mut names: Vec<&str> = eval_vars;
-        names.sort_unstable();
-        anyhow::bail!(
-            "`$(eval)` in the definition of {} — owlmake resolves an `$(eval)` \
-             assignment in a RECIPE, but not one that defines variables at parse \
-             time, so whatever it defines would silently be empty",
-            names.join(", ")
-        );
-    }
-
-    // The paths the plan produces WITHOUT a rule of its own, recorded because
-    // nothing downstream can work them out. A rule naming `mirror/cl.owl` or
-    // `tmp/all_pattern_terms.txt` as a prerequisite is satisfied — owlmake writes
-    // both natively — but a loaded plan sees only a path that no artefact and no
-    // prerequisite targets, and would report every one of them as a missing
-    // input. They are derived here from the Makefile, so here is where they are
-    // written down.
-    let native_targets = {
-        let mut v: Vec<String> = native_patterns
-            .iter()
-            .cloned()
-            .chain(native_mirror_targets(make, &imports))
-            .collect();
-        v.sort();
-        v.dedup();
-        v
-    };
-
-    Ok(Plan {
-        // What the repo itself states. A repo running the image's own tool names
-        // its ODK release and nothing else; one shipping its own names the tool.
-        emulate_odk_version: odk_declared_version(&repo.root, make),
-        native_targets,
-        // What a bare `owlmake` builds: the repo's default goal, RESOLVED to the
-        // targets it names — because after the Makefile is deleted nothing else
-        // knows that EFO's `all` meant "…and then run the QC".
-        refresh_groups: refresh_groups(make, &imports, merged_import.as_deref(), &artefacts, &prerequisites),
-        // Every variable a conditional consulted, with the value that selected
-        // the branch whose rules are recorded above.
-        gating_flags: make.cond_vars.clone(),
-        default_targets: default_targets(repo, make, &artefacts, &prerequisites),
-        phony: {
-            // Sorted: a HashSet's iteration order is not stable, and this is
-            // serialized into a committed plan — an unsorted list would make
-            // `owlmake.yaml` differ between two runs over the same repo.
-            let mut v: Vec<String> = make.phony.iter().cloned().collect();
-            v.sort();
-            v
-        },
-        transient_targets: transient_targets(make, &imports, &artefacts, &prerequisites),
-        // `$(SRC)` when the Makefile sets it, else the ODK `<id>-edit.*`
-        // convention applied ONCE, here — not by the executor probing extensions
-        // in order at build time.
-        edit_file: {
-            let src = make.expand("$(SRC)").trim().to_string();
-            if !src.is_empty() {
-                Some(src)
-            } else {
-                crate::odk::find_edit_file(&repo.dir)
+    let keep = |t: &String| !dropped.contains(t);
+    plan.prerequisites.retain(|a| keep(&a.target));
+    plan.artefacts.retain(|a| keep(&a.target));
+    for a in plan.prerequisites.iter_mut().chain(plan.artefacts.iter_mut()) {
+        a.needs.retain(keep);
+        a.order_only.retain(keep);
+        // The input is the first prerequisite; with that one gone, the next is.
+        if a.input.as_ref().is_some_and(|i| dropped.contains(i)) {
+            a.input = a.needs.iter().find(|n| !a.order_only.contains(n)).cloned();
+        }
+        for b in &mut a.branches {
+            b.needs.retain(keep);
+            if b.input.as_ref().is_some_and(|i| dropped.contains(i)) {
+                b.input = None;
             }
-        },
-        catalog_file: catalog_file(&repo.dir),
-        emulate_robot_version: emulate_robot_version(&repo.root, make),
-        // The global `--strict` / `-x` flags, as the repo's own `$(ROBOT)` launcher
-        // declares them: they change which axioms survive a parse and the bytes
-        // of every RDF/XML artefact, so they are recorded rather than left to
-        // whoever invokes the build.
-        strict: robot_global_flag(make, &["--strict"]),
-        xml_entities: robot_global_flag(make, &["-x", "--xml-entities"]),
-        dosdp: {
-            let dir = make.expand("$(PATTERNDIR)");
-            let dir = dir.trim();
-            plan_dosdp(
-                &repo.dir,
-                if dir.is_empty() { "../patterns" } else { dir },
-                Some(make),
-                &ontbase,
-                &version,
-            )
-        },
-        id,
-        // The DEFAULT release version. Every other string that needs it holds
-        // `{version}`, a reference to this field, so the run can supply a
-        // different date without the plan being regenerated.
-        version: make.version_default.clone(),
-        ontology_iri: format!("{ontbase}.owl"),
-        reasoner,
-        use_base_merging,
-        exclude_iri_patterns,
-        slme_individuals,
-        imports,
-        merged_import,
-        components,
-        variables: exec_variables(repo),
-        component_gaps,
-        prerequisites,
-        artefacts,
-    })
+        }
+    }
+    plan.default_targets.retain(keep);
+    plan.phony.retain(keep);
+    plan.transient_targets.retain(keep);
+    plan.native_targets.retain(keep);
+    for g in &mut plan.refresh_groups {
+        g.targets.retain(keep);
+    }
+}
+
+/// Drop the recorded `ROBOT` launcher when no step in the plan spells it.
+///
+/// The launcher travels with a plan so that a step which IS a command line can
+/// have owlmake put in its place at the command position. A plan whose ontology
+/// commands are all ops has no such step, and carrying the launcher there would
+/// have the plan name a program the build never runs — and name a path the
+/// repository need not contain.
+///
+/// Decided against the plan's own serialized form, so no step can be missed:
+/// whatever container a step sits in, the launcher is kept if the plan says it
+/// anywhere, and kept if the question cannot be answered at all.
+fn drop_unspelled_robot_launcher(plan: &mut Plan) {
+    let Some(launcher) = plan.variables.remove("ROBOT") else { return };
+    let spelled = serde_yaml::to_string(&crate::spec::OwlmakeSpec::from_plan(plan))
+        .map(|text| text.contains(&launcher))
+        .unwrap_or(true);
+    if spelled {
+        plan.variables.insert("ROBOT".to_string(), launcher);
+    }
 }
 
 /// Turn one Makefile rule into an [`ArtefactPlan`]: expand the automatic
@@ -590,6 +799,13 @@ fn plan_rule(
     target: &str,
     on_release_path: bool,
 ) -> Option<ArtefactPlan> {
+    // A target the repository records as resolved is taken as written: its steps
+    // are already what a recipe would have been planned into. One that only
+    // extends the standard target is planned from the standard rule, which its
+    // prerequisites have joined.
+    if let Some(own) = repo.own_targets().iter().find(|t| t.target == target && !t.extends) {
+        return Some(own.clone().into_plan());
+    }
     let (rule, stem) = make.rule_for(target)?;
     let mut autos = Autos::default();
     autos.set("@", target);
@@ -653,6 +869,11 @@ fn plan_rule(
     // `--input`, so a `merge` that leads such a line REPLACES the model rather
     // than adding to it.
     let mut command_lines = 0usize;
+    // Whether any recipe line names the target as something it writes: `$@`
+    // before expansion, or the target itself as a whole token after it. A
+    // recipe that never does produces only side files — see
+    // `ArtefactPlan::side_effect_only`.
+    let mut names_target = false;
     for line in &rule.recipe {
         // A recipe-time `$(eval VAR := VALUE)` assignment produces no command. It
         // is resolved HERE, at ingest, so the recorded step carries the real command
@@ -663,6 +884,12 @@ fn plan_rule(
             continue;
         }
         let expanded = make.expand_with(line, &autos);
+        if !names_target {
+            // `$@` may reach the expanded text through a variable's value, so
+            // the expanded line is checked for both spellings of the target.
+            names_target = line.contains("$@")
+                || expanded.split_whitespace().any(|t| t == target || t == "$@");
+        }
         // The pipeline opens with the first ROBOT invocation's own input. A line
         // that runs something else — `$(MAKE) …`, `sssom convert …` — threads no
         // model, so the scan continues past it; the first robot line that names
@@ -703,6 +930,30 @@ fn plan_rule(
                 line_steps.insert(0, Step::Boundary { input: Some(opens_with) });
             }
         }
+        // A line that opens over a REMOTE ontology is a boundary on ANY line,
+        // including the first: an IRI cannot become the rule's `$<`, which is
+        // resolved to a path, so the boundary is how the plan names it.
+        if !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
+            if let Some(iri) = first_robot_iri_input(&expanded, robot_prefix) {
+                if !matches!(line_steps.first(), Some(Step::Boundary { .. })) {
+                    line_steps.insert(0, Step::Boundary { input: Some(iri) });
+                }
+            }
+        }
+        // A `mint` line that names no `--id-ranges` takes the single
+        // `*-idranges.owl` beside the edit file, which is how the recipe's ROBOT
+        // resolves it. Resolve it HERE so the plan NAMES the file: leaving it
+        // unset made execution glob for it, and it globbed the directory `om` was
+        // launched from rather than the ontology directory, so EFO's
+        // `allocate-definitive-ids` — which CI runs unattended on every merge to
+        // master — failed with "no *-idranges.owl file found in .".
+        for step in &mut line_steps {
+            if let Step::Op(Op::Mint { id_ranges, .. }) = step {
+                if id_ranges.is_none() {
+                    *id_ranges = idranges_beside_edit_file(&repo.dir);
+                }
+            }
+        }
         if !line_steps.is_empty() {
             command_lines += 1;
         }
@@ -717,6 +968,7 @@ fn plan_rule(
         input = None;
     }
     drop_target_round_trip(&mut steps, target);
+    fold_output_bookkeeping(&mut steps, target);
     // A recipe that is nothing but recursive make is an aggregate wearing a
     // disguise: `feature_diff: make reports/a.txt -B; make reports/b.txt -B` says
     // "these two targets", and saying it as a dependency beats spawning owlmake
@@ -729,12 +981,12 @@ fn plan_rule(
     // EFO's `IMP=false PAT=false`, inherited from the ODK and referenced nowhere
     // in its Makefile — cannot.
     let all_make = !steps.is_empty()
-        && steps.iter().all(|s| matches!(s, Step::CliRobot { name, .. } if name == "make"));
+        && steps.iter().all(|s| matches!(s, Step::OwlmakeCli { name, .. } if name == "make"));
     if all_make {
         let mut targets = Vec::new();
         let mut flattenable = true;
         for s in &steps {
-            let Step::CliRobot { args, .. } = s else { continue };
+            let Step::OwlmakeCli { args, .. } = s else { continue };
             for a in args {
                 match a.split_once('=') {
                     Some((name, _)) => {
@@ -770,6 +1022,18 @@ fn plan_rule(
         let normal = expanded_prereqs_opt(repo, rule, stem.as_deref(), target, false);
         all.into_iter().filter(|p| !normal.contains(p)).collect()
     };
+    // Only a recipe that THREADS A MODEL can be side-effect only in the sense
+    // the executor asks about: whether the pipeline's final model may be
+    // materialised at the target path. A rule of shell commands alone owns its
+    // own outputs however it names them (a script may write the target under a
+    // name the recipe never spells), and a grouping rule with no recipe has no
+    // sides at all.
+    let side_effect_only = !rule.recipe.is_empty()
+        && !names_target
+        && steps
+            .iter()
+            .any(|s| matches!(s, Step::Op(_) | Step::Partial { .. } | Step::OwlmakeCli { .. }))
+        && !crate::plan::gaps::recipe_outputs(&steps).iter().any(|o| o == target);
     Some(ArtefactPlan {
         target: target.to_string(),
         input,
@@ -782,9 +1046,16 @@ fn plan_rule(
         steps,
         gaps,
         missing_rule: false,
+        side_effect_only,
         stdout_file,
         // Filled in once every target is known, by `attach_branches`.
         branches: Vec::new(),
+        // A pattern-rule instantiation whose concrete name the configuration
+        // never spells is an intermediate of its chain (a phony name is a
+        // recipe, not a file, and takes no part in that rule).
+        intermediate: stem.is_some()
+            && !make.phony.contains(target)
+            && !make.mentioned_explicitly(target),
     })
 }
 
@@ -1098,11 +1369,7 @@ fn refresh_groups(
     prerequisites: &[ArtefactPlan],
 ) -> Vec<crate::plan::RefreshGroup> {
     use crate::plan::{Freshness, RefreshGroup};
-    let mirrordir = {
-        let d = make.expand("$(MIRRORDIR)");
-        let d = d.trim().to_string();
-        if d.is_empty() { "mirror".to_string() } else { d }
-    };
+    let mirrordir = mirror_dir(make);
 
     // Every import owlmake can actually re-fetch, at the path it fetches into.
     //
@@ -1124,8 +1391,29 @@ fn refresh_groups(
         .iter()
         .map(|i| format!("{mirrordir}/{}.owl", i.id))
         .collect();
+    // A rule's own guard decides its group. The merged mirror is the case in
+    // point: its recipe is `if [ $(IMP) = true ] && [ $(MERGE_MIRRORS) = true ]`,
+    // so under `MIR=false IMP=true` it still rebuilds — from the pinned mirrors —
+    // and pinning it under MIR would refuse a build the reference performs.
+    // Grouped under MIR only when the rule actually tests MIR (in an `ifeq`
+    // frame or in the recipe itself); otherwise the imports sweep below picks it
+    // up as a target built from the mirrors.
+    let tests_mir = |name: &str| -> Option<bool> {
+        let makefile_name = name
+            .strip_prefix("src/ontology/")
+            .map(str::to_string)
+            .or_else(|| name.strip_prefix("src/").map(|rest| format!("../{rest}")));
+        let rule = [Some(name.to_string()), makefile_name]
+            .into_iter()
+            .flatten()
+            .find_map(|n| make.rule_for(&n));
+        rule.map(|(r, _)| {
+            r.guards.iter().any(|g| g == "MIR")
+                || r.recipe.iter().any(|l| l.contains("$(MIR)"))
+        })
+    };
     let merged_mirror = format!("{mirrordir}/merged.owl");
-    if make.rule_for(&merged_mirror).is_some() {
+    if tests_mir(&merged_mirror) == Some(true) {
         mirrors.push(merged_mirror);
     }
 
@@ -1143,7 +1431,11 @@ fn refresh_groups(
         let t = &a.target;
         let is_mirror = t.starts_with("mirror-")
             || Path::new(t).parent().is_some_and(|p| p == Path::new(&mirrordir));
-        if is_mirror && !mirrors.contains(t) {
+        // A mirror-path target whose rule exists but never tests MIR is not of
+        // this group, wherever it lives — its own guard says when it rebuilds. A
+        // target with no rule at all stays: there is nothing to rebuild it with,
+        // and the pin states that.
+        if is_mirror && tests_mir(t) != Some(false) && !mirrors.contains(t) {
             mirrors.push(t.clone());
         }
     }
@@ -1415,8 +1707,11 @@ fn switch_groups(
 /// the reference build too, whose meaning lives in the NAME of
 /// `refresh-imports-excluding-large` and reaches owlmake that way. A repository
 /// that does gate rules on it gets a `large-imports` group like any other switch.
-fn switch_group_name(flag: &str) -> String {
+pub(crate) fn switch_group_name(flag: &str) -> String {
     match flag {
+        "MIR" => "mirrors".to_string(),
+        "IMP" => "imports".to_string(),
+        "PAT" => "patterns".to_string(),
         "BRI" => "bridges".to_string(),
         "COMP" => "components".to_string(),
         "IMP_LARGE" => "large-imports".to_string(),
@@ -1424,8 +1719,24 @@ fn switch_group_name(flag: &str) -> String {
     }
 }
 
-/// The repo's `owl:imports` catalog, if it has one. ODK's filename, applied at
-/// plan time so execution has a NAME rather than a convention to re-derive.
+/// The switch a group answers to: the inverse of [`switch_group_name`], which is
+/// how a file's `when` — written as group names — reaches the rule model as the
+/// guard its own conditional was.
+pub(crate) fn switch_flag(group: &str) -> String {
+    match group {
+        "mirrors" => "MIR".to_string(),
+        "imports" => "IMP".to_string(),
+        "patterns" => "PAT".to_string(),
+        "bridges" => "BRI".to_string(),
+        "components" => "COMP".to_string(),
+        "large-imports" => "IMP_LARGE".to_string(),
+        other => other.to_ascii_uppercase(),
+    }
+}
+
+/// The repo's `owl:imports` catalog under its conventional name, if it has one:
+/// for a configuration that does not name its catalog. Applied at plan time so
+/// execution has a NAME rather than a convention to re-derive.
 fn catalog_file(dir: &std::path::Path) -> Option<String> {
     dir.join("catalog-v001.xml")
         .is_file()
@@ -1438,20 +1749,10 @@ fn catalog_file(dir: &std::path::Path) -> Option<String> {
 /// Read from the rule that branch defines for `$(TMPDIR)/all_pattern_terms.txt`
 /// — the else half of `ifeq ($(PAT),true)`, which ingest's own parse (every flag
 /// TRUE) never sees.
-fn cached_pattern_seed_query(make: &super::makefile::MakeModel) -> Option<String> {
-    let base = make.base_dir.as_ref()?;
-    let main_mk = base.join("Makefile");
-    let mut alt =
-        super::makefile::MakeModel::parse_file_with_flags(&main_mk, &[], &[("PAT", "false")])
-            .ok()?;
-    alt.base_dir = Some(base.clone());
-    let id = alt.expand("$(ONT)").trim().to_string();
-    if !id.is_empty() {
-        let over = base.join(format!("{id}.Makefile"));
-        if over.exists() {
-            alt.overlay_file(&over).ok()?;
-        }
-    }
+fn cached_pattern_seed_query(repo: &OdkRepo) -> Option<String> {
+    // The configuration as it stands with pattern generation switched off —
+    // resolved the way the repository's configuration is, wherever it comes from.
+    let alt = repo.configuration_under("PAT", "false")?;
     let tmpdir = {
         let d = alt.expand("$(TMPDIR)").trim().to_string();
         if d.is_empty() { "tmp".to_string() } else { d }
@@ -1482,6 +1783,7 @@ fn plan_dosdp(
     dir: &std::path::Path,
     pattern_dir: &str,
     make: Option<&super::makefile::MakeModel>,
+    repo: Option<&OdkRepo>,
     ontbase: &str,
     version: &str,
 ) -> Option<crate::spec::DosdpSpec> {
@@ -1558,7 +1860,7 @@ fn plan_dosdp(
     Some(DosdpSpec {
         output,
         prefixes,
-        cached_seed_query: make.and_then(cached_pattern_seed_query),
+        cached_seed_query: repo.and_then(cached_pattern_seed_query),
         patterns,
         steps,
         templates,
@@ -1626,7 +1928,7 @@ fn dosdp_merge_steps(
     pattern_dir: &str,
     ontbase: &str,
     version: &str,
-) -> Vec<crate::spec::StepSpec> {
+) -> Vec<crate::spec::StepEntry> {
     use crate::plan::step::{AnnotateSpec, Op, Step};
     let recorded = make.and_then(|m| {
         let rule = m.rules.get(&format!("{pattern_dir}/definitions.owl"))?;
@@ -1666,7 +1968,7 @@ fn dosdp_merge_steps(
             })),
         ]
     });
-    steps.iter().map(crate::spec::StepSpec::from_step).collect()
+    steps.iter().map(crate::spec::StepEntry::from_step).collect()
 }
 
 /// The pattern-generator options a repo's own `generate` rule passes, read off
@@ -1789,11 +2091,7 @@ pub(crate) fn native_import_targets(
 /// Does `target`'s rule read `$(MIRRORDIR)/merged.owl`? — see
 /// `native_import_targets`.
 fn reads_merged_mirror(make: &super::makefile::MakeModel, target: &str) -> bool {
-    let mirrordir = {
-        let d = make.expand("$(MIRRORDIR)");
-        let d = d.trim().to_string();
-        if d.is_empty() { "mirror".to_string() } else { d }
-    };
+    let mirrordir = mirror_dir(make);
     let merged = format!("{mirrordir}/merged.owl");
     for name in [target.to_string(), format!("imports/{}", Path::new(target).file_name().and_then(|s| s.to_str()).unwrap_or(target))] {
         if let Some((rule, _)) = make.rule_for(&name) {
@@ -1803,6 +2101,20 @@ fn reads_merged_mirror(make: &super::makefile::MakeModel, target: &str) -> bool 
         }
     }
     false
+}
+
+/// The repo's mirror directory, spelled ONE way.
+///
+/// `./mirror` and `mirror` name the same directory, and the plan has to settle on
+/// one: writing a path rebases it to the plan file's directory and reading rebases
+/// it back, so an un-normalised `MIRRORDIR` gives a repo two names for one target —
+/// one from the build configuration, one from the committed plan. A target has a
+/// single name whichever the build reads.
+fn mirror_dir(make: &super::makefile::MakeModel) -> String {
+    let d = make.expand("$(MIRRORDIR)");
+    let d = d.trim();
+    let d = d.strip_prefix("./").unwrap_or(d).trim_end_matches('/');
+    if d.is_empty() { "mirror".to_string() } else { d.to_string() }
 }
 
 /// The mirror targets the executor serves natively, in the plan's own spelling.
@@ -1821,11 +2133,7 @@ pub(crate) fn native_mirror_targets(
     make: &super::makefile::MakeModel,
     imports: &[ImportPlan],
 ) -> std::collections::HashSet<String> {
-    let mirrordir = {
-        let d = make.expand("$(MIRRORDIR)");
-        let d = d.trim().to_string();
-        if d.is_empty() { "mirror".to_string() } else { d }
-    };
+    let mirrordir = mirror_dir(make);
     imports
         .iter()
         .flat_map(|i| [format!("mirror-{}", i.id), format!("{mirrordir}/{}.owl", i.id)])
@@ -1843,6 +2151,7 @@ pub(crate) fn native_mirror_targets(
 /// (`../patterns/…`) while the plan records them repo-relative (`src/patterns/…`).
 pub(crate) fn native_pattern_targets(
     make: &super::makefile::MakeModel,
+    ontology_dir: &std::path::Path,
 ) -> std::collections::HashSet<String> {
     let dir = |var: &str, dflt: &str| {
         let d = make.expand(var);
@@ -1851,6 +2160,12 @@ pub(crate) fn native_pattern_targets(
     };
     let patterndir = dir("$(PATTERNDIR)", "../patterns");
     let tmpdir = dir("$(TMPDIR)", "tmp");
+    // A repo with no pattern directory runs no DOSDP pipeline and claims none of
+    // its targets: every path the plan names is a file the build can produce, and
+    // `--list-targets` offers only what is buildable.
+    if !ontology_dir.join(&patterndir).is_dir() {
+        return Default::default();
+    }
     let mut out: std::collections::HashSet<String> = Default::default();
     let mut add = |t: String| {
         if let Some(rest) = t.strip_prefix("../") {
@@ -1934,7 +2249,7 @@ fn plan_prerequisites(
     // the native path pins them, replayed rules do not.
     let mut native: HashSet<String> = native_mirror_targets(make, imports);
 
-    native.extend(native_pattern_targets(make));
+    native.extend(native_patterns(repo, make));
     native.extend(native_import_targets(make, imports, merged_import));
 
     // Post-order DFS: a target is pushed only after everything it needs.
@@ -2190,6 +2505,8 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
                 create_new_ontology: None,
                 create_new_ontology_with_annotations: None,
                 exclude_duplicate_axioms: None,
+                axiom_generators: Vec::new(),
+                properties: Vec::new(),
             }),
             Step::Op(Op::Reduce { reasoner: None, include_subproperties: None }),
         ];
@@ -2262,7 +2579,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
     // The DOSDP products are a source of the release, exactly as an ODK Makefile
     // puts `$(PATTERNDIR)/definitions.owl` in `$(OTHER_SRC)`. Without this the
     // pattern step would write `definitions.owl` and nothing would merge it.
-    let dosdp = plan_dosdp(&repo.dir, "../patterns", None, &ontbase, &version);
+    let dosdp = plan_dosdp(&repo.dir, "../patterns", None, None, &ontbase, &version);
     if let Some(d) = &dosdp {
         if !d.patterns.is_empty() && !components.contains(&d.output) {
             components.push(d.output.clone());
@@ -2283,6 +2600,8 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         create_new_ontology: None,
         create_new_ontology_with_annotations: None,
         exclude_duplicate_axioms: None,
+        axiom_generators: Vec::new(),
+        properties: Vec::new(),
     };
     let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None };
     let ann = |art: &str| {
@@ -2328,7 +2647,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         ],
         gaps: vec![],
         missing_rule: false,
+        side_effect_only: false,
         stdout_file: None,
+        intermediate: false,
         // A repo with no build configuration has no conditionals to branch on.
         branches: Vec::new(),
     });
@@ -2353,7 +2674,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         ],
         gaps: vec![],
         missing_rule: false,
+        side_effect_only: false,
         stdout_file: None,
+        intermediate: false,
         // A repo with no build configuration has no conditionals to branch on.
         branches: Vec::new(),
     });
@@ -2372,7 +2695,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![] })],
             gaps: vec![],
             missing_rule: false,
+        side_effect_only: false,
             stdout_file: None,
+            intermediate: false,
             branches: Vec::new(),
         });
     }
@@ -2383,6 +2708,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
     artefacts.retain(|a| matches(&a.target));
 
     Plan {
+        // No Makefile was read, so no backtick named a version file: an ODK yaml
+        // states its version directly, and `version` below is that literal.
+        version_file: None,
         // No Makefile was read, so the repo stated no ODK release here; the
         // current tool generation below is the honest default.
         emulate_odk_version: None,
@@ -2424,7 +2752,9 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         slme_individuals: None,
         imports,
         merged_import: None,
-        components,
+        merged_import_iri: None,
+        merged_import_shards: None,
+            merged_import_shard_bytes: None,
         variables: std::collections::BTreeMap::new(),
         component_gaps: Vec::new(),
         prerequisites: Vec::new(),
@@ -2537,6 +2867,13 @@ fn mirror_steps(repo: &OdkRepo, id: &str) -> Vec<Step> {
     // the fetch entirely.
     for target in [format!("mirror-{id}"), format!("mirror/{id}.owl")] {
         let Some((rule, stem)) = repo.make.rule_for(&target) else { continue };
+        // Installing the staged mirror — comparing `tmp/mirror-<id>.owl` with
+        // `mirror/<id>.owl` and copying it over when they differ — is what
+        // owlmake does with every mirror once its steps have run, so a rule that
+        // does only that is not a step of the mirror.
+        if installs_staged_mirror(rule) {
+            continue;
+        }
         let mut autos = Autos::default();
         autos.set("@", &target);
         if let Some(first) = rule.prereqs.first() {
@@ -2576,6 +2913,75 @@ fn mirror_steps(repo: &OdkRepo, id: &str) -> Vec<Step> {
     steps
 }
 
+/// Whether a rule does nothing but install the staged mirror: compare
+/// `$(TMPDIR)/mirror-$*.owl` with its target and copy it over when the two
+/// differ. The standard build's `$(MIRRORDIR)/%.owl` rule is exactly that, and so
+/// is a repository's own spelling of it with a switch test in front.
+fn installs_staged_mirror(rule: &super::makefile::Rule) -> bool {
+    let text: String = rule.recipe.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let staged = "$(TMPDIR)/mirror-$*.owl";
+    text.contains(&format!("cmp -s {staged} $@"))
+        && text.contains(&format!("cp {staged} $@"))
+        && !text.contains("curl ")
+        && !text.contains("$(ROBOT)")
+}
+
+/// The mirrors a repository keeps for its own targets, beyond the import
+/// products: each is a phony `mirror-<id>` of its own, read from `mirror/<id>.owl`
+/// by its rules and made into no module. UBERON has nineteen, feeding its
+/// composite pipeline. Each is recorded as an import with `mirror_steps` alone, so
+/// the executor fetches, processes and installs it as it does every mirror, and
+/// its switch group pins it as it pins theirs.
+fn own_mirrors(repo: &OdkRepo, imports: &[ImportPlan], merged_cached: bool) -> Vec<ImportPlan> {
+    use crate::build::recipe::FileOp;
+    let mirrordir = mirror_dir(&repo.make);
+    let known = |id: &str| imports.iter().any(|i| i.id == id);
+    let mut out: Vec<ImportPlan> = Vec::new();
+    // Stated by the repository's file.
+    for own in repo.own_imports() {
+        if own.output.is_empty() && own.steps.is_empty() && !known(&own.id) {
+            out.push(own.clone().into_plan(&repo.dir, merged_cached));
+        }
+    }
+    // Found in its rules.
+    let mut ids: Vec<&str> = repo
+        .make
+        .phony
+        .iter()
+        .filter_map(|p| p.strip_prefix("mirror-"))
+        .filter(|id| !id.is_empty() && *id != "merged" && !known(id))
+        .filter(|id| !out.iter().any(|i| i.id == *id))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    for id in ids {
+        let steps = mirror_steps(repo, id);
+        if steps.is_empty() {
+            continue;
+        }
+        let source = steps
+            .iter()
+            .find_map(|s| match s {
+                Step::File(FileOp::Fetch { url, .. }) => Some(url.clone()),
+                _ => None,
+            })
+            .or_else(|| mirror_input_iri(repo, id))
+            .unwrap_or_else(|| "<custom mirror script>".to_string());
+        out.push(ImportPlan {
+            id: id.to_string(),
+            source,
+            output: String::new(),
+            steps: Vec::new(),
+            cached: repo.dir.join(format!("{mirrordir}/{id}.owl")).exists(),
+            gaps: Vec::new(),
+            product: None,
+            mirror_steps: steps,
+            mirror_inputs: mirror_inputs(repo, id),
+        });
+    }
+    out
+}
+
 /// Whether a recipe line invokes robot at all — as against running a script, a
 /// sub-make, or one of the other tools a recipe reaches for.
 fn is_robot_line(cmd: &str, robot_prefix: &str) -> bool {
@@ -2585,13 +2991,44 @@ fn is_robot_line(cmd: &str, robot_prefix: &str) -> bool {
     })
 }
 
+/// The REMOTE ontology a robot line opens over (`--input-iri` / `-I`).
+///
+/// Kept apart from [`first_robot_input`] because the two answers are used
+/// differently: a file input becomes the rule's `$<` and is resolved to a path,
+/// an IRI cannot be and instead opens the line's pipeline as a boundary.
+///
+/// Recording it is what puts the fetch in the plan: a rule with no prerequisites
+/// has no other input, so the line's own IRI is the only thing that says what the
+/// pipeline opens over.
+pub(super) fn first_robot_iri_input(cmd: &str, robot_prefix: &str) -> Option<String> {
+    for seg in cmd.split(['|', ';', '&']) {
+        let toks = robot::tokenize(seg);
+        if toks.is_empty() || !robot::is_robot(&toks, robot_prefix) {
+            continue;
+        }
+        let mut it = toks.iter();
+        while let Some(t) = it.next() {
+            let v = match t.as_str() {
+                "-I" | "--input-iri" => it.next().cloned(),
+                _ => t.strip_prefix("--input-iri=").map(str::to_string),
+            };
+            let Some(v) = v else { continue };
+            if v.starts_with("http://") || v.starts_with("https://") {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
 /// The file the first `robot` invocation on this recipe line reads (`-i`/`--input`),
 /// which is what opens the pipeline for the rule it belongs to.
 ///
 /// Only a robot command counts — `sed -i` is an in-place edit, not an input — and
 /// only a path: a `--input` naming an http(s) IRI loads over the network, and is
-/// not a file the executor can thread a model from.
-fn first_robot_input(cmd: &str, robot_prefix: &str) -> Option<String> {
+/// not a file the executor can thread a model from. That case is
+/// [`first_robot_iri_input`].
+pub(super) fn first_robot_input(cmd: &str, robot_prefix: &str) -> Option<String> {
     for seg in cmd.split(['|', ';', '&']) {
         let toks = robot::tokenize(seg);
         // `is_robot` indexes `toks[0]`, and splitting on `&` yields empty segments
@@ -2885,6 +3322,7 @@ fn import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str) -> V
         }
     }
     drop_target_round_trip(&mut steps, &target);
+    fold_output_bookkeeping(&mut steps, &target);
     resolve_seed_paths(make, repo, &mut steps);
     steps
 }
@@ -2905,31 +3343,39 @@ fn kept_after_build(make: &MakeModel, path: &str) -> bool {
             || a.strip_suffix(path).is_some_and(|p| p.ends_with('/'))
             || path.strip_suffix(a).is_some_and(|p| p.ends_with('/'))
     };
+    // Whether a special target covers the path, by name or by pattern.
+    let covers = |special: &str| {
+        make.rules.get(special).is_some_and(|r| {
+            r.prereqs.iter().any(|p| {
+                make.expand(p).split_whitespace().any(|t| {
+                    super::makefile::match_pattern(t, path).is_some()
+                        || path
+                            .rsplit_once('/')
+                            .is_some_and(|(_, base)| super::makefile::match_pattern(t, base).is_some())
+                })
+            })
+        })
+    };
+    // `.PRECIOUS` and `.SECONDARY` both keep what they cover, whether they name a
+    // file or a pattern. `.SECONDARY` is the one that says "these are
+    // intermediates, but do not delete them", so a build configuration that
+    // declares it is asking for exactly the file the sweep would remove.
+    if covers(".PRECIOUS") || covers(".SECONDARY") {
+        return true;
+    }
+    // `.INTERMEDIATE` makes a file an intermediate however it is named: a
+    // standard file records its repository's intermediates this way, since
+    // every target it records is a rule of its own.
+    if covers(".INTERMEDIATE") {
+        return false;
+    }
     if make.rules.keys().any(|k| same(k)) {
         return true;
     }
     let names = |list: &[String]| {
         list.iter().any(|p| make.expand(p).split_whitespace().any(same))
     };
-    if make.rules.values().any(|r| names(&r.prereqs) || names(&r.order_only)) {
-        return true;
-    }
-    // `.PRECIOUS` and `.SECONDARY` both keep what they cover, whether they name a
-    // file or a pattern. `.SECONDARY` is the one that says "these are
-    // intermediates, but do not delete them", so a build configuration that
-    // declares it is asking for exactly the file the sweep would remove.
-    [".PRECIOUS", ".SECONDARY"].iter().any(|special| {
-    make.rules.get(*special).is_some_and(|r| {
-        r.prereqs.iter().any(|p| {
-            make.expand(p).split_whitespace().any(|t| {
-                super::makefile::match_pattern(t, path).is_some()
-                    || path
-                        .rsplit_once('/')
-                        .is_some_and(|(_, base)| super::makefile::match_pattern(t, base).is_some())
-            })
-        })
-    })
-    })
+    make.rules.values().any(|r| names(&r.prereqs) || names(&r.order_only))
 }
 
 /// Every path the build writes on its way to something else and does not keep:
@@ -3082,14 +3528,100 @@ fn resolve_seed_paths(make: &super::makefile::MakeModel, repo: &OdkRepo, steps: 
 /// Drop the round-trip a rule's own final `-o $@` implies: the pipeline's closing
 /// write already performs it, and materializing the target twice would send it
 /// through one serialization more than the recipe asks for.
+///
+/// Unless a LATER invocation reads the file back. A target-named write followed
+/// by a boundary over the same file is load-bearing (MONDO's
+/// `subsets/mondo-rare.owl` is `extract … --output $@ && robot annotate
+/// --input $@ …`): the write must happen where the recipe puts it, or the
+/// boundary has nothing to open.
 fn drop_target_round_trip(steps: &mut Vec<Step>, target: &str) {
     let name = std::path::Path::new(target).file_name().map(|s| s.to_os_string());
-    steps.retain(|s| match s {
-        Step::Op(robot::Op::RoundTrip { path, .. }) => {
-            std::path::Path::new(path).file_name().map(|s| s.to_os_string()) != name
-        }
-        _ => true,
+    let same_file = |p: &str| std::path::Path::new(p).file_name().map(|s| s.to_os_string()) == name;
+    let read_back_after: Vec<bool> = (0..steps.len())
+        .map(|i| {
+            steps[i + 1..].iter().any(|s| {
+                matches!(s, Step::Boundary { input: Some(f) } if same_file(f))
+            })
+        })
+        .collect();
+    let mut i = 0;
+    steps.retain(|s| {
+        let keep = match s {
+            Step::Op(robot::Op::RoundTrip { path, .. }) if same_file(path) => read_back_after[i],
+            _ => true,
+        };
+        i += 1;
+        keep
     });
+}
+
+/// Record what a pipeline's tail DOES rather than how the recipe staged it.
+///
+/// A recipe that ends `… --output $@.tmp.owl && mv $@.tmp.owl $@` writes the
+/// target once; the staging file is how it avoids leaving a half-written target
+/// behind, which the pipeline's closing write already guarantees. So a closing
+/// write to a staging file followed by the move of that file onto the target is
+/// recorded as the write alone: a `convert` keeps its format and loses its
+/// `output`, and a `round-trip` — a write with no format of its own — goes
+/// entirely.
+///
+/// Two `annotate`s side by side are one annotation of the ontology, and are
+/// recorded as one, unless either clears the existing annotations or both set
+/// the same IRI — there the order is the meaning.
+fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
+    use crate::build::recipe::FileOp;
+    let same_file = |a: &str, b: &str| {
+        std::path::Path::new(a).file_name() == std::path::Path::new(b).file_name()
+    };
+    if let [.., write, Step::File(FileOp::Move { src, dst })] = steps.as_slice() {
+        let staged = match write {
+            Step::Op(robot::Op::Convert { output: Some(o), .. }) => Some(o),
+            Step::Op(robot::Op::RoundTrip { path }) => Some(path),
+            _ => None,
+        };
+        let folds = same_file(dst, target)
+            && matches!((staged, src.as_slice()), (Some(o), [only]) if o == only && !same_file(o, target));
+        if folds {
+            steps.pop();
+            match steps.last_mut() {
+                Some(Step::Op(robot::Op::Convert { output, .. })) => *output = None,
+                _ => {
+                    steps.pop();
+                }
+            }
+        }
+    }
+
+    // A closing `convert` that names the target outright is the same write.
+    if let Some(Step::Op(robot::Op::Convert { output, .. })) = steps.last_mut() {
+        if output.as_deref().is_some_and(|o| same_file(o, target)) {
+            *output = None;
+        }
+    }
+
+    let mut i = 0;
+    while i + 1 < steps.len() {
+        let (Step::Op(robot::Op::Annotate(a)), Step::Op(robot::Op::Annotate(b))) =
+            (&steps[i], &steps[i + 1])
+        else {
+            i += 1;
+            continue;
+        };
+        let independent = !a.remove_annotations
+            && !b.remove_annotations
+            && !(a.ontology_iri.is_some() && b.ontology_iri.is_some())
+            && !(a.version_iri.is_some() && b.version_iri.is_some());
+        if !independent {
+            i += 1;
+            continue;
+        }
+        let Step::Op(robot::Op::Annotate(b)) = steps.remove(i + 1) else { unreachable!() };
+        let Step::Op(robot::Op::Annotate(a)) = &mut steps[i] else { unreachable!() };
+        a.ontology_iri = a.ontology_iri.take().or(b.ontology_iri);
+        a.version_iri = a.version_iri.take().or(b.version_iri);
+        a.annotations.extend(b.annotations);
+        a.link_annotations.extend(b.link_annotations);
+    }
 }
 
 /// Parse a recipe line that is a single `$(eval VAR <op> VALUE)` (or `${…}`)
@@ -3174,4 +3706,32 @@ pub(super) fn expanded_prereqs_opt(
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+/// The release version a repo's version file holds right now, trimmed.
+///
+/// `rel` is `repo.dir`-relative, the convention every path field in the plan
+/// follows. An unreadable or empty file yields `None`, which leaves the recorded
+/// default in place rather than stamping a release with an empty version.
+fn read_version_file(dir: &std::path::Path, rel: &str) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(rel)).ok()?;
+    let v = text.trim().to_string();
+    (!v.is_empty()).then_some(v)
+}
+
+/// The single `*-idranges.owl` beside the edit file, as a `repo.dir`-relative
+/// name — the ID policy `mint` draws definitive IDs from.
+///
+/// `None` when there is no such file, or more than one and so no single answer:
+/// the op then reaches execution unresolved and fails naming the problem, rather
+/// than picking one of several ID policies.
+pub(super) fn idranges_beside_edit_file(dir: &std::path::Path) -> Option<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.ends_with("-idranges.owl"))
+        .collect();
+    found.sort();
+    (found.len() == 1).then(|| found.remove(0))
 }

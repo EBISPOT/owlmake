@@ -169,15 +169,6 @@ pub struct Reasoner {
     /// Ids that stand for asserted individuals (nominals). An unsatisfiable
     /// individual makes the whole ontology inconsistent.
     individuals: Vec<CId>,
-    /// Reflexive-transitive super-roles of each role. `materialize` needs it for
-    /// the third directness rule: `r2 ⊑ r` and `X ⊑ ∃r2.D` entail `X ⊑ ∃r.D`, so
-    /// the `r` edge is not direct.
-    role_super: Vec<HashSet<RId>>,
-    /// Roles declared `TransitiveObjectProperty`. `materialize` needs them: for a
-    /// transitive `r`, `∃r.D2 ⊑ ∃r.D` whenever `D2 ⊑ ∃r.D`, so `D` is not a
-    /// DIRECT superclass expression. Without it every ancestor along a `part_of`
-    /// chain is asserted.
-    transitive: HashSet<RId>,
 }
 
 /// Enable/disable the union-elimination completion rule for the current thread.
@@ -196,7 +187,7 @@ impl Reasoner {
     pub fn classify(model: &Model) -> Reasoner {
         // Arm the memory safety valve before any large structure is built, so the
         // reasoner can never drive the whole machine into the OOM-killer.
-        spawn_mem_watchdog();
+        let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
         let b = Self::normalize(model, t0, timing);
@@ -210,7 +201,7 @@ impl Reasoner {
     /// RSS by that much. Use only when the caller no longer needs the model
     /// (reasoning-only / fresh-output modes).
     pub fn classify_consume(model: Model) -> Reasoner {
-        spawn_mem_watchdog();
+        let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
         // `normalize` returns a fully-owned `Builder` (interned ids + normal
@@ -328,113 +319,6 @@ impl Reasoner {
         self.ignored
     }
 
-    /// Materialize inferred existential restrictions: for each named class C
-    /// and each object property in `props`, return the most-specific named
-    /// classes D such that `C ⊑ (prop some D)` is entailed. Returns
-    /// (C_iri, prop_iri, D_iri) triples. If `props` is empty, all properties
-    /// are considered.
-    pub fn materialize(&self, props: &std::collections::HashSet<String>) -> Vec<(String, String, String)> {
-        let mut out = Vec::new();
-        let named_class = |c: CId| {
-            c != TOP && c != BOT && self.class_iri[c as usize].is_some() && self.named.contains(&c)
-        };
-        for ((r, x), ys) in &self.state.r_succ {
-            // Only materialize over requested properties with real IRIs. Skip
-            // owl:topObjectProperty — every class trivially relates to itself
-            // under it, so those edges carry no information and are omitted.
-            let r_iri = match self.role_iri.get(*r as usize) {
-                Some(iri)
-                    if !iri.starts_with("__owlmake_aux_role_")
-                        && iri != "http://www.w3.org/2002/07/owl#topObjectProperty" =>
-                {
-                    iri
-                }
-                _ => continue,
-            };
-            if !props.is_empty() && !props.contains(r_iri) {
-                continue;
-            }
-            if !named_class(*x) {
-                continue;
-            }
-            // Collect named subsumers of each successor, then keep the most
-            // specific ones (minimal under ⊑).
-            let mut candidates: Vec<CId> = Vec::new();
-            for &y in ys {
-                for &d in &self.state.s[y as usize] {
-                    if named_class(d) {
-                        candidates.push(d);
-                    }
-                }
-            }
-            candidates.sort_unstable();
-            candidates.dedup();
-            // For a TRANSITIVE role, `∃r.D2 ⊑ ∃r.D` also holds when `D2 ⊑ ∃r.D` —
-            // so a filler another candidate reaches ALONG r is not a direct
-            // superclass expression either. Pruning by filler subsumption alone
-            // kept the whole `part_of` chain: UBERON's `tmp/uberon.owl` came out
-            // with 172,981 `BFO_0000050` restrictions where ROBOT writes 21,117
-            // (and 33,328 `RO_0002202` against 1,990), inflating the file from
-            // 93 MB to 149 MB and every subset built from it.
-            let r_transitive = self.transitive.contains(r);
-            let reaches = |from: CId, to: CId| -> bool {
-                self.state.r_succ.get(&(*r, from)).is_some_and(|ys| {
-                    ys.iter().any(|&y| self.state.s[y as usize].contains(&to))
-                })
-            };
-            for &d in &candidates {
-                // d is most-specific iff no other candidate d' is strictly below d.
-                let redundant = candidates.iter().any(|&d2| {
-                    d2 != d
-                        && ((self.state.s[d2 as usize].contains(&d)
-                            && !self.state.s[d as usize].contains(&d2))
-                            || (r_transitive && !reaches(d, d2) && reaches(d2, d)))
-                });
-                // A sub-property providing the same filler does NOT make the `r`
-                // edge redundant here. `materialize` exists to state the requested
-                // property explicitly, so suppressing `X ⊑ ∃r.D` because
-                // `X ⊑ ∃r2.D` holds for some `r2 ⊑ r` defeats the command: UBERON
-                // asserts `pituitary gland immediate_transformation_of future
-                // pituitary gland`, and with `RO_0002495 ⊑ RO_0002494 ⊑ RO_0002202`
-                // the requested `develops_from` edge was suppressed. 199 such
-                // inferences were missing from `tmp/uberon.owl`, across all three
-                // properties the recipe asks to materialize.
-                //
-                // The rule it replaced was added to explain an apparent +858
-                // `part_of` EXCESS which later turned out to be duplicated blank
-                // nodes in the RDF/XML writer, not inference — so it was tuned
-                // against a measurement artefact and suppressed real inferences to
-                // match it.
-                if !redundant {
-                    out.push((*x, *r, d));
-                }
-            }
-        }
-        // An expression a class INHERITS from a named superclass is not a direct
-        // superclass expression of it either: if `X ⊑ X2` and `X2 ⊑ ∃r.D`, then
-        // `X ⊑ ∃r.D` is entailed through X2 and ELK does not report it for X.
-        // Keeping it left every subclass restating its parents' `part_of` edges.
-        let have: HashSet<(CId, RId, CId)> = out.iter().copied().collect();
-        out.retain(|&(x, r, d)| {
-            !self.state.s[x as usize].iter().any(|&x2| {
-                x2 != x && !self.state.s[x2 as usize].contains(&x) && have.contains(&(x2, r, d))
-            })
-        });
-        let mut out: Vec<(String, String, String)> = out
-            .into_iter()
-            .map(|(x, r, d)| {
-                (
-                    self.class_iri[x as usize].clone().unwrap(),
-                    self.role_iri[r as usize].clone(),
-                    self.class_iri[d as usize].clone().unwrap(),
-                )
-            })
-            .collect();
-        out.sort();
-        out.dedup();
-        out
-    }
-
     /// Materialize the *full* (redundant) existential closure: for each named
     /// class C and object property R in `props`, return **every** named D such
     /// that `C ⊑ (R some D)` is entailed — not only the most-specific ones.
@@ -544,6 +428,47 @@ impl Reasoner {
                 if !dominated {
                     if let Some(di) = &self.class_iri[d as usize] {
                         out.push((ind_iri.clone(), di.clone()));
+                    }
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Inferred object property assertions: every `(subject, property, object)`
+    /// triple of asserted individuals and a named object property for which
+    /// `property(subject, object)` is entailed — the asserted assertions closed
+    /// under the property hierarchy, property chains and transitivity. An
+    /// individual is a singleton nominal concept here, so `r(a, b)` is read off
+    /// as an `r`-link from `a` to a concept subsumed by `{b}`.
+    pub fn object_property_assertions(&self) -> Vec<(String, String, String)> {
+        let individuals: HashSet<CId> = self.individuals.iter().copied().collect();
+        let mut out = Vec::new();
+        for ((r, x), ys) in &self.state.r_succ {
+            if !individuals.contains(x) {
+                continue;
+            }
+            let r_iri = match self.role_iri.get(*r as usize) {
+                Some(iri)
+                    if !iri.starts_with("__owlmake_aux_role_")
+                        && iri != "http://www.w3.org/2002/07/owl#topObjectProperty" =>
+                {
+                    iri
+                }
+                _ => continue,
+            };
+            let Some(x_iri) = &self.class_iri[*x as usize] else {
+                continue;
+            };
+            for &y in ys {
+                for &d in self.state.s[y as usize].iter().chain(std::iter::once(&y)) {
+                    if !individuals.contains(&d) {
+                        continue;
+                    }
+                    if let Some(d_iri) = &self.class_iri[d as usize] {
+                        out.push((x_iri.clone(), r_iri.clone(), d_iri.clone()));
                     }
                 }
             }
@@ -1907,8 +1832,6 @@ impl Builder {
             ignored: self.ignored,
             named,
             individuals,
-            transitive: self.transitive,
-            role_super: role_super_closure,
         }
     }
 }
@@ -1989,7 +1912,24 @@ fn mem_available_gib() -> Option<usize> {
 /// desktop-safe margin that keeps an editor/UI responsive rather than swapping
 /// right up to the abort; `0` disables the guard entirely). Off Linux (no
 /// `MemAvailable`) the guard is a no-op.
-fn spawn_mem_watchdog() {
+/// Number of classifications in flight. The watchdog thread lives for the
+/// process, but it only aborts while this is non-zero: EFO's CI showed a
+/// `verify` step parsing a 500 MB release AFTER the reasoner had finished, on a
+/// 16 GB runner, and the still-armed watchdog killed a job that was nowhere near
+/// an OOM.
+static MEM_GUARD_ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Held by a classification for as long as it runs; dropping it disarms the
+/// watchdog once the last classification is over.
+pub struct MemGuard(());
+impl Drop for MemGuard {
+    fn drop(&mut self) {
+        MEM_GUARD_ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn spawn_mem_watchdog() -> MemGuard {
+    MEM_GUARD_ACTIVE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let floor_gib: u64 = std::env::var("OWLMAKE_MEM_FLOOR_GIB")
@@ -2008,6 +1948,9 @@ fn spawn_mem_watchdog() {
             // Poll often: the saturator can allocate gigabytes per second, so a
             // long interval could overshoot the floor between checks.
             std::thread::sleep(std::time::Duration::from_millis(100));
+            if MEM_GUARD_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                continue;
+            }
             if let Some(avail) = mem_available_mib() {
                 if avail < floor_mib {
                     status!(
@@ -2026,6 +1969,7 @@ fn spawn_mem_watchdog() {
             }
         });
     });
+    MemGuard(())
 }
 
 /// Choose a worker count. The parallel engine's peak memory is dominated by the
@@ -2371,12 +2315,18 @@ fn saturate_parallel(
         );
     }
 
-    // Move S-sets out of the cells and rebuild r_succ from forward links.
+    // Move S-sets out of the cells and rebuild r_succ by inverting the backward
+    // links. The backward store carries every link of every role — the forward
+    // store holds only the roles the chain rule consumes — and `materialize`
+    // reads r_succ for arbitrary roles, so the rebuild must come from the
+    // complete side.
     let s: Vec<HashSet<CId>> = shared.s.into_iter().map(|c| c.into_inner()).collect();
     let mut r_succ: HashMap<(RId, CId), HashSet<CId>> = HashMap::default();
-    for (c, cell) in shared.fwd.into_iter().enumerate() {
-        for (r, zs) in cell.into_inner() {
-            r_succ.entry((r, c as CId)).or_default().extend(zs);
+    for (c, cell) in shared.back.into_iter().enumerate() {
+        for (r, xs) in cell.into_inner() {
+            for x in xs {
+                r_succ.entry((r, x)).or_default().insert(c as CId);
+            }
         }
     }
     (s, r_succ)

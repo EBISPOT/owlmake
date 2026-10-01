@@ -1,0 +1,8 @@
+id: noscan
+import_group:
+  scan_signature: false
+  strip_annotation_properties: false
+  products:
+    - id: ro
+    - id: go
+      module_type: minimal

@@ -2,7 +2,8 @@
 //!
 //! By default this checks coherence (no unsatisfiable classes) and asserts the
 //! transitive reduction of inferred SubClassOf axioms. The full option set is
-//! available: axiom generators, indirect inference, tautology/owl:Thing/
+//! available: axiom generators (subsumptions, equivalences, class assertions
+//! and object property assertions), indirect inference, tautology/owl:Thing/
 //! duplicate/external exclusion, equivalent-class policy, new-ontology output,
 //! redundant-axiom removal, and unsatisfiable dumping.
 
@@ -13,7 +14,8 @@ use anyhow::{bail, Result};
 use clap::Args as ClapArgs;
 use horned_owl::model::{
     Annotation, AnnotatedComponent, AnnotationValue, ClassAssertion, ClassExpression as CE,
-    Component, EquivalentClasses, Individual, Literal, MutableOntology, SubClassOf,
+    Component, EquivalentClasses, Individual, Literal, MutableOntology, ObjectPropertyAssertion,
+    ObjectPropertyExpression as OPE, SubClassOf,
 };
 
 use crate::model::Model;
@@ -69,9 +71,16 @@ pub struct Args {
     pub annotate_inferred_axioms: Option<bool>,
 
     /// Inference types to assert: `SubClass`, `EquivalentClass`,
-    /// `ClassAssertion`, … Repeatable / comma-separated. Default: `SubClass`.
+    /// `ClassAssertion`, `PropertyAssertion`. Repeatable / comma-separated.
+    /// Default: `SubClass`.
     #[arg(short = 'A', long, value_delimiter = ',')]
     pub axiom_generators: Vec<String>,
+
+    /// The object properties whose inferred assertions the `PropertyAssertion`
+    /// generator asserts, as IRIs or CURIEs. Repeatable / comma-separated.
+    /// Default: every named object property in the signature.
+    #[arg(long, value_delimiter = ',')]
+    pub properties: Vec<String>,
 
     /// Assert all (indirect) subsumptions, not just the direct ones (`<bool>`).
     #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
@@ -213,7 +222,7 @@ impl ReasonerKind {
     }
 }
 
-/// The `--axiom-generators` names. All fourteen are recognised; the eleven
+/// The `--axiom-generators` names. All fourteen are recognised; the ten
 /// owlmake has no inference for are a hard error, because a name that generated
 /// **no** axioms and still exited 0 would turn `reason` into an expensive no-op.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -321,10 +330,11 @@ fn parse_generators(raw: &[String]) -> Result<Vec<AxiomGenerator>> {
             AxiomGenerator::SubClass
                 | AxiomGenerator::EquivalentClass
                 | AxiomGenerator::ClassAssertion
+                | AxiomGenerator::PropertyAssertion
         ) {
             bail!(
-                "--axiom-generators {}: owlmake infers only SubClass, EquivalentClass and \
-                 ClassAssertion; refusing to silently emit nothing for '{}'",
+                "--axiom-generators {}: owlmake infers only SubClass, EquivalentClass, \
+                 ClassAssertion and PropertyAssertion; refusing to silently emit nothing for '{}'",
                 gen.robot_name(),
                 gen.robot_name()
             );
@@ -372,6 +382,9 @@ pub struct ReasonOptions {
     pub annotate_inferred_axioms: bool,
     pub allow_incoherent: bool,
     pub axiom_generators: Vec<String>,
+    /// The object properties the `PropertyAssertion` generator is restricted to
+    /// (IRIs or CURIEs); empty means every named object property.
+    pub properties: Vec<String>,
     pub include_indirect: bool,
     pub equivalent_classes_allowed: String,
     pub create_new_ontology: bool,
@@ -391,6 +404,7 @@ impl Default for ReasonOptions {
             annotate_inferred_axioms: false,
             allow_incoherent: false,
             axiom_generators: Vec::new(),
+            properties: Vec::new(),
             include_indirect: false,
             equivalent_classes_allowed: "all".to_string(),
             create_new_ontology: false,
@@ -428,6 +442,7 @@ impl Args {
             annotate_inferred_axioms: self.annotate_inferred_axioms.unwrap_or(false),
             allow_incoherent: self.allow_incoherent,
             axiom_generators: self.axiom_generators.clone(),
+            properties: self.properties.clone(),
             include_indirect: self.include_indirect.unwrap_or(false),
             equivalent_classes_allowed: self.equivalent_classes_allowed.clone(),
             create_new_ontology: self.create_new_ontology.unwrap_or(false),
@@ -497,6 +512,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     let want_subclass = generators.contains(&AxiomGenerator::SubClass);
     let want_equiv = generators.contains(&AxiomGenerator::EquivalentClass);
     let want_class_assertion = generators.contains(&AxiomGenerator::ClassAssertion);
+    let want_property_assertion = generators.contains(&AxiomGenerator::PropertyAssertion);
     // The equivalence policy needs the inferred equivalence pairs, NOT the full
     // subsumption closure: each backend computes them directly (O(n·|S(c)|)).
     // `--equivalent-classes-allowed asserted-only` is on essentially every
@@ -509,6 +525,16 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // (huge) parsed model can be freed before saturation in reasoning-only mode —
     // on phenio that drops ~12 GB held uselessly through the ~60 s saturation.
     let declared = declared_classes(&model);
+    let declared_individuals = declared_individuals(&model);
+    // The properties the PropertyAssertion generator is restricted to, expanded
+    // against the model's prefixes here, before the model may be released.
+    let assertion_properties: HashSet<String> = opts
+        .properties
+        .iter()
+        .flat_map(|p| p.split([',', ' ']))
+        .filter(|p| !p.is_empty())
+        .map(|p| crate::cmd::select::expand(&model, p))
+        .collect();
     let existing = existing_subclass_pairs(&model);
     // `--equivalent-classes-allowed asserted-only` subtracts the equivalences the
     // input ALREADY states, so the asserted set must be captured here, before the
@@ -565,6 +591,11 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             } else {
                 Vec::new()
             },
+            property_assertions: if want_property_assertion {
+                r.object_property_assertions()
+            } else {
+                Vec::new()
+            },
         }
     } else {
         classify(
@@ -573,6 +604,8 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             need_all,
             need_equiv,
             want_class_assertion,
+            want_property_assertion,
+            &assertion_properties,
         )
     };
     let Classification {
@@ -582,7 +615,11 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         all,
         equiv,
         class_assertions,
+        mut property_assertions,
     } = cls;
+    if !assertion_properties.is_empty() {
+        property_assertions.retain(|(_, p, _)| assertion_properties.contains(p));
+    }
 
     if !consistent {
         bail!("ontology is inconsistent (owl:Thing is unsatisfiable)");
@@ -650,11 +687,22 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         direct.clone()
     };
     {
-        let has_named_super: std::collections::HashSet<&String> = direct
+        // A mutual pair — each member of an equivalence node subsuming the other
+        // — is no parent: a root equivalence node's members all carry the root
+        // edge themselves.
+        let pairs: std::collections::HashSet<(&str, &str)> =
+            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let mut has_named_super: std::collections::HashSet<String> = direct
             .iter()
-            .filter(|(_, sup)| sup.as_str() != OWL_THING)
-            .map(|(sub, _)| sub)
+            .filter(|(sub, sup)| {
+                sup.as_str() != OWL_THING && !pairs.contains(&(sup.as_str(), sub.as_str()))
+            })
+            .map(|(sub, _)| sub.clone())
             .collect();
+        // An asserted ANONYMOUS superclass does not carry the root edge: a class
+        // whose only superclass is a restriction still gets `⊑ owl:Thing`, so
+        // nothing more to mark here — the reasoner's hierarchy already named
+        // every class with a named parent.
         // Every class in the SIGNATURE, declared or not: a merge can leave an
         // undeclared class referenced by surviving axioms, and its inferred
         // superclass is still asserted — under a bare `reason` that is the
@@ -671,7 +719,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if c == OWL_THING || c == OWL_NOTHING {
                 continue;
             }
-            if opts.include_indirect || !has_named_super.contains(c) {
+            if opts.include_indirect || !has_named_super.contains(c.as_str()) {
                 base.push((c.clone(), OWL_THING.to_string()));
             }
         }
@@ -710,11 +758,18 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         let mut fresh = Model::from_parts(horned_owl::ontology::set::SetOntology::new(), prefixes);
         if opts.create_new_ontology_with_annotations {
             // Reached only when `free_model` is false, so the model is still held.
-            for ac in model.as_ref().expect("model retained for annotation copy").ont.iter() {
+            // The ROOT's annotations and declarations, as in ROBOT (whose
+            // `OWLOntology.getAxioms()` is root-only): what the import closure
+            // lent is not copied here — and, see below, nothing is stripped from
+            // the fresh ontology on save either, so this filter is the only
+            // thing keeping the closure's annotations out of it.
+            let src = model.as_ref().expect("model retained for annotation copy");
+            for ac in src.ont.iter() {
                 if matches!(
                     ac.component,
                     Component::AnnotationAssertion(_) | Component::DeclareClass(_)
-                ) {
+                ) && !src.imported_components.contains(ac)
+                {
                     fresh.ont.insert(ac.clone());
                 }
             }
@@ -834,6 +889,31 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         }
     }
 
+    if want_property_assertion {
+        let existing_pa = existing_object_property_assertions(&target);
+        for (from, prop, to) in &property_assertions {
+            if opts.exclude_external_entities && !declared_individuals.contains(from) {
+                continue;
+            }
+            if opts.exclude_duplicate_axioms
+                && existing_pa.contains(&(from.clone(), prop.clone(), to.clone()))
+            {
+                continue;
+            }
+            let ax = Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
+                ope: OPE::ObjectProperty(target.build.object_property(prop.clone())),
+                from: Individual::Named(target.build.named_individual(from.clone())),
+                to: Individual::Named(target.build.named_individual(to.clone())),
+            });
+            if taut_checker.as_ref().is_some_and(|t| t.is_tautology(&ax)) {
+                continue;
+            }
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+                added += 1;
+            }
+        }
+    }
+
     status!("reason: asserted {added} inferred axiom(s)");
 
     // Redundant-subclass removal (on by default): drop an asserted NAMED,
@@ -903,6 +983,18 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     }
 
     target.carry_meta_from(&meta_src);
+    // A fresh output is a NEW ontology of inferences, not the processed root. It
+    // still declares the root's imports on save, as ROBOT's does, but nothing in
+    // it was lent by the closure: an inferred `C ⊑ D` that an import also asserts
+    // is an inference all the same, and ROBOT writes it
+    // (`--exclude-duplicate-axioms` is the switch that drops it). Carrying the
+    // root's `imported_components` into the fresh model made the save strip
+    // exactly those edges — on EFO, every direct parent of a PO class that the
+    // PO import asserts, so `tepal` came out of `--create-new-ontology` with no
+    // parent at all while `explain` derived them (EBISPOT/owlmake#2).
+    if opts.create_new_ontology || opts.create_new_ontology_with_annotations {
+        target.imported_components.clear();
+    }
     Ok(target)
 }
 
@@ -920,6 +1012,9 @@ struct Classification {
     /// Inferred direct class assertions (individual_iri, class_iri), only the
     /// `class-assertion` generator populates this.
     class_assertions: Vec<(String, String)>,
+    /// Inferred object property assertions (subject, property, object) between
+    /// named individuals; only the `property-assertion` generator populates this.
+    property_assertions: Vec<(String, String, String)>,
 }
 
 fn classify(
@@ -928,6 +1023,8 @@ fn classify(
     need_all: bool,
     need_equiv: bool,
     need_class_assertions: bool,
+    need_property_assertions: bool,
+    assertion_properties: &HashSet<String>,
 ) -> Classification {
     match kind {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so `hermit`/
@@ -937,16 +1034,26 @@ fn classify(
             let r = crate::reason::DlReasoner::classify(model);
             let direct = r.direct_subsumptions();
             let all = if need_all { r.all_subsumptions() } else { Vec::new() };
-            if need_class_assertions {
-                status!("note: the 'class-assertion' generator needs the EL reasoner; no inferred class assertions from '{kind:?}'");
-            }
+            // The ABox queries need a consistent ontology; `reason_with` fails
+            // on inconsistency right after this, so an inconsistent one just
+            // gets no assertions.
+            let consistent = r.is_consistent();
             Classification {
-                consistent: r.is_consistent(),
+                consistent,
                 unsat: r.unsatisfiable(),
                 direct,
                 all,
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
-                class_assertions: Vec::new(),
+                class_assertions: if need_class_assertions && consistent {
+                    r.class_assertions()
+                } else {
+                    Vec::new()
+                },
+                property_assertions: if need_property_assertions && consistent {
+                    r.object_property_assertions(assertion_properties)
+                } else {
+                    Vec::new()
+                },
             }
         }
         ReasonerKind::Whelk => {
@@ -955,6 +1062,9 @@ fn classify(
             let direct = r.direct_subsumptions();
             if need_class_assertions {
                 status!("note: the 'class-assertion' generator needs the built-in EL reasoner; no inferred class assertions from whelk");
+            }
+            if need_property_assertions {
+                status!("note: the 'property-assertion' generator needs the built-in EL reasoner or hermit; no inferred property assertions from whelk");
             }
             Classification {
                 consistent: r.is_consistent(),
@@ -967,6 +1077,7 @@ fn classify(
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
                 direct,
                 class_assertions: Vec::new(),
+                property_assertions: Vec::new(),
             }
         }
         // `structural`: the TOLD hierarchy, no reasoning at all.
@@ -1000,6 +1111,11 @@ fn classify(
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
                 class_assertions: if need_class_assertions {
                     r.class_assertions()
+                } else {
+                    Vec::new()
+                },
+                property_assertions: if need_property_assertions {
+                    r.object_property_assertions()
                 } else {
                     Vec::new()
                 },
@@ -1108,6 +1224,7 @@ fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Class
         all,
         equiv,
         class_assertions: Vec::new(),
+        property_assertions: Vec::new(),
     }
 }
 
@@ -1259,6 +1376,36 @@ fn existing_class_assertions(model: &Model) -> std::collections::HashSet<(String
             if let (CE::Class(c), Individual::Named(i)) = (&ca.ce, &ca.i) {
                 out.insert((i.0.as_ref().to_string(), c.0.as_ref().to_string()));
             }
+        }
+    }
+    out
+}
+
+/// The asserted `(subject, property, object)` assertions between named
+/// individuals on named properties, for `--exclude-duplicate-axioms`.
+fn existing_object_property_assertions(model: &Model) -> HashSet<(String, String, String)> {
+    let mut out = HashSet::new();
+    for ac in model.ont.iter() {
+        if let Component::ObjectPropertyAssertion(pa) = &ac.component {
+            if let (OPE::ObjectProperty(p), Individual::Named(f), Individual::Named(t)) =
+                (&pa.ope, &pa.from, &pa.to)
+            {
+                out.insert((
+                    f.0.as_ref().to_string(),
+                    p.0.as_ref().to_string(),
+                    t.0.as_ref().to_string(),
+                ));
+            }
+        }
+    }
+    out
+}
+
+fn declared_individuals(model: &Model) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for ac in model.ont.iter() {
+        if let Component::DeclareNamedIndividual(d) = &ac.component {
+            out.insert(d.0 .0.as_ref().to_string());
         }
     }
     out

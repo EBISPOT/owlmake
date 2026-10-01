@@ -240,9 +240,14 @@ fn a_repo_can_delete_its_makefile_and_still_build() {
         "a bare build failed with no Makefile:\n{}",
         String::from_utf8_lossy(&bare.stderr)
     );
+    assert!(ont.join("tiny.owl").is_file(), "the bare build produced no release artefact");
+    // …and publishes it at the root, as the build with the Makefile did: the
+    // file says which of its targets are the release, and a target it merely
+    // builds is not.
     assert!(
-        ont.join("tiny.owl").is_file() || root.join("tiny.owl").is_file(),
-        "the bare build produced no release artefact"
+        root.join("tiny.owl").is_file(),
+        "the release artefact was not published from the plan alone: the plan no longer \
+         knows `tiny.owl` is a release artefact"
     );
 
     let _ = std::fs::remove_dir_all(&root);
@@ -379,9 +384,9 @@ fn a_plan_only_repo_can_keep_a_switched_group() {
     assert!(bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap().status.success());
     let plan_text = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(
-        plan_text.contains("name: bridges") && plan_text.contains("flag: BRI"),
-        "a switch of the repo's own invention must be declared as a group, or a repo with \
-         no build configuration cannot be told to keep it:\n{plan_text}"
+        plan_text.contains("when:\n  - bridges") && plan_text.contains("BRI: 'true'"),
+        "a switch of the repo's own invention must be declared, with the targets that exist \
+         under it, or a repo with no build configuration cannot be told to keep it:\n{plan_text}"
     );
 
     let stash = scratch("bridges_stash");
@@ -474,7 +479,7 @@ fn a_plan_only_repo_runs_the_other_branch_of_a_conditional() {
     assert!(bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap().status.success());
     let plan_text = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(
-        plan_text.contains("branches:") && plan_text.contains("flag: BRI"),
+        plan_text.contains("branches:") && plan_text.contains("group: bridges"),
         "the recipe the other branch defines must be recorded, or flipping the switch \
          leaves the target with no rule at all:\n{plan_text}"
     );
@@ -628,4 +633,482 @@ fn a_deleted_source_fails_the_build_that_has_only_the_plan() {
 
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&stash);
+}
+
+/// The committed plan records an import module twice: once as the import
+/// product's own pipeline (`imports: - id: x … steps:`), which is what
+/// `--plan-only` shows and what a curator edits, and once as the replayed
+/// Makefile rule for the same file (`targets: - target: …/x_import.owl`). The two
+/// agree on the day the plan is generated and diverge the moment someone edits
+/// the product's steps — EFO flipped the OBA filter's `trim: false` and the
+/// rebuilt module came out byte-identical, because both `om make
+/// imports/oba_import.owl` and the `imports` refresh group replayed the recorded
+/// rule and never ran the product's pipeline. The product's recorded steps are
+/// the plan; they must be what runs.
+#[test]
+fn an_edited_import_pipeline_is_what_a_rebuild_runs() {
+    let root = scratch("importfix");
+    let ont = root.join("src/ontology");
+    let mirror = ont.join("mirror/x.owl");
+
+    // The source: X_1 is seeded; F_1 is the filler of a relation on X_1 and is NOT
+    // seeded, so `filter --trim true` drops the relation and `--trim false` keeps it.
+    write(
+        &mirror,
+        "Prefix(:=<http://example.org/x/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/x.owl>\n\
+         Declaration(Class(<http://example.org/x/X_1>))\n\
+         Declaration(Class(<http://example.org/x/X_2>))\n\
+         Declaration(Class(<http://example.org/f/F_1>))\n\
+         Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000050>))\n\
+         SubClassOf(<http://example.org/x/X_1> <http://example.org/x/X_2>)\n\
+         SubClassOf(<http://example.org/x/X_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000050> <http://example.org/f/F_1>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/x/X_1> \"x one\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/x/X_2> \"x two\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/f/F_1> \"filler\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/x_terms.txt"), "http://example.org/x/X_1\n");
+    write(
+        &ont.join("x-edit.ofn"),
+        "Prefix(:=<http://example.org/x/>)\n\
+         Ontology(<http://example.org/x-edit.owl>\n\
+         Declaration(Class(<http://example.org/x/X_9>))\n\
+         )\n",
+    );
+    write(
+        &ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         </catalog>\n",
+    );
+    // EFO's import rules, verbatim in shape: a BOT module, then a filter that
+    // trims to the seed signature.
+    write(
+        &ont.join("Makefile"),
+        "ONT = x\n\
+         SRC = x-edit.ofn\n\
+         ROBOT = robot\n\
+         BASE = http://example.org/x\n\
+         IMPORTS_OWL = imports/x_import.owl\n\
+         \n\
+         all: x.owl\n\
+         .PHONY: all all_imports\n\
+         \n\
+         x.owl: $(SRC) imports/x_import.owl\n\
+         \t$(ROBOT) merge -i $< -i imports/x_import.owl annotate --ontology-iri http://example.org/x.owl -o $@\n\
+         \n\
+         all_imports: $(IMPORTS_OWL)\n\
+         \n\
+         imports/%_terms.txt: iri_dependencies/%_terms.txt\n\
+         \tcat $^ | sort | uniq > $@\n\
+         \n\
+         imports/%_bot.owl: mirror/%.owl imports/%_terms.txt\n\
+         \t$(ROBOT) extract -i $< -T imports/$*_terms.txt --method BOT -O $(BASE)/$@ -o $@\n\
+         \n\
+         imports/%_import.owl: imports/%_bot.owl imports/%_terms.txt $(SRC)\n\
+         \t$(ROBOT) filter -i $< --term-file imports/$*_terms.txt --select \"annotations ontology anonymous self\" --trim true --signature true -O $(BASE)/$@ -o $@\n\
+         .PRECIOUS: imports/%_import.owl\n",
+    );
+    write(
+        &ont.join("x-odk.yaml"),
+        &format!(
+            "id: x\n\
+             import_group:\n\
+             \x20 products:\n\
+             \x20   - id: x\n\
+             \x20     mirror_from: file://{}\n",
+            mirror.display()
+        ),
+    );
+
+    let plan_out = bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap();
+    assert!(plan_out.status.success(), "planning failed:\n{}", String::from_utf8_lossy(&plan_out.stderr));
+    let plan_file = root.join("owlmake.yaml");
+    let plan_text = std::fs::read_to_string(&plan_file).unwrap();
+    let product_at = plan_text.find("- id: x\n").expect("the plan records the import product");
+    let trim_at = plan_text[product_at..].find("trim: true").map(|i| i + product_at).expect(
+        "the product's recorded filter step carries the rule's `--trim true`",
+    );
+    assert!(
+        plan_text.contains("target: src/ontology/imports/x_import.owl"),
+        "the plan also replays the Makefile rule for the module — the shadowing this test is about:\n{plan_text}"
+    );
+
+    // EFO's situation: the build configuration is gone and the committed plan is
+    // the only statement of the build. (With the Makefile present, om rightly
+    // refuses a plan that disagrees with it.)
+    let stash = scratch("importfix_stash");
+    std::fs::create_dir_all(&stash).unwrap();
+    std::fs::rename(ont.join("Makefile"), stash.join("Makefile")).unwrap();
+    std::fs::rename(ont.join("x-odk.yaml"), stash.join("x-odk.yaml")).unwrap();
+
+    let module = ont.join("imports/x_import.owl");
+    let build = |what: &str| {
+        let out = bin().args(["make", what, "--rebuild", "imports", "-C"]).arg(&ont).output().unwrap();
+        assert!(out.status.success(), "`om make {what}` failed:\n{}", String::from_utf8_lossy(&out.stderr));
+        std::fs::read_to_string(&module).unwrap()
+    };
+
+    // As recorded, the filter trims: the unseeded filler is dropped.
+    let trimmed = build("imports/x_import.owl");
+    assert!(trimmed.contains("X_1") && !trimmed.contains("F_1"), "trim: true must drop the unseeded filler:\n{trimmed}");
+
+    // Edit the PRODUCT's step, as a curator would, and leave the replayed rule alone.
+    let edited = format!("{}trim: false{}", &plan_text[..trim_at], &plan_text[trim_at + "trim: true".len()..]);
+    std::fs::write(&plan_file, edited).unwrap();
+
+    // Both spellings of "rebuild this module" must run the edited pipeline.
+    let by_name = build("imports/x_import.owl");
+    assert!(by_name.contains("F_1"), "`om make imports/x_import.owl` ran the replayed rule, not the product's edited pipeline:\n{by_name}");
+    std::fs::remove_file(&module).unwrap();
+    let by_group = build("all_imports");
+    assert!(by_group.contains("F_1"), "`om make all_imports` ran the replayed rule, not the product's edited pipeline:\n{by_group}");
+
+    // The plan with the replayed rules REMOVED — one source of truth, which is
+    // where a repo ends up once it notices the duplication — must build the same
+    // module from the product pipelines alone, whichever way it is asked.
+    let plan_text = std::fs::read_to_string(&plan_file).unwrap();
+    let mut kept = String::new();
+    let mut skipping = false;
+    for line in plan_text.lines() {
+        if line.starts_with("- target: ") {
+            let t = &line["- target: ".len()..];
+            skipping = t.starts_with("src/ontology/imports/x_") && !t.ends_with("_terms.txt");
+        } else if !line.starts_with(' ') && !line.starts_with('-') {
+            skipping = false;
+        }
+        if !skipping {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    assert!(
+        !kept.contains("target: src/ontology/imports/x_import.owl") && kept.contains("- id: x\n"),
+        "the replayed module rules should be gone and the product kept:\n{kept}"
+    );
+    std::fs::write(&plan_file, kept).unwrap();
+    // `refresh-imports` re-mirrors by definition, and the fixture's mirror is a
+    // local file — so it is asked for the way ODK's `no_mirror_refresh_imports`
+    // asks: with the mirrors pinned.
+    for what in [
+        vec!["imports/x_import.owl"],
+        vec!["all_imports"],
+        vec!["refresh-imports", "MIR=false"],
+        // `MIR=false` pins the mirrors only; the module named alongside
+        // `--rebuild imports` is still rebuilt.
+        vec!["imports/x_import.owl", "--rebuild", "imports", "MIR=false"],
+    ] {
+        let _ = std::fs::remove_file(&module);
+        let out = bin().arg("make").args(&what).arg("-C").arg(&ont).output().unwrap();
+        let what = what[0];
+        assert!(out.status.success(), "`om make {what}` failed on the de-duplicated plan:\n{}", String::from_utf8_lossy(&out.stderr));
+        let built = std::fs::read_to_string(&module).unwrap_or_default();
+        assert!(built.contains("F_1"), "`om make {what}` on the de-duplicated plan did not run the product's pipeline:\n{built}");
+    }
+
+    // A fresh checkout: the module is absent (EFO gitignores its MONDO module) and
+    // the release needs it. With no rule of its own for the file, the product's
+    // pipeline must build it on the way — not "no rule to make target".
+    let _ = std::fs::remove_file(&module);
+    let _ = std::fs::remove_file(ont.join("x.owl"));
+    let out = bin().args(["make", "x.owl", "-C"]).arg(&ont).output().unwrap();
+    assert!(out.status.success(), "`om make x.owl` failed with the module absent:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(module.is_file(), "the release did not build the import module it needs");
+    let release = std::fs::read_to_string(ont.join("x.owl")).unwrap();
+    assert!(release.contains("X_1") && release.contains("F_1"), "the release should merge the module built from the product's edited pipeline:\n{release}");
+
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&stash);
+}
+
+/// Under base merging, a custom product's cached module is what its own recipe
+/// chose to keep, and the merged ⊥-extraction must not shrink it. It did: the
+/// merged seed is the recipe's `*_terms.txt`, so a class the recipe's own
+/// extraction kept only because an axiom (an equivalence with a seed term, say)
+/// tied it to a seed term — an axiom a later recipe step then removed — is
+/// dropped by the second BOT pass. EFO's MONDO module lost 1,077 gene-defined
+/// disease subtypes that way. A normal product is still extracted over its
+/// seed, so an unseeded leaf in a plain mirror stays out.
+#[test]
+fn a_cached_custom_module_is_kept_whole_by_the_merged_import() {
+    let root = scratch("cachedcustom");
+    let ont = root.join("src/ontology");
+    let mirror = ont.join("mirror/a.owl");
+
+    // A plain mirror: A_1 is seeded, A_2 is its parent, A_3 an UNSEEDED leaf.
+    write(
+        &mirror,
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/a.owl>\n\
+         Declaration(Class(<http://example.org/a/A_1>))\n\
+         Declaration(Class(<http://example.org/a/A_2>))\n\
+         Declaration(Class(<http://example.org/a/A_3>))\n\
+         SubClassOf(<http://example.org/a/A_1> <http://example.org/a/A_2>)\n\
+         SubClassOf(<http://example.org/a/A_3> <http://example.org/a/A_1>)\n\
+         AnnotationAssertion(rdfs:label <http://example.org/a/A_1> \"a one\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/a/A_2> \"a two\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/a/A_3> \"a three\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/a_terms.txt"), "http://example.org/a/A_1\n");
+
+    // The custom product's cached module, as its recipe left it: C_1 is seeded;
+    // C_2 is a leaf under it that the recipe kept and the seed does not name.
+    write(
+        &ont.join("imports/c_import.owl"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/x/imports/c_import.owl>\n\
+         Declaration(Class(<http://example.org/c/C_1>))\n\
+         Declaration(Class(<http://example.org/c/C_2>))\n\
+         SubClassOf(<http://example.org/c/C_2> <http://example.org/c/C_1>)\n\
+         AnnotationAssertion(rdfs:label <http://example.org/c/C_1> \"c one\")\n\
+         AnnotationAssertion(rdfs:label <http://example.org/c/C_2> \"c two\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/c_terms.txt"), "http://example.org/c/C_1\n");
+    write(
+        &ont.join("x-edit.ofn"),
+        "Ontology(<http://example.org/x-edit.owl>\n\
+         Declaration(Class(<http://example.org/x/X_9>))\n\
+         )\n",
+    );
+    write(
+        &ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         </catalog>\n",
+    );
+    // A committed plan, EFO's shape: a build of the repository's own, base
+    // merging into one merged module, one plain product and one custom product
+    // with a cached module.
+    write(
+        &root.join("owlmake.yaml"),
+        &format!(
+            "use_builtin_rules: false\n\
+             id: x\n\
+             version: '1'\n\
+             ontology_iri: http://example.org/x.owl\n\
+             reasoner: elk\n\
+             use_base_merging: true\n\
+             merged_import: src/ontology/imports/merged_import.owl\n\
+             merged_import_iri: http://example.org/x/imports/merged_import.owl\n\
+             edit_file: src/ontology/x-edit.ofn\n\
+             catalog_file: src/ontology/catalog-v001.xml\n\
+             imports:\n\
+             - id: a\n\
+             \x20 source: file://{mirror}\n\
+             \x20 output: src/ontology/imports/a_import.owl\n\
+             \x20 steps:\n\
+             \x20 - op: extract\n\
+             \x20   method: BOT\n\
+             \x20   term_files:\n\
+             \x20   - src/ontology/iri_dependencies/a_terms.txt\n\
+             \x20 product:\n\
+             \x20   id: a\n\
+             \x20   mirror_from: file://{mirror}\n\
+             - id: c\n\
+             \x20 source: file://{root}/nowhere/c.owl\n\
+             \x20 output: src/ontology/imports/c_import.owl\n\
+             \x20 steps:\n\
+             \x20 - op: extract\n\
+             \x20   method: BOT\n\
+             \x20   term_files:\n\
+             \x20   - src/ontology/iri_dependencies/c_terms.txt\n\
+             \x20 product:\n\
+             \x20   id: c\n\
+             \x20   mirror_type: custom\n\
+             refresh_groups:\n\
+             - name: mirrors\n\
+             \x20 flag: MIR\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/mirror/a.owl\n\
+             \x20 default: keep\n\
+             - name: imports\n\
+             \x20 flag: IMP\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/imports/merged_import.owl\n\
+             \x20 default: keep\n",
+            mirror = mirror.display(),
+            root = root.display(),
+        ),
+    );
+
+    let out = bin()
+        .args(["make", "imports/merged_import.owl", "--rebuild", "imports", "--keep", "mirrors", "-C"])
+        .arg(&ont)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merged import build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let merged = std::fs::read_to_string(ont.join("imports/merged_import.owl")).unwrap();
+    assert!(merged.contains("A_1") && merged.contains("A_2"), "the plain product's seed and its ancestor are in:\n{merged}");
+    assert!(!merged.contains("A_3"), "an unseeded leaf of a plain mirror is still extracted away:\n{merged}");
+    assert!(merged.contains("C_1"), "the cached module's seed term is in:\n{merged}");
+    assert!(
+        merged.contains("C_2"),
+        "the cached custom module's unseeded leaf was dropped by the merged extraction:\n{merged}"
+    );
+}
+
+/// With `merged_import_shards`, the merged import is one functional-syntax
+/// document per source ontology plus an index that `owl:imports` them, and a
+/// single `rewriteURI` catalog line resolves the lot. Ontology-level components
+/// stay with the index; entities shard by the prefix of their local name.
+#[test]
+fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
+    let root = scratch("shards");
+    let ont = root.join("src/ontology");
+    let mirror = ont.join("mirror/a.owl");
+    write(
+        &mirror,
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/a.owl>\n\
+         Declaration(Class(<http://purl.obolibrary.org/obo/A_1>))\n\
+         Declaration(Class(<http://purl.obolibrary.org/obo/A_2>))\n\
+         Declaration(Class(<http://purl.obolibrary.org/obo/B_1>))\n\
+         Declaration(Class(<http://dbpedia.org/resource/Western_Sahara>))\n\
+         Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000050>))\n\
+         SubClassOf(<http://purl.obolibrary.org/obo/A_1> <http://purl.obolibrary.org/obo/A_2>)\n\
+         SubClassOf(<http://purl.obolibrary.org/obo/A_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000050> <http://purl.obolibrary.org/obo/B_1>))\n\
+         AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/A_1> \"a one\")\n\
+         AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/A_2> \"a two\")\n\
+         AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/B_1> \"b one\")\n\
+         AnnotationAssertion(rdfs:label <http://dbpedia.org/resource/Western_Sahara> \"Western Sahara\")\n\
+         )\n",
+    );
+    write(&ont.join("iri_dependencies/a_terms.txt"), "http://purl.obolibrary.org/obo/A_1\nhttp://dbpedia.org/resource/Western_Sahara\n");
+    write(
+        &ont.join("x-edit.ofn"),
+        "Ontology(<http://example.org/x-edit.owl>\n\
+         Import(<http://example.org/x/imports/merged_import.owl>)\n\
+         Declaration(Class(<http://example.org/x/X_9>))\n\
+         )\n",
+    );
+    write(
+        &ont.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://example.org/x/imports/merged_import.owl\" uri=\"imports/merged_import.owl\"/>\n\
+         </catalog>\n",
+    );
+    write(
+        &root.join("owlmake.yaml"),
+        &format!(
+            "use_builtin_rules: false\n\
+             id: x\n\
+             version: '1'\n\
+             ontology_iri: http://example.org/x.owl\n\
+             reasoner: elk\n\
+             use_base_merging: true\n\
+             merged_import: src/ontology/imports/merged_import.owl\n\
+             merged_import_iri: http://example.org/x/imports/merged_import.owl\n\
+             merged_import_shards: src/ontology/imports/merged\n\
+             merged_import_shard_bytes: 150\n\
+             edit_file: src/ontology/x-edit.ofn\n\
+             catalog_file: src/ontology/catalog-v001.xml\n\
+             imports:\n\
+             - id: a\n\
+             \x20 source: file://{mirror}\n\
+             \x20 output: src/ontology/imports/a_import.owl\n\
+             \x20 steps:\n\
+             \x20 - op: extract\n\
+             \x20   method: BOT\n\
+             \x20   term_files:\n\
+             \x20   - src/ontology/iri_dependencies/a_terms.txt\n\
+             \x20 product:\n\
+             \x20   id: a\n\
+             \x20   mirror_from: file://{mirror}\n\
+             refresh_groups:\n\
+             - name: mirrors\n\
+             \x20 flag: MIR\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/mirror/a.owl\n\
+             \x20 default: keep\n\
+             - name: imports\n\
+             \x20 flag: IMP\n\
+             \x20 targets:\n\
+             \x20 - src/ontology/imports/merged_import.owl\n\
+             \x20 default: keep\n",
+            mirror = mirror.display(),
+        ),
+    );
+    // A stale shard from an earlier layout must not survive the rebuild.
+    write(&ont.join("imports/merged/stale.owl"), "Ontology(<http://example.org/x/imports/merged/stale.owl>)\n");
+
+    let out = bin()
+        .args(["make", "imports/merged_import.owl", "--rebuild", "imports", "--keep", "mirrors", "-C"])
+        .arg(&ont)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merged import build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+
+    let index = std::fs::read_to_string(ont.join("imports/merged_import.owl")).unwrap();
+    // The A shard is over the 150-byte cap, so it splits on the local id: A_1's
+    // axioms in `a-1.owl`, A_2's in `a-2.owl`. B fits in one file.
+    let a1 = std::fs::read_to_string(ont.join("imports/merged/a-1.owl")).unwrap();
+    let a2 = std::fs::read_to_string(ont.join("imports/merged/a-2.owl")).unwrap();
+    let b = std::fs::read_to_string(ont.join("imports/merged/b.owl")).unwrap();
+    assert!(!ont.join("imports/merged/a.owl").exists(), "a split shard leaves no unsplit file");
+    for f in ["a-1", "a-2", "b"] {
+        assert!(index.contains(&format!("Import(<http://example.org/x/imports/merged/{f}.owl>)")), "index imports {f}:\n{index}");
+    }
+    assert!(!index.contains("A_1"), "axioms live in the shards, not the index:\n{index}");
+    assert!(a1.contains("Ontology(<http://example.org/x/imports/merged/a-1.owl>"), "a shard has its own IRI:\n{a1}");
+    assert!(a1.contains("SubClassOf(<http://purl.obolibrary.org/obo/A_1> <http://purl.obolibrary.org/obo/A_2>)"), "A_1's axioms shard with A_1:\n{a1}");
+    assert!(a2.contains("A_2> \"a two\"") && !a1.contains("A_2> \"a two\""), "A_2's label is in a-2 only:\n{a1}\n{a2}");
+    assert!(b.contains("\"b one\""), "B_1 shards by its own prefix:\n{b}");
+    assert!(!ont.join("imports/merged/stale.owl").exists(), "the stale shard was not removed");
+    // A local name that is not `PREFIX_NNNN` is not a prefix of its own.
+    let other = std::fs::read_to_string(ont.join("imports/merged/other.owl")).unwrap();
+    assert!(other.contains("Western_Sahara"), "a non-OBO local name shards to `other`:\n{other}");
+    assert!(!ont.join("imports/merged/western.owl").exists(), "`Western_Sahara` must not become a `western` shard");
+
+    // Splits are sticky: with the cap raised so A would fit in one file, the
+    // rebuild keeps `a-1`/`a-2` rather than merging them back into `a.owl` —
+    // which would rename every file under a bucket whenever an import shrank.
+    let plan = root.join("owlmake.yaml");
+    let text = std::fs::read_to_string(&plan).unwrap().replace("merged_import_shard_bytes: 150", "merged_import_shard_bytes: 1000000");
+    std::fs::write(&plan, text).unwrap();
+    let out = bin()
+        .args(["make", "imports/merged_import.owl", "--rebuild", "imports", "--keep", "mirrors", "-C"])
+        .arg(&ont)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "rebuild with a larger cap failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(ont.join("imports/merged/a-1.owl").exists() && ont.join("imports/merged/a-2.owl").exists(), "a split bucket merged back");
+    assert!(!ont.join("imports/merged/a.owl").exists(), "a split bucket was rewritten as one file");
+
+    // The build wrote one `<uri>` per shard into a group of its own in the
+    // catalog (Protégé resolves those, not `rewriteURI`), and left the curators'
+    // entry alone. The stale shard's entry is gone with the file.
+    let catalog = std::fs::read_to_string(ont.join("catalog-v001.xml")).unwrap();
+    assert!(catalog.contains("<group id=\"merged import shards\""), "no shard group in the catalog:\n{catalog}");
+    for f in ["a-1", "a-2", "b", "other"] {
+        assert!(
+            catalog.contains(&format!("<uri name=\"http://example.org/x/imports/merged/{f}.owl\" uri=\"imports/merged/{f}.owl\"/>")),
+            "no catalog entry for shard {f}:\n{catalog}"
+        );
+    }
+    assert!(!catalog.contains("stale.owl"), "the stale shard kept a catalog entry:\n{catalog}");
+    assert!(catalog.contains("uri=\"imports/merged_import.owl\""), "the curators' index entry was lost:\n{catalog}");
+    assert_eq!(catalog.matches("<group id=\"merged import shards\"").count(), 1, "the shard group was written twice:\n{catalog}");
+
+    // The closure loads through the catalog: merging the edit file resolves the
+    // index by the curators' entry, then every shard by the generated group.
+    let merged = ont.join("merged.ofn");
+    let out = bin()
+        .args(["merge", "-i"])
+        .arg(ont.join("x-edit.ofn"))
+        .args(["--catalog"])
+        .arg(ont.join("catalog-v001.xml"))
+        .arg("-o")
+        .arg(&merged)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "merge through the catalog failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let text = std::fs::read_to_string(&merged).unwrap();
+    for want in ["X_9", "A_1", "A_2", "B_1"] {
+        assert!(text.contains(want), "`{want}` did not arrive through the sharded closure:\n{text}");
+    }
 }

@@ -366,7 +366,6 @@ pub fn merge_equivalent_sets(
     out.explicit_prefixes = renamed.explicit_prefixes;
     out.owl_genid_refs = renamed.owl_genid_refs;
     out.owl_label_order = renamed.owl_label_order;
-    out.owl_reif_order = renamed.owl_reif_order;
     out.owl_anon_blocks = renamed.owl_anon_blocks;
     out.closure_ann_ns = renamed.closure_ann_ns;
     out.closure_declared = renamed.closure_declared;

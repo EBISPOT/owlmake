@@ -14,6 +14,18 @@ const SUBCOMMANDS: &[&str] = &[
     "query", "verify", "report", "template", "export", "measure", "extract", "mirror", "repair",
     "rename", "expand", "collapse", "unmerge", "diff", "explain", "validate-profile", "reduce",
     "mireot", "rdfxml-to-json", "python",
+    // owlmake's own names for the commands a recipe may also spell `odk:<name>`.
+    "normalize", "subset", "check-align",
+];
+
+/// Commands that read their own inputs and write an output that is not the
+/// ontology flowing through the chain — a report, a table, a prefix map, a mirror
+/// directory — so running the command line IS the operation. A command that
+/// threads a model on (`mint`) has to be a pipeline op instead, or the chain it
+/// sits in loses the model.
+const TERMINAL_COMMANDS: &[&str] = &[
+    "report", "verify", "validate-profile", "measure", "diff", "export", "export-prefixes",
+    "explain", "mirror", "check-align",
 ];
 
 const BENIGN_SHELL: &[&str] = &[
@@ -96,14 +108,21 @@ pub(crate) fn shell_step(command: String) -> Step {
 /// as a missing external dependency, and the plan's preflight then asks the user
 /// to install something owlmake already provides.
 pub(crate) const BUNDLED: &[&str] = &[
+    // owlmake under its own name, which is how the standard build's recipes
+    // spell a command line.
+    "om",
     "robot", "jq", "arq", "sssom", "sssom-cli", "kgx", "dosdp-tools", "dosdp",
     "owltools", "sed", "grep", "comm", "gzip", "gunzip", "zcat",
     // Helper command words a recipe can spell inline. Nothing else on the machine
     // provides them, so owlmake serves each one from its own implementation.
     "dicer-cli", "check-rdfxml", "odk-info", "sha256sum", "fastobo-validator",
-    "simple_pattern_tester.py",
+    "simple_pattern_tester.py", "runoak",
+    // The OBO stanza filter, under the name of the script repositories call.
+    "obo-grep.pl", "obo-grep",
     // The ontology SQL database (`semsql make <name>.db`).
     "semsql",
+    // Helpers of ODK's own that the standard build's recipes name.
+    "tsvalid", "context2csv", "make-release-assets.py",
 ];
 
 /// Command words in `line` that owlmake cannot vouch for, deduplicated in first
@@ -111,8 +130,8 @@ pub(crate) const BUNDLED: &[&str] = &[
 /// word, so `git show x | robot convert` reports `git` and not `robot`.
 fn unvouched_tools(line: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for seg in line.split(['|', ';', '&']) {
-        let toks = tokenize(seg);
+    for seg in split_commands(line) {
+        let toks = tokenize(&seg);
         let Some(word) = toks.iter().find(|t| !is_env_assignment(t)) else { continue };
         // `!` negates a command in POSIX sh (`! grep -q x file`), so it is trimmed
         // off the command word rather than reported as a tool the machine needs.
@@ -128,10 +147,60 @@ fn unvouched_tools(line: &str) -> Vec<String> {
         {
             continue;
         }
-        if !out.iter().any(|o| o == base) {
-            out.push(base.to_string());
+        // A program named by path is a file of the repository (`../scripts/x.pl`),
+        // and the plan names it as the path it is, so the build can see whether it
+        // is there. A bare word is a program the machine provides on PATH.
+        let name = if word.contains('/') { word } else { base };
+        if !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
         }
     }
+    out
+}
+
+/// The simple commands of a line, split at every unquoted `|`, `;`, `&` or
+/// newline. Quoted text is one word whatever it contains: a regex argument
+/// `"(is_a|intersection_of):"` is an argument, not two commands, and splitting
+/// inside it would read `intersection_of` as a program and swallow the rest of
+/// the line into the unbalanced quote that follows.
+fn split_commands(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                } else if q == '"' && c == '\\' {
+                    // An escaped `"` does not close the string.
+                    if let Some(&n) = chars.peek() {
+                        cur.push(c);
+                        cur.push(n);
+                        chars.next();
+                        continue;
+                    }
+                }
+                cur.push(c);
+            }
+            None => match c {
+                '"' | '\'' | '`' => {
+                    quote = Some(c);
+                    cur.push(c);
+                }
+                '\\' => {
+                    cur.push(c);
+                    if let Some(n) = chars.next() {
+                        cur.push(n);
+                    }
+                }
+                '|' | ';' | '&' | '\n' => out.push(std::mem::take(&mut cur)),
+                _ => cur.push(c),
+            },
+        }
+    }
+    out.push(cur);
     out
 }
 
@@ -180,6 +249,28 @@ fn is_python(tok: &str) -> bool {
         || tok.ends_with("/python3")
 }
 
+/// Whether owlmake performs this step itself, with no command line involved.
+///
+/// The test for whether a parse is worth keeping over the text it came from: a
+/// step that ends up shelling out anyway has been decomposed for nothing, and
+/// decomposing costs the shell's own short-circuiting and redirection.
+fn runs_without_a_shell(s: &Step) -> bool {
+    match s {
+        Step::Op(_) | Step::Partial { .. } | Step::Boundary { .. } => true,
+        Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::OwlmakeCli { .. } => true,
+        Step::MayFail(inner) => runs_without_a_shell(inner),
+        // `Shell`/`Fallback` are command lines by definition; an unsupported
+        // subcommand is one owlmake has no implementation for, and `Branch`/`Oort`
+        // are replayed rather than threaded. `Inert` alone is not work to keep.
+        Step::Shell { .. }
+        | Step::Fallback { .. }
+        | Step::UnsupportedSubcommand(_)
+        | Step::Branch { .. }
+        | Step::Oort(_)
+        | Step::Inert(_) => false,
+    }
+}
+
 /// Parse one shell command line (already variable-expanded) into steps.
 pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
     // A shell `if … then … [else …] fi` construct is one logical command whose
@@ -221,6 +312,14 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
     }
 
     let mut steps = Vec::new();
+    // Whether an earlier part of THIS command was itself a robot invocation. A
+    // later one that names its own `--input` opens a new pipeline over that
+    // file: a separate process shares nothing with the last but files, exactly
+    // as a later recipe LINE does. MONDO's chebi mirror is `convert -I …
+    // -o tmp.owl && remove -i tmp.owl …` on one line: the remove re-reads the
+    // file the convert wrote, and the re-read is what hands the document's
+    // declared xmlns block to the final writer.
+    let mut saw_robot_part = false;
     // `split_shell_seq` records the separator that FOLLOWS each part, so the one
     // that governs a part is its predecessor's. `&&` and `;`
     // need nothing recorded — steps already run in order and abort on failure — but
@@ -242,17 +341,30 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
         if sub == "true" || sub == ":" {
             continue;
         }
-        // `cmd || true` says cmd MAY FAIL. Dropping the `true` did not express
-        // that — it left `cmd` an ordinary step whose failure aborts the recipe.
-        // MONDO's OMIM-gene check is `grep -Ff $< mondo-edit.obo | grep '^xref' >
-        // $@ || true`, and grep exits 1 when it matches nothing, which is the
-        // PASSING case: the check fails only if the file it writes is non-empty.
-        // Keeping the `|| true` in the command hands the semantics to the shell
-        // that already runs it, and the plan reads as what happens.
+        // `cmd || true` says cmd MAY FAIL. Dropping the `true` would not express
+        // that — it would leave `cmd` an ordinary step whose failure aborts the
+        // recipe — so the tolerance is recorded as `may_fail` on the step itself.
+        //
+        // Tolerating a failure says nothing about what the command IS, so the
+        // command is still parsed. A plan is the whole build once the recipe it
+        // came from is gone, and an ontology command belongs in it as the op
+        // owlmake runs — EFO's mondo import excludes HGNC terms with a tolerated
+        // `query`, which the plan names as `op: query` like any other.
+        //
+        // Only when the parse is fully native, though. MONDO's OMIM-gene check is
+        // `grep -Ff $< mondo-edit.obo | grep '^xref' > $@ || true` — a pipeline of
+        // text tools, where grep exits 1 on no match and that is the PASSING case.
+        // Nothing is gained by taking it apart, so it stays one command and the
+        // shell that runs it applies its own semantics.
         let tolerated = matches!(seq[idx].1, Some(ShellSep::Or))
             && matches!(seq.get(idx + 1), Some((next, _)) if next.trim() == "true" || next.trim() == ":");
         if tolerated {
-            steps.push(shell_step(format!("{sub} || true")));
+            let parsed = parse_command(sub, robot_prefix);
+            if !parsed.is_empty() && parsed.iter().all(runs_without_a_shell) {
+                steps.extend(parsed.into_iter().map(|s| Step::MayFail(Box::new(s))));
+            } else {
+                steps.push(shell_step(format!("{sub} || true")));
+            }
             continue;
         }
         // The right-hand side of `||` runs only on failure, whatever it parses as,
@@ -297,7 +409,14 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
             if toks.iter().any(|t| t.starts_with("sssom:")) {
                 steps.push(shell_step(sub.to_string()));
             } else {
-                steps.extend(parse_robot_chain(&toks, robot_prefix));
+                let mut chain = parse_robot_chain(&toks, robot_prefix);
+                if saw_robot_part && !chain.is_empty() {
+                    if let Some(input) = super::planner::first_robot_input(sub, robot_prefix) {
+                        chain.insert(0, Step::Boundary { input: Some(input) });
+                    }
+                }
+                saw_robot_part = true;
+                steps.extend(chain);
             }
         } else if toks[0] == "owltools" || toks[0].ends_with("/owltools") {
             steps.extend(parse_owltools(&toks, sub));
@@ -352,7 +471,7 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
                 .filter(|t| !is_make_flag(t))
                 .cloned()
                 .collect();
-            steps.push(Step::CliRobot { name: "make".to_string(), args });
+            steps.push(Step::OwlmakeCli { name: "make".to_string(), args });
         } else if BENIGN_SHELL.contains(&toks[0].as_str()) && !writes_a_file(&toks) {
             steps.push(Step::Inert(sub.to_string()));
         } else if BENIGN_SHELL.contains(&toks[0].as_str()) {
@@ -572,14 +691,12 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
     // …`, so the write is the whole point of the line and the `mv` that follows
     // has nothing to rename without it.
     let mut out_file: Option<String> = None;
-    let mut out_format: Option<String> = None;
     let mut i = 1;
     while i < toks.len() {
         let t = &toks[i];
         if t == "-o" {
             let mut j = i + 1;
             if toks.get(j).is_some_and(|f| f == "-f") {
-                out_format = toks.get(j + 1).cloned();
                 j += 2;
             }
             out_file = toks.get(j).cloned();
@@ -688,14 +805,13 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
     }
     if steps.is_empty() {
         match out_file {
-            // A pure format conversion: no operations, but it still WRITES the
-            // file its `-o` names, in the format its `-f` gives.
-            Some(output) => steps.push(Step::Op(Op::Convert {
-                format: out_format,
-                clean_obo: None,
-                output: Some(output),
-                add_prefixes: Vec::new(),
-            })),
+            // A pure load-and-save: no operations, but the line still WRITES the
+            // file its `-o` names, in the format its `-f` gives — through the
+            // owltools emulation, whose writers differ from `convert`'s (the
+            // inline-anonymous-node RDF/XML profile, and the property_value
+            // quoting of its OBO output). Replayed verbatim so the plan says
+            // exactly what runs.
+            Some(_) => return vec![shell_step(sub.to_string())],
             // Nothing to do and nothing to write — the line only reads.
             None => steps.push(Step::Inert(sub.to_string())),
         }
@@ -1049,7 +1165,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
     };
     let boolv = |key: &str| -> Option<bool> { val(key).map(|s| s == "true") };
     // Every option token of this invocation, flattened back to argv order, for the
-    // `CliRobot` steps that are executed by re-invoking the owlmake binary.
+    // `OwlmakeCli` steps that are executed by re-invoking the owlmake binary.
     let argv = || -> Vec<String> {
         opts.iter()
             .flat_map(|(k, v)| std::iter::once(k.clone()).chain(v.iter().cloned()))
@@ -1109,7 +1225,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
                 add_annotation_iri: all("--add-annotation-iri"),
             })),
             "create-species-subset" => {
-                Step::CliRobot { name: name.to_string(), args: argv() }
+                Step::OwlmakeCli { name: name.to_string(), args: argv() }
             }
             // `kgcl:mint` is a pipeline op rather than a CLI re-invocation: EFO's
             // `allocate-definitive-ids` chains it into `convert`, so it has to
@@ -1126,11 +1242,10 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             // entry is a claim that the command reads its own inputs and writes
             // its own output — a command that THREADS a model (`mint`) must be a
             // real op instead, or the chain it sits in loses the model.
-            "report" | "verify" | "validate-profile" | "measure" | "diff" | "export"
-            | "export-prefixes" | "explain" | "mirror" => {
-                Step::CliRobot { name: name.to_string(), args: argv() }
+            name if TERMINAL_COMMANDS.contains(&name) => {
+                Step::OwlmakeCli { name: name.to_string(), args: argv() }
             }
-            _ => Step::UnknownRobot(name.to_string()),
+            _ => Step::UnsupportedSubcommand(name.to_string()),
         };
     }
 
@@ -1248,6 +1363,8 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             )
             .map(|s| s == "true"),
             exclude_duplicate_axioms: val2("--exclude-duplicate-axioms", "-x").map(|s| s == "true"),
+            axiom_generators: { let mut g = all("--axiom-generators"); g.extend(all("-A")); g },
+            properties: all("--properties"),
         }),
         "relax" => Step::Op(Op::Relax {
             include_subclass_of: boolv("--include-subclass-of").unwrap_or(false),
@@ -1257,7 +1374,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             include_subproperties: boolv("--include-subproperties").or_else(|| boolv("-s")),
         }),
         "materialize" => Step::Op(Op::Materialize {
-            properties: { let mut p = all("--property"); p.extend(all("-P")); p },
+            properties: { let mut p = all("--term"); p.extend(all("-t")); p },
             term_files: { let mut f = all("--term-file"); f.extend(all("-T")); f },
         }),
         "remove" => remove_step(RemoveSpec {
@@ -1397,11 +1514,10 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
         // output (a report, a table, a prefix map, a mirror directory), leaving
         // the ontology untouched — so dispatching a fresh `om` subcommand IS the
         // operation, and no model has to thread through.
-        "report" | "verify" | "validate-profile" | "measure" | "diff" | "export"
-        | "export-prefixes" | "explain" | "mirror" => {
-            Step::CliRobot { name: name.to_string(), args: argv() }
+        name if TERMINAL_COMMANDS.contains(&name) => {
+            Step::OwlmakeCli { name: name.to_string(), args: argv() }
         }
-        other => Step::UnknownRobot(other.to_string()),
+        other => Step::UnsupportedSubcommand(other.to_string()),
     }
 }
 
@@ -1879,5 +1995,93 @@ mod tests {
             vec!["uberon: http://purl.obolibrary.org/obo/uberon/core#"],
             "the --prefix binding must reach the plan"
         );
+    }
+
+    /// A tolerated ontology command is an op that may fail, not a command line.
+    ///
+    /// EFO's mondo import excludes HGNC terms with a query whose failure the
+    /// recipe walks past. The redirection and the `|| true` around it are the
+    /// shell's, and neither changes what the command does, so both are read and
+    /// the query itself is what the plan names.
+    #[test]
+    fn a_tolerated_robot_command_is_parsed_and_marked_may_fail() {
+        let steps = parse_command(
+            "bin/robot query -i imports/mondo_import.owl.tmp.owl \
+             -q ../sparql/hgnc_terms.sparql imports/mondo_import.owl.hgnc.tsv \
+             2>/dev/null || true",
+            "bin/robot",
+        );
+        let inner = steps
+            .iter()
+            .find_map(|s| match s {
+                Step::MayFail(inner) => Some(inner.as_ref()),
+                _ => None,
+            })
+            .expect("the tolerated command is a step that may fail");
+        match inner {
+            Step::Op(Op::Query { selects, .. }) => assert_eq!(
+                selects,
+                &[(
+                    "../sparql/hgnc_terms.sparql".to_string(),
+                    "imports/mondo_import.owl.hgnc.tsv".to_string()
+                )]
+            ),
+            other => panic!("expected a native query, got {other:?}"),
+        }
+        assert!(
+            !steps.iter().any(|s| matches!(s, Step::Shell { .. })),
+            "nothing is left for a shell — and so nothing names a robot binary"
+        );
+    }
+
+    /// A tolerated command owlmake does NOT implement stays one shell command.
+    ///
+    /// MONDO's OMIM-gene check is a pipeline of text tools whose `grep` exits 1
+    /// when it matches nothing — the passing case. Taking it apart would buy
+    /// nothing and cost the shell's own short-circuiting.
+    #[test]
+    fn a_tolerated_shell_pipeline_is_left_whole() {
+        let steps = parse_command(
+            "grep -Ff $< mondo-edit.obo | grep '^xref' > omim.txt || true",
+            "robot",
+        );
+        assert!(
+            matches!(steps.as_slice(), [Step::Shell { command, .. }] if command.ends_with("|| true")),
+            "expected one tolerated shell command, got {steps:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod requires_tests {
+    use super::*;
+
+    fn requires(cmd: &str) -> Vec<String> {
+        match shell_step(cmd.to_string()) {
+            Step::Shell { requires, .. } => requires,
+            other => panic!("expected a shell step, got {other:?}"),
+        }
+    }
+
+    /// A quoted regex is one argument however many `|` it holds. UBERON's
+    /// orphan report pipes four stanza-filter calls, two of them over
+    /// alternations, and the only thing the machine has to provide is the script
+    /// — and when the script is `obo-grep.pl`, owlmake provides that too.
+    #[test]
+    fn a_quoted_alternation_is_not_a_pipeline() {
+        let cmd = r#"../scripts/obo-filter.pl --neg -r "(is_a|intersection_of|is_obsolete):" uberon.obo |  ../scripts/obo-filter.pl -r Term - |  ../scripts/obo-filter.pl --neg -r "id: UBERON:(0001062|0000000)" - |  ../scripts/obo-filter.pl -r Term - > reports/uberon-orphans.tmp"#;
+        assert_eq!(requires(cmd), vec!["../scripts/obo-filter.pl"]);
+        assert!(requires(&cmd.replace("obo-filter.pl", "obo-grep.pl")).is_empty());
+        let cmd = "(egrep '^(id|name):'  reports/uberon-orphans.tmp > reports/uberon-orphans || echo ok)";
+        assert!(requires(cmd).is_empty(), "{:?}", requires(cmd));
+    }
+
+    /// Each simple command contributes its own program word, and a program on
+    /// PATH is named bare.
+    #[test]
+    fn every_command_of_a_pipeline_is_seen() {
+        assert_eq!(requires("git show HEAD:x.owl | robot convert -o y.owl"), vec!["git"]);
+        assert_eq!(requires("wget -O a b && gzip -d a; curl x"), vec!["wget", "curl"]);
+        assert_eq!(requires("FOO=1 ./run.sh | sort"), vec!["./run.sh"]);
     }
 }

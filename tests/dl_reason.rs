@@ -670,3 +670,27 @@ fn genus_differentia_nested_subsumption() {
         "A ⊑ X via the genus-differentia clause ∃R.(G ⊓ ∃S.V) ⊑ X"
     );
 }
+
+#[test]
+fn inconsistent_ontology_classifies_to_the_collapsed_hierarchy() {
+    // A ⊑ ⊥ with A(a): inconsistent. Classification answers rather than fails:
+    // the ontology is inconsistent, every class is unsatisfiable, and there
+    // are no subsumptions to report.
+    use horned_owl::model::{ClassAssertion, Individual, NamedIndividual};
+    let b = Build::new_rc();
+    let c = |n: &str| CE::Class(b.class(format!("{NS}{n}")));
+    let m = model(vec![
+        sub(c("A"), CE::Class(b.class("http://www.w3.org/2002/07/owl#Nothing"))),
+        sub(c("B"), c("C")),
+        Component::ClassAssertion(ClassAssertion {
+            ce: c("A"),
+            i: Individual::Named(NamedIndividual(b.iri(format!("{NS}a")))),
+        }),
+    ]);
+    let rr = DlReasoner::classify(&m);
+    let unsat = rr.unsatisfiable();
+    assert!(unsat.contains(&format!("{NS}A")), "{unsat:?}");
+    assert!(unsat.contains(&format!("{NS}B")), "every class is unsatisfiable: {unsat:?}");
+    assert!(!rr.is_consistent());
+    assert!(rr.direct_subsumptions().is_empty(), "{:?}", rr.direct_subsumptions());
+}

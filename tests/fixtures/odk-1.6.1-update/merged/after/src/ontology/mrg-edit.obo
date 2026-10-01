@@ -1,0 +1,9 @@
+format-version: 1.2
+import: http://example.org/obo/merged-one/components/part.owl
+import: http://example.org/obo/merged-one/imports/merged_import.owl
+ontology: mrg
+
+[Term]
+id: MRG:0000001
+name: thing
+

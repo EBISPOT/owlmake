@@ -1,0 +1,30 @@
+id: intl
+release_artefacts:
+  - base
+  - full
+  - international
+use_translations: true
+babelon_translation_group:
+  release_merged_translations: true
+  oak_adapter: simpleobo:intl-full.obo
+  translate_ontology: intl-full.obo
+  predicates:
+    - rdfs:label
+    - IAO:0000115
+    - oboInOwl:hasExactSynonym
+  products:
+    - id: intl-fr
+      language: fr
+    - id: intl-de
+      language: de
+      maintenance: mirror
+      mirror_babelon_from: https://example.org/de.babelon.tsv
+      mirror_synonyms_from: https://example.org/de.synonyms.tsv
+      include_robot_template_synonyms: true
+      include_not_translated: true
+      update_translation_status: false
+      drop_unknown_columns: false
+    - id: intl-es
+      language: es
+      auto_translate: true
+      include_robot_template_synonyms: true

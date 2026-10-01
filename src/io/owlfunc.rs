@@ -140,12 +140,18 @@ pub(crate) fn cmp_annotation_value(a: &AnnotationValue<RcStr>, b: &AnnotationVal
         // `rdf:PlainLiteral` (what the functional and RDF/XML parsers build), which
         // is what puts a pattern-derived synonym before an edit-file one on the
         // same OBA class.
-        (AnnotationValue::Literal(x), AnnotationValue::Literal(y)) => lit_datatype(x)
-            .cmp(&lit_datatype(y))
-            .then_with(|| x.literal().cmp(y.literal()))
-            .then_with(|| lit_lang(x).cmp(&lit_lang(y))),
+        (AnnotationValue::Literal(x), AnnotationValue::Literal(y)) => cmp_literal(x, y),
         _ => rank(a).cmp(&rank(b)),
     }
+}
+
+/// Two literals compare on their DATATYPE first, then on the lexical form, then
+/// on the language.
+fn cmp_literal(x: &Literal<RcStr>, y: &Literal<RcStr>) -> Ordering {
+    lit_datatype(x)
+        .cmp(lit_datatype(y))
+        .then_with(|| x.literal().cmp(y.literal()))
+        .then_with(|| lit_lang(x).cmp(lit_lang(y)))
 }
 
 /// Orders class expressions by `typeIndex`, then by their components.
@@ -291,9 +297,13 @@ fn axiom_type_index(c: &Component<RcStr>) -> i32 {
         Component::SubClassOf(_) => 2,
         Component::DisjointClasses(_) => 3,
         Component::DisjointUnion(_) => 4,
+        Component::ClassAssertion(_) => 5,
+        Component::SameIndividual(_) => 6,
         Component::DifferentIndividuals(_) => 7,
         Component::ObjectPropertyAssertion(_) => 8,
         Component::NegativeObjectPropertyAssertion(_) => 9,
+        Component::DataPropertyAssertion(_) => 10,
+        Component::NegativeDataPropertyAssertion(_) => 11,
         Component::SubObjectPropertyOf(_) => 13,
         Component::IrreflexiveObjectProperty(_) => 21,
         Component::ObjectPropertyRange(_) => 23,
@@ -309,10 +319,10 @@ fn axiom_type_index(c: &Component<RcStr>) -> i32 {
 
 /// Orders axioms by the axiom-type rank, then by the axiom's own fields.
 ///
-/// Types with no comparison arm of their own — the declarations, the negative
-/// assertions, and everything the 99 catch-all collects — compare equal to each
-/// other, so this is a preorder, not a total order. Ties keep the order they arrived
-/// in, which only a stable sort preserves.
+/// Types with no comparison arm of their own — the declarations, and everything
+/// the 99 catch-all collects — compare equal to each other, so this is a
+/// preorder, not a total order. Ties keep the order they arrived in, which only a
+/// stable sort preserves.
 pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Ordering {
     let ti = axiom_type_index(a).cmp(&axiom_type_index(b));
     if ti != Ordering::Equal {
@@ -337,6 +347,42 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
             cmp_ope(&x.ope, &y.ope)
                 .then_with(|| cmp_individual(&x.from, &y.from))
                 .then_with(|| cmp_individual(&x.to, &y.to))
+        }
+        (
+            Component::NegativeObjectPropertyAssertion(x),
+            Component::NegativeObjectPropertyAssertion(y),
+        ) => cmp_ope(&x.ope, &y.ope)
+            .then_with(|| cmp_individual(&x.from, &y.from))
+            .then_with(|| cmp_individual(&x.to, &y.to)),
+        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => x
+            .dp
+            .0
+            .as_ref()
+            .cmp(y.dp.0.as_ref())
+            .then_with(|| cmp_individual(&x.from, &y.from))
+            .then_with(|| cmp_literal(&x.to, &y.to)),
+        (
+            Component::NegativeDataPropertyAssertion(x),
+            Component::NegativeDataPropertyAssertion(y),
+        ) => x
+            .dp
+            .0
+            .as_ref()
+            .cmp(y.dp.0.as_ref())
+            .then_with(|| cmp_individual(&x.from, &y.from))
+            .then_with(|| cmp_literal(&x.to, &y.to)),
+        (Component::ClassAssertion(x), Component::ClassAssertion(y)) => {
+            cmp_individual(&x.i, &y.i).then_with(|| cmp_ce(&x.ce, &y.ce))
+        }
+        (Component::SameIndividual(x), Component::SameIndividual(y)) => {
+            let n = x.0.len().min(y.0.len());
+            for k in 0..n {
+                let o = cmp_individual(&x.0[k], &y.0[k]);
+                if o != Ordering::Equal {
+                    return o;
+                }
+            }
+            x.0.len().cmp(&y.0.len())
         }
         (Component::IrreflexiveObjectProperty(x), Component::IrreflexiveObjectProperty(y)) => {
             cmp_ope(&x.0, &y.0)
@@ -456,6 +502,34 @@ fn owner_entity(c: &Component<RcStr>) -> Option<(String, EKind)> {
             Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
             _ => None,
         },
+        // An individual's other assertions render under its section too, and a
+        // `SameIndividual` under its first member's: the other members' sections
+        // then hold nothing unwritten and are left out.
+        Component::SameIndividual(ax) => ax
+            .0
+            .iter()
+            .filter_map(|i| match i {
+                Individual::Named(n) => Some(n.0.as_ref().to_string()),
+                _ => None,
+            })
+            .min()
+            .map(|i| (i, EKind::NamedIndividual)),
+        Component::ClassAssertion(ax) => match &ax.i {
+            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
+            _ => None,
+        },
+        Component::NegativeObjectPropertyAssertion(ax) => match &ax.from {
+            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
+            _ => None,
+        },
+        Component::DataPropertyAssertion(ax) => match &ax.from {
+            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
+            _ => None,
+        },
+        Component::NegativeDataPropertyAssertion(ax) => match &ax.from {
+            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
+            _ => None,
+        },
         // A SubAnnotationPropertyOf renders under its SUB-property's section (EFO's
         // created_by ⊑ dc:creator and skos:prefLabel ⊑ rdfs:label sit under the
         // Annotation Properties banner).
@@ -502,6 +576,7 @@ fn named_class(ce: &CE<RcStr>) -> Option<String> {
 struct Sig {
     classes: BTreeSet<String>,
     oprops: BTreeSet<String>,
+    dprops: BTreeSet<String>,
     inds: BTreeSet<String>,
     aprops: BTreeSet<String>,
     datatypes: BTreeSet<String>,
@@ -511,14 +586,24 @@ fn signature(axioms: &[&AnnotatedComponent<RcStr>]) -> Sig {
     let mut s = Sig {
         classes: BTreeSet::new(),
         oprops: BTreeSet::new(),
+        dprops: BTreeSet::new(),
         inds: BTreeSet::new(),
         aprops: BTreeSet::new(),
         datatypes: BTreeSet::new(),
     };
     for ac in axioms {
         sig_component(&ac.component, &mut s.classes, &mut s.oprops, &mut s.inds, &mut s.aprops);
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            sig_dt_value(&aa.ann.av, &mut s.datatypes);
+        match &ac.component {
+            Component::AnnotationAssertion(aa) => sig_dt_value(&aa.ann.av, &mut s.datatypes),
+            Component::DataPropertyAssertion(ax) => {
+                s.dprops.insert(ax.dp.0.as_ref().to_string());
+                sig_dt_literal(&ax.to, &mut s.datatypes);
+            }
+            Component::NegativeDataPropertyAssertion(ax) => {
+                s.dprops.insert(ax.dp.0.as_ref().to_string());
+                sig_dt_literal(&ax.to, &mut s.datatypes);
+            }
+            _ => {}
         }
         for a in &ac.ann {
             sig_annotation(a, &mut s.classes, &mut s.oprops, &mut s.inds, &mut s.aprops);
@@ -534,13 +619,17 @@ fn signature(axioms: &[&AnnotatedComponent<RcStr>]) -> Sig {
 /// per literal kind suffices.
 fn sig_dt_value(av: &AnnotationValue<RcStr>, dt: &mut BTreeSet<String>) {
     if let AnnotationValue::Literal(l) = av {
-        let d = match l {
-            Literal::Simple { .. } => "http://www.w3.org/2001/XMLSchema#string",
-            Literal::Language { .. } => "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
-            Literal::Datatype { datatype_iri, .. } => datatype_iri.as_ref(),
-        };
-        dt.insert(d.to_string());
+        sig_dt_literal(l, dt);
     }
+}
+
+fn sig_dt_literal(l: &Literal<RcStr>, dt: &mut BTreeSet<String>) {
+    let d = match l {
+        Literal::Simple { .. } => "http://www.w3.org/2001/XMLSchema#string",
+        Literal::Language { .. } => "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
+        Literal::Datatype { datatype_iri, .. } => datatype_iri.as_ref(),
+    };
+    dt.insert(d.to_string());
 }
 
 fn sig_ce(ce: &CE<RcStr>, cl: &mut BTreeSet<String>, op: &mut BTreeSet<String>, ind: &mut BTreeSet<String>) {
@@ -666,6 +755,38 @@ fn sig_component(
                 if let Individual::Named(n) = i {
                     ind.insert(n.0.as_ref().to_string());
                 }
+            }
+        }
+        Component::SameIndividual(ax) => {
+            for i in &ax.0 {
+                if let Individual::Named(n) = i {
+                    ind.insert(n.0.as_ref().to_string());
+                }
+            }
+        }
+        Component::ClassAssertion(ax) => {
+            sig_ce(&ax.ce, cl, op, ind);
+            if let Individual::Named(n) = &ax.i {
+                ind.insert(n.0.as_ref().to_string());
+            }
+        }
+        Component::NegativeObjectPropertyAssertion(ax) => {
+            sig_ope(&ax.ope, op);
+            for i in [&ax.from, &ax.to] {
+                if let Individual::Named(n) = i {
+                    ind.insert(n.0.as_ref().to_string());
+                }
+            }
+        }
+        // The data property is collected by `signature`, with the literal's datatype.
+        Component::DataPropertyAssertion(ax) => {
+            if let Individual::Named(n) = &ax.from {
+                ind.insert(n.0.as_ref().to_string());
+            }
+        }
+        Component::NegativeDataPropertyAssertion(ax) => {
+            if let Individual::Named(n) = &ax.from {
+                ind.insert(n.0.as_ref().to_string());
             }
         }
         Component::SubAnnotationPropertyOf(ax) => {
@@ -1046,6 +1167,55 @@ impl<'a> Renderer<'a> {
                 }
                 self.w(")");
             }
+            Component::SameIndividual(ax) => {
+                self.w("SameIndividual(");
+                self.axiom_annotations(anns);
+                for (n, i) in ax.0.iter().enumerate() {
+                    if n > 0 {
+                        self.w(" ");
+                    }
+                    self.individual(i);
+                }
+                self.w(")");
+            }
+            Component::ClassAssertion(ax) => {
+                self.w("ClassAssertion(");
+                self.axiom_annotations(anns);
+                self.ce(&ax.ce);
+                self.w(" ");
+                self.individual(&ax.i);
+                self.w(")");
+            }
+            Component::NegativeObjectPropertyAssertion(ax) => {
+                self.w("NegativeObjectPropertyAssertion(");
+                self.axiom_annotations(anns);
+                self.ope(&ax.ope);
+                self.w(" ");
+                self.individual(&ax.from);
+                self.w(" ");
+                self.individual(&ax.to);
+                self.w(")");
+            }
+            Component::DataPropertyAssertion(ax) => {
+                self.w("DataPropertyAssertion(");
+                self.axiom_annotations(anns);
+                self.iri(ax.dp.0.as_ref());
+                self.w(" ");
+                self.individual(&ax.from);
+                self.w(" ");
+                self.literal(&ax.to);
+                self.w(")");
+            }
+            Component::NegativeDataPropertyAssertion(ax) => {
+                self.w("NegativeDataPropertyAssertion(");
+                self.axiom_annotations(anns);
+                self.iri(ax.dp.0.as_ref());
+                self.w(" ");
+                self.individual(&ax.from);
+                self.w(" ");
+                self.literal(&ax.to);
+                self.w(")");
+            }
             Component::SubAnnotationPropertyOf(ax) => {
                 self.w("SubAnnotationPropertyOf(");
                 self.axiom_annotations(anns);
@@ -1191,8 +1361,7 @@ pub fn render_owl_axioms(
         }
     }
     let untranslatable: &[&AnnotatedComponent<RcStr>] = &deduped;
-    let Sig { classes, oprops, inds, aprops, datatypes } = signature(untranslatable);
-    let dprops: BTreeSet<String> = BTreeSet::new();
+    let Sig { classes, oprops, dprops, inds, aprops, datatypes } = signature(untranslatable);
 
     let mut r = Renderer { out: String::new(), labels, focused: None };
     // The five builtin prefixes in fixed order, then blank line, Ontology(.
@@ -1204,7 +1373,8 @@ pub fn render_owl_axioms(
     r.w("\n\nOntology(\n");
 
     // Declarations: entities in typeIndex order (Class 1001, ObjectProperty 1002,
-    // NamedIndividual 1005, AnnotationProperty 1006), IRI-sorted within.
+    // DataProperty 1003, NamedIndividual 1005, AnnotationProperty 1006), IRI-sorted
+    // within.
     for iri in &classes {
         r.w("Declaration(Class(");
         r.iri(iri);
@@ -1212,6 +1382,11 @@ pub fn render_owl_axioms(
     }
     for iri in &oprops {
         r.w("Declaration(ObjectProperty(");
+        r.iri(iri);
+        r.w("))\n");
+    }
+    for iri in &dprops {
+        r.w("Declaration(DataProperty(");
         r.iri(iri);
         r.w("))\n");
     }
@@ -1258,9 +1433,10 @@ pub fn render_owl_axioms(
     // Axioms that make an entity's block NON-empty without ever being printed in it.
     // A `DifferentIndividuals` axiom, and a `DisjointClasses` with more than two
     // operands, is never rendered inside an entity block — it falls through to the
-    // trailing leftover block — but it still counts when deciding whether the block
-    // is written at all, because that emptiness test runs over the entity's unfiltered
-    // axiom set. So an entity whose only axioms are of those two kinds gets a
+    // trailing leftover block — but it still counts when deciding whether the
+    // block is written at all, because that emptiness test runs over the entity's
+    // unfiltered axiom set. So an entity whose only axioms are of those two kinds
+    // gets a
     // `# Class: …` / `# Individual: …` comment with nothing under it. That is MONDO's
     // case: `FOODON_034121115` & co. appear only in 3+-way `DisjointClasses`, and
     // `IAO_0000120`…`IAO_0000428` only in one `DifferentIndividuals`.

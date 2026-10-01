@@ -388,11 +388,35 @@ subClassOf: {text: "'cell'"}
         "expected IAO:0000115 definition");
 }
 
-/// `document` renders the pattern as Markdown; `validate_data` accepts a good table.
+/// `docs` renders a batch of patterns as Markdown pages plus an index;
+/// `validate_data` accepts a good table.
 #[test]
-fn dosdp_document_and_validate() {
-    let md = dosdp::document(PATTERN).unwrap();
-    assert!(md.contains("part_of_x"), "document() should include the pattern name");
+fn dosdp_docs_and_validate() {
+    let dir = std::env::temp_dir().join(format!("om-dosdp-docs-{}", std::process::id()));
+    let tpl = dir.join("patterns");
+    let data = dir.join("data");
+    let out = dir.join("docs");
+    for d in [&tpl, &data, &out] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(tpl.join("part_of_x.yaml"), PATTERN).unwrap();
+    std::fs::write(data.join("part_of_x.tsv"), "defined_class\tpart\nCL:1\tUBERON:1\n").unwrap();
+    dosdp::docs_batch(
+        &tpl,
+        &data,
+        &["part_of_x".to_string()],
+        &out,
+        "http://example.org/",
+        &HashMap::new(),
+        "tsv",
+    )
+    .unwrap();
+    let md = std::fs::read_to_string(out.join("part_of_x.md")).unwrap();
+    assert!(md.contains("# part_of_x"), "docs page should be titled with the pattern name");
+    assert!(md.contains("## Data preview"), "docs page should carry the data preview");
+    let index = std::fs::read_to_string(out.join("index.md")).unwrap();
+    assert!(index.contains("part_of_x.md"), "index should link the pattern page");
+    std::fs::remove_dir_all(&dir).ok();
     dosdp::validate_data("defined_class\tpart\nCL:1\tUBERON:1\n").unwrap();
 }
 

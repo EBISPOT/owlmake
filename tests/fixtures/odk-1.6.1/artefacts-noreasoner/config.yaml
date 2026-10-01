@@ -1,0 +1,20 @@
+id: nor
+release_artefacts:
+  - base
+  - simple
+  - simple-non-classified
+  - basic
+primary_release: basic
+export_formats:
+  - obo
+  - json
+release_use_reasoner: false
+use_edit_file_imports: false
+ensure_valid_rdfxml: false
+gzip_main: true
+components:
+  products:
+    - filename: extra.owl
+import_group:
+  products:
+    - id: ro

@@ -40,6 +40,21 @@ pub struct ArtefactPlan {
     pub gaps: Vec<String>,
     /// Set when no rule for the target was found.
     pub missing_rule: bool,
+    /// The target is reached only by instantiating pattern rules — its concrete
+    /// name is never spelled in the build configuration as a target or a
+    /// prerequisite. Such a file is an intermediate of the chain that uses it:
+    /// when it does not exist and the target that needs it is otherwise up to
+    /// date, the chain does not run and the file is never created. ECTO's
+    /// `tmp/stamp-component-<x>.owl` markers are the shape — a build whose
+    /// components are all present creates no stamps.
+    pub intermediate: bool,
+    /// The recipe never names its own target as something it writes (`$@`
+    /// appears nowhere in it, nor the target path itself): it produces only the
+    /// side files its steps name, the target file is never created, and the
+    /// rule simply runs again next time it is asked for. The executor must not
+    /// materialise the threaded pipeline model at the target path — a real
+    /// file would appear that the build never meant to produce.
+    pub side_effect_only: bool,
     /// Where the recipe sends its console output. A check whose rule ends
     /// `… > $@` builds its target out of what the tool prints, so the file exists
     /// (empty, when nothing was printed) exactly if the recipe ran to the end.
@@ -116,6 +131,14 @@ pub struct ImportPlan {
 }
 
 impl ImportPlan {
+    /// A mirror the repository keeps for its own targets, made into no module:
+    /// UBERON fetches nineteen taxon anatomies this way and reads each from
+    /// `mirror/<id>.owl` in rules of its own. The entry carries the fetch and
+    /// the post-processing, and nothing else.
+    pub fn is_mirror_only(&self) -> bool {
+        self.output.is_empty() && self.steps.is_empty() && !self.mirror_steps.is_empty()
+    }
+
     /// The seed term-file path(s) this import extracts over — the `--term-file`
     /// arguments of its first `extract`/`filter` step. Used for the human stage
     /// description ("…terms listed in <file>…") and the merged-import seed union.
@@ -197,6 +220,14 @@ pub const VERSION_REF: &str = "{version}";
 /// literal instead, and either way the run may override it.
 pub const VERSION_TODAY: &str = "{today}";
 
+/// The calendar date the build runs, for a recipe that asks the shell for it —
+/// `annotate -V $(ONTBASE)/releases/`date +%Y-%m-%d`/…`. That is a different
+/// question from [`VERSION_TODAY`]: `TODAY=` on a make command line sets a
+/// variable, and cannot change what `date` prints, so a run that stamps one
+/// release version still writes the real day here. uPheno's pattern ontology
+/// names both, one in each of two version IRIs.
+pub const VERSION_CLOCK: &str = "{clock}";
+
 /// Whether a switch's value reads as ON. The spellings a build configuration and
 /// a command line use between them, in one place, so a `BRI=1` means what a
 /// `BRI=true` means wherever the question is asked.
@@ -227,6 +258,9 @@ pub fn today() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
+/// `Default` is the empty plan: the base a build of the repository's own is
+/// stated against, which derives nothing.
+#[derive(Default)]
 pub struct Plan {
     pub id: String,
     /// The release version to stamp, as a DEFAULT: a literal the build
@@ -235,6 +269,15 @@ pub struct Plan {
     /// a reference to this field, and a run binds the two together — so the same
     /// plan releases on any date without being regenerated.
     pub version: String,
+    /// The repo file the release version is read from, relative to the repo root
+    /// (EFO's `src/ontology/version.txt`), when the build configuration takes it
+    /// from one rather than pinning it.
+    ///
+    /// [`version`](Self::version) still records what the file held when the plan
+    /// was written, so a plan whose file has gone missing keeps a usable default;
+    /// but a run that names no version reads the file, because bumping it is
+    /// ordinary curation and the plan must not fix one release forever.
+    pub version_file: Option<String>,
     pub ontology_iri: String,
     pub reasoner: String,
     pub use_base_merging: bool,
@@ -246,7 +289,18 @@ pub struct Plan {
     pub slme_individuals: Option<String>,
     pub imports: Vec<ImportPlan>,
     pub merged_import: Option<String>,
-    pub components: Vec<String>,
+    /// Explicit ontology IRI for the merged import module, if the plan names one.
+    pub merged_import_iri: Option<String>,
+    /// Write the merged import as one functional-syntax document per source
+    /// ontology in this directory, with [`merged_import`](Self::merged_import) as
+    /// an index that `owl:imports` each of them, instead of one file. Text git
+    /// can delta-compress, so a one-term import costs kilobytes of history rather
+    /// than the whole module; and `git diff --stat` says which ontologies moved.
+    pub merged_import_shards: Option<String>,
+    /// Cap on one shard file in bytes (default 10 MiB): a shard above it is split
+    /// on its local ids.
+    pub merged_import_shard_bytes: Option<usize>,
+
     /// Build variables the *executor* still needs after planning — `$(SRC)`,
     /// `$(OTHER_SRC)`, `$(ROBOT)`, `$(OBOBASE)`, `$(MIRRORDIR)` — resolved at
     /// ingest. Recorded here (and so in `owlmake.json`) because a recorded step
@@ -651,6 +705,10 @@ impl fmt::Display for Plan {
             if self.use_base_merging { ", base-merging" } else { "" })?;
         for imp in &self.imports {
             let status = if imp.cached { "cached" } else { "DOWNLOAD" };
+            if imp.is_mirror_only() {
+                writeln!(f, "║   {:<12} mirror   [{}] {}", imp.id, status, imp.source)?;
+                continue;
+            }
             writeln!(f, "║   {:<12} {:<8} [{}] {}", imp.id, imp.method(), status, imp.source)?;
             let seeds = imp.seed_term_files();
             if !seeds.is_empty() {
@@ -679,9 +737,15 @@ impl fmt::Display for Plan {
         if !self.exclude_iri_patterns.is_empty() {
             writeln!(f, "║   exclusions  : {} IRI pattern(s)", self.exclude_iri_patterns.len())?;
         }
-        if !self.components.is_empty() {
+        // The components are what the build merges with the edit file.
+        let components: Vec<&str> = self
+            .variables
+            .get("OTHER_SRC")
+            .map(|v| v.split_whitespace().collect())
+            .unwrap_or_default();
+        if !components.is_empty() {
             writeln!(f, "╠─ components")?;
-            for c in &self.components {
+            for c in &components {
                 let blocked = self.component_gaps.iter().any(|g| g.starts_with(&format!("component {c}:")));
                 writeln!(f, "║   [{}] {c}", if blocked { "✗" } else { "✓" })?;
             }
@@ -712,7 +776,7 @@ impl fmt::Display for Plan {
                     Step::Shell { .. } => "›",
                     // Covered, but run by invoking owlmake's own subcommand rather
                     // than threaded through the pipeline — not a gap, so not `✗`.
-                    Step::CliRobot { .. } => "▪",
+                    Step::OwlmakeCli { .. } => "▪",
                     _ => "✗",
                 };
                 writeln!(f, "║       {bullet} {}", s.label())?;

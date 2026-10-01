@@ -23,7 +23,7 @@ mv om-macos-arm64 ~/.local/bin/om
 
 ### To build ontologies
 
-From the repository of the ontology you want to build, run `om`. Targets will be discovered from the existing ODK setup (yaml/makefiles), then a plan will be generated in `owlmake.yaml` and executed. For example, to build the [Ontology of Biological Attributes (OBA)](https://github.com/obophenotype/bio-attribute-ontology):
+From the repository of the ontology you want to build, run `om`. Targets will be discovered from the existing ODK setup (yaml/makefiles), then `owlmake.yaml` will be written and the build executed. For example, to build the [Ontology of Biological Attributes (OBA)](https://github.com/obophenotype/bio-attribute-ontology):
 
 ```
 git clone https://github.com/obophenotype/bio-attribute-ontology
@@ -31,12 +31,12 @@ cd bio-attribute-ontology
 om
 ```
 
-**Much of the existing ODK is functionally mirrored by the `om` binary itself (the majority of `robot`, `sssom`, `owltools`, `dosdp-tools`), so for many existing ontologies there are no environmental dependencies.** You can build ontologies like EFO, CL, and UBERON out of the box without Docker, Java, or Python.
+**Much of the existing ODK is functionally mirrored by the `om` binary itself (the majority of `robot`, `sssom`, `owltools`, `dosdp-tools`), so for many existing ontologies there are no environmental dependencies.** You can build ontologies like EFO and CL out of the box without Docker, Java, or Python.
 
-Notable exceptions are ontologies using Python scripts as part of their build, e.g. uPheno which uses Python and Pandas which are not supplied as part of the single `om` binary. For this reason Docker images are also provided, as a compact alternative to the ODK image (2.81 GB for `odkfull`):
+Notable exceptions are ontologies using Python scripts as part of their build, e.g. uPheno, which uses Python and Pandas, and UBERON, whose bridge rules come from a Python script that reads YAML with PyYAML; none of these is supplied as part of the single `om` binary. For this reason Docker images are also provided, as a compact alternative to the ODK image (2.81 GB for `odkfull`):
 
-- the **default** image bundles just `om`, with `robot`/`jq`/`sssom` shims on the `PATH` — **~38 MB**. This builds every ontology `om` handles natively (EFO, CL, UBERON, …).
-- the **`with-python`** image adds a Python 3 runtime plus Pandas (and NumPy) for the ontologies that shell out part of their builds to Python, and `git` for the recipes that diff against a release — **~200 MB**.
+- the **default** image bundles just `om`, with `robot`/`jq`/`sssom` shims on the `PATH` — **~38 MB**. This builds every ontology `om` handles natively (EFO, CL, …).
+- the **`with-python`** image adds a Python 3 runtime plus Pandas (and NumPy) and PyYAML for the ontologies that shell out part of their builds to Python, and `git` for the recipes that diff against a release — **~200 MB**.
 
 Both are published to GitHub Container Registry for `linux/amd64` and `linux/arm64`:
 
@@ -77,12 +77,15 @@ om all-imports                     # rebuild every individual import module
 ODK's standard Make targets are available as top-level owlmake commands:
 
 ```
-om prepare-release   # build every release artefact (ODK `prepare_release`/`all`)
+om prepare-release   # build what the release needs — checks, reports, artefacts — then publish it (ODK `prepare_release`/`all`)
 om refresh-imports   # rebuild imports from upstream
 om test              # run the repository's QC checks
+om update-repo       # bring the repository's files into step with owlmake.yaml
 ```
 
-Any other target defined in the repo's Makefile is dispatched too — `om <target>` interprets that target's recipe (and its prerequisites). Targets owlmake doesn't replicate (`update_repo`, `clean`, `seed`-style scaffolding) report a clear error rather than doing the wrong thing.
+Each takes the same `VAR=value` switches as `om make` (`om test IMP=false MIR=false`). After adding or removing an import or a component in `owlmake.yaml`, `om update-repo` updates the edit file's imports and the XML catalog to match and creates the placeholder files, as ODK's `update_repo` does.
+
+Any other target defined in the repo's Makefile is dispatched too — `om <target>` interprets that target's recipe (and its prerequisites). Targets owlmake doesn't replicate (`seed`-style scaffolding) report a clear error rather than doing the wrong thing.
 
 ### Starting a new ontology
 
@@ -92,7 +95,7 @@ Any other target defined in the repo's Makefile is dispatched too — `om <targe
 om seed --id myont
 ```
 
-This writes a buildable plan (primary + base products and obo/json exports, built merge → reason → relax → reduce → annotate over `myont-edit.obo`). A repo defined only by a committed plan — no ODK Makefile or yaml — builds straight from it: `om` reads the plan as the source of truth (it is not regenerated). The plan is YAML by default; `om make --plan-format json` writes `owlmake.json` instead, and either spelling is accepted when building (commit both and they must describe the same build). Validate a plan against its schema with `om schema`.
+This writes a short `owlmake.yaml` asking for the standard build of `myont` over `myont-edit.obo` — its primary and base products in OWL, OBO and JSON — which a bare `om` then builds. Every `owlmake.yaml` is the same kind of file: the repository's options for the standard build (`release_artefacts`, `import_group`, `components`, …) plus whatever it states outright — a target of its own under `targets`, a `version`, an `ontology_iri`, the output conventions it emulates — each of which overrides what the standard build derives. A repository whose build is all its own says `use_builtin_rules: false` and states everything; `om make --plan-only` prints the resolved plan either way.
 
 ### As a ROBOT implementation
 

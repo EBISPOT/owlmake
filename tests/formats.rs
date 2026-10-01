@@ -49,8 +49,17 @@ fn subclass_edges(m: &Model) -> usize {
         .count()
 }
 
+/// The tests below all parse documents, and every parse draws blank-node ids
+/// from one process-global counter (`io::reset_anon_counter` /
+/// `ANON_COUNTER`). Run in parallel, a round trip in one test can take an id
+/// between another test's reset and its read, so the id assertions race — rarely,
+/// but a full `cargo test` did lose it once. The counter is process state by
+/// design (one run, one sequence), so the tests take turns instead.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn obograph_json_roundtrip() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let m = sample();
     let mut json = Vec::new();
     io::write_to_ref(&m, &mut json, Format::OboGraph).unwrap();
@@ -65,6 +74,7 @@ fn obograph_json_roundtrip() {
 
 #[test]
 fn manchester_roundtrip() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     // Add an existential so the Manchester `some` parser is exercised.
     let b = Build::new();
     let mut m = sample();
@@ -95,6 +105,7 @@ fn manchester_roundtrip() {
 
 #[test]
 fn turtle_roundtrip() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let m = sample();
     let mut ttl = Vec::new();
     io::write_to_ref(&m, &mut ttl, Format::Turtle).unwrap();
@@ -113,6 +124,7 @@ fn turtle_roundtrip() {
 /// sorts, and a `_:` inside a string literal is text, not a node id.
 #[test]
 fn a_functional_documents_node_ids_are_reminted_in_first_mention_order() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     const DOC: &str = concat!(
         "Prefix(:=<http://ex.org/>)\n",
         "Ontology(<http://ex.org/anon.owl>\n",
@@ -174,6 +186,7 @@ fn a_functional_documents_node_ids_are_reminted_in_first_mention_order() {
 /// inverse(STATO_0000205))` — and so does every mirror merged from it.
 #[test]
 fn an_equivalence_between_two_inverses_survives_rdfxml() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     use horned_owl::model::{
         EquivalentObjectProperties, ObjectPropertyExpression as OPE,
     };
@@ -213,5 +226,59 @@ fn an_equivalence_between_two_inverses_survives_rdfxml() {
                 && matches!(&e.0[1], OPE::InverseObjectProperty(_)))
     });
     assert!(kept, "the axiom did not survive the round trip:\n{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An annotated property assertion on an individual is reified as an
+/// `<owl:Axiom>` after the individual's block, like an annotated `rdf:type`.
+/// Written bare instead, COHO's `has_data_collection_location` assertions lose
+/// the recruitment quote and its source URL in every RDF/XML release.
+#[test]
+fn an_annotated_property_assertion_survives_rdfxml() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    use horned_owl::model::{
+        Annotation, AnnotationValue, DeclareNamedIndividual, DeclareObjectProperty, Individual,
+        Literal, ObjectPropertyAssertion, ObjectPropertyExpression as OPE,
+    };
+    let b = Build::new();
+    let mut ont = SetOntology::new();
+    let p = b.object_property(format!("{NS}located_in"));
+    let s = b.named_individual(format!("{NS}I_1"));
+    let o = b.named_individual(format!("{NS}I_2"));
+    ont.insert(Component::DeclareObjectProperty(DeclareObjectProperty(p.clone())));
+    ont.insert(Component::DeclareNamedIndividual(DeclareNamedIndividual(s.clone())));
+    ont.insert(Component::DeclareNamedIndividual(DeclareNamedIndividual(o.clone())));
+    let mut ac = horned_owl::model::AnnotatedComponent::from(Component::ObjectPropertyAssertion(
+        ObjectPropertyAssertion {
+            ope: OPE::ObjectProperty(p.clone()),
+            from: Individual::Named(s.clone()),
+            to: Individual::Named(o.clone()),
+        },
+    ));
+    ac.ann.insert(Annotation {
+        ann: Default::default(),
+        ap: b.annotation_property("http://www.w3.org/2000/01/rdf-schema#comment"),
+        av: AnnotationValue::Literal(Literal::Simple { literal: "recruited in Kuopio".into() }),
+    });
+    ont.insert(ac);
+    let mut model = Model::from_parts(ont, owlmake::model::default_prefixes());
+
+    let dir = std::env::temp_dir().join(format!("om-annopa-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.owl");
+    io::save_as(&mut model, &path, Format::RdfXml).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains(&format!("<annotatedProperty rdf:resource=\"{NS}located_in\"/>"))
+            || text.contains(&format!("<owl:annotatedProperty rdf:resource=\"{NS}located_in\"/>")),
+        "the assertion is not reified:\n{text}"
+    );
+
+    let back = io::load(&path).unwrap();
+    let kept = back.ont.iter().any(|ac| {
+        matches!(&ac.component, Component::ObjectPropertyAssertion(_))
+            && ac.ann.iter().any(|a| matches!(&a.av, AnnotationValue::Literal(l) if l.literal() == "recruited in Kuopio"))
+    });
+    assert!(kept, "the axiom annotation did not survive the round trip:\n{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,8 +1,10 @@
-//! `owlmake.json` — the declarative build plan.
+//! `owlmake.yaml` — the declarative build plan.
 //!
-//! This is the on-disk, hand-editable description of a release build, and the
-//! whole of it: owlmake reads [`OwlmakeSpec`] straight from `owlmake.json` and
-//! consults nothing else about how the repository is built.
+//! This is the on-disk, hand-editable description of a build: a repository's
+//! options over owlmake's standard build, and what it states beyond them.
+//! owlmake reads [`OwlmakeSpec`] from the file, resolves the standard build for
+//! its options, lays the file's statements over it, and consults nothing else
+//! about how the repository is built.
 //!
 //! The format is decoupled from owlmake's internal runtime types ([`Plan`],
 //! [`Op`], [`Step`]) on purpose, so the file stays a stable, documented contract
@@ -108,9 +110,27 @@ fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     Some((it.next()?, it.next().unwrap_or(0), it.next().unwrap_or(0)))
 }
 
-/// A complete owlmake build plan (the contents of `owlmake.json`).
+/// What a repository commits: `owlmake.yaml`.
+///
+/// One shape. The file is a set of options over owlmake's standard build, and
+/// statements about the plan those options resolve to. Its top-level keys are
+/// the repository's options — `release_artefacts`, `import_group`, `components`,
+/// `report`, … (see [`crate::odk::builtin::Config`]) — and beside them what the
+/// repository states outright: a target it builds in a way of its own, an
+/// import or the pattern products it obtains its own way, the release version,
+/// the ontology IRI, the output conventions it emulates. A statement overrides
+/// or extends what the standard build derives; what the file leaves out is
+/// derived. A file with no statements is the standard build for its options; a
+/// file that states every target is a build of the repository's own; and every
+/// file in between means what it says.
+///
+/// A repository whose build is all its own — one with no standard build to lean
+/// on — says so with `use_builtin_rules: false`. Nothing is then derived: the
+/// file names every target, every path and every switch, and an option of the
+/// standard build is refused because nothing would read it.
+///
+/// An unknown key is an error ([`OwlmakeSpec::check`]).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct OwlmakeSpec {
     /// Optional pointer to a (shared) JSON Schema for editor/CI validation. Not
     /// written by default — `owlmake schema` emits the canonical schema; the
@@ -129,106 +149,166 @@ pub struct OwlmakeSpec {
     /// accepted by every version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_owlmake_version: Option<String>,
-    /// Ontology short id (e.g. `oba`).
+    /// Whether owlmake's built-in rules — the standard build — underlie this
+    /// file. They do unless the file says otherwise: the rules for the options
+    /// resolve to every target, path and switch the file does not state itself.
+    ///
+    /// `false` for a repository whose build is all its own. The file is then the
+    /// whole build — every target under `targets`, every import under `imports`,
+    /// the release `version`, the `ontology_iri`, the `reasoner` — and nothing is
+    /// derived from a convention. An option of the standard build is refused in
+    /// such a file, because nothing would read it.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub use_builtin_rules: bool,
+    /// The ODK release whose output this build emulates, e.g. `"1.6.1"`: the
+    /// bytes its artefacts carry, not the rules that build them. The standard
+    /// build is owlmake's own whatever this says.
+    ///
+    /// A release settles more than a tool version does — the OBO extended prefix
+    /// map is baked into the image, and the two releases' maps differ by 388
+    /// prefixes — and a release neither writes nor reads OBO `[Instance]` frames.
+    /// Absent, the artefacts are written under owlmake's own conventions: the
+    /// current tool generation, and `[Instance]` frames written and read. A
+    /// repository migrating from the release records it; one that wants its
+    /// individuals in its OBO export deletes the line and keeps everything else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulate_odk_version: Option<String>,
+    /// The artefact-format generation this build emulates, e.g. `"1.9.8"`. Two
+    /// byte-level behaviours flip at 1.9.9 — see `Plan::emulate_robot_version`
+    /// for both. Absent, it follows from `emulate_odk_version`, or is the current
+    /// generation when that is absent too.
+    ///
+    /// Stated by a repository that ships its own tool — EFO launches
+    /// `../../bin/robot` at 1.9.7 — and so emulates a tool version and no
+    /// release. Recording BOTH is an error unless they agree, because a plan that
+    /// says two things about one behaviour cannot be obeyed: see
+    /// [`OwlmakeSpec::check_emulation_versions`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emulate_robot_version: Option<String>,
+    /// Ontology short id (e.g. `oba`). The one key every file states.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub id: String,
-    /// Release version (typically a date, `YYYY-MM-DD`).
+    /// The release version to stamp, as a default (typically `{today}`, the date
+    /// of the build). Stated, it replaces the one the standard build derives; a
+    /// build of the repository's own must state it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
-    /// The ontology IRI of the primary product.
+    /// Optional: the repo file the release version is read from, relative to the
+    /// repo root. When present a run that names no version reads it, and
+    /// [`version`](Self::version) is only the fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_file: Option<String>,
+    /// The ontology IRI of the primary product. Stated, it replaces the one the
+    /// standard build derives from `uribase` and `id`; a build of the
+    /// repository's own must state it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ontology_iri: String,
-    /// Reasoner backend (`ELK`, `whelk`, …).
+    /// Reasoner backend (`ELK`, `whelk`, …). An option of the standard build as
+    /// well as a plan field; a build of the repository's own must state it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reasoner: String,
-    /// Whether imports are squashed into a single base-merged module.
+    /// The repository's options for the standard build, held as written and in the
+    /// order they were written.
+    #[serde(flatten)]
+    pub options: serde_json::Map<String, serde_json::Value>,
+    /// Whether imports are squashed into a single base-merged module. The standard
+    /// build takes this from `import_group`; a build of the repository's own
+    /// states it here.
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_base_merging: bool,
-    /// IRI patterns dropped from the merged import.
+    /// IRI patterns dropped from the merged import. From `import_group` in the
+    /// standard build.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_iri_patterns: Vec<String>,
     /// How individuals are handled in the merged import — the `--individuals`
     /// setting of its module extraction:
-    /// `include`/`minimal`/`definitions`/`exclude`.
+    /// `include`/`minimal`/`definitions`/`exclude`. From `import_group` in the
+    /// standard build.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slme_individuals: Option<String>,
-    /// Import products feeding the release.
+    /// Import products feeding the release. Each entry is the whole of how that
+    /// import is obtained and cut: with the standard build it replaces the
+    /// standard import of its id, and must be a product of `import_group`; a
+    /// build of the repository's own lists every import here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imports: Vec<ImportSpec>,
-    /// The single merged-import file, when base-merging is on.
+    /// The single merged-import file, when base-merging is on. The standard build
+    /// derives it from `import_group`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged_import: Option<String>,
-    /// Component files merged into the edit ontology before the release runs.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub components: Vec<String>,
-    /// What a bare `owlmake` builds, RESOLVED at plan time. A goal NAME (`all`)
-    /// would need something outside the plan to say what it covered; the resolved
-    /// list needs nothing. EFO's `all` covers `all_imports all_gwas all_components
-    /// release qc`, so a bare build that stopped at the release artefacts would
-    /// leave the QC unrun.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub default_targets: Vec<String>,
-    /// Targets the repo declares `.PHONY` — always out of date, never satisfied
-    /// by a same-named file.
+    /// The ontology IRI to stamp on the merged import module. Without it the IRI is
+    /// derived from `ontology_iri` and the module path (compression suffix and the
+    /// ontology directory stripped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_iri: Option<String>,
+    /// Shard the merged import: one functional-syntax document per source
+    /// ontology in this directory (`imports/merged`), and `merged_import` becomes
+    /// the index that `owl:imports` them. Opt-in; without it the merged import is
+    /// the single file `merged_import` names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_shards: Option<String>,
+    /// Cap on one shard file in bytes; a shard above it is split on its local ids
+    /// (`mondo-000.owl`, …). Default 10 MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_import_shard_bytes: Option<usize>,
+    /// What a bare `owlmake` builds, RESOLVED. A goal NAME (`all`) would need
+    /// something outside the plan to say what it covered; the resolved list needs
+    /// nothing. Stated, it is the whole list and replaces the one the standard
+    /// build derives from its default goal. EFO's `all` covers `all_imports
+    /// all_gwas all_components release qc`, so a bare build that stopped at the
+    /// release artefacts would leave the QC unrun.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_targets: Option<Vec<String>>,
+    /// Targets that name no file — always out of date, never satisfied by a
+    /// same-named file. Joined to the standard build's phony names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phony: Vec<String>,
     /// Paths the build writes on its way to something else and does not keep — a
     /// file it reaches only through a pattern, never named outright. Removed once
-    /// the chain that needed it is done.
+    /// the chain that needed it is done. Joined to the standard build's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transient_targets: Vec<String>,
     /// Paths owlmake's own engines produce without a recorded rule — the DOSDP
     /// pattern products and the per-import mirrors. A prerequisite naming one of
-    /// these is satisfied by the build even though nothing in `artefacts` or
-    /// `prerequisites` targets it.
+    /// these is satisfied by the build even though no target produces it. Joined
+    /// to the standard build's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native_targets: Vec<String>,
-    /// The edit ontology, relative to the ontology directory. Named here rather
-    /// than probed by extension at build time.
+    /// The edit ontology, relative to the ontology directory. The standard build
+    /// reads `<id>-edit.<edit_format>`; stated, this is the file every rule reads
+    /// instead. A build of the repository's own names it here or has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_file: Option<String>,
     /// The `owl:imports` catalog file, relative to the ontology directory. The
     /// plan names it; execution reads it. Not inlined — Protégé writes that file.
+    /// An option of the standard build as well as a plan field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_file: Option<String>,
-    /// The DOSDP pattern set, enumerated at plan time.
+    /// The DOSDP pattern set, enumerated at plan time. Stated, it replaces the set
+    /// the standard build enumerates from the pattern directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dosdp: Option<DosdpSpec>,
-    /// The ODK release this repo's outputs were made under, e.g. `"1.6"`.
-    ///
-    /// This is the fact a repo actually states — in its `run.sh.conf`, or the
-    /// `container:` of its workflows — and it settles more than the tool version
-    /// does: the OBO extended prefix map is baked into the image, and the two
-    /// releases' maps differ by 388 prefixes. Prefer it to
-    /// [`Self::emulate_robot_version`], which a repo only names when it runs a
-    /// tool of its own rather than the image's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub emulate_odk_version: Option<String>,
-    /// The artefact-format generation this repo builds to, e.g. `"1.9.8"`. Two
-    /// byte-level behaviours flip at 1.9.9 — see `Plan::emulate_robot_version` for both.
-    /// Absent means the current generation.
-    ///
-    /// A repo that runs the image's own tool states only its ODK release, and this
-    /// follows from it. A repo that ships its own — EFO launches `../../bin/robot`
-    /// at 1.9.7 inside an ODK 1.6.1 image — states this instead, and the two are
-    /// then genuinely different facts. Recording BOTH is an error unless they
-    /// agree, because a plan that says two things about one behaviour cannot be
-    /// obeyed: see [`OwlmakeSpec::check_emulation_versions`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub emulate_robot_version: Option<String>,
     /// `--strict` parsing: structurally-broken RDF is rejected rather than
-    /// repaired, so it decides which axioms survive a parse. Resolved at ingest.
+    /// repaired, so it decides which axioms survive a parse.
     #[serde(default, skip_serializing_if = "is_false")]
     pub strict: bool,
     /// `-x`/`--xml-entities` output: `&prefix;` entity references in RDF/XML, a
-    /// byte-level change to every RDF/XML artefact. Resolved at ingest.
+    /// byte-level change to every RDF/XML artefact.
     #[serde(default, skip_serializing_if = "is_false")]
     pub xml_entities: bool,
     /// The rebuild switches this plan exposes — the target groups a run may ask
     /// to rebuild rather than reuse. The VALUES are run inputs and are not
-    /// recorded; the parameter space is.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub refresh_groups: Vec<crate::plan::RefreshGroup>,
+    /// recorded; the parameter space is. Stated, it is the whole list and
+    /// replaces the groups the build derives from its switches; a target that
+    /// exists only under a switch says so with `when`, and joins that switch's
+    /// group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_groups: Option<Vec<crate::plan::RefreshGroup>>,
     /// The build-configuration variables whose value decides which rules exist,
-    /// and the value this plan describes. A run may assign one, but only to the
-    /// value recorded here: the plan holds the rules of one branch, so a run
-    /// asking for the other is refused rather than quietly given this one.
+    /// and the value this repository gives each. A run may assign one, but only
+    /// to the value recorded here: the plan holds the rules of one branch, so a
+    /// run asking for the other is refused rather than quietly given this one.
+    /// Joined to the standard build's, the stated value winning.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub gating_flags: std::collections::BTreeMap<String, String>,
     /// Build variables the executor reads at build time rather than at plan time
@@ -236,7 +316,8 @@ pub struct OwlmakeSpec {
     /// recorded so a plan-only repo builds exactly what the plan was generated
     /// from: without `ODK_VERSION_MAKEFILE` the OBO Graphs writer silently stops
     /// nesting axiom-annotation `meta`, and without `OTHER_SRC` the merged-import
-    /// seed loses whole component branches.
+    /// seed loses whole component branches. A stated variable is bound before the
+    /// standard build's rules are built, so they read it too.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub variables: std::collections::BTreeMap<String, String>,
     /// Steps in the rules that BUILD declared components which owlmake cannot
@@ -244,15 +325,22 @@ pub struct OwlmakeSpec {
     /// recorded rather than silently re-derived as empty on load.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub component_gaps: Vec<String>,
-    /// Generated files the artefacts and imports depend on — plugin provisioning,
-    /// filter seeds, tag subsets, generated components. Built in the order listed
-    /// (dependencies first), before any artefact. Recorded here so the build is
-    /// fully described by this file, and a step that can only be a shell command
-    /// is written as one.
+    /// The targets the repository builds in a way of its own — or, in a build of
+    /// the repository's own, every target. Each replaces the standard target of
+    /// that name, or is one the standard build does not have — unless it says
+    /// `extends`, and then its `needs` join the standard target's and the standard
+    /// steps stand. `artefact` makes it a release artefact; `when` names the
+    /// switches it exists under.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prerequisites: Vec<ArtefactSpec>,
-    /// Release artefacts, each a pipeline of steps over an input.
-    pub artefacts: Vec<ArtefactSpec>,
+    pub targets: Vec<ArtefactSpec>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 /// One import product.
@@ -262,8 +350,15 @@ pub struct ImportSpec {
     pub id: String,
     /// Upstream source URL, or `<custom mirror script>` for project scripts. The
     /// pipeline input is this ontology (mirrored under `mirror/<id>.owl`).
+    /// An entry that `extends` leaves it out: the standard build derives it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
     /// Output module path, relative to `src/ontology` (`imports/<id>_import.owl`).
+    /// An entry that `extends` leaves it out: the standard build derives it. So
+    /// does a mirror the repository keeps for its own targets and makes into no
+    /// module: that entry states `source` and `mirror_steps` alone, and its
+    /// `mirror/<id>.owl` is built and kept as any other mirror is.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub output: String,
     /// The mirror→module pipeline: the ordered operations that turn the source
     /// ontology into the committed import module (`extract`/`filter`/`remove`/
@@ -271,7 +366,7 @@ pub struct ImportSpec {
     /// source paths (e.g. `iri_dependencies/<id>_terms.txt`), so the build never
     /// re-guesses where the term list lives.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
     /// The import product declaration this module came from — mirror URL/type,
     /// base-IRI flags, `is_large`. A `--imports fresh` run reads these, so
     /// recording them keeps that path working from the plan alone.
@@ -282,7 +377,17 @@ pub struct ImportSpec {
     /// plan-only fresh-import run has no way to produce `mirror/<id>.owl`. A
     /// mirror rule threads no model, so these are whole-command shell steps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mirror_steps: Vec<StepSpec>,
+    pub mirror_steps: Vec<StepEntry>,
+    /// Appends this entry's `steps` to the end of the standard mirror→module
+    /// pipeline for this import, which otherwise stands: the source, the output
+    /// and the standard steps are derived as usual and need not be stated. This
+    /// is how a repository states one extra operation over a module — COHO
+    /// removes the subset properties its NCIT slice drags along with
+    /// `remove --term oboInOwl:SubsetProperty --select children` — without
+    /// restating the pipeline. Without it, the entry is the whole pipeline,
+    /// taken as written.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extends: bool,
     /// Files the mirror steps read that another rule makes (MONDO's
     /// `mirror/hgnc_gene.nt`, `mirror/ncbi_gene.nt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -390,7 +495,7 @@ pub struct DosdpSpec {
     /// edit merge, an `oba.owl`, `oba-base.owl`, `oba-full.owl` and `oba-basic.owl`
     /// — that the repo never asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
     /// Every template in the pattern directory — a SUPERSET of `patterns`,
     /// because `dosdp validate` covers templates that have no data table yet.
     /// Recorded separately so validation cannot silently check a subset while
@@ -458,46 +563,160 @@ pub struct ArtefactSpec {
     /// file written into it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order_only: Vec<String>,
-    /// Ordered operations applied to the input.
-    pub steps: Vec<StepSpec>,
+    /// Ordered operations applied to the input. None for a target that only groups
+    /// others, or that `extends` a standard one.
+    #[serde(default)]
+    pub steps: Vec<StepEntry>,
     /// Set when ingest found no rule for this target. It blocks the release, so
     /// it is recorded: without it the artefact loads as one with no steps and
     /// silently builds nothing instead of reporting "no rule found".
     #[serde(default, skip_serializing_if = "is_false")]
     pub missing_rule: bool,
+    /// The recipe writes only the side files its steps name, never the target
+    /// itself: no target file is created, and the executor must not
+    /// materialise the pipeline model at the target path — see
+    /// `ArtefactPlan::side_effect_only`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub side_effect_only: bool,
     /// Where the recipe sends its console output (`… reason > $@`). The steps
     /// name only the intermediates they write with `-o`, so for a check built out
     /// of what its tool prints this is the only field that names the target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdout_file: Option<String>,
+    /// The target is an intermediate of a pattern-rule chain: nothing in the
+    /// build configuration spells its concrete name. When it is missing and the
+    /// target that needs it is otherwise up to date, the chain does not run and
+    /// the file is not created (ECTO's `tmp/stamp-component-<x>.owl`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub intermediate: bool,
     /// What this target is built by under the OTHER value of a switch. Absent is
     /// the ordinary case: the other branch defines no rule, so under that value
     /// the target is not built and the committed file stands.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub branches: Vec<BranchSpec>,
+    /// This entry ADDS its `needs` to the standard target of the same name, whose
+    /// steps stand. Without it an entry is the whole of how the target is built,
+    /// steps or none.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extends: bool,
+    /// The rebuild groups this target exists under (`mirrors`, `imports`,
+    /// `bridges`, …), as `--rebuild` and `--keep` spell them: it joins each.
+    /// Kept, the target is not rebuilt and the file on disk stands, as for a
+    /// standard target of the same group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when: Vec<String>,
+    /// The target is a release artefact: built by the release pipeline together
+    /// with the other artefacts, in dependency order, and published with them.
+    /// Said only of a target the standard build does not already build as one;
+    /// a build of the repository's own says it of each of its artefacts.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub artefact: bool,
+}
+
+impl ImportSpec {
+    pub fn from_plan(i: &ImportPlan) -> Self {
+        ImportSpec {
+            id: i.id.clone(),
+            source: i.source.clone(),
+            output: i.output.clone(),
+            steps: i.steps.iter().map(StepEntry::from_step).collect(),
+            extends: false,
+            product: i.product.clone(),
+            mirror_steps: i.mirror_steps.iter().map(StepEntry::from_step).collect(),
+            mirror_inputs: i.mirror_inputs.clone(),
+        }
+    }
+
+    /// The import as the planner and executor hold it. `source` is taken as
+    /// recorded — that is what recording it means. A `-base` product is resolved
+    /// to its URL before it is written down, so re-resolving here would make a
+    /// hand edit to the recorded source silently ineffective; and mirroring
+    /// `mondo.owl` where `mondo/mondo-base.owl` was recorded pulls MONDO's whole
+    /// closure, and BFO's disjointness with it, into EFO's module.
+    ///
+    /// Whether the module is already on disk, and what it lacks, are facts about
+    /// this checkout and are derived here rather than read.
+    pub fn into_plan(self, dir: &Path, merged_cached: bool) -> ImportPlan {
+        let mut plan = ImportPlan {
+            id: self.id,
+            source: self.source,
+            output: self.output,
+            steps: self.steps.into_iter().map(StepEntry::into_step).collect(),
+            cached: false,
+            gaps: Vec::new(),
+            product: self.product,
+            mirror_steps: self.mirror_steps.into_iter().map(StepEntry::into_step).collect(),
+            mirror_inputs: self.mirror_inputs,
+        };
+        let (cached, gaps) = crate::plan::gaps::import_state(dir, &plan, merged_cached);
+        plan.cached = cached;
+        plan.gaps = gaps;
+        plan
+    }
 }
 
 impl ArtefactSpec {
-    fn from_plan(a: &ArtefactPlan) -> Self {
+    /// A target with nothing said about it yet.
+    pub fn named(target: &str) -> ArtefactSpec {
+        ArtefactSpec::from_plan(&ArtefactPlan {
+            target: target.to_string(),
+            input: None,
+            needs: Vec::new(),
+            order_only: Vec::new(),
+            steps: Vec::new(),
+            gaps: Vec::new(),
+            missing_rule: false,
+            intermediate: false,
+            side_effect_only: false,
+            stdout_file: None,
+            branches: Vec::new(),
+        })
+    }
+
+    /// The target as the planner and executor hold it.
+    pub fn into_plan(self) -> ArtefactPlan {
+        let steps: Vec<Step> = self.steps.into_iter().map(StepEntry::into_step).collect();
+        let gaps = steps.iter().flat_map(|s| s.gaps()).collect();
+        ArtefactPlan {
+            target: self.target,
+            input: self.input,
+            needs: self.needs,
+            order_only: self.order_only,
+            steps,
+            gaps,
+            missing_rule: self.missing_rule,
+            side_effect_only: self.side_effect_only,
+            stdout_file: self.stdout_file,
+            intermediate: self.intermediate,
+            branches: self.branches.into_iter().map(BranchSpec::into_branch).collect(),
+        }
+    }
+
+    pub fn from_plan(a: &ArtefactPlan) -> Self {
         ArtefactSpec {
             target: a.target.clone(),
             input: a.input.clone(),
             needs: a.needs.clone(),
             order_only: a.order_only.clone(),
-            steps: a.steps.iter().map(StepSpec::from_step).collect(),
+            steps: a.steps.iter().map(StepEntry::from_step).collect(),
             missing_rule: a.missing_rule,
+            side_effect_only: a.side_effect_only,
             stdout_file: a.stdout_file.clone(),
+            intermediate: a.intermediate,
             branches: a
                 .branches
                 .iter()
                 .map(|b| BranchSpec {
-                    flag: b.flag.clone(),
+                    group: crate::odk::planner::switch_group_name(&b.flag),
                     value: b.value.clone(),
                     input: b.input.clone(),
                     needs: b.needs.clone(),
-                    steps: b.steps.iter().map(StepSpec::from_step).collect(),
+                    steps: b.steps.iter().map(StepEntry::from_step).collect(),
                 })
                 .collect(),
+            extends: false,
+            when: Vec::new(),
+            artefact: false,
         }
     }
 }
@@ -509,7 +728,7 @@ impl ArtefactSpec {
 /// structural equality has to be maintained alongside the serializer to say so.
 pub(crate) fn steps_differ(a: &[Step], b: &[Step]) -> bool {
     let text = |v: &[Step]| {
-        serde_json::to_string(&v.iter().map(StepSpec::from_step).collect::<Vec<_>>()).ok()
+        serde_json::to_string(&v.iter().map(StepEntry::from_step).collect::<Vec<_>>()).ok()
     };
     text(a) != text(b)
 }
@@ -517,11 +736,11 @@ pub(crate) fn steps_differ(a: &[Step], b: &[Step]) -> bool {
 impl BranchSpec {
     fn into_branch(self) -> crate::plan::Branch {
         crate::plan::Branch {
-            flag: self.flag,
+            flag: crate::odk::planner::switch_flag(&self.group),
             value: self.value,
             input: self.input,
             needs: self.needs,
-            steps: self.steps.into_iter().map(StepSpec::into_step).collect(),
+            steps: self.steps.into_iter().map(StepEntry::into_step).collect(),
         }
     }
 }
@@ -531,21 +750,54 @@ impl BranchSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BranchSpec {
-    /// The switch this pipeline belongs to.
-    pub flag: String,
-    /// The value of that switch which selects it.
+    /// The rebuild group whose switch this pipeline belongs to (`bridges`,
+    /// `mirrors`, …), as `when` spells it.
+    pub group: String,
+    /// The value of that group's switch which selects it.
     pub value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub steps: Vec<StepSpec>,
+    pub steps: Vec<StepEntry>,
+}
+
+/// A step as a plan writes it: the operation, plus the per-step settings that
+/// apply whatever the operation is.
+///
+/// Flattened, so a step stays one mapping — `op: query` with `may_fail: true`
+/// beside it, not an operation nested inside a wrapper.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StepEntry {
+    #[serde(flatten)]
+    pub spec: StepSpec,
+    /// The step's failure is not the build's. A recipe writes this `cmd || true`;
+    /// see [`crate::plan::step::Step::MayFail`] for why it is a property of the
+    /// one step rather than of the steps around it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub may_fail: bool,
+}
+
+impl StepEntry {
+    pub fn from_step(s: &Step) -> Self {
+        match s {
+            Step::MayFail(inner) => {
+                StepEntry { spec: StepSpec::from_step(inner), may_fail: true }
+            }
+            other => StepEntry { spec: StepSpec::from_step(other), may_fail: false },
+        }
+    }
+
+    pub fn into_step(self) -> Step {
+        let step = self.spec.into_step();
+        if self.may_fail { Step::MayFail(Box::new(step)) } else { step }
+    }
 }
 
 /// One step of an artefact's pipeline. Most variants are owlmake's own ops,
 /// applied to the model in memory; `shell`/`fallback` carry a command line run
-/// outside the pipeline, and `unsupported-robot` records an ontology subcommand
+/// outside the pipeline, and `unsupported-subcommand` records an ontology subcommand
 /// owlmake has no implementation for, so a coverage gap shows up in the plan
 /// rather than vanishing from it.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -596,6 +848,13 @@ pub enum StepSpec {
         create_new_ontology_with_annotations: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exclude_duplicate_axioms: Option<bool>,
+        /// The inference types to assert; empty is the default, `SubClass`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        axiom_generators: Vec<String>,
+        /// The object properties the `PropertyAssertion` generator is
+        /// restricted to; empty is every named object property.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        properties: Vec<String>,
     },
     /// Relax equivalence axioms into weaker existentials.
     Relax {
@@ -942,12 +1201,16 @@ pub enum StepSpec {
     /// The bundled SSSOM CLI (`owlmake sssom`) with its argument tokens
     /// (including the `sssom`/`sssom:<cmd>` launcher).
     Sssom { args: Vec<String> },
-    /// `cp [-r] SRC… DST` — a native file copy.
+    /// `cp [-r] SRC… DST` — a native file copy. `relative` is `rsync -R`'s
+    /// relative mode: each source's own relative path is recreated under the
+    /// destination.
     CopyFile {
         src: Vec<String>,
         dst: String,
         #[serde(default, skip_serializing_if = "is_false")]
         recursive: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        relative: bool,
     },
     /// `mv SRC… DST` — a native file move.
     MoveFile { src: Vec<String>, dst: String },
@@ -1041,17 +1304,17 @@ pub enum StepSpec {
         #[serde(rename = "if")]
         r#if: ConditionSpec,
         #[serde(default, rename = "then", skip_serializing_if = "Vec::is_empty")]
-        then_steps: Vec<StepSpec>,
+        then_steps: Vec<StepEntry>,
         #[serde(default, rename = "else", skip_serializing_if = "Vec::is_empty")]
-        else_steps: Vec<StepSpec>,
+        else_steps: Vec<StepEntry>,
     },
     /// An ontology subcommand a recipe names that owlmake does not implement (a
     /// coverage gap).
-    UnsupportedRobot { command: String },
+    UnsupportedSubcommand { command: String },
     /// An ontology subcommand owlmake implements on its CLI but not as a pipeline
     /// op; executed by invoking the owlmake binary's matching subcommand with
     /// `args` (the invocation's own option tokens, in argv order).
-    CliRobot {
+    OwlmakeCli {
         command: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         args: Vec<String>,
@@ -1084,35 +1347,41 @@ pub struct AnnotationSpec {
 // --- Conversions: runtime Plan → spec ------------------------------------------
 
 impl OwlmakeSpec {
-    /// Build a spec from a freshly-derived [`Plan`] (the result of ingest), ready
-    /// to serialize into `owlmake.json`. Diagnostic fields (coverage gaps, cache
-    /// state) are dropped — they are re-derived on load.
+    /// The whole of a [`Plan`] as a file states it: every target, import and
+    /// setting, with no standard build underneath (`use_builtin_rules: false`), so
+    /// that [`into_plan`](Self::into_plan) reads it back without deriving
+    /// anything. Diagnostic fields (coverage gaps, cache state) are dropped —
+    /// they are re-derived on load.
     pub fn from_plan(plan: &Plan) -> Self {
+        let mut targets: Vec<ArtefactSpec> =
+            plan.prerequisites.iter().map(ArtefactSpec::from_plan).collect();
+        targets.extend(plan.artefacts.iter().map(|a| ArtefactSpec {
+            artefact: true,
+            ..ArtefactSpec::from_plan(a)
+        }));
         OwlmakeSpec {
             // No per-repo `$schema` pointer: the schema is the same for every
-            // `owlmake.json` and is emitted on demand by `owlmake schema`. Users
+            // `owlmake.yaml` and is emitted on demand by `owlmake schema`. Users
             // who want editor validation can add a `$schema` pointing at a shared
             // copy; the loader validates against the built-in schema regardless.
             schema: None,
-            default_targets: plan.default_targets.clone(),
+            use_builtin_rules: false,
+            default_targets: Some(plan.default_targets.clone()),
             phony: plan.phony.clone(),
             transient_targets: plan.transient_targets.clone(),
             native_targets: plan.native_targets.clone(),
             edit_file: plan.edit_file.clone(),
             catalog_file: plan.catalog_file.clone(),
             dosdp: plan.dosdp.clone(),
-            // The ODK release is what a repo states when it runs the image's own
-            // tool; the tool version is what it states when it ships one. Ingest
-            // resolves whichever the repo actually says and records that one, so a
-            // round trip never invents the other and never has to reconcile them.
             emulate_odk_version: plan.emulate_odk_version.map(format_version),
-            emulate_robot_version: plan
-                .emulate_odk_version
-                .is_none()
-                .then(|| format_version(plan.emulate_robot_version)),
+            // The tool generation is written only where the release does not
+            // already imply it, so a file never says one thing twice.
+            emulate_robot_version: (plan.emulate_robot_version
+                != implied_robot_version(plan.emulate_odk_version))
+            .then(|| format_version(plan.emulate_robot_version)),
             strict: plan.strict,
             xml_entities: plan.xml_entities,
-            refresh_groups: plan.refresh_groups.clone(),
+            refresh_groups: Some(plan.refresh_groups.clone()),
             gating_flags: plan.gating_flags.clone(),
             // The FORMAT floor, not the generator's version. Stamping
             // `CARGO_PKG_VERSION` would make every plan claim a minimum it does
@@ -1122,38 +1391,29 @@ impl OwlmakeSpec {
             min_owlmake_version: Some(PLAN_FORMAT_MIN_VERSION.to_string()),
             id: plan.id.clone(),
             version: plan.version.clone(),
+            version_file: plan.version_file.clone(),
             ontology_iri: plan.ontology_iri.clone(),
             reasoner: plan.reasoner.clone(),
             use_base_merging: plan.use_base_merging,
             exclude_iri_patterns: plan.exclude_iri_patterns.clone(),
             slme_individuals: plan.slme_individuals.clone(),
-            imports: plan
-                .imports
-                .iter()
-                .map(|i| ImportSpec {
-                    id: i.id.clone(),
-                    source: i.source.clone(),
-                    output: i.output.clone(),
-                    steps: i.steps.iter().map(StepSpec::from_step).collect(),
-                    product: i.product.clone(),
-                    mirror_steps: i.mirror_steps.iter().map(StepSpec::from_step).collect(),
-                    mirror_inputs: i.mirror_inputs.clone(),
-                })
-                .collect(),
+            imports: plan.imports.iter().map(ImportSpec::from_plan).collect(),
             merged_import: plan.merged_import.clone(),
-            components: plan.components.clone(),
+            merged_import_iri: plan.merged_import_iri.clone(),
+            merged_import_shards: plan.merged_import_shards.clone(),
+            merged_import_shard_bytes: plan.merged_import_shard_bytes,
+            targets,
+            options: Default::default(),
             variables: plan.variables.clone(),
             component_gaps: plan.component_gaps.clone(),
-            prerequisites: plan
-                .prerequisites
-                .iter()
-                .map(ArtefactSpec::from_plan)
-                .collect(),
-            artefacts: plan.artefacts.iter().map(ArtefactSpec::from_plan).collect(),
         }
     }
 
-    /// Materialize a runtime [`Plan`] from this spec.
+    /// The [`Plan`] this spec states, read as a complete statement: nothing is
+    /// derived, so this is the reverse of [`from_plan`](Self::from_plan) and the
+    /// in-memory round trip a run binds its version through. A file is not read
+    /// this way — the standard build for its options is resolved first and the
+    /// file laid over it (`OdkRepo::from_file`).
     ///
     /// `dir` is the ONTOLOGY DIRECTORY, and it is used only to observe which
     /// files are already on disk — a fact about this filesystem right now, not a
@@ -1166,46 +1426,10 @@ impl OwlmakeSpec {
     pub fn into_plan(self, dir: &Path) -> Plan {
         let merged_cached =
             self.use_base_merging && dir.join("imports/merged_import.owl").exists();
-        // The OBO PURL base a `-base` product URL is built from, as the recorded
-        // `OBOBASE` variable defines it.
-        let obobase = self
-            .variables
-            .get("OBOBASE")
-            .map(|s| s.trim_end_matches('/').to_string())
-            .unwrap_or_else(|| "http://purl.obolibrary.org/obo".to_string());
-        let imports = self
+        let imports: Vec<ImportPlan> = self
             .imports
             .into_iter()
-            .map(|i| {
-                let steps: Vec<Step> = i.steps.into_iter().map(StepSpec::into_step).collect();
-                // `source` as recorded in the plan is authoritative — that is what
-                // serializing it means. Ingest already resolves a `-base` product
-                // (the ontology's OWN axioms, without its import closure) to its
-                // URL, so re-resolving here would make a hand edit to the recorded
-                // source silently ineffective.
-                //
-                // EFO is why the distinction matters: mirroring `mondo.owl` rather
-                // than `mondo/mondo-base.owl` pulls MONDO's whole closure (OMO ->
-                // IAO -> BFO) into the BOT module, and BFO's upper-level
-                // disjointness makes 37,589 classes unsatisfiable in the merged
-                // ontology.
-                let source = i.source;
-                let mut plan = ImportPlan {
-                    id: i.id,
-                    source,
-                    output: i.output,
-                    steps,
-                    cached: false,
-                    gaps: Vec::new(),
-                    product: i.product,
-                    mirror_steps: i.mirror_steps.into_iter().map(StepSpec::into_step).collect(),
-                    mirror_inputs: i.mirror_inputs,
-                };
-                let (cached, gaps) = crate::plan::gaps::import_state(dir, &plan, merged_cached);
-                plan.cached = cached;
-                plan.gaps = gaps;
-                plan
-            })
+            .map(|i| i.into_plan(dir, merged_cached))
             .collect();
 
         // Gaps are diagnostics about THIS filesystem, so they are re-derived here
@@ -1219,44 +1443,17 @@ impl OwlmakeSpec {
         // files ingest read — that is, everywhere except the plan-only build the
         // check exists for, where a declared source deleted after planning would
         // leave a stale output standing and the build calling it up to date.
-        let mut prerequisites = self
-            .prerequisites
-            .into_iter()
-            .map(|a| {
-                let steps: Vec<Step> = a.steps.into_iter().map(StepSpec::into_step).collect();
-                let gaps = steps.iter().flat_map(|s| s.gaps()).collect();
-                ArtefactPlan {
-                    target: a.target,
-                    input: a.input,
-                    needs: a.needs,
-                    order_only: a.order_only,
-                    steps,
-                    gaps,
-                    missing_rule: a.missing_rule,
-                    stdout_file: a.stdout_file,
-                    branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
-                }
-            })
-            .collect::<Vec<ArtefactPlan>>();
-        let mut artefacts = self
-            .artefacts
-            .into_iter()
-            .map(|a| {
-                let steps: Vec<Step> = a.steps.into_iter().map(StepSpec::into_step).collect();
-                let gaps: Vec<String> = steps.iter().flat_map(|s| s.gaps()).collect();
-                ArtefactPlan {
-                    target: a.target,
-                    input: a.input,
-                    needs: a.needs,
-                    order_only: a.order_only,
-                    steps,
-                    gaps,
-                    missing_rule: a.missing_rule,
-                    stdout_file: a.stdout_file,
-                    branches: a.branches.into_iter().map(BranchSpec::into_branch).collect(),
-                }
-            })
-            .collect::<Vec<ArtefactPlan>>();
+        let (mut prerequisites, mut artefacts): (Vec<ArtefactPlan>, Vec<ArtefactPlan>) =
+            (Vec::new(), Vec::new());
+        for t in self.targets {
+            let is_artefact = t.artefact;
+            let planned = t.into_plan();
+            if is_artefact {
+                artefacts.push(planned);
+            } else {
+                prerequisites.push(planned);
+            }
+        }
         {
             // Everything the build produces, by any route: a recorded rule, one of
             // owlmake's own engines, or another rule's recipe writing a file it
@@ -1272,40 +1469,38 @@ impl OwlmakeSpec {
                 planned.extend(crate::plan::gaps::recipe_outputs(&a.steps));
             }
             let phony: std::collections::HashSet<String> = self.phony.iter().cloned().collect();
+            let products: Vec<String> =
+                imports.iter().filter(|i| !i.steps.is_empty()).map(|i| i.output.clone()).collect();
             for a in artefacts.iter_mut().chain(prerequisites.iter_mut()) {
                 a.gaps.extend(crate::plan::gaps::term_file_gaps(dir, &a.steps, &planned));
                 a.gaps.extend(crate::plan::gaps::prerequisite_gaps(
-                    dir, &a.needs, &planned, &phony,
+                    dir, &a.needs, &planned, &phony, &products,
                 ));
             }
         }
 
+        let emulate_odk_version = self.emulate_odk_version.as_deref().and_then(parse_version);
         Plan {
-            default_targets: self.default_targets,
+            default_targets: self.default_targets.unwrap_or_default(),
             phony: self.phony,
             transient_targets: self.transient_targets,
             native_targets: self.native_targets,
             edit_file: self.edit_file,
             catalog_file: self.catalog_file,
             dosdp: self.dosdp,
-            emulate_odk_version: self.emulate_odk_version.as_deref().and_then(parse_version),
-            // A plan that names its ODK release implies the tool version; one that
-            // names the tool states it outright. `check_emulation_versions` has
-            // already refused the case where both are present and disagree, so
-            // preferring the ODK release here cannot silently override anything.
+            emulate_odk_version,
             emulate_robot_version: self
-                .emulate_odk_version
+                .emulate_robot_version
                 .as_deref()
                 .and_then(parse_version)
-                .map(crate::odk::workflows::odk_robot_version)
-                .or_else(|| self.emulate_robot_version.as_deref().and_then(parse_version))
-                .unwrap_or(CURRENT_ROBOT),
+                .unwrap_or_else(|| implied_robot_version(emulate_odk_version)),
             strict: self.strict,
             xml_entities: self.xml_entities,
-            refresh_groups: self.refresh_groups,
+            refresh_groups: self.refresh_groups.unwrap_or_default(),
             gating_flags: self.gating_flags,
             id: self.id,
             version: self.version,
+            version_file: self.version_file,
             ontology_iri: self.ontology_iri,
             reasoner: self.reasoner,
             use_base_merging: self.use_base_merging,
@@ -1313,13 +1508,108 @@ impl OwlmakeSpec {
             slme_individuals: self.slme_individuals,
             imports,
             merged_import: self.merged_import,
-            components: self.components,
+            merged_import_iri: self.merged_import_iri,
+            merged_import_shards: self.merged_import_shards,
+            merged_import_shard_bytes: self.merged_import_shard_bytes,
             variables: self.variables,
             component_gaps: self.component_gaps,
             prerequisites,
             artefacts,
         }
     }
+
+    /// Lay this file's statements over `plan`, the standard build resolved for
+    /// its options with its targets, imports and switches already threaded in
+    /// (`OdkRepo::from_file`). What remains is the settings the rules never
+    /// decide: each replaces what was derived, or joins it where the field is a
+    /// list the file may only add to.
+    ///
+    /// The output conventions are the file's whatever the rules derived: absent,
+    /// they are owlmake's own, which is what a repository that deletes its
+    /// `emulate_odk_version` line is asking for.
+    pub fn overlay(&self, plan: &mut Plan) {
+        if !self.version.is_empty() {
+            plan.version = self.version.clone();
+        }
+        if self.version_file.is_some() {
+            plan.version_file = self.version_file.clone();
+        }
+        if !self.ontology_iri.is_empty() {
+            plan.ontology_iri = self.ontology_iri.clone();
+        }
+        if !self.reasoner.is_empty() {
+            plan.reasoner = self.reasoner.clone();
+        }
+        if self.edit_file.is_some() {
+            plan.edit_file = self.edit_file.clone();
+        }
+        if self.catalog_file.is_some() {
+            plan.catalog_file = self.catalog_file.clone();
+        }
+        if let Some(targets) = &self.default_targets {
+            plan.default_targets = targets.clone();
+        }
+        if let Some(groups) = &self.refresh_groups {
+            plan.refresh_groups = groups.clone();
+        }
+        for (name, value) in &self.gating_flags {
+            plan.gating_flags.insert(name.clone(), value.clone());
+        }
+        for (name, value) in &self.variables {
+            plan.variables.insert(name.clone(), value.clone());
+        }
+        let join = |into: &mut Vec<String>, from: &[String]| {
+            for t in from {
+                if !into.contains(t) {
+                    into.push(t.clone());
+                }
+            }
+            into.sort();
+        };
+        join(&mut plan.phony, &self.phony);
+        join(&mut plan.transient_targets, &self.transient_targets);
+        join(&mut plan.native_targets, &self.native_targets);
+        for gap in &self.component_gaps {
+            if !plan.component_gaps.contains(gap) {
+                plan.component_gaps.push(gap.clone());
+            }
+        }
+        plan.strict |= self.strict;
+        plan.xml_entities |= self.xml_entities;
+        plan.emulate_odk_version = self.emulate_odk_version.as_deref().and_then(parse_version);
+        plan.emulate_robot_version = self
+            .emulate_robot_version
+            .as_deref()
+            .and_then(parse_version)
+            .unwrap_or_else(|| implied_robot_version(plan.emulate_odk_version));
+        if self.use_base_merging {
+            plan.use_base_merging = true;
+        }
+        if !self.exclude_iri_patterns.is_empty() {
+            plan.exclude_iri_patterns = self.exclude_iri_patterns.clone();
+        }
+        if self.slme_individuals.is_some() {
+            plan.slme_individuals = self.slme_individuals.clone();
+        }
+        if self.merged_import.is_some() {
+            plan.merged_import = self.merged_import.clone();
+        }
+        if self.merged_import_iri.is_some() {
+            plan.merged_import_iri = self.merged_import_iri.clone();
+        }
+        if self.merged_import_shards.is_some() {
+            plan.merged_import_shards = self.merged_import_shards.clone();
+        }
+        if self.merged_import_shard_bytes.is_some() {
+            plan.merged_import_shard_bytes = self.merged_import_shard_bytes;
+        }
+    }
+}
+
+/// The tool generation an emulated release implies, or the current one where no
+/// release is emulated.
+fn implied_robot_version(odk: Option<(u32, u32, u32)>) -> (u32, u32, u32) {
+    odk.map_or(CURRENT_ROBOT, crate::odk::workflows::odk_robot_version)
 }
 
 /// Bind a run's release version into a plan.
@@ -1338,6 +1628,7 @@ pub fn bind_version(
     plan: &Plan,
     version: &str,
     today: Option<&str>,
+    clock: Option<&str>,
     dir: &Path,
 ) -> Result<Plan> {
     let spec = OwlmakeSpec::from_plan(plan);
@@ -1357,6 +1648,11 @@ pub fn bind_version(
     // TODAY=2026-08-19 across midnight.
     let today = today.map(str::to_string).unwrap_or_else(crate::plan::today);
     substitute(&mut value, crate::plan::VERSION_TODAY, &today);
+    // …and the clock is the clock, unless the run names it: a recipe that
+    // shells out to `date` gets the day the build runs whatever version it
+    // stamps, and `CLOCK=` reproduces such a build on any later day.
+    let clock = clock.map(str::to_string).unwrap_or_else(crate::plan::today);
+    substitute(&mut value, crate::plan::VERSION_CLOCK, &clock);
     let mut bound: OwlmakeSpec = serde_json::from_value(value)
         .context("internal: a plan did not read back while binding its release version")?;
     bound.version = version.to_string();
@@ -1427,6 +1723,10 @@ impl StepSpec {
             // An Op or a Partial both serialize by their operation; partial-ness
             // (the coverage gaps) is re-derived on load from the op's options.
             Step::Op(op) | Step::Partial { op, .. } => Self::from_op(op),
+            // `may_fail` is a field of the step's own mapping, so it is written by
+            // [`StepEntry`] — the only thing that builds one of these — and what
+            // remains here is the operation it applies to.
+            Step::MayFail(inner) => Self::from_step(inner),
             Step::Boundary { input } => StepSpec::Boundary { input: input.clone() },
             // `Inert` never reaches a plan (the planner drops it); mapped for
             // exhaustiveness only.
@@ -1443,12 +1743,12 @@ impl StepSpec {
 
             Step::Branch { condition, then_steps, else_steps } => StepSpec::Branch {
                 r#if: ConditionSpec::from_condition(condition),
-                then_steps: then_steps.iter().map(StepSpec::from_step).collect(),
-                else_steps: else_steps.iter().map(StepSpec::from_step).collect(),
+                then_steps: then_steps.iter().map(StepEntry::from_step).collect(),
+                else_steps: else_steps.iter().map(StepEntry::from_step).collect(),
             },
-            Step::UnknownRobot(c) => StepSpec::UnsupportedRobot { command: c.clone() },
-            Step::CliRobot { name, args } => {
-                StepSpec::CliRobot { command: name.clone(), args: args.clone() }
+            Step::UnsupportedSubcommand(c) => StepSpec::UnsupportedSubcommand { command: c.clone() },
+            Step::OwlmakeCli { name, args } => {
+                StepSpec::OwlmakeCli { command: name.clone(), args: args.clone() }
             }
 
             // The release-runner marker is resolved away by `rewrite_oort` before
@@ -1467,10 +1767,11 @@ impl StepSpec {
 
     fn from_file_op(op: &FileOp) -> Self {
         match op {
-            FileOp::Copy { src, dst, recursive } => StepSpec::CopyFile {
+            FileOp::Copy { src, dst, recursive, relative } => StepSpec::CopyFile {
                 src: src.clone(),
                 dst: dst.clone(),
                 recursive: *recursive,
+                relative: *relative,
             },
             FileOp::Move { src, dst } => StepSpec::MoveFile { src: src.clone(), dst: dst.clone() },
             FileOp::Remove { paths, recursive, force } => StepSpec::RemoveFile {
@@ -1561,6 +1862,8 @@ impl StepSpec {
                 create_new_ontology,
                 create_new_ontology_with_annotations,
                 exclude_duplicate_axioms,
+                axiom_generators,
+                properties,
             } => StepSpec::Reason {
                 reasoner: reasoner.clone(),
                 equivalent_classes_allowed: equivalent_classes_allowed.clone(),
@@ -1573,6 +1876,8 @@ impl StepSpec {
                 create_new_ontology: *create_new_ontology,
                 create_new_ontology_with_annotations: *create_new_ontology_with_annotations,
                 exclude_duplicate_axioms: *exclude_duplicate_axioms,
+                axiom_generators: axiom_generators.clone(),
+                properties: properties.clone(),
             },
             Op::Relax { include_subclass_of } => {
                 StepSpec::Relax { include_subclass_of: *include_subclass_of }
@@ -1773,6 +2078,8 @@ impl StepSpec {
                 create_new_ontology,
                 create_new_ontology_with_annotations,
                 exclude_duplicate_axioms,
+                axiom_generators,
+                properties,
             } => Step::Op(Op::Reason {
                 reasoner,
                 equivalent_classes_allowed,
@@ -1785,6 +2092,8 @@ impl StepSpec {
                 create_new_ontology,
                 create_new_ontology_with_annotations,
                 exclude_duplicate_axioms,
+                axiom_generators,
+                properties,
             }),
             StepSpec::Relax { include_subclass_of } => {
                 Step::Op(Op::Relax { include_subclass_of })
@@ -1930,7 +2239,9 @@ impl StepSpec {
             StepSpec::Fallback { command, requires } => Step::Fallback { command, requires },
             StepSpec::Jq { args } => Step::Jq(args),
             StepSpec::Sssom { args } => Step::Sssom(args),
-            StepSpec::CopyFile { src, dst, recursive } => Step::File(FileOp::Copy { src, dst, recursive }),
+            StepSpec::CopyFile { src, dst, recursive, relative } => {
+                Step::File(FileOp::Copy { src, dst, recursive, relative })
+            }
             StepSpec::MoveFile { src, dst } => Step::File(FileOp::Move { src, dst }),
             StepSpec::RemoveFile { paths, recursive, force } => {
                 Step::File(FileOp::Remove { paths, recursive, force })
@@ -1990,11 +2301,11 @@ impl StepSpec {
 
             StepSpec::Branch { r#if, then_steps, else_steps } => Step::Branch {
                 condition: r#if.into_condition(),
-                then_steps: then_steps.into_iter().map(StepSpec::into_step).collect(),
-                else_steps: else_steps.into_iter().map(StepSpec::into_step).collect(),
+                then_steps: then_steps.into_iter().map(StepEntry::into_step).collect(),
+                else_steps: else_steps.into_iter().map(StepEntry::into_step).collect(),
             },
-            StepSpec::UnsupportedRobot { command } => Step::UnknownRobot(command),
-            StepSpec::CliRobot { command, args } => Step::CliRobot { name: command, args },
+            StepSpec::UnsupportedSubcommand { command } => Step::UnsupportedSubcommand(command),
+            StepSpec::OwlmakeCli { command, args } => Step::OwlmakeCli { name: command, args },
 
             StepSpec::Oort { input, outdir, reasoner, simple, relaxed, asserted } => {
                 Step::Oort(crate::plan::step::OortSpec {
@@ -2129,8 +2440,6 @@ const PATH_SUFFIXES: [&str; 21] = [
 /// Whether a token could name a file. Deliberately conservative: an IRI, a CURIE
 /// (`rdfs:comment`, `NCBITaxon:9606`), a flag and a bare word are all rejected, so
 /// only a token with a directory separator or a known suffix is even considered.
-/// A `sed` script like `s/[<>]//g` has a `/` and gets past this — the caller's
-/// "the parent directory must exist" test is what actually rules it out.
 fn could_be_path(tok: &str) -> bool {
     !tok.is_empty()
         && !tok.starts_with('-')
@@ -2149,44 +2458,42 @@ fn is_dot_path(tok: &str) -> bool {
     !tok.is_empty() && tok.split('/').all(|c| c == "." || c == "..")
 }
 
-/// How much latitude a string gets when its path-like tokens are rebased.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Rebase {
-    /// A field the schema declares as a path. Rebase on SHAPE alone, so the
-    /// result is the same whatever happens to exist on disk.
-    Field,
-    /// A shell line, a message, a tool's argument vector — arbitrary text a
-    /// human wrote, in which a path can only be guessed at. Here the "parent
-    /// directory must exist" test earns its keep: it is what stops `sed`'s
-    /// `s/[<>]//g` (which has a `/` and clears the shape gate) being rewritten.
-    FreeText,
-}
-
 /// Reinterpret `tok` — a path relative to `from` — as a path relative to `to`.
 ///
-/// For a declared path field this is total and purely lexical. Probing the
-/// filesystem here would make the mapping neither total nor symmetric: a token
-/// whose parent directory exists at save time and not at load time is rewritten
-/// once and never rewritten back. EFO's `.gitignore` lists `build`, `mirror` and
-/// `tmp`, so a plan generated after a build records `src/ontology/build/efo.owl`,
-/// and on a fresh clone — the case owlmake exists for — the executor would
-/// resolve that against the ontology directory and write
-/// `src/ontology/src/ontology/build/efo.owl`, exit code 0. It would also make the
-/// plan's own bytes depend on which gitignored directories happened to be
-/// present.
-fn rebase(tok: &str, from: &Path, to: &Path, mode: Rebase) -> Option<String> {
-    let shaped = match mode {
-        Rebase::Field => could_be_path(tok) || is_dot_path(tok),
-        Rebase::FreeText => could_be_path(tok),
-    };
-    if !shaped {
+/// This is total and purely lexical. Probing the filesystem here would make the
+/// mapping neither total nor symmetric: a token whose parent directory exists at
+/// save time and not at load time is rewritten once and never rewritten back.
+/// EFO's `.gitignore` lists `build`, `mirror` and `tmp`, so a plan generated
+/// after a build records `src/ontology/build/efo.owl`, and on a fresh clone — the
+/// case owlmake exists for — the executor would resolve that against the
+/// ontology directory and write `src/ontology/src/ontology/build/efo.owl`, exit
+/// code 0. It would also make the plan's own bytes depend on which gitignored
+/// directories happened to be present.
+fn rebase(tok: &str, from: &Path, to: &Path) -> Option<String> {
+    if !could_be_path(tok) && !is_dot_path(tok) {
+        return None;
+    }
+    // An ABSOLUTE path names a machine location, not a repo file — the reference
+    // image's `/tools/obo.epm.json` is the case. Expressed relative to the plan
+    // it would encode where the repo happens to sit, so the same tree at two
+    // paths would carry two different plans.
+    if tok.starts_with('/') {
         return None;
     }
     let abs = normalize(&from.join(tok));
-    if mode == Rebase::FreeText && !abs.parent().is_some_and(|p| p.is_dir()) {
-        return None;
+    // What is written has to be something the reverse trip turns back into `tok`.
+    // A path keeps the trailing `/` that says it is a directory; and one that no
+    // longer LOOKS like a path once rebased — `../../mappings` becoming `mappings`
+    // — is written `./mappings`, or it would be read back as a bare word and left
+    // where the other base put it.
+    let mut out = relative_to(&abs, to).to_string_lossy().into_owned();
+    if tok.ends_with('/') && !out.ends_with('/') {
+        out.push('/');
     }
-    Some(relative_to(&abs, to).to_string_lossy().into_owned())
+    if !could_be_path(&out) && !is_dot_path(&out) {
+        out.insert_str(0, "./");
+    }
+    Some(out)
 }
 
 /// Split a command line into shell words: whitespace separates, but a `'…'` or
@@ -2224,33 +2531,19 @@ fn shell_words(s: &str) -> Vec<&str> {
     out
 }
 
-/// Rebase every path-like token in `s`, leaving the rest of the string — quoting,
-/// pipes, redirections, `sed` scripts — byte-for-byte intact. Tokens are located
-/// by splitting on whitespace and stripping the punctuation a shell puts around a
-/// filename.
+/// Rebase every path-like token in `s`, leaving the rest of the string byte for
+/// byte intact: a declared value may name several paths, as a recorded
+/// variable's list does. Tokens are located by splitting on whitespace — a quoted
+/// region is one word however much whitespace is inside it — and stripping the
+/// punctuation a shell puts around a filename.
 ///
 /// Substitution is ONE left-to-right pass, taking the longest token that starts
-/// at each position and skipping past what it wrote. A sequence of
-/// `String::replace` calls cannot do this even ordered longest-first: that only
-/// stops a token being rewritten before a longer one containing it, not inside
-/// the REPLACEMENT a longer one just produced. MONDO's `mondo.obo` rule is the
-/// case — `grep -v ^owl-axioms mondo.obo.tmp.obo > mondo.obo` rebases
-/// `mondo.obo.tmp.obo` to `src/ontology/mondo.obo.tmp.obo`, and the shorter
-/// `mondo.obo` would then match inside that and prefix it a second time, giving
-/// `src/ontology/src/ontology/mondo.obo.tmp.obo`. `load` strips one level back,
-/// the `convert` step writes to the target instead of the temp file, and the
-/// `grep` exits 2 on a file that was never created.
-///
-/// A match must also sit on a token boundary, so `mondo.obo` in the middle of
-/// some longer word is left alone.
-///
-/// Tokenizing respects quotes, because a quoted word is one word however much
-/// whitespace is inside it. MONDO's `sed -i 's/  */ /g' reports/…` is the case:
-/// split on whitespace, the script becomes the three fragments `'s/`, `*/` and
-/// `/g'`, and the first and last look exactly like paths, so the plan would
-/// record `sed -i 'src/ontology/s  */ ../../../g' …`. Kept whole, `s/  */ /g`
-/// resolves to nothing that exists and `rebase` declines it.
-fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase) -> String {
+/// at each position and skipping past what it wrote, and a match must sit on a
+/// token boundary. A sequence of `String::replace` calls cannot do this even
+/// ordered longest-first: that stops a token being rewritten before a longer one
+/// containing it, but not inside the REPLACEMENT the longer one just produced, so
+/// `mondo.obo.tmp.obo mondo.obo` would come out with the first prefixed twice.
+fn rebase_in_string(s: &str, from: &Path, to: &Path) -> String {
     const EDGE: [char; 10] = ['\'', '"', '(', ')', ';', ',', '<', '>', '|', '`'];
     let mut subs: Vec<(String, String)> = Vec::new();
     for raw in shell_words(s) {
@@ -2258,7 +2551,7 @@ fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase) -> String {
         if tok.is_empty() || subs.iter().any(|(t, _)| t == tok) {
             continue;
         }
-        if let Some(new) = rebase(tok, from, to, mode) {
+        if let Some(new) = rebase(tok, from, to) {
             if new != tok {
                 subs.push((tok.to_string(), new));
             }
@@ -2298,16 +2591,15 @@ fn rebase_in_string(s: &str, from: &Path, to: &Path, mode: Rebase) -> String {
 }
 
 /// Keys whose value is arbitrary text a human wrote rather than a path the schema
-/// declares: a shell line, a `Print` message, a tool's argument vector. Their
-/// paths can only be found by guessing, so they keep the conservative treatment.
-/// Everything else in the plan is a declared path field and is rebased on shape
-/// alone.
+/// declares: a shell line, a `Print` message, a tool's argument vector. A path
+/// inside such text can only be guessed at, and rebasing a guess is not undone
+/// by rebasing it back, so the text is written as it runs: in the build's working
+/// directory, exactly as the step executes it. Everything else in the plan is a
+/// declared path field and is rebased on shape alone.
 ///
 /// `variables` is deliberately NOT here. A recorded variable's value is a path or
 /// a list of them (`SRC`, `ROBOT`, `MIRRORDIR`, `VQUERIES`) — that is why it is
-/// recorded at all — and under the conservative treatment `ROBOT =
-/// ../../bin/robot` would rebase asymmetrically whenever `bin/` was absent, which
-/// is the same defect one level down.
+/// recorded at all — so it is rebased as every other declared path is.
 fn is_free_text_key(key: &str) -> bool {
     matches!(key, "command" | "message" | "args")
 }
@@ -2318,31 +2610,43 @@ fn is_literal_key(key: &str) -> bool {
     matches!(key, "value" | "annotations" | "add_annotation" | "add_annotation_iri")
 }
 
-/// Walk a serialized plan and rebase every path it names.
+/// Walk a serialized plan and rebase every path it declares.
 ///
 /// The walk is key-aware because the plan holds three different kinds of string
-/// and they cannot be told apart by looking at one. Defaulting an unrecognised key
-/// to the FIELD treatment is deliberate: a path field added later is rebased
+/// — a declared path, free text, a literal — and they cannot be told apart by
+/// looking at one; only a declared path is rebased. Defaulting an unrecognised
+/// key to the path treatment is deliberate: a path field added later is rebased
 /// without anyone remembering to list it, which is the direction the mistake
 /// should fall.
-fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path, mode: Rebase) {
+fn relocate(value: &mut serde_json::Value, from: &Path, to: &Path) {
     match value {
-        serde_json::Value::String(s) => *s = rebase_in_string(s, from, to, mode),
+        serde_json::Value::String(s) => *s = rebase_in_string(s, from, to),
         serde_json::Value::Array(a) => {
             for v in a {
-                relocate(v, from, to, mode);
+                relocate(v, from, to);
             }
         }
         serde_json::Value::Object(o) => {
             for (k, v) in o.iter_mut() {
-                if is_literal_key(k) {
-                    continue;
+                if !is_free_text_key(k) && !is_literal_key(k) {
+                    relocate(v, from, to);
                 }
-                let m = if is_free_text_key(k) { Rebase::FreeText } else { mode };
-                relocate(v, from, to, m);
             }
         }
         _ => {}
+    }
+}
+
+/// Rebase the paths of a whole document, leaving the standard-build options as
+/// written. An option is a setting, not a path: a template is named `GWAS.csv`
+/// whichever directory the file is read from.
+fn relocate_document(value: &mut serde_json::Value, from: &Path, to: &Path) {
+    let Some(map) = value.as_object_mut() else { return };
+    for (key, v) in map.iter_mut() {
+        if crate::odk::builtin::is_option(key) && !OwlmakeSpec::is_plan_key(key) {
+            continue;
+        }
+        relocate(v, from, to);
     }
 }
 
@@ -2374,7 +2678,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.1.0";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.4";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -2398,14 +2702,16 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
         check_min_version(req, path)?;
     }
     validate(&value).with_context(|| format!("validating {}", path.display()))?;
-    // On disk every path is relative to this file; the build runs in the ontology
-    // directory, so translate them to that base before anything reads them.
+    // On disk every declared path is relative to this file; the build runs in the
+    // ontology directory, so translate them to that base before anything reads
+    // them.
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        relocate(&mut value, &file_dir, &exec, Rebase::Field);
+        relocate_document(&mut value, &file_dir, &exec);
     }
     let spec: OwlmakeSpec = serde_json::from_value(value)
         .with_context(|| format!("interpreting {}", path.display()))?;
+    spec.check().with_context(|| format!("in {}", path.display()))?;
     check_version(&spec, path)?;
     spec.check_emulation_versions()
         .with_context(|| format!("in {}", path.display()))?;
@@ -2413,6 +2719,142 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
 }
 
 impl OwlmakeSpec {
+    /// A file stating `options` — the repository's options for the standard
+    /// build, `id` among them — over the built-in rules or, with
+    /// `use_builtin_rules` off, over nothing, and nothing else yet.
+    pub fn for_options(
+        options: serde_json::Map<String, serde_json::Value>,
+        use_builtin_rules: bool,
+    ) -> Result<OwlmakeSpec> {
+        let mut document = serde_json::Map::new();
+        document.insert("min_owlmake_version".into(), PLAN_FORMAT_MIN_VERSION.into());
+        document.insert("use_builtin_rules".into(), use_builtin_rules.into());
+        document.extend(options);
+        serde_json::from_value(serde_json::Value::Object(document))
+            .context("reading the repository's options")
+    }
+
+    /// The options as one document: the keys this struct holds as fields of its
+    /// own, and the rest as written.
+    pub fn options(&self) -> serde_json::Value {
+        let mut all = serde_json::Map::new();
+        all.insert("id".into(), self.id.clone().into());
+        if !self.reasoner.is_empty() {
+            all.insert("reasoner".into(), self.reasoner.clone().into());
+        }
+        if let Some(catalog) = &self.catalog_file {
+            all.insert("catalog_file".into(), catalog.clone().into());
+        }
+        all.extend(self.options.clone());
+        serde_json::Value::Object(all)
+    }
+
+    /// A key that is a field of the plan as well as an option, and is read as the
+    /// field: both mean the same thing.
+    fn is_plan_key(key: &str) -> bool {
+        matches!(key, "id" | "reasoner" | "catalog_file")
+    }
+
+    /// Refuse a file that holds a key nothing reads, or that says something its
+    /// base cannot honour.
+    ///
+    /// With the standard build, the merged import is decided by `import_group`, so
+    /// the fields that would state it a second way are refused. Without it, an
+    /// option of the standard build sets nothing and is refused by name, and the
+    /// identity of the ontology has to be stated because nothing else can derive
+    /// it.
+    pub fn check(&self) -> Result<()> {
+        for key in self.options.keys() {
+            if let Some(reason) = crate::odk::builtin::tool_only_reason(key) {
+                bail!("`{key}` sets {reason}; leave it out");
+            }
+            if !crate::odk::builtin::is_option(key) {
+                bail!("unknown key `{key}`: it is neither part of a plan nor an option of the standard build");
+            }
+        }
+        if self.id.is_empty() {
+            bail!("the file names no `id`");
+        }
+        if self.use_builtin_rules {
+            let stated = [
+                ("use_base_merging", self.use_base_merging),
+                ("exclude_iri_patterns", !self.exclude_iri_patterns.is_empty()),
+                ("slme_individuals", self.slme_individuals.is_some()),
+                ("merged_import", self.merged_import.is_some()),
+                ("merged_import_iri", self.merged_import_iri.is_some()),
+                ("merged_import_shards", self.merged_import_shards.is_some()),
+                ("merged_import_shard_bytes", self.merged_import_shard_bytes.is_some()),
+            ];
+            if let Some((key, _)) = stated.iter().find(|(_, set)| *set) {
+                bail!(
+                    "`{key}` states the merged import, which the standard build decides from \
+                     `import_group`: state it there, or state the whole build with \
+                     `use_builtin_rules: false`"
+                );
+            }
+        } else {
+            if let Some(key) = self.options.keys().next() {
+                bail!(
+                    "`{key}` is an option of the standard build, and this file does not use \
+                     its rules (`use_builtin_rules: false`): nothing would read it"
+                );
+            }
+            for (name, value) in [
+                ("version", &self.version),
+                ("ontology_iri", &self.ontology_iri),
+                ("reasoner", &self.reasoner),
+            ] {
+                if value.is_empty() {
+                    bail!(
+                        "a build of the repository's own (`use_builtin_rules: false`) must state \
+                         `{name}`: there is no standard build to derive it from"
+                    );
+                }
+            }
+        }
+        for i in &self.imports {
+            if i.extends {
+                if !self.use_builtin_rules {
+                    bail!(
+                        "import `{}` says `extends`, and this file does not use the standard \
+                         build's rules (`use_builtin_rules: false`): there is no standard \
+                         pipeline to extend",
+                        i.id
+                    );
+                }
+                if i.steps.is_empty() {
+                    bail!("import `{}` says `extends` but states no `steps` to append", i.id);
+                }
+            } else if i.output.is_empty() && i.steps.is_empty() {
+                // A mirror of the repository's own: fetched and kept, made into
+                // no module.
+                if i.mirror_steps.is_empty() {
+                    bail!(
+                        "import `{}` states neither a module (`output` and `steps`) nor a \
+                         mirror (`mirror_steps`)",
+                        i.id
+                    );
+                }
+                if i.source.is_empty() {
+                    bail!("import `{}` is a mirror and states no `source`", i.id);
+                }
+            } else {
+                for (name, value) in [("source", &i.source), ("output", &i.output)] {
+                    if value.is_empty() {
+                        bail!(
+                            "import `{}` states no `{name}`: an entry that is the whole \
+                             pipeline states both, one that only appends steps says \
+                             `extends`, and a mirror made into no module states `source` \
+                             and `mirror_steps` alone",
+                            i.id
+                        );
+                    }
+                }
+            }
+        }
+        self.check_emulation_versions()
+    }
+
     /// A plan states which ODK release it emulates, or which tool version, or
     /// both AGREEING. Both disagreeing is refused.
     ///
@@ -2445,6 +2887,199 @@ impl OwlmakeSpec {
             );
         }
         Ok(())
+    }
+
+    /// State in this file what `mine` builds that `base` does not — `base` being
+    /// the plan this file's options and `use_builtin_rules` resolve to with nothing
+    /// else stated, and `mine` the build the repository actually has.
+    ///
+    /// This is the half of the file the graph is built from: its targets, with
+    /// `artefact` where `mine` releases what `base` does not, `extends` where only
+    /// prerequisites were added, and `when` for the switches each exists under;
+    /// its imports and pattern products; its phony names, intermediates, switch
+    /// values and variables; and, for a build of the repository's own, its
+    /// identity. What the graph derives from these is stated afterwards, by
+    /// [`state_rest`](Self::state_rest).
+    pub fn state_build(&mut self, mine: &Plan, base: &Plan) {
+        use std::collections::HashMap;
+        let json = |v: &dyn erased::Json| v.json();
+        let same = |a: &ArtefactSpec, b: &ArtefactSpec| json(a) == json(b);
+        let base_targets: HashMap<&str, ArtefactSpec> = base
+            .prerequisites
+            .iter()
+            .chain(base.artefacts.iter())
+            .map(|t| (t.target.as_str(), ArtefactSpec::from_plan(t)))
+            .collect();
+        let base_artefacts: std::collections::HashSet<&str> =
+            base.artefacts.iter().map(|a| a.target.as_str()).collect();
+        let switches = |target: &str| -> Vec<String> {
+            mine.refresh_groups
+                .iter()
+                .filter(|g| !g.flag.is_empty() && g.targets.iter().any(|t| t == target))
+                .map(|g| g.name.clone())
+                .collect()
+        };
+        let targets = mine
+            .prerequisites
+            .iter()
+            .map(|t| (t, false))
+            .chain(mine.artefacts.iter().map(|t| (t, true)));
+        for (t, released) in targets {
+            let mut own = ArtefactSpec::from_plan(t);
+            // Said only where the base does not already release it.
+            let artefact = released && !base_artefacts.contains(t.target.as_str());
+            match base_targets.get(t.target.as_str()) {
+                Some(theirs) if same(&own, theirs) => {
+                    if !artefact {
+                        continue;
+                    }
+                    // The standard target as it stands, released.
+                    own = ArtefactSpec { extends: true, ..ArtefactSpec::named(&t.target) };
+                }
+                // The standard target with prerequisites added: record the additions.
+                Some(theirs) => {
+                    let mut grown = theirs.clone();
+                    grown.needs = own.needs.clone();
+                    grown.order_only = own.order_only.clone();
+                    grown.input = own.input.clone();
+                    let added = |all: &[String], had: &[String]| -> Vec<String> {
+                        all.iter().filter(|n| !had.contains(n)).cloned().collect()
+                    };
+                    if same(&own, &grown) && theirs.needs.iter().all(|n| own.needs.contains(n)) {
+                        own = ArtefactSpec {
+                            extends: true,
+                            needs: added(&own.needs, &theirs.needs),
+                            order_only: added(&own.order_only, &theirs.order_only),
+                            ..ArtefactSpec::named(&t.target)
+                        };
+                    }
+                }
+                None => {}
+            }
+            own.artefact = artefact;
+            own.when = switches(&t.target);
+            self.targets.push(own);
+        }
+        self.phony = mine.phony.iter().filter(|p| !base.phony.contains(p)).cloned().collect();
+        // What its own rules decide beyond their targets: the switches they test,
+        // with the values the repository gives them, and the targets they reach
+        // only as intermediates.
+        self.gating_flags = mine
+            .gating_flags
+            .iter()
+            .filter(|(k, v)| base.gating_flags.get(*k) != Some(*v))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        self.transient_targets = mine
+            .transient_targets
+            .iter()
+            .filter(|t| !base.transient_targets.contains(t))
+            .cloned()
+            .collect();
+        self.variables = mine
+            .variables
+            .iter()
+            .filter(|(k, v)| base.variables.get(*k) != Some(*v))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        // The natively built products are not targets, so what the repository does
+        // its own way with one shows up in the import, or in the pattern spec.
+        for import in &mine.imports {
+            let own = ImportSpec::from_plan(import);
+            let standard =
+                base.imports.iter().find(|i| i.id == import.id).map(ImportSpec::from_plan);
+            if standard.map(|s| json(&s)) != Some(json(&own)) {
+                self.imports.push(own);
+            }
+        }
+        if mine.dosdp.as_ref().map(|d| json(d)) != base.dosdp.as_ref().map(|d| json(d)) {
+            self.dosdp = mine.dosdp.clone();
+        }
+        if mine.reasoner != base.reasoner {
+            self.reasoner = mine.reasoner.clone();
+        }
+        if mine.edit_file != base.edit_file {
+            self.edit_file = mine.edit_file.clone();
+        }
+        if mine.catalog_file != base.catalog_file {
+            self.catalog_file = mine.catalog_file.clone();
+        }
+        if !self.use_builtin_rules {
+            // Nothing derives these; the file is the whole build.
+            self.version = mine.version.clone();
+            self.ontology_iri = mine.ontology_iri.clone();
+            self.use_base_merging = mine.use_base_merging;
+            self.exclude_iri_patterns = mine.exclude_iri_patterns.clone();
+            self.slme_individuals = mine.slme_individuals.clone();
+            self.merged_import = mine.merged_import.clone();
+            self.merged_import_iri = mine.merged_import_iri.clone();
+            self.merged_import_shards = mine.merged_import_shards.clone();
+            self.merged_import_shard_bytes = mine.merged_import_shard_bytes;
+        }
+    }
+
+    /// State in this file what `mine` says that `derived` — the plan this file
+    /// resolves to as it stands — does not: what a bare build makes, the switches
+    /// the plan exposes, the natively built paths, the component gaps, and the
+    /// settings no rule decides. Each is written only where the derivation falls
+    /// short, so the file carries what the repository decided and nothing that
+    /// follows from it.
+    pub fn state_rest(&mut self, mine: &Plan, derived: &Plan) {
+        if mine.default_targets != derived.default_targets {
+            self.default_targets = Some(mine.default_targets.clone());
+        }
+        let groups = |plan: &Plan| -> Vec<(String, String, Vec<String>, crate::plan::Freshness)> {
+            plan.refresh_groups
+                .iter()
+                .map(|g| {
+                    let mut targets = g.targets.clone();
+                    targets.sort();
+                    (g.name.clone(), g.flag.clone(), targets, g.default)
+                })
+                .collect()
+        };
+        if groups(mine) != groups(derived) {
+            self.refresh_groups = Some(mine.refresh_groups.clone());
+        }
+        self.native_targets = mine
+            .native_targets
+            .iter()
+            .filter(|t| !derived.native_targets.contains(t))
+            .cloned()
+            .collect();
+        self.component_gaps = mine
+            .component_gaps
+            .iter()
+            .filter(|g| !derived.component_gaps.contains(g))
+            .cloned()
+            .collect();
+        if mine.version != derived.version {
+            self.version = mine.version.clone();
+        }
+        if mine.version_file != derived.version_file {
+            self.version_file = mine.version_file.clone();
+        }
+        if mine.ontology_iri != derived.ontology_iri {
+            self.ontology_iri = mine.ontology_iri.clone();
+        }
+        self.strict = mine.strict && !derived.strict;
+        self.xml_entities = mine.xml_entities && !derived.xml_entities;
+        self.emulate_odk_version = mine.emulate_odk_version.map(format_version);
+        self.emulate_robot_version = (mine.emulate_robot_version
+            != implied_robot_version(mine.emulate_odk_version))
+        .then(|| format_version(mine.emulate_robot_version));
+    }
+}
+
+/// Comparing two recorded things by what they would write.
+mod erased {
+    pub trait Json {
+        fn json(&self) -> Option<serde_json::Value>;
+    }
+    impl<T: serde::Serialize> Json for T {
+        fn json(&self) -> Option<serde_json::Value> {
+            serde_json::to_value(self).ok()
+        }
     }
 }
 
@@ -2493,16 +3128,16 @@ pub fn to_value(spec: &OwlmakeSpec, path: &Path) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(spec)?;
     let (file_dir, exec) = exec_dir(path);
     if file_dir != exec {
-        relocate(&mut value, &exec, &file_dir, Rebase::Field);
+        relocate_document(&mut value, &exec, &file_dir);
     }
     Ok(value)
 }
 
 /// Serialize a spec to `path`, in the format its extension names.
 pub fn save(spec: &OwlmakeSpec, path: &Path) -> Result<()> {
-    // Paths are held relative to the build's working directory; write them
-    // relative to the file, so what the plan says is what a reader sitting next
-    // to it can resolve. `load` translates them straight back.
+    // Declared paths are held relative to the build's working directory; write
+    // them relative to the file, so a reader sitting next to it can resolve them.
+    // `load` translates them straight back. Free text is written as it runs.
     let value = to_value(spec, path)?;
     let mut text = match PlanFormat::of_path(path) {
         PlanFormat::Json => serde_json::to_string_pretty(&value)?,
@@ -2519,36 +3154,112 @@ pub fn save(spec: &OwlmakeSpec, path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// A rule naming both `X` and `X.tmp.obo` must rebase each exactly once.
-    /// MONDO's `mondo.obo` recipe is the case: a sequence of `String::replace`
-    /// calls would rewrite `mondo.obo` inside the replacement it had just produced
-    /// for `mondo.obo.tmp.obo`, doubling the prefix.
+    /// `may_fail` is a field of the step, beside its `op` — not a wrapper around
+    /// it — and it survives a round trip through the plan file.
+    #[test]
+    fn may_fail_is_written_beside_the_op_it_applies_to() {
+        let step = Step::MayFail(Box::new(Step::Op(crate::plan::step::Op::Query {
+            updates: vec![],
+            selects: vec![("q.sparql".into(), "out.tsv".into())],
+            constructs: vec![],
+            format: None,
+            use_graphs: false,
+            tdb: false,
+        })));
+
+        let yaml = serde_yaml::to_string(&StepEntry::from_step(&step)).unwrap();
+        assert!(yaml.contains("op: query"), "the operation is still named: {yaml}");
+        assert!(yaml.contains("may_fail: true"), "the tolerance is a field: {yaml}");
+
+        let back: StepEntry = serde_yaml::from_str(&yaml).unwrap();
+        assert!(
+            matches!(back.into_step(), Step::MayFail(inner)
+                if matches!(*inner, Step::Op(crate::plan::step::Op::Query { .. }))),
+            "a plan that says may_fail reads back as a step that may fail"
+        );
+    }
+
+    /// An import entry either states its whole pipeline (and with it its source
+    /// and output) or says `extends` and appends steps to the standard one —
+    /// `check` refuses the shapes in between, where the plan would silently
+    /// build less than the file says.
+    #[test]
+    fn an_import_entry_is_whole_or_extends() {
+        let yaml = |imports: &str| -> OwlmakeSpec {
+            serde_yaml::from_str(&format!("id: tiny
+imports:
+{imports}")).unwrap()
+        };
+        let extends_no_steps = yaml("- id: ncit
+  extends: true
+");
+        let err = extends_no_steps.check().unwrap_err().to_string();
+        assert!(err.contains("no `steps` to append"), "{err}");
+
+        let whole_without_source = yaml("- id: ncit
+  output: imports/ncit_import.owl
+");
+        let err = whole_without_source.check().unwrap_err().to_string();
+        assert!(err.contains("states no `source`"), "{err}");
+
+        let extends: OwlmakeSpec = yaml(
+            "- id: ncit
+  extends: true
+  steps:
+  - op: remove-terms
+    terms:
+    - oboInOwl:SubsetProperty
+    selects:
+    - children
+",
+        );
+        extends.check().expect("an extending entry with steps is well-formed");
+
+        let mut own_build = yaml("- id: ncit
+  extends: true
+  steps:
+  - op: relax
+");
+        own_build.use_builtin_rules = false;
+        own_build.version = "2026-01-01".into();
+        own_build.ontology_iri = "http://example.com/tiny.owl".into();
+        own_build.reasoner = "elk".into();
+        let err = own_build.check().unwrap_err().to_string();
+        assert!(err.contains("no standard"), "{err}");
+    }
+
+    /// An ordinary step writes no `may_fail` at all — the flag is the exception,
+    /// so every other step in a plan is unchanged by its existence.
+    #[test]
+    fn an_ordinary_step_writes_no_may_fail() {
+        let step = Step::Op(crate::plan::step::Op::Relax { include_subclass_of: false });
+        let yaml = serde_yaml::to_string(&StepEntry::from_step(&step)).unwrap();
+        assert!(!yaml.contains("may_fail"), "unexpected flag: {yaml}");
+    }
+
+    /// A value naming both `X` and `X.tmp.obo` must rebase each exactly once: a
+    /// sequence of `String::replace` calls would rewrite `mondo.obo` inside the
+    /// replacement it had just produced for `mondo.obo.tmp.obo`, doubling the
+    /// prefix.
     #[test]
     fn rebases_a_token_that_is_a_prefix_of_another_once() {
-        let base = std::env::temp_dir()
-            .join(format!("owlmake-rebase-{}", std::process::id()));
+        let base = Path::new("/repo");
         let onto = base.join("src/ontology");
-        std::fs::create_dir_all(onto.join("reports")).unwrap();
 
         // save: paths held relative to src/ontology, written relative to the root.
-        let cmd = "grep -v ^owl-axioms mondo.obo.tmp.obo > mondo.obo";
-        let saved = rebase_in_string(cmd, &onto, &base, Rebase::FreeText);
-        assert_eq!(
-            saved,
-            "grep -v ^owl-axioms src/ontology/mondo.obo.tmp.obo > src/ontology/mondo.obo"
-        );
+        let value = "mondo.obo.tmp.obo mondo.obo";
+        let saved = rebase_in_string(value, &onto, base);
+        assert_eq!(saved, "src/ontology/mondo.obo.tmp.obo src/ontology/mondo.obo");
 
         // load: and straight back, so the round trip is the identity.
-        assert_eq!(rebase_in_string(&saved, &base, &onto, Rebase::FreeText), cmd);
+        assert_eq!(rebase_in_string(&saved, base, &onto), value);
 
-        // A quoted `sed` script is one word, not three path-shaped fragments.
+        // A quoted region is one word, not three path-shaped fragments.
         let sed = "sed -i 's/  */ /g' reports/mondo_release_diff.md";
         assert_eq!(
-            rebase_in_string(sed, &onto, &base, Rebase::FreeText),
+            rebase_in_string(sed, &onto, base),
             "sed -i 's/  */ /g' src/ontology/reports/mondo_release_diff.md"
         );
-
-        std::fs::remove_dir_all(&base).ok();
     }
 
     /// **The plan file is the contract, so every path in it is relative to the
@@ -2591,7 +3302,9 @@ mod tests {
             })],
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
+            intermediate: false,
             branches: vec![],
         };
         let release = ArtefactPlan {
@@ -2603,15 +3316,19 @@ mod tests {
                 src: vec!["build/tiny.owl".into()],
                 dst: "../..".into(),
                 recursive: false,
+                relative: false,
             })],
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
+            intermediate: false,
             branches: vec![],
         };
         let plan = Plan {
             id: "tiny".into(),
             version: "1".into(),
+            version_file: None,
             ontology_iri: "http://example.org/tiny.owl".into(),
             reasoner: "ELK".into(),
             use_base_merging: false,
@@ -2619,7 +3336,9 @@ mod tests {
             slme_individuals: None,
             imports: vec![],
             merged_import: None,
-            components: vec!["components/c.owl".into()],
+            merged_import_iri: None,
+            merged_import_shards: None,
+            merged_import_shard_bytes: None,
             variables: [("ROBOT".to_string(), "../../bin/robot".to_string())]
                 .into_iter()
                 .collect(),
@@ -2670,7 +3389,6 @@ mod tests {
         }
         assert_eq!(back.edit_file, plan.edit_file);
         assert_eq!(back.catalog_file, plan.catalog_file);
-        assert_eq!(back.components, plan.components);
         assert_eq!(back.default_targets, plan.default_targets);
         assert_eq!(back.phony, plan.phony);
         assert_eq!(back.variables, plan.variables, "a Makefile variable's path did not survive");
@@ -2695,6 +3413,69 @@ mod tests {
             std::fs::read_to_string(&second).unwrap(),
             "the plan's bytes changed because a directory appeared"
         );
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// A command, a message and a tool's argument vector are written as they run,
+    /// in the build's working directory, and come back byte for byte.
+    ///
+    /// Only a declared path can be rebased exactly. A path inside free text can
+    /// only be guessed at, and the reverse guess does not undo it: UBERON's
+    /// normalisation recipe names `../../src/ontology/imports/caro_import.owl`,
+    /// which climbs out of the ontology directory and back in, and
+    /// `src/ontology/imports/fbbt_import.owl`, which from the ontology directory
+    /// names a file that is not there. Rebased to the plan file and back, both
+    /// read `imports/…`: the first spelled differently, the second naming another
+    /// file. Nor may what is written depend on what is on disk: EFO's qc steps name
+    /// `build/efo.owl`, and `build/` exists only once the ontology has built.
+    #[test]
+    fn free_text_is_written_as_it_runs() {
+        let base =
+            std::env::temp_dir().join(format!("owlmake-freetext-{}", std::process::id()));
+        let onto = base.join("src/ontology");
+        let _ = std::fs::remove_dir_all(&base);
+        // The directories the commands climb into exist, as they do in the
+        // repository; `build/` does not.
+        std::fs::create_dir_all(onto.join("imports")).unwrap();
+        std::fs::create_dir_all(base.join("src/scripts")).unwrap();
+
+        let norm = "sh ../scripts/norm_rdfxml.sh ../../src/ontology/imports/caro_import.owl \
+                    src/ontology/imports/fbbt_import.owl";
+        let release = "sh ../scripts/norm_rdfxml.sh ../../tiny-base.owl";
+        let qc = "python3 ../scripts/check.py build/efo.owl";
+        let message = "normalised imports/caro_import.owl";
+        let spec: OwlmakeSpec = serde_json::from_value(serde_json::json!({
+            "min_owlmake_version": PLAN_FORMAT_MIN_VERSION,
+            "emulate_odk_version": crate::odk::builtin::BEHAVIOUR_SET,
+            "id": "tiny",
+            "phony": ["normalise"],
+            "targets": [{
+                "target": "normalise",
+                "steps": [
+                    { "op": "shell", "command": norm, "requires": ["sh"] },
+                    { "op": "shell", "command": release, "requires": ["sh"] },
+                    { "op": "shell", "command": qc, "requires": ["python3"] },
+                    { "op": "owlmake-cli", "command": "diff",
+                      "args": ["--left", "build/efo.owl", "--right", "../../efo.owl"] },
+                    { "op": "print", "message": message },
+                ],
+            }],
+        }))
+        .unwrap();
+
+        let path = base.join("owlmake.yaml");
+        save(&spec, &path).unwrap();
+        let back = load(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(&back.targets).unwrap(),
+            serde_json::to_value(&spec.targets).unwrap(),
+            "free text did not come back byte for byte"
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        for want in [norm, release, qc, "- build/efo.owl", "- ../../efo.owl", message] {
+            assert!(text.contains(want), "`{want}` is not written as it runs:\n{text}");
+        }
 
         std::fs::remove_dir_all(&base).ok();
     }
@@ -2733,7 +3514,89 @@ mod format_floor_tests {
         // A plan written before the step existed still loads and still describes
         // the build it described — the step is simply absent — so
         // PLAN_FORMAT_MIN_VERSION stays put here too.
-        const PLAN_SCHEMA_DIGEST: &str = "49c83905a95a7f85";
+        //
+        // `boundary` replaces `merge`'s `restart` flag. Where the pipeline starts
+        // over is a fact about the invocation, not about one of the operations
+        // inside it, so it is its own step and carries the invocation's `input`.
+        // A plan carrying the old flag would lose the boundary rather than
+        // mis-execute it, and there is nothing to migrate, so the floor stays put.
+        // `version_file` arrived as an OPTIONAL field with a default, so a plan
+        // written before it loads unchanged and one written with it is ignored by
+        // a build that does not know it — only the frozen version comes back.
+        // That is a format an older owlmake can still execute, so the floor stays.
+        //
+        // `merged_import_shards` and `merged_import_shard_bytes` are optional with
+        // no default behaviour change: a plan without them is the single-file
+        // merged import every owlmake wrote. A plan WITH them is executable only
+        // by a build that shards and reads `rewriteURI` catalogs, and an older one
+        // stops with an unresolved import rather than mis-executing — a repo that
+        // opts in pins `min_owlmake_version` itself (EFO: 0.2.11). The floor stays.
+        //
+        // `may_fail` arrives as an optional field on every step, flattened beside
+        // the `op` it applies to — the first setting that belongs to a step rather
+        // than to an operation, which is why it is a field of `StepEntry` and not
+        // of each op in turn. `owlmake-cli` and `unsupported-subcommand` are what
+        // the two subcommand steps are called: a step naming the tool it runs —
+        // `jq`, `sssom` — says which tool, and these two run owlmake's own CLI.
+        //
+        // The floor moves to 0.2.0 for both. A 0.1.0 build reading a 0.2.0 plan
+        // does not fail on `may_fail`, it IGNORES it, and runs a step the plan
+        // says may fail as one that may not — a silent change of what the build
+        // does, which is the case the floor exists to refuse.
+        //
+        // `intermediate` (an artefact only pattern-rule chains name), the copy
+        // step's `relative` (rsync -R) and `side_effect_only` (a recipe that
+        // never writes its own target) all default off, and an older build
+        // ignoring them over-builds rather than mis-builds, so the floor stays.
+        //
+        // A file that states no `version` or `ontology_iri` now asks for the standard build: its
+        // top-level keys are the repository's options, `targets` holds what it
+        // builds its own way (with `extends` and `when`), and the rest is
+        // owlmake's built-in rules. A whole plan no longer carries `components`,
+        // which nothing but the display read — the build merges `OTHER_SRC`.
+        //
+        // The floor moves to 0.3.0. An older build reads a standard file as a plan
+        // with no artefacts and builds nothing, reporting success; that is the
+        // silent case the floor exists to refuse.
+        //
+        // The options a repository states by the tool ODK runs them with are
+        // now named for what they set (`report`, `relax_options`,
+        // `reduce_options`, `dosdp_options`), and the ones that configure a tool
+        // owlmake does not run are refused. Only the schema's description
+        // changed with the option names; an older build refuses a file that
+        // names `report` as an unknown key, loudly, so the floor stays.
+        //
+        // A reason step carries `axiom_generators` and `properties`: which
+        // inference types it asserts, and which object properties its
+        // property assertions are restricted to. A step's fields are not
+        // refused when unknown, so a 0.3.1 build reading a plan that asks for
+        // property assertions would reason without them and release an
+        // ontology missing what the plan says it holds. That is the silent
+        // case, so the floor moves to 0.3.2.
+        //
+        // One shape of file. `use_builtin_rules` says whether the standard build
+        // underlies it; `artefacts` and `prerequisites` are one `targets` list
+        // whose entries may say `artefact`; `default_targets` and
+        // `refresh_groups` are stated or derived, so they are optional; and the
+        // two emulation versions are plain options with defaults. A 0.3.2
+        // build reading a file of this shape refuses it — `use_builtin_rules` and
+        // `artefact` are unknown to it, loudly — and this build refuses the
+        // old `artefacts` key the same way, so nothing is silently built
+        // differently and the floor stays.
+        // An import entry gains `extends` — append the entry's steps to the
+        // standard pipeline — and with it `source` and `output` become optional,
+        // since an extending entry derives both. An older build reading a plan
+        // that uses either refuses it loudly (`ImportSpec` denies unknown fields,
+        // and an old full entry still states source and output), so nothing is
+        // silently built differently and the floor stays.
+        //
+        // A target's `when` and a branch's `group` name the rebuild group
+        // (`mirrors`, `bridges`) where they named its switch (`MIR`, `BRI`), and
+        // an import may be a mirror alone — `source` and `mirror_steps` with no
+        // module. A 0.4.3 build reading `when: [mirrors]` would make a group of
+        // that name beside the real one, so its `MIR=false` would not pin the
+        // target: that is the silent case, so the floor moves to 0.4.4.
+        const PLAN_SCHEMA_DIGEST: &str = "7395bc366905aafa";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -2764,6 +3627,7 @@ mod round_trip_tests {
         let plan = Plan {
             id: "tiny".into(),
             version: "2026-08-07".into(),
+            version_file: None,
             ontology_iri: "http://example.org/tiny.owl".into(),
             reasoner: "ELK".into(),
             use_base_merging: true,
@@ -2771,12 +3635,28 @@ mod round_trip_tests {
             slme_individuals: Some("minimal".into()),
             imports: vec![],
             merged_import: Some("imports/merged_import.owl".into()),
-            components: vec!["components/c.owl".into()],
+            merged_import_iri: None,
+            merged_import_shards: None,
+            merged_import_shard_bytes: None,
             variables: [("OTHER_SRC".to_string(), "components/c.owl".to_string())]
                 .into_iter()
                 .collect(),
             component_gaps: vec![],
-            prerequisites: vec![],
+            prerequisites: vec![ArtefactPlan {
+                target: "tmp/seed.txt".into(),
+                input: None,
+                needs: vec![],
+                order_only: vec![],
+                steps: vec![Step::File(crate::build::recipe::FileOp::Touch {
+                    paths: vec!["tmp/seed.txt".into()],
+                })],
+                gaps: vec![],
+                missing_rule: false,
+                side_effect_only: false,
+                stdout_file: None,
+                intermediate: false,
+                branches: vec![],
+            }],
             artefacts: vec![ArtefactPlan {
                 target: "tiny.owl".into(),
                 input: Some("tiny-edit.ofn".into()),
@@ -2788,7 +3668,9 @@ mod round_trip_tests {
                 })],
                 gaps: vec![],
                 missing_rule: false,
+                side_effect_only: false,
                 stdout_file: None,
+                intermediate: false,
                 branches: vec![crate::plan::Branch {
                     flag: "BRI".into(),
                     value: "false".into(),
@@ -2824,6 +3706,12 @@ mod round_trip_tests {
         // Every field the executor reads must survive. Listed one by one rather
         // than compared wholesale so a NEW field forces a decision here.
         assert_eq!(back.id, plan.id);
+        // A target's place in the release survives: the one list of targets says
+        // which are artefacts, and the split comes back as it went.
+        assert_eq!(back.artefacts.len(), 1, "the artefact was not read back as one");
+        assert_eq!(back.artefacts[0].target, "tiny.owl");
+        assert_eq!(back.prerequisites.len(), 1, "the prerequisite was not read back as one");
+        assert_eq!(back.prerequisites[0].target, "tmp/seed.txt");
         assert_eq!(back.version, plan.version);
         assert_eq!(back.ontology_iri, plan.ontology_iri);
         assert_eq!(back.reasoner, plan.reasoner);
@@ -2831,7 +3719,6 @@ mod round_trip_tests {
         assert_eq!(back.exclude_iri_patterns, plan.exclude_iri_patterns);
         assert_eq!(back.slme_individuals, plan.slme_individuals);
         assert_eq!(back.merged_import, plan.merged_import);
-        assert_eq!(back.components, plan.components);
         assert_eq!(back.variables, plan.variables);
         assert_eq!(back.default_targets, plan.default_targets, "default_targets was dropped");
         assert_eq!(back.phony, plan.phony, "phony was dropped");
@@ -2867,6 +3754,7 @@ mod round_trip_tests {
         let spec = OwlmakeSpec::from_plan(&Plan {
             id: "x".into(),
             version: "1".into(),
+            version_file: None,
             ontology_iri: "http://example.org/x.owl".into(),
             reasoner: "ELK".into(),
             use_base_merging: false,
@@ -2874,7 +3762,9 @@ mod round_trip_tests {
             slme_individuals: None,
             imports: vec![],
             merged_import: None,
-            components: vec![],
+            merged_import_iri: None,
+            merged_import_shards: None,
+            merged_import_shard_bytes: None,
             variables: Default::default(),
             component_gaps: vec![],
             prerequisites: vec![],

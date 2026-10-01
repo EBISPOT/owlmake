@@ -84,6 +84,17 @@ pub struct MakeModel {
     ///
     /// [`VERSION_TODAY`]: crate::plan::VERSION_TODAY
     pub version_default: String,
+    /// The file a backtick substitution reads the release version out of,
+    /// relative to [`base_dir`](Self::base_dir). EFO stamps
+    /// `` v`cat version.txt` `` into every release version IRI.
+    ///
+    /// Recorded during expansion, because that is the only place the command is
+    /// seen, and behind a `RefCell` because expansion runs behind `&self`. It
+    /// reaches the plan as [`Plan::version_file`], so a run reads the version the
+    /// file holds NOW rather than the one it held when the plan was written.
+    ///
+    /// [`Plan::version_file`]: crate::plan::Plan::version_file
+    pub version_file: std::cell::RefCell<Option<String>>,
     /// Explicit rules keyed by (already-expanded) target name; last wins.
     pub rules: HashMap<String, Rule>,
     /// Pattern rules in declaration order; last matching wins.
@@ -221,11 +232,14 @@ impl MakeModel {
         }
     }
 
-    fn parse_impl(
-        path: &Path,
+    /// A model holding no rules yet, with the run's switches and assignments bound
+    /// as they must be before any rule is added: a switch the run does not set is
+    /// on, and what the run does set outranks every later assignment.
+    pub fn with_flags(
+        dir: &Path,
         overrides: &[(String, String)],
         flags: &[(&str, &str)],
-    ) -> Result<MakeModel> {
+    ) -> MakeModel {
         let mut m = MakeModel::default();
         for f in Self::WORKFLOW_FLAGS {
             match flags.iter().find(|(k, _)| *k == f) {
@@ -265,7 +279,7 @@ impl MakeModel {
         // process happens to have been launched from — and a repo planned from
         // its root would lose every DOSDP pattern named
         // `$(wildcard ../patterns/data/default/*.tsv)`.
-        m.base_dir = path.parent().map(|d| d.to_path_buf());
+        m.base_dir = Some(dir.to_path_buf());
         for (k, v) in overrides {
             // A run input on the command line does NOT reach the parse: a
             // workflow flag would change which rules exist, and the release
@@ -278,12 +292,28 @@ impl MakeModel {
             m.vars.insert(k.clone(), v.clone());
             m.command_line_vars.insert(k.clone());
         }
+        m
+    }
+
+    fn parse_impl(
+        path: &Path,
+        overrides: &[(String, String)],
+        flags: &[(&str, &str)],
+    ) -> Result<MakeModel> {
+        let mut m = Self::with_flags(path.parent().unwrap_or(Path::new("")), overrides, flags);
         m.ingest(&std::fs::read_to_string(path)?)?;
         Ok(m)
     }
 
     pub fn overlay_file(&mut self, path: &Path) -> Result<()> {
         self.ingest(&std::fs::read_to_string(path)?)
+    }
+
+    /// Add rules and assignments a repository wrote itself and keeps somewhere
+    /// other than a file of its own — in its configuration, say. They are read as
+    /// any of its rules are.
+    pub fn overlay_text(&mut self, text: &str) -> Result<()> {
+        self.ingest(text)
     }
 
     fn ingest(&mut self, text: &str) -> Result<()> {
@@ -502,112 +532,123 @@ impl MakeModel {
                     recipe,
                     guards: rule_guards,
                 };
-                // `.PHONY: a b c` declares targets that name no file, so they are
-                // always out of date. Recorded so the plan can carry the set and
-                // execution can apply the staleness rule to the rest instead of
-                // rebuilding the whole release path on every QC run.
-                if targets.iter().any(|t| t == ".PHONY") {
-                    self.phony.extend(rule.prereqs.iter().cloned());
+                self.add_rule(rule);
+            }
+        }
+        Ok(())
+    }
+
+    /// Add one rule to the model: a `.PHONY` declaration extends the phony set, a
+    /// pattern rule joins the pattern rules, and an explicit rule is merged into
+    /// what the model already holds for each of its targets. The first explicit
+    /// target becomes the default goal.
+    ///
+    /// The one way a rule enters a model, whether it was read from a file or
+    /// built as data, so both mean the same thing.
+    pub fn add_rule(&mut self, rule: Rule) {
+        // `.PHONY: a b c` declares targets that name no file, so they are
+        // always out of date. Recorded so the plan can carry the set and
+        // execution can apply the staleness rule to the rest instead of
+        // rebuilding the whole release path on every QC run.
+        if rule.targets.iter().any(|t| t == ".PHONY") {
+            self.phony.extend(rule.prereqs.iter().cloned());
+        }
+        if rule.targets.iter().any(|t| t.contains('%')) {
+            self.pattern_rules.push(rule);
+        } else {
+            for t in &rule.targets.clone() {
+                // The default goal is the first target of the first
+                // explicit rule. A dot-target is skipped only when it
+                // ALSO contains no slash, so `.PHONY` is skipped but
+                // `../patterns/foo.owl` is not.
+                if self.default_goal.is_none()
+                    && !(t.starts_with('.') && !t.contains('/'))
+                {
+                    self.default_goal = Some(t.clone());
                 }
-                if targets.iter().any(|t| t.contains('%')) {
-                    self.pattern_rules.push(rule);
-                } else {
-                    for t in &targets {
-                        // The default goal is the first target of the first
-                        // explicit rule. A dot-target is skipped only when it
-                        // ALSO contains no slash, so `.PHONY` is skipped but
-                        // `../patterns/foo.owl` is not.
-                        if self.default_goal.is_none()
-                            && !(t.starts_with('.') && !t.contains('/'))
-                        {
-                            self.default_goal = Some(t.clone());
-                        }
-                        // MERGE, do not replace. Prerequisites accumulate across
-                        // every explicit rule for a target, and a single recipe
-                        // is kept ("last one wins", with a warning). Every ODK
-                        // Makefile ends with `include <ont>.Makefile`, and those
-                        // override files extend `test:` with repo checks — OBA's
-                        // adds one line, `test: check_children_oba`. Replacing
-                        // would let that line DELETE the whole seven-member ODK
-                        // QC pipeline from the plan, leaving `om test` to run two
-                        // repo greps and report success.
-                        match self.rules.entry(t.clone()) {
-                            std::collections::hash_map::Entry::Vacant(e) => {
-                                e.insert(rule.clone());
+                // MERGE, do not replace. Prerequisites accumulate across
+                // every explicit rule for a target, and a single recipe
+                // is kept ("last one wins", with a warning). Every ODK
+                // Makefile ends with `include <ont>.Makefile`, and those
+                // override files extend `test:` with repo checks — OBA's
+                // adds one line, `test: check_children_oba`. Replacing
+                // would let that line DELETE the whole seven-member ODK
+                // QC pipeline from the plan, leaving `om test` to run two
+                // repo greps and report success.
+                match self.rules.entry(t.clone()) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(rule.clone());
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        let old = e.get_mut();
+                        // Which END the later rule's prerequisites join
+                        // depends on whether it also carries a RECIPE.
+                        // For `t: a a2` followed by `t: b b2`:
+                        //   later rule has a recipe  → `$^ = b b2 a a2`
+                        //   later rule has none      → `$^ = a a2 b b2`
+                        // An overriding recipe relinks the target and its
+                        // own prerequisites lead; a bare prerequisite line
+                        // just accumulates in the order the file is read.
+                        //
+                        // Both halves matter here. Prepending is what makes
+                        // `$<` for HPO's `hp.owl` the edit file rather
+                        // than the earlier rule's
+                        // `hp-simple-non-classified.owl`, so the release
+                        // is built from the whole edit file and not from a
+                        // reduced subset. And appending is what keeps
+                        // `test:` in ODK order, so the profile check
+                        // builds `hp.owl` BEFORE `test_obo` writes
+                        // `hp.obo`; reversed, `hp.obo` is older than
+                        // `hp.owl`, the release rule re-makes it, and the
+                        // shipped file is the release conversion instead
+                        // of the `test_obo` product the ODK actually
+                        // publishes.
+                        let overrides = !rule.recipe.is_empty();
+                        let join = |mut lead: Vec<String>, rest: Vec<String>| {
+                            for p in rest {
+                                if !lead.contains(&p) {
+                                    lead.push(p);
+                                }
                             }
-                            std::collections::hash_map::Entry::Occupied(mut e) => {
-                                let old = e.get_mut();
-                                // Which END the later rule's prerequisites join
-                                // depends on whether it also carries a RECIPE.
-                                // For `t: a a2` followed by `t: b b2`:
-                                //   later rule has a recipe  → `$^ = b b2 a a2`
-                                //   later rule has none      → `$^ = a a2 b b2`
-                                // An overriding recipe relinks the target and its
-                                // own prerequisites lead; a bare prerequisite line
-                                // just accumulates in the order the file is read.
-                                //
-                                // Both halves matter here. Prepending is what makes
-                                // `$<` for HPO's `hp.owl` the edit file rather
-                                // than the earlier rule's
-                                // `hp-simple-non-classified.owl`, so the release
-                                // is built from the whole edit file and not from a
-                                // reduced subset. And appending is what keeps
-                                // `test:` in ODK order, so the profile check
-                                // builds `hp.owl` BEFORE `test_obo` writes
-                                // `hp.obo`; reversed, `hp.obo` is older than
-                                // `hp.owl`, the release rule re-makes it, and the
-                                // shipped file is the release conversion instead
-                                // of the `test_obo` product the ODK actually
-                                // publishes.
-                                let overrides = !rule.recipe.is_empty();
-                                let join = |mut lead: Vec<String>, rest: Vec<String>| {
-                                    for p in rest {
-                                        if !lead.contains(&p) {
-                                            lead.push(p);
-                                        }
-                                    }
-                                    lead
-                                };
-                                let (a, b) = (rule.prereqs.clone(), old.prereqs.split_off(0));
-                                old.prereqs = if overrides { join(a, b) } else { join(b, a) };
-                                let (a, b) = (rule.order_only.clone(), old.order_only.split_off(0));
-                                old.order_only = if overrides { join(a, b) } else { join(b, a) };
-                                // The guards follow the RECIPE. When a later rule
-                                // overrides the recipe from inside a guarded
-                                // block, the recipe the plan will run exists only
-                                // under that flag — UBERON's base rule for
-                                // `../mappings/biomappings.sssom.tsv` is an
-                                // unguarded `test -f $@`, and its override file
-                                // replaces it with a fetch pipeline inside
-                                // `ifeq ($(strip $(MIR)),true)`. A prerequisite-
-                                // only line changes no recipe and so no guard.
-                                if overrides {
-                                    old.guards = rule.guards.clone();
-                                }
-                                if !rule.recipe.is_empty() {
-                                    // Dot-targets (`.PHONY`, `.PRECIOUS`) are
-                                    // declarations, repeated freely throughout a
-                                    // Makefile; only a real target's recipe being
-                                    // replaced is worth reporting.
-                                    if !old.recipe.is_empty() && !t.starts_with('.') {
-                                        status!(
-                                            "make: warning: overriding recipe for target `{t}`"
-                                        );
-                                    }
-                                    old.recipe = rule.recipe.clone();
-                                }
-                                for tg in &rule.targets {
-                                    if !old.targets.contains(tg) {
-                                        old.targets.push(tg.clone());
-                                    }
-                                }
+                            lead
+                        };
+                        let (a, b) = (rule.prereqs.clone(), old.prereqs.split_off(0));
+                        old.prereqs = if overrides { join(a, b) } else { join(b, a) };
+                        let (a, b) = (rule.order_only.clone(), old.order_only.split_off(0));
+                        old.order_only = if overrides { join(a, b) } else { join(b, a) };
+                        // The guards follow the RECIPE. When a later rule
+                        // overrides the recipe from inside a guarded
+                        // block, the recipe the plan will run exists only
+                        // under that flag — UBERON's base rule for
+                        // `../mappings/biomappings.sssom.tsv` is an
+                        // unguarded `test -f $@`, and its override file
+                        // replaces it with a fetch pipeline inside
+                        // `ifeq ($(strip $(MIR)),true)`. A prerequisite-
+                        // only line changes no recipe and so no guard.
+                        if overrides {
+                            old.guards = rule.guards.clone();
+                        }
+                        if !rule.recipe.is_empty() {
+                            // Dot-targets (`.PHONY`, `.PRECIOUS`) are
+                            // declarations, repeated freely throughout a
+                            // Makefile; only a real target's recipe being
+                            // replaced is worth reporting.
+                            if !old.recipe.is_empty() && !t.starts_with('.') {
+                                status!(
+                                    "make: warning: overriding recipe for target `{t}`"
+                                );
+                            }
+                            old.recipe = rule.recipe.clone();
+                        }
+                        for tg in &rule.targets {
+                            if !old.targets.contains(tg) {
+                                old.targets.push(tg.clone());
                             }
                         }
                     }
                 }
             }
         }
-        Ok(())
     }
 
     /// Evaluate a parsed conditional operand against the current variable table.
@@ -773,6 +814,18 @@ impl MakeModel {
         }
     }
 
+    /// Whether a concrete file name is spelled out in the build configuration —
+    /// as an explicit rule's target, or among any explicit rule's prerequisites
+    /// (order-only included). A name reached only through pattern-rule
+    /// instantiation is not mentioned, which is what makes the file an
+    /// intermediate of its chain.
+    pub fn mentioned_explicitly(&self, name: &str) -> bool {
+        self.rules.contains_key(name)
+            || self.rules.values().any(|r| {
+                r.prereqs.iter().chain(r.order_only.iter()).any(|p| p == name)
+            })
+    }
+
     /// Look up the effective rule for a concrete target: explicit first, then
     /// the last matching pattern rule.
     pub fn rule_for<'a>(&'a self, target: &str) -> Option<(&'a Rule, Option<String>)> {
@@ -795,7 +848,7 @@ impl MakeModel {
     }
 
     pub fn expand_with(&self, s: &str, autos: &Autos) -> String {
-        eval_backticks(&self.expand_inner(s, autos, 0), self.base_dir.as_deref())
+        eval_backticks(&self.expand_inner(s, autos, 0), self.base_dir.as_deref(), &self.version_file)
     }
 
     fn expand_inner(&self, s: &str, autos: &Autos, depth: usize) -> String {
@@ -821,13 +874,16 @@ impl MakeModel {
                     continue;
                 } else {
                     // Automatic single-char variable.
-                    out.push_str(autos.get((c as char).to_string().as_str()).unwrap_or(""));
-                    i += 2;
+                    let name = s[i + 1..].chars().next().expect("a character follows `$`");
+                    out.push_str(autos.get(name.to_string().as_str()).unwrap_or(""));
+                    i += 1 + name.len_utf8();
                     continue;
                 }
             }
-            out.push(bytes[i] as char);
-            i += 1;
+            // Everything up to the next `$` is text, copied as it is.
+            let next = s[i + 1..].find('$').map_or(s.len(), |p| i + 1 + p);
+            out.push_str(&s[i..next]);
+            i = next;
         }
         out
     }
@@ -999,7 +1055,7 @@ impl MakeModel {
             "words" => eargs.split_whitespace().count().to_string(),
             "firstword" => eargs.split_whitespace().next().unwrap_or("").to_string(),
             "lastword" => eargs.split_whitespace().next_back().unwrap_or("").to_string(),
-            "shell" => run_shell(eargs.trim(), self.base_dir.as_deref()),
+            "shell" => run_shell(eargs.trim(), self.base_dir.as_deref(), &self.version_file),
             _ => String::new(),
         }
     }
@@ -1244,17 +1300,11 @@ fn parse_assignment(line: &str) -> Option<(&str, &str, &str)> {
     }
     // Find the assignment operator before any ':' that would make it a rule.
     // Operators: ::=, :=, ?=, +=, =
-    let bytes = trimmed.as_bytes();
-    let mut i = 0;
     // variable name
-    while i < bytes.len() {
-        let c = bytes[i] as char;
-        if c.is_alphanumeric() || c == '_' || c == '.' || c == '-' {
-            i += 1;
-        } else {
-            break;
-        }
-    }
+    let i = trimmed
+        .char_indices()
+        .find(|&(_, c)| !(c.is_alphanumeric() || c == '_' || c == '.' || c == '-'))
+        .map_or(trimmed.len(), |(i, _)| i);
     if i == 0 {
         return None;
     }
@@ -1407,7 +1457,11 @@ fn glob_simple(pat: &str, base_dir: Option<&Path>) -> Vec<String> {
 /// literal backtick. Evaluating here keeps the in-memory and shell-replay paths
 /// consistent (idempotent for the shell-replay path, which would just re-run an
 /// already-substituted line).
-fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
+fn eval_backticks(
+    s: &str,
+    base_dir: Option<&Path>,
+    version_file: &std::cell::RefCell<Option<String>>,
+) -> String {
     if !s.contains('`') {
         return s.to_string();
     }
@@ -1418,7 +1472,7 @@ fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
         let after = &rest[open + 1..];
         match after.find('`') {
             Some(close) => {
-                out.push_str(&run_shell(&after[..close], base_dir));
+                out.push_str(&run_shell(&after[..close], base_dir, version_file));
                 rest = &after[close + 1..];
             }
             None => {
@@ -1433,17 +1487,33 @@ fn eval_backticks(s: &str, base_dir: Option<&Path>) -> String {
     out
 }
 
-fn run_shell(cmd: &str, base_dir: Option<&Path>) -> String {
+fn run_shell(
+    cmd: &str,
+    base_dir: Option<&Path>,
+    version_file: &std::cell::RefCell<Option<String>>,
+) -> String {
     // A command that reads the calendar date is a run input, not a value to
-    // freeze: it resolves to [`VERSION_TODAY`], which the run binds to the date
-    // it builds on. uPheno's `../patterns/pattern-merged.owl` stamps
+    // freeze: it resolves to [`VERSION_CLOCK`], which the run binds to the day
+    // it builds on — the shell's answer, which a `TODAY=` assignment does not
+    // reach. uPheno's `../patterns/pattern-merged.owl` stamps
     // `annotate -V $(ONTBASE)/releases/`date +%Y-%m-%d`/…`, and running the
     // command here wrote the planning day's date into the plan, so every later
     // build published that same version IRI.
     //
-    // [`VERSION_TODAY`]: crate::plan::VERSION_TODAY
+    // [`VERSION_CLOCK`]: crate::plan::VERSION_CLOCK
     if is_today_command(cmd) {
-        return crate::plan::VERSION_TODAY.to_string();
+        return crate::plan::VERSION_CLOCK.to_string();
+    }
+    // A command that reads the release version out of a file is a run input for
+    // the same reason: the file is repo content a curator edits for each release,
+    // so its CONTENTS are data the run reads, not a value to freeze. EFO stamps
+    // `` v`cat version.txt` `` into four version IRIs and two `owl:versionInfo`
+    // annotations; running the command here wrote 3.92.0 into all six, and the
+    // file was named by nothing, so bumping it to 3.93.0 neither changed the
+    // artefacts nor made them out of date.
+    if let Some(file) = version_file_command(cmd) {
+        *version_file.borrow_mut() = Some(file.to_string());
+        return crate::plan::VERSION_REF.to_string();
     }
     // A `$(shell …)` expansion may itself call `jq`/`sssom`; substitute the
     // bundled tools named directly in it by explicit binary path, and put the
@@ -1473,6 +1543,21 @@ fn run_shell(cmd: &str, base_dir: Option<&Path>) -> String {
 /// Only the bare day: a command that also prints the time — ODK's
 /// `date +'%d:%m:%Y %H:%M'` — is not a release version, and a plan that
 /// referred to it would resolve to a different string on every run.
+/// The file `cmd` reads the release version out of, if reading that file is all
+/// it does — `cat version.txt`, and the `tr`/`echo` dressings that mean the same.
+///
+/// Only a bare read qualifies. A substitution that computes something from a file
+/// is not a reference to the file's contents, and freezing its result is right.
+fn version_file_command(cmd: &str) -> Option<&str> {
+    let mut words = cmd.split_whitespace();
+    if words.next() != Some("cat") {
+        return None;
+    }
+    let path = words.next()?;
+    // `cat a b` concatenates two files; that is not a version reference.
+    words.next().is_none().then_some(path.trim_matches(['\'', '"']))
+}
+
 fn is_today_command(cmd: &str) -> bool {
     let mut words = cmd.split_whitespace();
     if words.next() != Some("date") {
@@ -1485,6 +1570,24 @@ fn is_today_command(cmd: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Text that is not ASCII reads and expands as itself: a message's dash, a
+    /// file named in another language, and a `$` before a character of several
+    /// bytes, which names a variable as any single character does.
+    #[test]
+    fn text_that_is_not_ascii_reads_and_expands_as_itself() {
+        let mut m = MakeModel::default();
+        m.ingest(concat!(
+            "MSG = changes — please normalise\n",
+            "café.owl: thé.owl\n",
+            "\techo \"$(MSG)\" à\n",
+        ))
+        .unwrap();
+        let r = m.rules.get("café.owl").expect("a rule for a file whose name is not ASCII");
+        assert_eq!(r.prereqs, vec!["thé.owl"]);
+        assert_eq!(m.expand(&r.recipe[0]), "echo \"changes — please normalise\" à");
+        assert_eq!(m.expand("prix: 5$€"), "prix: 5");
+    }
 
     #[test]
     fn a_guarded_recipe_does_not_swallow_the_next_conditional() {
@@ -1622,25 +1725,115 @@ mod tests {
         );
     }
 
-    /// Backtick command substitution (e.g. EFO's `` v`cat version.txt` `` version
-    /// IRI) must resolve relative files against the Makefile's directory, not the
-    /// process cwd `om` was launched from. Without `base_dir` the `cat` finds no
-    /// file and the IRI collapses to `.../releases/v/efo.owl`.
+    /// A backtick substitution that is EVALUATED must resolve its relative files
+    /// against the Makefile's directory, not the process cwd `om` was launched
+    /// from. Without `base_dir` the `cat` finds no file and the substitution
+    /// collapses to the empty string.
+    ///
+    /// Two files, so this stays an evaluated substitution: a bare one-file read
+    /// is a version reference and resolves without running anything
+    /// (`a_version_read_from_a_file_is_a_reference_not_a_value`).
     #[test]
     fn backticks_resolve_relative_to_base_dir() {
         let dir = std::env::temp_dir().join(format!("owlmake_mk_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("version.txt"), "3.90.0\n").unwrap();
+        std::fs::write(dir.join("suffix.txt"), "rc1\n").unwrap();
+
+        let mut m = MakeModel::default();
+        m.base_dir = Some(dir.clone());
+        assert_eq!(
+            m.expand("http://www.ebi.ac.uk/efo/releases/v`cat version.txt suffix.txt`/efo.owl"),
+            "http://www.ebi.ac.uk/efo/releases/v3.90.0 rc1/efo.owl"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A backtick that reads the version out of a FILE resolves to a reference to
+    /// that file, not to the version it happens to hold at plan time. EFO's
+    /// `` v`cat version.txt` `` reached six release strings; freezing it there
+    /// meant a curator could bump `version.txt` to 3.93.0 and get 3.92.0
+    /// artefacts, with nothing naming the file to make them out of date.
+    #[test]
+    fn a_version_read_from_a_file_is_a_reference_not_a_value() {
+        let dir = std::env::temp_dir().join(format!("owlmake_vf_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("version.txt"), "3.92.0\n").unwrap();
 
         let mut m = MakeModel::default();
         m.base_dir = Some(dir.clone());
         assert_eq!(
             m.expand("http://www.ebi.ac.uk/efo/releases/v`cat version.txt`/efo.owl"),
-            "http://www.ebi.ac.uk/efo/releases/v3.90.0/efo.owl"
+            format!("http://www.ebi.ac.uk/efo/releases/v{}/efo.owl", crate::plan::VERSION_REF)
         );
+        // …and the file is named, so the plan can carry it and the run re-read it.
+        assert_eq!(m.version_file.borrow().as_deref(), Some("version.txt"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A robot line that opens over `--input-iri` names a remote input, and the
+    /// plan carries it: the local `--input` scan skips anything beginning `http`,
+    /// so an IRI is the separate answer. A rule with no prerequisites has no
+    /// other input, and a query over the previous release is exactly that shape.
+    #[test]
+    fn a_remote_input_is_an_input() {
+        let iri = "https://github.com/EBISPOT/efo/releases/download/current/efo.owl";
+        let line = format!("robot query --input-iri {iri} --select q.sparql out.tmp");
+        assert_eq!(super::super::planner::first_robot_iri_input(&line, "robot"), Some(iri.into()));
+        assert_eq!(
+            super::super::planner::first_robot_iri_input(
+                &format!("robot query --input-iri={iri} --select q.sparql out.tmp"),
+                "robot"
+            ),
+            Some(iri.into())
+        );
+        // A local input is not an IRI input, and vice versa: the two answers are
+        // used differently, one as `$<` and one as a pipeline boundary.
+        assert_eq!(
+            super::super::planner::first_robot_iri_input("robot query -i build/efo.owl", "robot"),
+            None
+        );
+        assert_eq!(super::super::planner::first_robot_input(&line, "robot"), None);
+    }
+
+    /// `mint` takes its ID policy from the single `*-idranges.owl` beside the
+    /// edit file, and the PLAN has to name it: when it did not, execution globbed
+    /// for one and globbed the wrong directory, so EFO's `allocate-definitive-ids`
+    /// died with "no *-idranges.owl file found in .". Two candidates is no answer
+    /// — minting from the wrong ID policy is worse than not minting.
+    #[test]
+    fn idranges_is_resolved_when_there_is_exactly_one() {
+        let dir = std::env::temp_dir().join(format!("owlmake_ir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(super::super::planner::idranges_beside_edit_file(&dir), None);
+
+        std::fs::write(dir.join("efo-idranges.owl"), "").unwrap();
+        assert_eq!(
+            super::super::planner::idranges_beside_edit_file(&dir).as_deref(),
+            Some("efo-idranges.owl")
+        );
+
+        std::fs::write(dir.join("cl-idranges.owl"), "").unwrap();
+        assert_eq!(super::super::planner::idranges_beside_edit_file(&dir), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only a BARE read is a version reference. `cat a b` concatenates two files
+    /// and `wc -l < f` computes from one; neither is "the version lives here", so
+    /// both keep running at plan time.
+    #[test]
+    fn a_computed_substitution_is_still_a_value() {
+        assert_eq!(version_file_command("cat version.txt"), Some("version.txt"));
+        assert_eq!(version_file_command("cat 'version.txt'"), Some("version.txt"));
+        assert_eq!(version_file_command("cat a.txt b.txt"), None);
+        assert_eq!(version_file_command("wc -l < version.txt"), None);
+        assert_eq!(version_file_command("date +%Y-%m-%d"), None);
     }
 
     /// `$(wildcard …)` resolves against the Makefile's directory too. CL's DOSDP

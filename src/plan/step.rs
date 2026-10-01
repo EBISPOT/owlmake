@@ -57,6 +57,12 @@ pub enum Op {
         /// `-x`/`--exclude-duplicate-axioms` (default false): do not assert
         /// an inferred axiom that is already present.
         exclude_duplicate_axioms: Option<bool>,
+        /// `-A`/`--axiom-generators`: the inference types to assert, as the
+        /// recipe spells them; empty is the command's default, `SubClass`.
+        axiom_generators: Vec<String>,
+        /// `--properties`: the object properties the `PropertyAssertion`
+        /// generator is restricted to; empty is every named object property.
+        properties: Vec<String>,
     },
     Relax {
         /// `relax --include-subclass-of` (default false): also weaken
@@ -534,7 +540,7 @@ pub enum Step {
     /// A mapped operation that uses options owlmake can't execute yet.
     Partial { op: Op, gaps: Vec<String> },
     /// A subcommand named by a recipe that owlmake does not implement.
-    UnknownRobot(String),
+    UnsupportedSubcommand(String),
     /// A subcommand owlmake implements as a CLI command but does not model
     /// as a pipeline [`Op`] — `uberon:create-species-subset`, which writes two
     /// products (the tag set and the pruned view) rather than threading one model
@@ -545,7 +551,7 @@ pub enum Step {
     /// flattened), so the step says both which subcommand to run and what to run
     /// it on. Without them it could only be executed by replaying the recipe line,
     /// and the plan would not be self-sufficient.
-    CliRobot { name: String, args: Vec<String> },
+    OwlmakeCli { name: String, args: Vec<String> },
     /// A recipe line with no observable effect (`echo`, `cd`, the move of a
     /// `.tmp` onto the target that the pipeline's closing write already
     /// performed). Internal to ingest: the executor skips these, so the planner
@@ -581,6 +587,19 @@ pub enum Step {
     /// `;` need no variant: sequential steps that abort on failure already mean the
     /// same thing.
     Fallback { command: String, requires: Vec<String> },
+    /// A step whose FAILURE is not an error — the shell's `cmd || true`.
+    ///
+    /// The tolerance belongs to the ONE step, not to what precedes it. A recipe's
+    /// steps are the concatenation of all its lines, so a tolerance expressed as a
+    /// trailing [`Step::Fallback`] would reach back over every earlier line:
+    /// EFO's mondo import extracts, writes a temp copy, and only then runs a
+    /// tolerated query, and a failed extract has to stop the build rather than
+    /// yield an empty import.
+    ///
+    /// A failed step leaves the pipeline's model as it was — which is what makes
+    /// the tolerance safe to express here at all: the step's effects are exactly
+    /// what the recipe is prepared to do without.
+    MayFail(Box<Step>),
     /// A shell `if … then … [else …] fi` construct decomposed into structured
     /// form: a `condition` (the shell test, e.g. `[ -s foo.tsv ]`) and the nested
     /// step lists run when it succeeds / fails. Sub-steps may themselves be
@@ -600,15 +619,28 @@ pub enum Step {
 }
 
 impl Step {
+    /// The step itself, with any [`Step::MayFail`] wrapper peeled off.
+    ///
+    /// Tolerating failure says nothing about WHAT the step does, so everything
+    /// that asks what a step is — which files it writes, which term files it
+    /// reads, whether it is covered — asks the step inside.
+    pub fn effective(&self) -> &Step {
+        match self {
+            Step::MayFail(inner) => inner.effective(),
+            other => other,
+        }
+    }
+
     /// Human-readable gaps contributed by this step (empty when fully covered).
     pub fn gaps(&self) -> Vec<String> {
         match self {
             Step::Op(_) | Step::Inert(_) | Step::Shell { .. } | Step::Fallback { .. } | Step::Oort(_) => vec![],
             // A boundary is bookkeeping about where one invocation ends, not work.
             Step::Boundary { .. } => vec![],
-            Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::CliRobot { .. } => vec![],
+            Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::OwlmakeCli { .. } => vec![],
             Step::Partial { gaps, .. } => gaps.clone(),
-            Step::UnknownRobot(name) => vec![format!("unsupported ROBOT command `{name}`")],
+            Step::UnsupportedSubcommand(name) => vec![format!("unsupported ontology subcommand `{name}`")],
+            Step::MayFail(inner) => inner.gaps(),
 
             // A branch is covered exactly when both of its bodies are.
             Step::Branch { then_steps, else_steps, .. } => then_steps
@@ -626,7 +658,8 @@ impl Step {
     pub fn unrunnable_gaps(&self) -> Vec<String> {
         match self {
             Step::Partial { gaps, .. } => gaps.clone(),
-            Step::UnknownRobot(name) => vec![format!("unsupported ROBOT command `{name}`")],
+            Step::UnsupportedSubcommand(name) => vec![format!("unsupported ontology subcommand `{name}`")],
+            Step::MayFail(inner) => inner.unrunnable_gaps(),
             Step::Branch { then_steps, else_steps, .. } => then_steps
                 .iter()
                 .chain(else_steps)
@@ -643,8 +676,8 @@ impl Step {
                 Some(i) => format!("── new invocation, from {i}"),
                 None => "── new invocation".to_string(),
             },
-            Step::UnknownRobot(n) => format!("robot {n} (UNSUPPORTED)"),
-            Step::CliRobot { name, .. } => format!("robot {name}"),
+            Step::UnsupportedSubcommand(n) => format!("{n} (UNSUPPORTED)"),
+            Step::OwlmakeCli { name, .. } => format!("om {name}"),
             Step::File(f) => f.label(),
             Step::Jq(args) => format!("jq {}", args.join(" ")),
             Step::Sssom(args) => format!("sssom {}", args.iter().skip(1).cloned().collect::<Vec<_>>().join(" ")),
@@ -662,6 +695,7 @@ impl Step {
             Step::Shell { command, requires } => {
                 format!("sh: {} (needs {})", first_word(command), requires.join(", "))
             }
+            Step::MayFail(inner) => format!("{} (may fail)", inner.label()),
             Step::Branch { condition, .. } => format!("if {}", condition.describe()),
 
             Step::Oort(s) => {
@@ -689,11 +723,18 @@ fn op_label(op: &Op) -> String {
             }
         }
         Op::Unmerge { .. } => "unmerge".into(),
-        Op::Reason { reasoner, equivalent_classes_allowed, exclude_tautologies, .. } => format!(
-            "reason[{}{}{}]",
+        Op::Reason {
+            reasoner, equivalent_classes_allowed, exclude_tautologies, axiom_generators, ..
+        } => format!(
+            "reason[{}{}{}{}]",
             reasoner.clone().unwrap_or_else(|| "ELK".into()),
             equivalent_classes_allowed.as_ref().map(|e| format!(", eq={e}")).unwrap_or_default(),
             exclude_tautologies.as_ref().map(|e| format!(", tauto={e}")).unwrap_or_default(),
+            if axiom_generators.is_empty() {
+                String::new()
+            } else {
+                format!(", generators={}", axiom_generators.join(" "))
+            },
         ),
         Op::Relax { include_subclass_of } => {
             if *include_subclass_of {

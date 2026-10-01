@@ -1,0 +1,7 @@
+emulate_odk_version: 1.6.1
+id: tl
+create_obo_metadata: false
+import_group:
+  ids:
+    - ro
+    - bfo

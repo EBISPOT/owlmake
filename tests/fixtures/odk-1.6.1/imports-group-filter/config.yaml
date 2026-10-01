@@ -1,0 +1,7 @@
+id: gfilter
+import_group:
+  module_type: filter
+  products:
+    - id: ro
+    - id: go
+      module_type: slme

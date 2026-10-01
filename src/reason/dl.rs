@@ -100,9 +100,23 @@ impl ClassificationProgressMonitor<Class<ArcStr>> for ProgressMonitor {
 /// with ETA once per-concept classification begins; the final summary line is
 /// printed when classification returns. Falls back to a plain classify when
 /// progress is disabled.
+/// The hermit-rs configuration every classification here runs under: the
+/// defaults, except that an inconsistent ontology classifies to the collapsed
+/// hierarchy (every class in the one ⊤/⊥ node) instead of raising an error.
+/// Inconsistency is an answer the callers read off that hierarchy, through
+/// [`DlReasoner::is_consistent`] and [`DlReasoner::unsatisfiable`], and report
+/// as they see fit; it is not a failure of the reasoner.
+fn configuration() -> hermit_rs::configuration::Configuration {
+    hermit_rs::configuration::Configuration {
+        throw_inconsistent_ontology_exception: false,
+        ..Default::default()
+    }
+}
+
 fn classify_with_progress(ont: &SetOntology<ArcStr>) -> Hierarchy<Class<ArcStr>> {
     if !crate::progress::enabled() {
-        return hermit::classify(ont).unwrap_or_else(|e| die(e));
+        return hermit::classify_with_configuration(ont, &configuration())
+            .unwrap_or_else(|e| die(e));
     }
 
     let state = Arc::new(ProgressState::default());
@@ -154,7 +168,7 @@ fn classify_with_progress(ont: &SetOntology<ArcStr>) -> Hierarchy<Class<ArcStr>>
     };
 
     let mut monitor = ProgressMonitor { state };
-    let result = hermit::classify_with_monitor(ont, &mut monitor);
+    let result = hermit::classify_with_configuration_and_monitor(ont, &configuration(), &mut monitor);
     finished.store(true, Ordering::Relaxed);
     let _ = hb.join();
     result.unwrap_or_else(|e| die(e))
@@ -174,6 +188,10 @@ const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 /// hierarchy and therefore does classify (once).
 pub struct DlReasoner {
     ont: SetOntology<ArcStr>,
+    /// The named object properties in the ontology's signature, sorted, with
+    /// `owl:topObjectProperty` and `owl:bottomObjectProperty` left out: the
+    /// properties [`DlReasoner::object_property_assertions`] retrieves.
+    object_properties: Vec<String>,
     consistent: OnceLock<bool>,
     hierarchy: OnceLock<Hierarchy<Class<ArcStr>>>,
 }
@@ -730,11 +748,79 @@ impl DlReasoner {
             let _hb = crate::progress::Heartbeat::start("reason: hermit-rs converting model");
             to_arc(model)
         };
+        let mut object_properties: Vec<String> = model
+            .ont
+            .iter()
+            .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+            .filter(|(k, _)| *k == crate::sig::kind::OBJECT_PROPERTY)
+            .map(|(_, iri)| iri)
+            .filter(|iri| {
+                iri != "http://www.w3.org/2002/07/owl#topObjectProperty"
+                    && iri != "http://www.w3.org/2002/07/owl#bottomObjectProperty"
+            })
+            .collect();
+        object_properties.sort();
+        object_properties.dedup();
         DlReasoner {
             ont,
+            object_properties,
             consistent: OnceLock::new(),
             hierarchy: OnceLock::new(),
         }
+    }
+
+    /// The direct types of every named individual, as `(individual, class)`
+    /// pairs: the most specific named classes it is entailed to be an instance
+    /// of. The ontology must be consistent.
+    pub fn class_assertions(&self) -> Vec<(String, String)> {
+        let _hb = crate::progress::Heartbeat::start("reason: hermit-rs realising individuals");
+        let types = hermit::realize(&self.ont).unwrap_or_else(|e| die(e));
+        let mut out: Vec<(String, String)> = types
+            .iter()
+            .flat_map(|(ind, classes)| {
+                classes
+                    .iter()
+                    .map(|c| c.0.to_string())
+                    .filter(|iri| is_named(iri))
+                    .map(move |c| (ind.0.to_string(), c))
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Every entailed object property assertion between named individuals, as
+    /// `(subject, property, object)` triples, over `properties`, or over every
+    /// named object property in the signature when that is empty. One
+    /// saturated model is read off for every property at once; each property's
+    /// query then only confirms the pairs that model left undecided. The
+    /// ontology must be consistent.
+    pub fn object_property_assertions(
+        &self,
+        properties: &std::collections::HashSet<String>,
+    ) -> Vec<(String, String, String)> {
+        let _hb = crate::progress::Heartbeat::start(
+            "reason: hermit-rs retrieving object property instances",
+        );
+        let mut index =
+            hermit::ObjectPropertyInstanceIndex::with_configuration(&self.ont, &configuration())
+                .unwrap_or_else(|e| die(e));
+        let build = Build::new_arc();
+        let mut out = Vec::new();
+        let mut asked: Vec<String> = properties.iter().cloned().collect();
+        asked.sort();
+        let queried = if asked.is_empty() { &self.object_properties } else { &asked };
+        for p in queried {
+            let ope = ho::ObjectPropertyExpression::ObjectProperty(build.object_property(p.clone()));
+            let pairs = index.object_property_instances(ope).unwrap_or_else(|e| die(e));
+            for (from, to) in pairs {
+                out.push((from.0.to_string(), p.clone(), to.0.to_string()));
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// The classified taxonomy (computed once). hermit-rs returns its

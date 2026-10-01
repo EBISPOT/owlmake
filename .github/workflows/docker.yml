@@ -5,7 +5,7 @@ name: Docker
 # variants come out of the one Dockerfile:
 #
 #   * default target      -> ghcr.io/<repo>          (om only, ~38 MB)
-#   * target with-python  -> ghcr.io/<repo>:*-python (adds Python 3 + Pandas)
+#   * target with-python  -> ghcr.io/<repo>:*-python (adds Python 3 + Pandas + PyYAML)
 #
 # Tagging (each applied to both variants, the python one with a `-python` suffix):
 #   * tag `v*`        -> pushes :<version>, :<major.minor>, and :latest

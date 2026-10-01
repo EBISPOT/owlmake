@@ -1,0 +1,7 @@
+id: gminimal
+import_group:
+  module_type: minimal
+  products:
+    - id: ro
+    - id: go
+      module_type: slme

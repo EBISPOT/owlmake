@@ -14,6 +14,7 @@ use anyhow::{bail, Context, Result};
 use crate::cmd;
 
 pub mod recipe;
+pub mod schedule;
 
 use crate::plan::{ArtefactPlan, Plan};
 use crate::plan::step::{Op, Step};
@@ -60,6 +61,11 @@ pub struct Repo<'a> {
     /// into rebuilding `mirror/merged.owl` from mirrors a release build never
     /// downloads.
     pub refresh_imports: bool,
+    /// The mirrors / imports group was pinned EXPLICITLY this run (`MIR=false`,
+    /// `IMP=false`, `--keep`). See [`ExecOpts::mirrors_pinned`]: it decides what
+    /// a pin means for a file that is absent.
+    pub mirrors_pinned: bool,
+    pub imports_pinned: bool,
     /// ODK `PAT`. FALSE means the DOSDP products are the committed ones, and the
     /// import seed's pattern half is extracted from `definitions.owl` rather than
     /// from the per-pattern term files — a different derivation, not a skipped
@@ -79,11 +85,19 @@ pub struct Repo<'a> {
     /// TWICE (24 fetches).
     /// Borrowed from [`crate::odk::OdkRepo`], which lives for the whole run — a
     /// `Repo` is rebuilt per phase and could not carry this itself.
-    pub built: &'a std::cell::RefCell<std::collections::HashSet<String>>,
+    pub built: &'a std::sync::Mutex<std::collections::HashSet<String>>,
     /// Targets whose build FAILED in this invocation — see [`crate::odk::OdkRepo`].
     /// A target naming one of these as a prerequisite cannot be up to date,
     /// however old the file sharing its name is.
-    pub failed: &'a std::cell::RefCell<std::collections::HashSet<String>>,
+    pub failed: &'a std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The targets being built right now — see [`Claims`].
+    pub claims: &'a Claims,
+    /// How many targets may be built at once. One builds them in plan order on
+    /// the calling thread; more builds every target whose prerequisites are
+    /// done, in plan order of readiness, on that many threads.
+    pub jobs: usize,
+    /// This run's `--assume-new` files (see [`ExecOpts::assume_new`]).
+    pub assume_new: Vec<String>,
     /// Where release artefacts are written — the repo root for an ODK layout.
     ///
     /// The ODK builds each artefact IN `src/ontology` and copies it to the root
@@ -109,10 +123,15 @@ impl<'a> Repo<'a> {
             always_make: false,
             refresh_mirrors: true,
             refresh_imports: true,
+            mirrors_pinned: false,
+            imports_pinned: false,
             regenerate_patterns: true,
             kept_groups: Vec::new(),
             built: &repo.built,
             failed: &repo.failed,
+            claims: &repo.claims,
+            jobs: 1,
+            assume_new: Vec::new(),
             output_dir: repo.root.clone(),
         }
     }
@@ -128,6 +147,8 @@ impl<'a> Repo<'a> {
             always_make: opts.always_make,
             refresh_mirrors: opts.refresh_mirrors,
             refresh_imports: matches!(opts.imports_mode, ImportsMode::Fresh),
+            mirrors_pinned: opts.mirrors_pinned,
+            imports_pinned: opts.imports_pinned,
             regenerate_patterns: opts.patterns_mode == PatternsMode::Regenerate,
             kept_groups: plan
                 .refresh_groups
@@ -137,6 +158,9 @@ impl<'a> Repo<'a> {
                 .collect(),
             built: &repo.built,
             failed: &repo.failed,
+            claims: &repo.claims,
+            jobs: opts.jobs.max(1),
+            assume_new: opts.assume_new.clone(),
             output_dir: opts.output_dir.clone(),
         }
     }
@@ -227,10 +251,10 @@ fn is_mirror_target(repo: &Repo, target: &str) -> bool {
 /// message about a pinned file has to say.
 fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
     if !repo.refresh_mirrors && is_mirror_target(repo, target) {
-        return Some(Pin { flag: "MIR".into(), group: "mirrors".into() });
+        return Some(Pin { flag: "MIR".into(), group: "mirrors".into(), explicit: repo.mirrors_pinned });
     }
     if !repo.refresh_imports && is_import_target(repo, target) {
-        return Some(Pin { flag: "IMP".into(), group: "imports".into() });
+        return Some(Pin { flag: "IMP".into(), group: "imports".into(), explicit: repo.imports_pinned });
     }
     // A group of a repository's own invention is a plain list of targets, so
     // membership is the whole test. Compared by filename as well as by path,
@@ -244,7 +268,10 @@ fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
     repo.kept_groups
         .iter()
         .find(|g| g.targets.iter().any(|t| same(t)))
-        .map(|g| Pin { flag: g.flag.clone(), group: g.name.clone() })
+        // A repo-invented group reaches `kept_groups` through one resolution for
+        // the run, so default and explicit are not distinguished here; treated
+        // as explicit, which keeps the strict answer for its absent files.
+        .map(|g| Pin { flag: g.flag.clone(), group: g.name.clone(), explicit: true })
 }
 
 /// Why a target is pinned: the switch that turned its rules off, and the group
@@ -252,12 +279,25 @@ fn pinned_by(repo: &Repo, target: &str) -> Option<Pin> {
 struct Pin {
     flag: String,
     group: String,
+    /// Stated by the caller for THIS run, as against the group's default.
+    explicit: bool,
 }
 
 impl std::fmt::Display for Pin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}=false", self.flag)
     }
+}
+
+/// The import product whose module `target` names, when the plan records that
+/// product's own pipeline (`ImportPlan::steps`). The plan spells outputs
+/// repo-relative (`src/ontology/imports/x_import.owl`) while a caller names them
+/// from the ontology directory (`imports/x_import.owl`), so the match is on whole
+/// trailing path components, not on the file name alone — `mirror/x.owl` must not
+/// pass for `imports/x.owl`.
+pub fn import_module_for<'p>(plan: &'p Plan, target: &str) -> Option<&'p crate::plan::ImportPlan> {
+    let same = |a: &str| a == target || Path::new(a).ends_with(target) || Path::new(target).ends_with(a);
+    plan.imports.iter().find(|i| !i.steps.is_empty() && same(&i.output))
 }
 
 /// A target that is built only while the import modules are being rebuilt — the
@@ -285,6 +325,123 @@ fn is_import_target(repo: &Repo, target: &str) -> bool {
             .any(|g| g.targets.iter().any(|t| same(t)))
 }
 
+/// Run a file operation with the build's view of where artefacts live.
+///
+/// Release artefacts are written to the output directory as they are built, so
+/// a copy whose recipe path names the build directory (`rsync -R ecto.owl …`
+/// from `src/ontology`) may find its source only at the published location. A
+/// source that is absent at its recipe path but is a plan target published to
+/// the output directory is read from there — and when that published file IS
+/// the copy's destination, the copy is already complete and does nothing.
+fn run_file_op(repo: &Repo, op: &recipe::FileOp) -> Result<()> {
+    use recipe::FileOp;
+    if let FileOp::Copy { src, dst, recursive, relative } = op {
+        let mut remaining: Vec<String> = Vec::new();
+        for s in src {
+            if repo.dir.join(s).exists() {
+                remaining.push(s.clone());
+                continue;
+            }
+            let Some(published) = repo.target_file(s).filter(|p| p.is_file()) else {
+                // Not published either: keep it for the plain run, whose error
+                // names the missing file.
+                remaining.push(s.clone());
+                continue;
+            };
+            let d = repo.dir.join(dst);
+            let dest = if *relative {
+                d.join(s)
+            } else if d.is_dir() {
+                d.join(Path::new(s).file_name().unwrap_or_default())
+            } else {
+                d.clone()
+            };
+            if dest.exists() && published.canonicalize().ok() == dest.canonicalize().ok() {
+                continue;
+            }
+            if let Some(par) = dest.parent() {
+                std::fs::create_dir_all(par)?;
+            }
+            std::fs::copy(&published, &dest).with_context(|| {
+                format!("cp {} {}", published.display(), dest.display())
+            })?;
+        }
+        if remaining.is_empty() {
+            return Ok(());
+        }
+        return FileOp::Copy {
+            src: remaining,
+            dst: dst.clone(),
+            recursive: *recursive,
+            relative: *relative,
+        }
+        .run(&repo.dir);
+    }
+    op.run(&repo.dir)
+}
+
+/// Whether a missing prerequisite is an INTERMEDIATE the requesting target does
+/// not need built.
+///
+/// A file only a pattern-rule chain names (`ArtefactPlan::intermediate`) is not
+/// created just because it is absent: the chain runs only when the target that
+/// needs it is out of date with respect to the intermediate's own
+/// prerequisites. ECTO's component stamps are the shape —
+/// `components/<x>.owl: tmp/stamp-component-<x>.owl`, with the stamp made by
+/// `touch` from nothing: a build whose components are present must create no
+/// stamps, and building one first would put it newer than its component and run
+/// the component recipe off the back of a file the build itself invented.
+/// `-B` overrides this like every other up-to-date rule.
+fn skip_missing_intermediate(repo: &Repo, target: &str, need: &str) -> bool {
+    if repo.always_make {
+        return false;
+    }
+    let Some(na) = repo.target(need) else { return false };
+    if !na.intermediate || repo.dir.join(need).exists() {
+        return false;
+    }
+    let Some(tm) = repo
+        .target_file(target)
+        .filter(|p| p.is_file())
+        .and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+    else {
+        return false;
+    };
+    // Is the target out of date against the intermediate's own prerequisites?
+    // Walked transitively through further missing intermediates; anything
+    // unresolvable builds the chain rather than silently skipping it.
+    fn out_of_date(
+        repo: &Repo,
+        tm: std::time::SystemTime,
+        a: &crate::plan::ArtefactPlan,
+        depth: usize,
+    ) -> bool {
+        if depth == 0 {
+            return true;
+        }
+        for p in a.needs.iter().filter(|n| !a.order_only.contains(n)) {
+            match std::fs::metadata(repo.dir.join(p)).and_then(|m| m.modified()) {
+                Ok(m) => {
+                    if m > tm {
+                        return true;
+                    }
+                }
+                Err(_) => match repo.target(p) {
+                    Some(pa) if pa.intermediate => {
+                        if out_of_date(repo, tm, pa, depth - 1) {
+                            return true;
+                        }
+                    }
+                    Some(_) => return true,
+                    None => {}
+                },
+            }
+        }
+        false
+    }
+    !out_of_date(repo, tm, na, 8)
+}
+
 /// The up-to-date test: does `target` exist and is no prerequisite newer?
 ///
 /// A prerequisite that is absent cannot make the target stale — it is not newer
@@ -305,7 +462,20 @@ fn mirror_import_for<'p>(repo: &Repo<'p>, path: &str) -> Option<&'p crate::plan:
         let d = repo.var("MIRRORDIR");
         if d.is_empty() { "mirror".to_string() } else { d.to_string() }
     };
-    repo.plan.imports.iter().find(|i| path == format!("{dir}/{}.owl", i.id))
+    // Compared as PATHS, with a leading `./` normalized away — `components()`
+    // alone keeps that one. The recorded `$(MIRRORDIR)` is the configuration's
+    // own spelling — EFO writes `./mirror` — while a rule's prerequisite says
+    // `mirror/mondo.owl`, and only as paths do the two meet.
+    use std::path::Component;
+    let parts = |p: &str| {
+        std::path::Path::new(p)
+            .components()
+            .filter(|c| !matches!(c, Component::CurDir))
+            .map(|c| c.as_os_str().to_os_string())
+            .collect::<Vec<_>>()
+    };
+    let want = parts(path);
+    repo.plan.imports.iter().find(|i| parts(&format!("{dir}/{}.owl", i.id)) == want)
 }
 
 /// Whether a path names one of the DOSDP products owlmake writes natively
@@ -374,6 +544,14 @@ pub struct ExecOpts {
     /// module rules are not defined. Forcing the rebuild regardless re-mirrored
     /// every upstream and overwrote the committed merged import.
     pub imports_pinned: bool,
+    /// The run pinned the MIRRORS group explicitly (`MIR=false`, `--keep
+    /// mirrors`), as against the plan's `default: keep`. The two pins hold
+    /// different promises for a file that is ABSENT: an explicit pin was stated
+    /// about this run and an absent file under it is an error, while a group
+    /// default pins the content of files that exist — a target nothing ever
+    /// committed (EFO gitignores `imports/mondo_import.owl` and its mirror) has
+    /// no content to pin, and every fresh clone must build it once.
+    pub mirrors_pinned: bool,
     /// The plan's OTHER refresh groups that this run keeps, by name — everything
     /// beyond `mirrors`/`imports`/`patterns`, whose own fields above carry them.
     /// A kept group's targets are not in play: their rules exist only under the
@@ -390,6 +568,74 @@ pub struct ExecOpts {
     /// `purl.obolibrary.org/obo/upheno/metazoa.owl`, whose `releases/latest`
     /// asset is gone, so without this one dead URL costs the other 24 products.
     pub keep_going: bool,
+    /// `-W`/`--assume-new`: files to treat as just modified. A target depending
+    /// on one runs its recipe; the file itself is neither rebuilt nor touched.
+    pub assume_new: Vec<String>,
+    /// `-j`/`--jobs`: how many targets to build at once.
+    pub jobs: usize,
+}
+
+/// The targets being built at this moment.
+///
+/// A target is built at most once per run, and `Repo::built` records the ones
+/// that are done. With more than one builder that record is not enough: a
+/// target reached from two directions while its recipe is still running would
+/// be taken as done by the second, which then reads a file half written. A
+/// builder therefore CLAIMS a target first, and a second claimant waits until
+/// the first has finished and then finds it built.
+#[derive(Default)]
+pub struct Claims {
+    in_progress: std::sync::Mutex<std::collections::HashSet<String>>,
+    settled: std::sync::Condvar,
+}
+
+/// A claimed target: the holder is the one building it. Dropping the claim
+/// releases it; [`Claim::succeed`] records the target as built as well.
+struct Claim<'a> {
+    repo: &'a Repo<'a>,
+    key: String,
+    succeeded: bool,
+}
+
+impl Claim<'_> {
+    /// Record the target as built, so no later visit builds it again.
+    fn succeed(&mut self) {
+        self.succeeded = true;
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        let mut in_progress = self.repo.claims.in_progress.lock().unwrap();
+        in_progress.remove(&self.key);
+        if self.succeeded {
+            self.repo.built.lock().unwrap().insert(std::mem::take(&mut self.key));
+        }
+        self.repo.claims.settled.notify_all();
+    }
+}
+
+/// Claim `key` for building. `None` means it is already built — by this run
+/// earlier, or by another builder this waited for — and there is nothing to do.
+fn claim<'a>(repo: &'a Repo<'a>, key: &str) -> Option<Claim<'a>> {
+    let dir_rel = repo
+        .dir
+        .strip_prefix(&repo.root)
+        .ok()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut in_progress = repo.claims.in_progress.lock().unwrap();
+    loop {
+        if memo_has(repo, key) {
+            return None;
+        }
+        if in_progress.iter().any(|m| same_target(m, key, &dir_rel)) {
+            in_progress = repo.claims.settled.wait(in_progress).unwrap();
+            continue;
+        }
+        in_progress.insert(key.to_string());
+        return Some(Claim { repo, key: key.to_string(), succeeded: false });
+    }
 }
 
 /// Build the plan. The ingested repo supplies its directories and nothing else —
@@ -453,6 +699,31 @@ pub fn refresh_one_mirror(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpts
     ensure_mirror(&r, imp, r.refresh_mirrors).map(|_| ())
 }
 
+/// Build one import module by its product's recorded pipeline — `om make
+/// imports/<id>_import.owl`. The plan may also carry the replayed rule for the
+/// same file; the product's steps are the plan's statement of how the module is
+/// built, so they are what runs (see `refresh_imports_planned`).
+pub fn build_import_module(repo: &OdkRepo, plan: &Plan, id: &str, opts: &ExecOpts) -> Result<()> {
+    let r = Repo::of_with(repo, plan, opts);
+    let Some(imp) = plan.imports.iter().find(|i| i.id == id) else {
+        bail!("no import `{id}` in the plan");
+    };
+    if imp.is_mirror_only() {
+        bail!("`{id}` is a mirror and is made into no module: `om make mirror/{id}.owl` builds it");
+    }
+    if opts.imports_pinned {
+        status!("make: `{}` pinned (IMP=false)", imp.output);
+        return Ok(());
+    }
+    let catalog = load_catalog_planned(&r);
+    let work = r.output_dir.join(".owlmake-odk-tmp");
+    std::fs::create_dir_all(&work)?;
+    build_one_import(&r, plan, imp, &catalog, &work)
+        .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
+    r.built.lock().unwrap().insert(imp.output.clone());
+    Ok(())
+}
+
 /// Run a target the plan defines. A target the plan does not define is an error:
 /// there is nothing else to fall back to.
 pub fn run_target_recipe(
@@ -484,17 +755,104 @@ const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
 /// how every CURIE in every SSSOM artefact resolves, and the two differ by 388
 /// prefixes. A version emulated with the other version's map is not approximately
 /// right, it is a different answer.
+///
+/// One convention reads the ODK release instead: a build that emulates one neither
+/// writes nor reads OBO `[Instance]` frames, because that release does neither.
+///
+/// Every owlmake process the build starts runs under the same emulation
+/// ([`emulation_args`]), so a step writes the same bytes whether it runs in this
+/// process or in one of its own.
 pub fn set_robot_behaviours(plan: &Plan) {
-    let post_1_9_9 = plan.emulate_robot_version >= ROBOT_1_9_9;
-    crate::io::obograph::set_nest_axiom_anns(post_1_9_9);
-    crate::cmd::query::set_update_keeps_prefixes(post_1_9_9);
-    crate::sssom::converter::set_obo_epm(plan.emulate_robot_version);
+    set_emulation(Some(Emulation {
+        robot: plan.emulate_robot_version,
+        odk: plan.emulate_odk_version,
+    }));
+}
+
+/// The releases a run writes as: a plan's `emulate_robot_version` and
+/// `emulate_odk_version`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Emulation {
+    pub robot: (u32, u32, u32),
+    pub odk: Option<(u32, u32, u32)>,
+}
+
+/// The emulation this process runs under: `None` while no plan governs the run.
+/// [`set_emulation`] is its only writer, and sets it together with the switches
+/// it decides.
+static EMULATION: std::sync::Mutex<Option<Emulation>> = std::sync::Mutex::new(None);
+
+/// Put this process under `emulation`, setting every byte behaviour it decides
+/// (see [`set_robot_behaviours`]). `None` returns them to the conventions of a
+/// run no plan governs.
+pub fn set_emulation(emulation: Option<Emulation>) {
+    let post_1_9_9 = emulation.map(|e| e.robot >= ROBOT_1_9_9);
+    crate::io::obograph::set_nest_axiom_anns(post_1_9_9.unwrap_or(false));
+    crate::cmd::query::set_update_keeps_prefixes(post_1_9_9.unwrap_or(true));
+    crate::sssom::converter::set_obo_epm(post_1_9_9.unwrap_or(true));
+    crate::io::obo::set_instance_frames(emulation.is_none_or(|e| e.odk.is_none()));
+    *EMULATION.lock().unwrap_or_else(|e| e.into_inner()) = emulation;
+}
+
+/// The emulation this process runs under — see [`set_emulation`].
+pub fn emulation() -> Option<Emulation> {
+    *EMULATION.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The arguments naming this process's emulation: `__emulate-robot-version=`
+/// and, when it emulates an ODK release, `__emulate-odk-version=`. Every owlmake
+/// process a build starts is given them ahead of its command, and takes them
+/// ([`take_emulation_args`]) before anything else. Empty while no plan governs
+/// the run.
+pub fn emulation_args() -> Vec<String> {
+    let Some(e) = emulation() else { return Vec::new() };
+    let version = |(a, b, c): (u32, u32, u32)| format!("{a}.{b}.{c}");
+    let mut args = vec![format!("{EMULATE_ROBOT_ARG}{}", version(e.robot))];
+    if let Some(odk) = e.odk {
+        args.push(format!("{EMULATE_ODK_ARG}{}", version(odk)));
+    }
+    args
+}
+
+const EMULATE_ROBOT_ARG: &str = "__emulate-robot-version=";
+const EMULATE_ODK_ARG: &str = "__emulate-odk-version=";
+
+/// Take the [`emulation_args`] that lead `argv` off it, and put this process
+/// under the emulation they name. An argv without them is left as it is.
+pub fn take_emulation_args(argv: &mut Vec<String>) -> Result<()> {
+    let version = |s: &str| -> Result<(u32, u32, u32)> {
+        let parts: Result<Vec<u32>, _> = s.split('.').map(str::parse).collect();
+        match parts.as_deref() {
+            Ok(&[a, b, c]) => Ok((a, b, c)),
+            _ => bail!("`{s}` is not a version"),
+        }
+    };
+    let (mut robot, mut odk, mut taken) = (None, None, 0);
+    for arg in argv.iter() {
+        if let Some(v) = arg.strip_prefix(EMULATE_ROBOT_ARG) {
+            robot = Some(version(v)?);
+        } else if let Some(v) = arg.strip_prefix(EMULATE_ODK_ARG) {
+            odk = Some(version(v)?);
+        } else {
+            break;
+        }
+        taken += 1;
+    }
+    if taken == 0 {
+        return Ok(());
+    }
+    let Some(robot) = robot else {
+        bail!("`{EMULATE_ODK_ARG}` names an ODK release without `{EMULATE_ROBOT_ARG}`")
+    };
+    argv.drain(..taken);
+    set_emulation(Some(Emulation { robot, odk }));
+    Ok(())
 }
 
 fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     use crate::progress::Stage;
 
-    // The three byte-affecting global switches are set ONCE, here, from the plan.
+    // The byte-affecting global switches are set ONCE, here, from the plan.
     // The plan is their only writer on the build path: reachable from the
     // environment or from whichever subcommand ran last, they would let the same
     // plan produce different bytes depending on ambient state.
@@ -552,28 +910,36 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     // the `fresh`/merged paths are a single bulk step.
     let stage_imports =
         matches!(opts.imports_mode, ImportsMode::Cached) && plan.merged_import.is_none();
-    let total = buildable.len() + if stage_imports { plan.imports.len() } else { 0 };
+    let modules = plan.imports.iter().filter(|i| !i.is_mirror_only()).count();
+    let total = buildable.len() + if stage_imports { modules } else { 0 };
     let mut idx = 0usize;
 
     // --- Imports -----------------------------------------------------------
+    // A module on disk is kept. An absent one is built from its pipeline, or
+    // refused under an explicit `IMP=false` (see `ensure_import_module`). Each
+    // stage closes on which of the two it did, and one line after them counts
+    // both, so the log says whether any module changed.
     if stage_imports {
-        for imp in &plan.imports {
+        let mut seen = std::collections::HashSet::new();
+        let mut rebuilt = 0usize;
+        for imp in plan.imports.iter().filter(|i| !i.is_mirror_only()) {
             idx += 1;
             let (head, detail) = imp.describe(&repo.dir);
             let stage = Stage::start(idx, total, &head, &detail, None);
-            let res = (|| -> Result<()> {
-                if !repo.dir.join(&imp.output).exists() {
-                    build_one_import(repo, plan, imp, &catalog, &tmp)?;
+            match ensure_import_module(repo, imp, &imp.output, &mut seen) {
+                Ok(false) => stage.finish_ok_as("kept"),
+                Ok(true) => {
+                    rebuilt += 1;
+                    stage.finish_ok_as("rebuilt");
                 }
-                Ok(())
-            })();
-            match res {
-                Ok(()) => stage.finish_ok(),
                 Err(e) => {
                     stage.finish_err();
                     return Err(e).with_context(|| format!("import `{}`", imp.id));
                 }
             }
+        }
+        if modules > 0 {
+            status!("imports: {} kept, {rebuilt} rebuilt", modules - rebuilt);
         }
     } else {
         prepare_imports(repo, plan, opts)?;
@@ -606,13 +972,14 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         .filter(|a| !a.missing_rule)
         .map(|p| (p.target.as_str(), p))
         .collect();
-    let mut prereq_done: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let prereq_done: std::sync::Mutex<std::collections::HashSet<String>> = Default::default();
 
     // --- Release artefacts -------------------------------------------------
-    let mut failed: Vec<String> = Vec::new();
-    for &i in &buildable {
-        idx += 1;
-        let a = &plan.artefacts[i];
+    let failed: std::sync::Mutex<Vec<String>> = Default::default();
+    let stage_no = std::sync::atomic::AtomicUsize::new(idx);
+    let build_one = |pos: usize| -> Result<()> {
+        let a = &plan.artefacts[buildable[pos]];
+        let idx = stage_no.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let (head, detail) = crate::plan::describe_artefact(a);
         let stage = Stage::start(idx, total, &head, &detail, None);
         let out = opts.output_dir.join(&a.target);
@@ -625,7 +992,12 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // `ifeq ($(strip $(MIR)),true)`; unpinned, every `MIR=false` build
         // shipped a fresh fetch of a mapping set the reference left committed.
         // A pinned file that is absent is an error naming the switch.
-        let pinned = pinned_by(repo, &a.target);
+        let pinned = pinned_by(repo, &a.target).filter(|p| {
+            // A DEFAULT pin holds only for a file that exists — see
+            // `run_target_recipe_inner`, which decides the same question for a
+            // recipe target. An explicit pin holds either way.
+            p.explicit || repo.dir.join(&a.target).is_file()
+        });
         if let Some(switch) = pinned {
             if repo.dir.join(&a.target).is_file() {
                 status!("make: `{}` pinned ({switch})", a.target);
@@ -638,7 +1010,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                 status!("make: `{}` pinned ({switch}), absent — nothing demands it", a.target);
             }
             stage.finish_ok();
-            continue;
+            return Ok(());
         }
         // Resolve this artefact's prerequisites now rather than in one pass up
         // front: a prerequisite may itself depend on an *artefact*
@@ -650,7 +1022,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
                     repo,
                     need,
                     &prereq_index,
-                    &mut prereq_done,
+                    &prereq_done,
                     &catalog,
                     &tmp,
                     opts,
@@ -661,18 +1033,11 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         if let Err(e) = prereqs {
             stage.finish_err();
             // `-k` applies to a PREREQUISITE failure exactly as it does to a
-            // recipe failure below. Returning unconditionally here meant one
-            // unbuildable artefact still took the whole release down: UBERON's
-            // `composite-metazoan-basic.owl` fails, and the run died on the next
-            // target that needs it — abandoning the 111 subset artefacts that do
-            // not depend on it at all. GNU make `-k` builds them.
-            if !opts.keep_going {
-                return Err(e).with_context(|| format!("building {}", a.target));
-            }
-            eprintln!("odk: *** [{}] {e:#}", a.target);
-            repo.failed.borrow_mut().insert(a.target.clone());
-            failed.push(a.target.clone());
-            continue;
+            // recipe failure below: the scheduler carries on with the targets
+            // that do not depend on this one. When UBERON's
+            // `composite-metazoan-basic.owl` fails, the 111 subset artefacts that
+            // do not depend on it are still built.
+            return Err(e);
         }
         // The staleness rule: a target that already exists and is NEWER than
         // every one of its prerequisites is up to date, and its recipe is not run.
@@ -698,9 +1063,23 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // carry `ontology: hp.obo` instead of `ontology: test_obo`, a stray
         // `owl:versionInfo`, and 16 Typedef stanzas `test.owl`'s filtered term
         // list excludes.
-        if memo_has(repo, &a.target) {
+        let Some(mut held) = claim(repo, &a.target) else {
             stage.finish_ok();
-            continue;
+            return Ok(());
+        };
+        // A prerequisite that FAILED is not a prerequisite that is merely absent.
+        // Both look identical to the staleness test below — no file to stat — and
+        // reading the failure as "not newer" declares the target up to date, so
+        // whatever bytes happen to be on disk are published as this run's output.
+        // EFO's `components/legal_diseases.txt` is the case: its input
+        // `disease_to_phenotype_merged.owl` cannot be built (its own upstream
+        // serves a 404 page where an ontology should be), and om reported the
+        // target up to date and kept a file from a previous run. GNU make says
+        // `Target 'x' not remade because of errors`, and P5 says the same: a
+        // declared file that is missing is an error, not a filter.
+        if let Some(bad) = a.needs.iter().find(|n| repo.failed.lock().unwrap().contains(*n)) {
+            stage.finish_err();
+            bail!("not remade because of errors: prerequisite `{bad}` failed in this run");
         }
         // A prerequisite that FAILED is not a prerequisite that is merely absent.
         // Both look identical to the staleness test below — no file to stat — and
@@ -712,26 +1091,20 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         // target up to date and kept a file from a previous run. GNU make says
         // `Target 'x' not remade because of errors`, and P5 says the same: a
         // declared file that is missing is an error, not a filter.
-        if let Some(bad) = a.needs.iter().find(|n| repo.failed.borrow().contains(*n)) {
+        if let Some(bad) = a.needs.iter().find(|n| repo.failed.lock().unwrap().contains(*n)) {
             stage.finish_err();
-            let e = anyhow::anyhow!(
-                "not remade because of errors: prerequisite `{bad}` failed in this run"
-            );
-            if !opts.keep_going {
-                return Err(e).with_context(|| format!("building {}", a.target));
-            }
-            eprintln!("odk: *** [{}] {e:#}", a.target);
-            repo.failed.borrow_mut().insert(a.target.clone());
-            failed.push(a.target.clone());
-            continue;
+            bail!("not remade because of errors: prerequisite `{bad}` failed in this run");
         }
         // A phony target names no file, so it is out of date however old the file
-        // that happens to share its name is.
-        if !plan.is_phony(&a.target)
+        // that happens to share its name is. `-B`/`--always-make` runs the
+        // recipe regardless, here as on the target-recipe path.
+        if !opts.always_make
+            && !plan.is_phony(&a.target)
             && is_up_to_date(&out, &a.needs, &a.order_only, a.input.as_deref(), &opts.output_dir)
         {
+            status!("make: `{}` is up to date", a.target);
             stage.finish_ok();
-            continue;
+            return Ok(());
         }
         // Every artefact goes through the one step pipeline. A shell step
         // (perl/grep/sed, an `if`/`for` construct, a `jq`/`sssom` call, …) runs
@@ -740,20 +1113,57 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
         match run_artefact(repo, a, &catalog, &tmp, &opts.output_dir, &out) {
             Ok(()) => {
                 mirror_into_ontology_dir(repo, &a.target, &out);
-                repo.built.borrow_mut().insert(a.target.clone());
-                stage.finish_ok()
+                held.succeed();
+                stage.finish_ok();
+                Ok(())
             }
             Err(e) => {
                 stage.finish_err();
-                if !opts.keep_going {
-                    return Err(e).with_context(|| format!("building {}", a.target));
+                Err(e)
+            }
+        }
+    };
+    // A failure is recorded against the target whatever `-k` says, so the
+    // staleness test of anything that needs it sees a failed prerequisite and
+    // not a merely absent one; `-k` decides only whether the run goes on.
+    let job = |pos: usize| -> Result<()> {
+        let target = &plan.artefacts[buildable[pos]].target;
+        build_one(pos).map_err(|e| {
+            repo.failed.lock().unwrap().insert(target.clone());
+            failed.lock().unwrap().push(target.clone());
+            if opts.keep_going {
+                status!("make: *** [{target}] {e:#}");
+            }
+            e.context(format!("building {target}"))
+        })
+    };
+    let graph = artefact_graph(plan, &buildable);
+    crate::progress::set_parallel(repo.jobs > 1);
+    let outcomes = schedule::run(&graph, repo.jobs, opts.keep_going, &job);
+    crate::progress::set_parallel(false);
+    let mut first_error = None;
+    for (pos, outcome) in outcomes.into_iter().enumerate() {
+        let target = &plan.artefacts[buildable[pos]].target;
+        match outcome {
+            schedule::Outcome::Done | schedule::Outcome::Unstarted => {}
+            schedule::Outcome::Failed(e) => {
+                if first_error.is_none() {
+                    first_error = Some(e);
                 }
-                eprintln!("odk: *** [{}] {e:#}", a.target);
-                repo.failed.borrow_mut().insert(a.target.clone());
-                failed.push(a.target.clone());
+            }
+            schedule::Outcome::Skipped { dependency } => {
+                status!(
+                    "make: *** [{target}] not remade because of errors: `{dependency}` failed in this run"
+                );
+                repo.failed.lock().unwrap().insert(target.clone());
+                failed.lock().unwrap().push(target.clone());
             }
         }
     }
+    if let (Some(e), false) = (first_error, opts.keep_going) {
+        return Err(e);
+    }
+    let failed = failed.into_inner().unwrap();
     if !failed.is_empty() {
         bail!("{} target(s) failed: {}", failed.len(), failed.join(", "));
     }
@@ -762,10 +1172,48 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     for &i in &order {
         let a = &plan.artefacts[i];
         if a.missing_rule || !a.gaps.is_empty() {
-            eprintln!("odk: skipping {} (not fully covered)", a.target);
+            status!("make: skipping {} (not fully covered)", a.target);
         }
     }
     Ok(())
+}
+
+/// The build order among `buildable` artefacts (plan indices, in build order)
+/// as a graph for the scheduler: an artefact depends on every earlier one that
+/// produces something it needs — as its target, or as a file its recipe writes
+/// beside its target — so the two are never built side by side.
+fn artefact_graph(plan: &Plan, buildable: &[usize]) -> schedule::Graph {
+    let names = |need: &str, target: &str| {
+        need == target || need.strip_suffix(target).is_some_and(|p| p.ends_with('/'))
+    };
+    let produces: Vec<Vec<String>> = buildable
+        .iter()
+        .map(|&i| {
+            let a = &plan.artefacts[i];
+            let mut v = vec![a.target.clone()];
+            v.extend(crate::plan::gaps::recipe_outputs(&a.steps));
+            v
+        })
+        .collect();
+    let deps = buildable
+        .iter()
+        .enumerate()
+        .map(|(pos, &i)| {
+            let a = &plan.artefacts[i];
+            let mut v: Vec<usize> = (0..buildable.len())
+                .filter(|&other| other != pos)
+                .filter(|&other| {
+                    a.needs
+                        .iter()
+                        .chain(a.input.iter())
+                        .any(|need| produces[other].iter().any(|p| names(need, p)))
+                })
+                .collect();
+            v.sort_unstable();
+            v
+        })
+        .collect();
+    schedule::Graph { names: buildable.iter().map(|&i| plan.artefacts[i].target.clone()).collect(), deps }
 }
 
 /// Topologically order artefact indices so every artefact is built after the
@@ -839,33 +1287,16 @@ fn artefact_order(plan: &Plan) -> Vec<usize> {
 
 fn prepare_imports(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     match opts.imports_mode {
+        // Only a MERGED import reaches here cached: per-product modules are staged
+        // one by one in `execute_plan`, and with a merged import they are inputs
+        // to nothing — the merged module is the one module the release reads.
         ImportsMode::Cached => {
-            // Prefer the committed import modules in place. Any the release needs
-            // but that are not committed (the `imports/*_import.owl` are build
-            // artefacts and often git-ignored) are built on demand here —
-            // download the product's mirror and run its pipeline — rather than
-            // forcing the user to re-mirror *every* import with `--imports fresh`.
-            let catalog = load_catalog_planned(repo);
-            let work = opts.output_dir.join(".owlmake-odk-tmp");
-            std::fs::create_dir_all(&work)?;
-            for imp in &plan.imports {
-                let p = repo.dir.join(&imp.output);
-                if !p.exists() && plan.merged_import.is_none() {
-                    eprintln!(
-                        "odk: cached import {} missing ({}); building it from upstream",
-                        imp.id,
-                        p.display()
-                    );
-                    build_one_import(repo, plan, imp, &catalog, &work).with_context(|| {
-                        format!("building missing import module `{}`", imp.id)
-                    })?;
-                }
-            }
             if let Some(m) = &plan.merged_import {
                 let p = repo.dir.join(m);
                 if !p.exists() {
                     bail!("cached merged import {} missing; use --imports fresh", p.display());
                 }
+                status!("imports: `{m}` kept");
             }
             Ok(())
         }
@@ -960,7 +1391,7 @@ fn rebuild_imports_from_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Resul
     // or an import with no rule of its own) still have to be built — except under
     // base merging, where the group names the merged module alone precisely
     // because no per-product module is ever written.
-    for imp in &plan.imports {
+    for imp in plan.imports.iter().filter(|i| !i.is_mirror_only()) {
         if merged_name.is_none() && !group.contains(&imp.output) {
             build_one_import(repo, plan, imp, &catalog, &work)
                 .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
@@ -994,9 +1425,28 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
             .map(|i| i.output.as_str())
             .collect();
         let mut seen = std::collections::HashSet::new();
+        let catalog = load_catalog_planned(repo);
+        let work = repo.output_dir.join(".owlmake-odk-tmp");
+        std::fs::create_dir_all(&work)?;
         for sub in &repo.target("all_imports").expect("checked by has_import_rules").needs {
             if exclude_large && large.contains(&sub.as_str()) {
-                eprintln!("odk: skipping large import `{sub}`");
+                status!("import: skipping large import `{sub}`");
+                continue;
+            }
+            // A module the plan records as an import PRODUCT is built by the
+            // product's own pipeline (`ImportPlan::steps`): that is the pipeline
+            // `--plan-only` shows and the one a curator edits. The plan may also
+            // carry the replayed Makefile rule for the same file. The two agree on
+            // the day the plan is generated and diverge the moment the product is
+            // edited — EFO set its OBA filter to `trim: false` in the product and
+            // the rebuilt module came out byte-identical, because this loop
+            // replayed the recorded rule and never ran the product's steps.
+            if let Some(imp) = import_module_for(plan, sub) {
+                if seen.insert(sub.clone()) && !memo_has(repo, sub) {
+                    build_one_import(repo, plan, imp, &catalog, &work)
+                        .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
+                    repo.built.lock().unwrap().insert(sub.clone());
+                }
                 continue;
             }
             run_target_recipe_inner(repo, sub, &mut seen)?;
@@ -1005,6 +1455,33 @@ fn refresh_imports_planned(repo: &Repo, plan: &Plan, exclude_large: bool) -> Res
     }
     // `refresh-imports` IS the request to re-mirror from upstream, so the mirrors
     // are refreshed by definition here.
+    //
+    // A plan whose products carry their own recorded pipelines but no replayed
+    // rules — EFO once its duplicated import targets are gone — is built from
+    // those pipelines: the synthesized builder is only for products that carry
+    // none, as the comment above says.
+    if plan.imports.iter().any(|i| !i.steps.is_empty()) {
+        let catalog = load_catalog_planned(repo);
+        let work = repo.output_dir.join(".owlmake-odk-tmp");
+        std::fs::create_dir_all(&work)?;
+        for imp in &plan.imports {
+            if exclude_large && imp.product.as_ref().is_some_and(|p| p.is_large) {
+                status!("import: skipping large import `{}`", imp.output);
+                continue;
+            }
+            if imp.steps.is_empty() {
+                continue;
+            }
+            // Re-mirrored by definition — unless the same command line pinned the
+            // mirrors (`MIR=false`, ODK's `no_mirror_refresh_imports`), which
+            // outranks the request exactly as a pinned import does above.
+            ensure_mirror(repo, imp, !repo.mirrors_pinned)?;
+            build_one_import(repo, plan, imp, &catalog, &work)
+                .with_context(|| format!("rebuilding import module `{}`", imp.id))?;
+            repo.built.lock().unwrap().insert(imp.output.clone());
+        }
+        return Ok(());
+    }
     build_imports_fresh(repo, plan, exclude_large, true)
 }
 
@@ -1077,7 +1554,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
         return Ok(true);
     }
 
-    eprintln!("make: regenerating patterns/definitions.owl from {} DOSDP pattern(s)", names.len());
+    status!("make: regenerating patterns/definitions.owl from {} DOSDP pattern(s)", names.len());
     // Labels + the permutation annotation index come from the edit ontology AND
     // its import closure (resolved via the catalog) — the fillers' labels live in
     // the imports, so without the closure they cannot be resolved at all.
@@ -1205,7 +1682,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
     // pipeline, `dosdp.steps`. The two IRI stamps are in there; so is any
     // post-processing the repo adds, such as OBA's `query --update`.
     let steps: Vec<crate::plan::step::Step> =
-        dosdp.steps.iter().cloned().map(crate::spec::StepSpec::into_step).collect();
+        dosdp.steps.iter().cloned().map(crate::spec::StepEntry::into_step).collect();
     let work = repo.dir.join(".owlmake-odk-tmp");
     std::fs::create_dir_all(&work).ok();
     let mut defs = run_steps(repo, &steps, defs, &catalog, &work, Some(&dosdp.output), true, None)?;
@@ -1247,7 +1724,7 @@ fn staged_writes(steps: &[crate::plan::step::Step]) -> Vec<String> {
     use crate::plan::step::{Op, Step};
     let mut out = Vec::new();
     for step in steps {
-        match step {
+        match step.effective() {
             Step::Branch { then_steps, else_steps, .. } => {
                 out.extend(staged_writes(then_steps));
                 out.extend(staged_writes(else_steps));
@@ -1448,17 +1925,22 @@ fn write_pattern_terms_from_definitions(repo: &Repo, dosdp: &crate::spec::DosdpS
 /// `all_imports`: (re)build every individual `imports/<id>_import.owl` module the
 /// release declares, from upstream mirrors.
 fn build_all_imports_planned(repo: &Repo, plan: &Plan) -> Result<()> {
-    // Replay the repo's OWN rules when it has them, exactly as `refresh-imports`
-    // does. The synthesized builder derives the standard mirror -> module
-    // pipeline from the import products' flags, which is right for a repo with no
-    // explicit rules and wrong for one that spells its own out: EFO extracts a
-    // BOT module and then filters it, and synthesizing that instead yields a
-    // different module under the source ontology's IRI.
+    // A repo with rules of its own is built exactly as `refresh-imports` builds
+    // it: each module the plan records as an import PRODUCT runs the product's
+    // pipeline, and anything else `all_imports` needs is replayed as the rule the
+    // plan recorded. Replaying the `all_imports` target itself would walk its
+    // prerequisites through the recorded rules alone and never run a product's
+    // steps — so an edit to the product (EFO's `trim: false` on the OBA filter)
+    // changed nothing. The synthesized builder below derives the standard
+    // mirror -> module pipeline from the products' flags, which is right for a
+    // repo with no explicit rules and wrong for one that spells its own out: EFO
+    // extracts a BOT module and then filters it, and synthesizing that instead
+    // yields a different module under the source ontology's IRI.
     if has_import_rules(repo) {
-        return run_target_recipe_planned(repo, "all_imports");
+        return refresh_imports_planned(repo, plan, false);
     }
     if plan.imports.is_empty() {
-        eprintln!("make: no import products configured");
+        status!("make: no import products configured");
     }
     // Under base merging there are no per-product modules: `IMPORT_ROOTS` is
     // `merged_import` alone, and `$(IMPORT_FILES)` — the release asset — is that
@@ -1493,7 +1975,7 @@ fn build_all_imports_planned(repo: &Repo, plan: &Plan) -> Result<()> {
         }
         return Ok(());
     }
-    for imp in &plan.imports {
+    for imp in plan.imports.iter().filter(|i| !i.is_mirror_only()) {
         build_one_import(repo, plan, imp, &catalog, &work)
             .with_context(|| format!("building import module `{}`", imp.id))?;
     }
@@ -1531,7 +2013,7 @@ fn memo_has(repo: &Repo, target: &str) -> bool {
         .ok()
         .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default();
-    repo.built.borrow().iter().any(|m| same_target(m, target, &dir_rel))
+    repo.built.lock().unwrap().iter().any(|m| same_target(m, target, &dir_rel))
 }
 
 /// Whether two target spellings name the same file.
@@ -1552,6 +2034,65 @@ fn same_target(a: &str, b: &str, dir_rel: &str) -> bool {
     a == format!("{dir_rel}/{b}") || b == format!("{dir_rel}/{a}")
 }
 
+/// Whether this run `--assume-new`s the file `name` names (either spelling —
+/// plan-relative or build-directory-relative).
+fn assumed_new(repo: &Repo, name: &str) -> bool {
+    if repo.assume_new.is_empty() {
+        return false;
+    }
+    let dir_rel = repo
+        .dir
+        .strip_prefix(&repo.root)
+        .ok()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    repo.assume_new.iter().any(|w| same_target(w, name, &dir_rel))
+}
+
+/// Bring the import module `name` into being for a build that reads it, and say
+/// whether this call built it.
+///
+/// An import PRODUCT has no rule of its own: the product's recorded pipeline
+/// builds it. A module on disk stands, as any kept (`IMP`) target does; an
+/// absent one is built this once — unless the run pinned the imports
+/// explicitly, in which case there is nothing to build it from. EFO gitignores
+/// `imports/mondo_import.owl`, so on a fresh checkout `build/efo.owl` needs a
+/// module nothing has written yet.
+///
+/// The release's import stages and a target's prerequisite walk both ask this
+/// one question, so both give the same answer for an absent module.
+fn ensure_import_module(
+    repo: &Repo,
+    imp: &crate::plan::ImportPlan,
+    name: &str,
+    seen: &mut std::collections::HashSet<String>,
+) -> Result<bool> {
+    if !seen.insert(name.to_string()) {
+        return Ok(false);
+    }
+    let Some(mut held) = claim(repo, name) else { return Ok(false) };
+    let present = repo.dir.join(name).exists() || repo.root.join(&imp.output).exists();
+    if present && !repo.refresh_imports {
+        return Ok(false);
+    }
+    if !present && repo.imports_pinned {
+        bail!(
+            "`{name}` is an import module pinned by IMP=false but is not present. \
+             Under IMP=false nothing builds it — re-run with IMP=true (or `--rebuild imports`)"
+        );
+    }
+    if !present && !repo.refresh_imports {
+        status!("make: `{name}` is kept by default (IMP) but absent — building it from its pipeline this once");
+    }
+    let catalog = load_catalog_planned(repo);
+    let work = repo.output_dir.join(".owlmake-odk-tmp");
+    std::fs::create_dir_all(&work)?;
+    build_one_import(repo, repo.plan, imp, &catalog, &work)
+        .with_context(|| format!("building import module `{}`", imp.id))?;
+    held.succeed();
+    Ok(true)
+}
+
 fn run_target_recipe_inner(
     repo: &Repo,
     target: &str,
@@ -1560,10 +2101,13 @@ fn run_target_recipe_inner(
     // Per-run, not per-entry-point: see `Repo::built`. `seen` still guards the
     // local recursion, but the run-wide set is what makes a target's recipe run
     // once however many callers reach it.
-    if !seen.insert(target.to_string()) || memo_has(repo, target) {
+    if !seen.insert(target.to_string()) {
         return Ok(());
     }
-    repo.built.borrow_mut().insert(target.to_string());
+    let Some(mut held) = claim(repo, target) else { return Ok(()) };
+    // Visited is built, whatever comes of it: a target that failed is not tried
+    // again by the next path that reaches it.
+    held.succeed();
     let a = repo.target(target).ok_or_else(|| {
         anyhow::anyhow!(
             "no rule to make target `{target}`: the plan defines no such target. \
@@ -1587,7 +2131,11 @@ fn run_target_recipe_inner(
     // instead is a silent substitution of a different input (P5), and it is how a
     // `MIR=false` run came to overwrite pinned copies with today's upstream.
     if let Some(pin) = pinned_by(repo, target) {
-        if !repo.dir.join(target).exists() {
+        if repo.dir.join(target).exists() {
+            status!("make: `{target}` pinned ({pin})");
+            return Ok(());
+        }
+        if pin.explicit {
             bail!(
                 "`{target}` is pinned by {pin} but is not present. \
                  Under {pin} the rules that build it do not exist, so there is nothing to \
@@ -1596,8 +2144,16 @@ fn run_target_recipe_inner(
                 pin.group,
             );
         }
-        status!("make: `{target}` pinned ({pin})");
-        return Ok(());
+        // Kept only by the group's DEFAULT, and absent. The default pins the
+        // content of a file that exists; a target nothing committed (EFO
+        // gitignores `imports/mondo_import.owl`) has no content to pin, and
+        // refusing it would leave every fresh clone — CI first among them —
+        // unable to build at all. Said out loud, so the run reads as what it
+        // did; an explicit `{flag}=false` still refuses above.
+        status!(
+            "make: `{target}` is kept by default ({pin}) but absent — building it this once",
+            pin = pin
+        );
     }
 
     // An AGGREGATE target — prerequisites plus nothing but bookkeeping (EFO's
@@ -1619,7 +2175,13 @@ fn run_target_recipe_inner(
     // Build prerequisites the plan knows how to build (phony sub-targets like
     // `sparql_test`, or file targets); plain source files are left for the steps
     // to consume.
+    //
+    // With more than one job the prerequisites are built side by side: each is
+    // a job of its own, and what two of them share — a sub-target both need —
+    // is built once, by whichever claims it first, while the other waits.
     let mut failures: Vec<(String, anyhow::Error)> = Vec::new();
+    // The prerequisites this target builds, after the ones it leaves alone.
+    let mut to_build: Vec<&String> = Vec::new();
     for pre in &a.needs {
         // `all_robot_plugins` provisions plugin JARs (kgcl, uberon, …) into a
         // plugin directory. owlmake implements every one of those commands itself
@@ -1630,23 +2192,74 @@ fn run_target_recipe_inner(
             continue;
         }
         if repo.target(pre).is_none() {
+            // No rule of its own — but an import PRODUCT is built by its recorded
+            // pipeline, and a release that needs the module cannot wait for one.
+            if let Some(imp) = import_module_for(repo.plan, pre) {
+                ensure_import_module(repo, imp, pre, seen)?;
+            }
             continue;
         }
-        if !aggregate {
-            run_target_recipe_inner(repo, pre, seen)?;
+        // An `--assume-new` file is treated as just modified: dependents run,
+        // and the file itself is neither rebuilt nor touched.
+        if assumed_new(repo, pre) {
             continue;
         }
-        // Already visited via another path: it ran, and reporting it twice would
-        // be a lie about how much work this target did.
-        if seen.contains(pre) {
-            status!("[ ok ] {pre} (already run)");
+        if skip_missing_intermediate(repo, target, pre) {
             continue;
         }
-        match run_target_recipe_inner(repo, pre, seen) {
-            Ok(()) => status!("[PASS] {pre}"),
-            Err(e) => {
-                status!("[FAIL] {pre}: {e:#}");
-                failures.push((pre.clone(), e));
+        to_build.push(pre);
+    }
+    if repo.jobs > 1 && to_build.len() > 1 {
+        let graph = schedule::Graph {
+            names: to_build.iter().map(|p| p.to_string()).collect(),
+            deps: vec![Vec::new(); to_build.len()],
+        };
+        let job = |i: usize| -> Result<()> {
+            let pre = to_build[i];
+            // Already built via another path: it ran, and reporting it twice
+            // would be a lie about how much work this target did.
+            if aggregate && memo_has(repo, pre) {
+                status!("[ ok ] {pre} (already run)");
+                return Ok(());
+            }
+            let mut seen = std::collections::HashSet::new();
+            let r = run_target_recipe_inner(repo, pre, &mut seen);
+            if aggregate {
+                match &r {
+                    Ok(()) => status!("[PASS] {pre}"),
+                    Err(e) => status!("[FAIL] {pre}: {e:#}"),
+                }
+            }
+            r
+        };
+        let outcomes = schedule::run(&graph, repo.jobs, aggregate, &job);
+        for (i, outcome) in outcomes.into_iter().enumerate() {
+            seen.insert(to_build[i].clone());
+            if let schedule::Outcome::Failed(e) = outcome {
+                if !aggregate {
+                    return Err(e);
+                }
+                failures.push((to_build[i].clone(), e));
+            }
+        }
+    } else {
+        for pre in to_build {
+            if !aggregate {
+                run_target_recipe_inner(repo, pre, seen)?;
+                continue;
+            }
+            // Already visited via another path: it ran, and reporting it twice
+            // would be a lie about how much work this target did.
+            if seen.contains(pre) {
+                status!("[ ok ] {pre} (already run)");
+                continue;
+            }
+            match run_target_recipe_inner(repo, pre, seen) {
+                Ok(()) => status!("[PASS] {pre}"),
+                Err(e) => {
+                    status!("[FAIL] {pre}: {e:#}");
+                    failures.push((pre.clone(), e));
+                }
             }
         }
     }
@@ -1660,13 +2273,47 @@ fn run_target_recipe_inner(
             names.join(", ")
         );
     }
+    // A prerequisite that neither exists nor has a rule refuses the target
+    // BEFORE its recipe runs — running it anyway would litter the recipe's
+    // redirect and staging files on a build that can only fail. ECTO's
+    // `old_modules/%.omn` needs `syns.json`, which is absent and has no rule:
+    // the target fails here, with the missing file named, and writes nothing.
+    for pre in &a.needs {
+        if pre == "all_robot_plugins" || pre.ends_with(".jar") {
+            continue;
+        }
+        if repo.dir.join(pre).exists()
+            || repo.target(pre).is_some()
+            || repo.plan.is_phony(pre)
+            || recipe::is_served_image_asset(pre)
+            || assumed_new(repo, pre)
+            || is_native_pattern_product(repo, pre)
+            || mirror_import_for(repo, pre).is_some()
+        {
+            continue;
+        }
+        bail!("no rule to make target `{pre}`, needed by `{target}`");
+    }
+
     // Patterns are native, so their products carry no plan rule — but a target
     // that NEEDS one still has to find it there. `execute_plan` runs the pattern
     // stage up front; a single-target invocation (`om make tmp/seed.txt`) does
     // not, and would build a seed missing all 317 pattern terms. Run it on
-    // demand, once per run (`repo.built`).
-    if a.needs.iter().any(|n| is_native_pattern_product(repo, n) && !repo.dir.join(n).exists()) {
-        if repo.built.borrow_mut().insert("\u{1}patterns".to_string()) {
+    // demand, once per run (`repo.built`). A product the plan DOES carry a rule
+    // for is that rule's to build, not the pattern stage's.
+    let ruled = |n: &str| {
+        repo.plan
+            .artefacts
+            .iter()
+            .chain(repo.plan.prerequisites.iter())
+            .any(|a| a.target == n && !a.missing_rule)
+    };
+    if a.needs
+        .iter()
+        .any(|n| is_native_pattern_product(repo, n) && !ruled(n) && !repo.dir.join(n).exists())
+    {
+        if let Some(mut held) = claim(repo, "\u{1}patterns") {
+            held.succeed();
             if repo.regenerate_patterns {
                 regenerate_patterns_planned(repo, repo.plan)
                     .with_context(|| "regenerating the DOSDP pattern products")?;
@@ -1717,7 +2364,7 @@ fn run_target_recipe_inner(
     if !a.steps.is_empty() && !forced && !repo.plan.is_phony(target) {
         if let Some(out) = repo.target_file(target).filter(|p| p.is_file()) {
             let out_mtime = std::fs::metadata(&out).and_then(|m| m.modified()).ok();
-            let newer = a.needs.iter().any(|pre| {
+            let newer = a.needs.iter().any(|pre| assumed_new(repo, pre)) || a.needs.iter().any(|pre| {
                 let p = repo.target_file(pre).unwrap_or_else(|| repo.dir.join(pre));
                 match (std::fs::metadata(&p).and_then(|m| m.modified()).ok(), out_mtime) {
                     (Some(pm), Some(om)) => pm > om,
@@ -1736,7 +2383,7 @@ fn run_target_recipe_inner(
     // and any `$(eval)` are already resolved — so running them needs no further
     // variable expansion.
     if !a.steps.is_empty() {
-        eprintln!("make: running target `{target}`");
+        status!("make: running target `{target}`");
         let catalog = load_catalog_planned(repo);
         let work = repo.dir.join(".owlmake-odk-tmp");
         std::fs::create_dir_all(&work)?;
@@ -1756,6 +2403,29 @@ fn run_target_recipe_inner(
 /// excluded IRIs, then extract a ⊥-locality module over the seed signature
 /// (the committed `imports/*_terms.txt` plus the edit ontology's own signature).
 /// Mirrors are cached under `mirror/`.
+/// The ontology IRI and version IRI to stamp on the merged import module.
+///
+/// A plan may name the IRI outright (`merged_import_iri`): EFO's modules live
+/// under `http://www.ebi.ac.uk/efo/imports/` while its plan carries the OBO PURL
+/// as `ontology_iri`. Otherwise it is derived from `ontology_iri` and the
+/// module's path — the path of the *document*: without the compression suffix a
+/// gzipped module carries, and relative to the ontology directory even when the
+/// plan spells it from the repository root.
+fn merged_import_iris(
+    ontology_iri: &str,
+    version: &str,
+    explicit: Option<&str>,
+    rel: &str,
+    dir_rel: &str,
+) -> (String, String) {
+    let ontbase = ontology_iri.strip_suffix(".owl").unwrap_or(ontology_iri);
+    let doc = rel.strip_suffix(".gz").unwrap_or(rel);
+    let doc = if dir_rel.is_empty() { doc } else { doc.strip_prefix(&format!("{dir_rel}/")).unwrap_or(doc) };
+    let iri = explicit.map(str::to_string).unwrap_or_else(|| format!("{ontbase}/{doc}"));
+    let ver = format!("{ontbase}/releases/{version}/{doc}");
+    (iri, ver)
+}
+
 fn build_imports_fresh(
     repo: &Repo,
     plan: &Plan,
@@ -1785,10 +2455,12 @@ fn build_imports_fresh(
         plan.imports.iter().filter_map(|i| i.product.clone()).collect();
 
     let mut merged = empty_model();
+    // Classes declared by cached custom modules; joined to the seed below.
+    let mut cached_seed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for p in &products {
         // `refresh-imports-excluding-large` skips the products flagged large.
         if exclude_large && p.is_large {
-            eprintln!("make: skipping large import {} (excluding-large)", p.id);
+            status!("import: skipping large import {} (excluding-large)", p.id);
             continue;
         }
         // Custom mirrors have no plain download URL — the project supplies a
@@ -1798,10 +2470,44 @@ fn build_imports_fresh(
         // `$(ROBOT)` resolving to the owlmake binary) to produce
         // mirror/<id>.owl, then process it like any other mirror.
         if p.mirror_type.as_deref() == Some("custom") {
-            let cached = import_dir.join(format!("{}_import.owl", p.id));
-            if cached.exists() {
-                eprintln!("odk: import {} (custom) — using cached {}", p.id, cached.display());
-                merge_file_into(&mut merged, &cached)?;
+            // The module may be committed gzipped (`<id>_import.owl.gz`: EFO's PR
+            // module is over GitHub's file-size limit as plain RDF/XML), and
+            // `io::load` reads either form. Missing the `.gz` here silently fell
+            // through to the raw mirror, skipping the custom recipe's own steps
+            // (PR's `rename-terms`/`remove-terms`) for the merged import.
+            let cached = [format!("{}_import.owl", p.id), format!("{}_import.owl.gz", p.id)]
+                .into_iter()
+                .map(|f| import_dir.join(f))
+                .find(|c| c.exists());
+            if let Some(cached) = cached {
+                status!("import: {} (custom) — using cached {}", p.id, cached.display());
+                // The recipe that wrote this module already chose its contents,
+                // and the ⊥-extraction below must not shrink that choice. It
+                // would: the seed is the recipe's `*_terms.txt`, and a class the
+                // recipe's OWN extraction kept only because an axiom tied it to a
+                // seed term can have lost that axiom to a later recipe step.
+                // EFO's MONDO module keeps 1,077 gene-defined disease subtypes
+                // (`retinitis pigmentosa 59 ≡ retinitis pigmentosa ⊓ ∃ has
+                // material basis in.HGNC:20603`) because BOT locality keeps an
+                // equivalence that mentions a seed, then strips the HGNC IRIs —
+                // leaving plain subclasses that a second BOT pass over the same
+                // seed drops. Seeding every class the module declares keeps the
+                // merged import a superset of what the recipe produced.
+                if !crate::io::is_empty_ontology_file(&cached) {
+                    let other = crate::io::load(&cached)?;
+                    let before = cached_seed.len();
+                    for ac in other.ont.iter() {
+                        if let horned_owl::model::Component::DeclareClass(d) = &ac.component {
+                            cached_seed.insert(d.0 .0.as_ref().to_string());
+                        }
+                    }
+                    status!(
+                        "import: {} (custom) — seeding its {} declared classes",
+                        p.id,
+                        cached_seed.len() - before
+                    );
+                    merge_loaded_into_as(&mut merged, &other, MergeRole::Input)?;
+                }
                 continue;
             }
         }
@@ -1835,12 +2541,10 @@ fn build_imports_fresh(
         merge_model_into(&mut merged, m);
     }
 
-    // Drop excluded IRIs (the plan's `exclude_iri_patterns`, e.g. `<…/GOCHE_*>`).
-    merged = drop_excluded(merged, plan)?;
-
     // Seed: committed *_terms.txt plus the edit ontology's signature.
-    let seed = import_seed(repo, plan)?;
-    eprintln!("odk: extracting ⊥-module over {} seed terms", seed.len());
+    let mut seed = import_seed(repo, plan)?;
+    seed.extend(cached_seed);
+    status!("import: extracting ⊥-module over {} seed terms", seed.len());
     // Honour the plan's `slme_individuals` policy (`extract --individuals`).
     // ECTO sets `exclude`, so imported individuals — and any now-degenerate
     // Same/DifferentIndividuals axioms left when their peers fall outside the
@@ -1849,10 +2553,19 @@ fn build_imports_fresh(
     if let Some(spec) = &plan.slme_individuals {
         match extract::Individuals::parse(spec) {
             Some(ind) => opts.individuals = ind,
-            None => eprintln!("odk: warning: unknown slme_individuals `{spec}`, using include"),
+            None => status!("import: warning: unknown slme_individuals `{spec}`, using include"),
         }
     }
     let mut module = extract::extract_with(&merged, &seed, Method::Bot, &opts);
+    drop(merged);
+
+    // Drop excluded IRIs (the plan's `exclude_iri_patterns`, e.g. `<…/GOCHE_*>`)
+    // from the MODULE, which is where the ODK recipe runs its `remove` chain
+    // (`merge … extract … $(foreach x,$(EXCLUDE_IRIS),remove --select "$(x)")`).
+    // Removing from the merged mirror instead — six million axioms for EFO,
+    // one structure-preserving pass per pattern — took nine minutes for sixteen
+    // patterns; on the module it is a few seconds.
+    module = drop_excluded(module, plan)?;
 
     // The merged-import rule post-processes the ⊥-module before writing it:
     //
@@ -1903,14 +2616,14 @@ fn build_imports_fresh(
     // one stale.
     let rel = plan.merged_import.as_deref().unwrap_or("imports/merged_import.owl");
     let out = repo.dir.join(rel);
-    // 4. `$(ANNOTATE_CONVERT_FILE)` — `annotate --ontology-iri $(ONTBASE)/$@
-    //    --version-iri $(ONTBASE)/releases/$(VERSION)/$@ --annotation
-    //    owl:versionInfo $(VERSION) convert -f ofn`. Without it the module goes out
-    //    under a bare `Ontology(`, with neither IRI nor `owl:versionInfo`. `$@` is
-    //    the target as the rule names it, so both IRIs follow the plan's path.
-    let ontbase = plan.ontology_iri.strip_suffix(".owl").unwrap_or(&plan.ontology_iri);
-    let mi_iri = format!("{ontbase}/{rel}");
-    let mi_ver = format!("{ontbase}/releases/{}/{rel}", plan.version);
+    let dir_rel = repo
+        .dir
+        .strip_prefix(&repo.root)
+        .ok()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (mi_iri, mi_ver) =
+        merged_import_iris(&plan.ontology_iri, &plan.version, plan.merged_import_iri.as_deref(), rel, &dir_rel);
     let annos =
         vec!["http://www.w3.org/2002/07/owl#versionInfo".to_string(), plan.version.clone()];
     let mut module =
@@ -1923,8 +2636,344 @@ fn build_imports_fresh(
     // owl/rdf/xml/xsd/rdfs, and nothing else.
     module.format_prefixes_cleared = true;
     module.prefixes = crate::io::robot_ofn_prefixes(&module);
+    if let Some(shards_rel) = plan.merged_import_shards.as_deref() {
+        return write_sharded_merged_import(repo, plan, module, &out, &dir_rel, shards_rel, &mi_iri);
+    }
     crate::io::save_as(&mut module, &out, crate::io::Format::Functional)?;
-    eprintln!("odk: wrote {} ({} components)", out.display(), module.ont.iter().count());
+    status!("import: wrote {} ({} components)", out.display(), module.ont.iter().count());
+    Ok(())
+}
+
+/// Default cap on a shard file, in bytes of functional syntax: above it the
+/// shard is split on its local ids (see [`write_sharded_merged_import`]).
+/// `merged_import_shard_bytes` in the plan overrides it.
+const DEFAULT_SHARD_BYTES: usize = 10 * 1024 * 1024;
+
+/// The entity an axiom is *about*, for sharding: the declared entity, the
+/// subclass, the first operand, the annotated subject, the property, the
+/// individual. Ontology-level components (`Ontology`, `Import`, annotations on
+/// the ontology) have none and go to the index.
+fn shard_owner(c: &horned_owl::model::Component<horned_owl::model::RcStr>) -> Option<String> {
+    use horned_owl::model::*;
+    fn ce(e: &ClassExpression<horned_owl::model::RcStr>) -> Option<String> {
+        match e {
+            ClassExpression::Class(c) => Some(c.0.to_string()),
+            _ => None,
+        }
+    }
+    fn ope(e: &ObjectPropertyExpression<horned_owl::model::RcStr>) -> String {
+        match e {
+            ObjectPropertyExpression::ObjectProperty(p) | ObjectPropertyExpression::InverseObjectProperty(p) => {
+                p.0.to_string()
+            }
+        }
+    }
+    fn ind(i: &Individual<horned_owl::model::RcStr>) -> Option<String> {
+        match i {
+            Individual::Named(n) => Some(n.0.to_string()),
+            Individual::Anonymous(_) => None,
+        }
+    }
+    match c {
+        Component::DeclareClass(d) => Some(d.0 .0.to_string()),
+        Component::DeclareObjectProperty(d) => Some(d.0 .0.to_string()),
+        Component::DeclareAnnotationProperty(d) => Some(d.0 .0.to_string()),
+        Component::DeclareDataProperty(d) => Some(d.0 .0.to_string()),
+        Component::DeclareNamedIndividual(d) => Some(d.0 .0.to_string()),
+        Component::DeclareDatatype(d) => Some(d.0 .0.to_string()),
+        Component::SubClassOf(a) => ce(&a.sub),
+        Component::EquivalentClasses(a) => a.0.iter().find_map(ce),
+        Component::DisjointClasses(a) => a.0.iter().find_map(ce),
+        Component::DisjointUnion(a) => Some(a.0 .0.to_string()),
+        Component::SubObjectPropertyOf(a) => Some(match &a.sub {
+            SubObjectPropertyExpression::ObjectPropertyExpression(e) => ope(e),
+            SubObjectPropertyExpression::ObjectPropertyChain(_) => ope(&a.sup),
+        }),
+        Component::EquivalentObjectProperties(a) => a.0.first().map(ope),
+        Component::DisjointObjectProperties(a) => a.0.first().map(ope),
+        Component::InverseObjectProperties(a) => Some(ope(&a.0)),
+        Component::ObjectPropertyDomain(a) => Some(ope(&a.ope)),
+        Component::ObjectPropertyRange(a) => Some(ope(&a.ope)),
+        Component::FunctionalObjectProperty(a) => Some(ope(&a.0)),
+        Component::InverseFunctionalObjectProperty(a) => Some(ope(&a.0)),
+        Component::ReflexiveObjectProperty(a) => Some(ope(&a.0)),
+        Component::IrreflexiveObjectProperty(a) => Some(ope(&a.0)),
+        Component::SymmetricObjectProperty(a) => Some(ope(&a.0)),
+        Component::AsymmetricObjectProperty(a) => Some(ope(&a.0)),
+        Component::TransitiveObjectProperty(a) => Some(ope(&a.0)),
+        Component::SubDataPropertyOf(a) => Some(a.sub.0.to_string()),
+        Component::EquivalentDataProperties(a) => a.0.first().map(|d| d.0.to_string()),
+        Component::DisjointDataProperties(a) => a.0.first().map(|d| d.0.to_string()),
+        Component::DataPropertyDomain(a) => Some(a.dp.0.to_string()),
+        Component::DataPropertyRange(a) => Some(a.dp.0.to_string()),
+        Component::FunctionalDataProperty(a) => Some(a.0 .0.to_string()),
+        Component::DatatypeDefinition(a) => Some(a.kind.0.to_string()),
+        Component::HasKey(a) => ce(&a.ce),
+        Component::SameIndividual(a) => a.0.iter().find_map(ind),
+        Component::DifferentIndividuals(a) => a.0.iter().find_map(ind),
+        Component::ClassAssertion(a) => ind(&a.i),
+        Component::ObjectPropertyAssertion(a) => ind(&a.from),
+        Component::NegativeObjectPropertyAssertion(a) => ind(&a.from),
+        Component::DataPropertyAssertion(a) => ind(&a.from),
+        Component::NegativeDataPropertyAssertion(a) => ind(&a.from),
+        Component::AnnotationAssertion(a) => match &a.subject {
+            AnnotationSubject::IRI(i) => Some(i.to_string()),
+            AnnotationSubject::AnonymousIndividual(_) => None,
+        },
+        Component::SubAnnotationPropertyOf(a) => Some(a.sub.0.to_string()),
+        Component::AnnotationPropertyDomain(a) => Some(a.ap.0.to_string()),
+        Component::AnnotationPropertyRange(a) => Some(a.ap.0.to_string()),
+        Component::OntologyID(_) | Component::DocIRI(_) | Component::Import(_) | Component::OntologyAnnotation(_) => None,
+        _ => None,
+    }
+}
+
+/// The shard an entity IRI belongs to: its OBO id space under the OBO PURL base,
+/// by the same OBO 1.4 rule the OBO writer translates IRIs with
+/// (`…/obo/MONDO_0005267` → `mondo`, `…/obo/OBA_VT0010487` → `oba`,
+/// `…/obo/NCBITaxon_Union_0000030` → `ncbitaxon_union`). An IRI that is not an
+/// OBO PURL — a dbpedia country, an HGNC gene page, a SwissLipids id — goes to
+/// `other`.
+fn shard_key(iri: &str) -> String {
+    const OBO: &str = "http://purl.obolibrary.org/obo/";
+    iri.strip_prefix(OBO)
+        .filter(|id| !id.contains(['/', '#']))
+        .and_then(crate::io::obo::canonical_prefixed_id)
+        .map(|(pre, _)| pre.to_ascii_lowercase())
+        .unwrap_or_else(|| "other".to_string())
+}
+
+/// One entity's axioms within a shard, keyed for splitting by its local id.
+struct ShardEntry {
+    local: String,
+    size: usize,
+    comps: Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>,
+}
+
+/// The local id an entity is split on: the part of the IRI after the last
+/// `/` or `#`, after its OBO id space prefix (`MONDO_0005267` → `0005267`),
+/// lower-cased, with anything but ASCII letters and digits folded to `_` so it
+/// can name a file.
+fn local_id_key(iri: &str) -> String {
+    let local = iri.rsplit(['/', '#']).next().unwrap_or(iri);
+    let local = crate::io::obo::canonical_prefixed_id(local).map(|(_, l)| l).unwrap_or(local);
+    local
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect()
+}
+
+/// Split a shard's entries into files of at most `cap` bytes, hierarchically on
+/// the local id: a shard that fits is one file `<key>.owl`; one that does not is
+/// grouped on the next character of its local ids (`mondo-000`, `mondo-001`, …),
+/// and a group still over the cap is split again on the character after
+/// (`mondo-0010`, …). Membership is fixed by the id, so a new entity lands in
+/// exactly one file, and a split only ever renames the bucket that overflowed.
+/// A run of characters every id shares (MONDO's leading `00`) is skipped over
+/// rather than made a level of its own.
+///
+/// Splits are sticky. `existing` is the layout already on disk (the suffixes of
+/// this key's files from the previous build, committed with the repo), and a
+/// bucket that was split stays split however small it has become — otherwise
+/// removing an import could merge a bucket back and rename every file under it.
+/// A bucket that empties is simply not written, and the stale file is removed.
+fn split_shard(
+    key: &str,
+    suffix: String,
+    entries: Vec<ShardEntry>,
+    depth: usize,
+    cap: usize,
+    existing: &std::collections::BTreeSet<String>,
+    out: &mut Vec<(String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>)>,
+) {
+    let total: usize = entries.iter().map(|e| e.size).sum();
+    let exhausted = entries.iter().all(|e| e.local.len() <= depth);
+    let split_before = existing.iter().any(|s| s.len() > suffix.len() && s.starts_with(suffix.as_str()));
+    // One entity cannot be split (its axioms stay together), unless the layout
+    // on disk already goes deeper, in which case it is placed where it was.
+    if exhausted || (entries.len() <= 1 && !split_before) || !(total > cap || split_before) {
+        let stem = if suffix.is_empty() { key.to_string() } else { format!("{key}-{suffix}") };
+        out.push((stem, entries.into_iter().flat_map(|e| e.comps).collect()));
+        return;
+    }
+    let mut groups: std::collections::BTreeMap<char, Vec<ShardEntry>> = std::collections::BTreeMap::new();
+    for e in entries {
+        let c = e.local.chars().nth(depth).unwrap_or('_');
+        groups.entry(c).or_default().push(e);
+    }
+    for (c, g) in groups {
+        split_shard(key, format!("{suffix}{c}"), g, depth + 1, cap, existing, out);
+    }
+}
+
+/// The shard layout already in `dir`: for each key, the suffixes of its files
+/// (`mondo.owl` → `""`, `mondo-0012.owl` → `"0012"`).
+fn existing_shard_layout(dir: &Path) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+    let mut out: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = std::collections::BTreeMap::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".owl") else { continue };
+            let (key, suffix) = match stem.rsplit_once('-') {
+                Some((k, s)) => (k.to_string(), s.to_string()),
+                None => (stem.to_string(), String::new()),
+            };
+            out.entry(key).or_default().insert(suffix);
+        }
+    }
+    out
+}
+
+/// Replace (or add, before `</catalog>`) the `<group id="…">` of an XML catalog
+/// with one `<uri name=IRI uri=PATH/>` per entry. The group is the build's:
+/// everything else in the catalog — the curators' and Protégé's own entries —
+/// is left byte-for-byte. Paths are catalog-relative, as Protégé writes them.
+fn write_catalog_group(catalog: &Path, id: &str, entries: &[(String, String)]) -> Result<()> {
+    let text = std::fs::read_to_string(catalog)?;
+    let open = format!("<group id=\"{id}\"");
+    let mut block = String::new();
+    block.push_str(&format!("    {open} prefer=\"public\" xml:base=\"\">\n"));
+    for (iri, path) in entries {
+        block.push_str(&format!("        <uri name=\"{iri}\" uri=\"{path}\"/>\n"));
+    }
+    block.push_str("    </group>\n");
+    let out = if let Some(start) = text.find(&open) {
+        // From the start of that line to the end of the line holding `</group>`.
+        let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+        let close = text[start..].find("</group>").map(|i| start + i + "</group>".len())
+            .ok_or_else(|| anyhow::anyhow!("catalog {}: group `{id}` is not closed", catalog.display()))?;
+        let line_end = text[close..].find('\n').map_or(text.len(), |i| close + i + 1);
+        format!("{}{}{}", &text[..line_start], block, &text[line_end..])
+    } else if let Some(end) = text.rfind("</catalog>") {
+        format!("{}{}{}", &text[..end], block, &text[end..])
+    } else {
+        anyhow::bail!("catalog {} has no </catalog>", catalog.display());
+    };
+    if out != text {
+        std::fs::write(catalog, out)?;
+    }
+    Ok(())
+}
+
+/// Write the merged import as one functional-syntax document per source
+/// ontology under `shards_rel`, and `out` as the index that `owl:imports` them.
+///
+/// Every shard is a complete ontology document with its own IRI, derived from
+/// the index's (`…/imports/merged_import.owl` → `…/imports/merged/<key>.owl`),
+/// so any OWL tool loads the closure through the catalog — one `rewriteURI`
+/// line for the shard directory. Files the previous build wrote and this one
+/// did not are removed, so a shard that emptied or split leaves nothing stale.
+fn write_sharded_merged_import(
+    repo: &Repo,
+    plan: &Plan,
+    module: crate::model::Model,
+    out: &Path,
+    dir_rel: &str,
+    shards_rel: &str,
+    mi_iri: &str,
+) -> Result<()> {
+    use horned_owl::model::{Component, Import, MutableOntology};
+    let shards_dir = repo.dir.join(shards_rel);
+    std::fs::create_dir_all(&shards_dir)?;
+    // Partition. Ontology-level components stay with the index.
+    let mut shards: std::collections::BTreeMap<String, Vec<(String, horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>)>> =
+        std::collections::BTreeMap::new();
+    let mut index_level = Vec::new();
+    for ac in module.ont.iter() {
+        match shard_owner(&ac.component) {
+            Some(iri) => shards.entry(shard_key(&iri)).or_default().push((iri, ac.clone())),
+            None => index_level.push(ac.clone()),
+        }
+    }
+    // The IRI directory the shards hang off: the index's, plus the shard
+    // directory's own name (`imports/merged` under `imports/merged_import.owl`).
+    let dir_name = Path::new(shards_rel)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "merged".into());
+    let iri_dir = mi_iri.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_else(|| mi_iri.to_string());
+    let mut written: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    let mut shard_iris: Vec<String> = Vec::new();
+    let mut total = 0usize;
+    let cap = plan.merged_import_shard_bytes.unwrap_or(DEFAULT_SHARD_BYTES).max(1);
+    let layout = existing_shard_layout(&shards_dir);
+    let no_files = std::collections::BTreeSet::new();
+    for (key, entries) in shards {
+        // Group by owner, measure, and split hierarchically on the local id.
+        let mut by_owner: std::collections::BTreeMap<String, ShardEntry> = std::collections::BTreeMap::new();
+        for (owner, ac) in entries {
+            let e = by_owner.entry(owner.clone()).or_insert_with(|| ShardEntry {
+                local: local_id_key(&owner),
+                size: 0,
+                comps: Vec::new(),
+            });
+            e.size += crate::io::owlfunc::render_component_line(&ac).len() + 1;
+            e.comps.push(ac);
+        }
+        let mut files: Vec<(String, Vec<horned_owl::model::AnnotatedComponent<horned_owl::model::RcStr>>)> = Vec::new();
+        split_shard(&key, String::new(), by_owner.into_values().collect(), 0, cap, layout.get(&key).unwrap_or(&no_files), &mut files);
+        for (stem, mut comps) in files {
+            comps.sort_by(|a, b| crate::io::owlfunc::cmp_component(&a.component, &b.component));
+            let file = format!("{stem}.owl");
+            let shard_rel = format!("{shards_rel}/{file}");
+            let shard_iri = format!("{iri_dir}/{dir_name}/{file}");
+            let (iri, ver) = merged_import_iris(&plan.ontology_iri, &plan.version, Some(&shard_iri), &shard_rel, dir_rel);
+            let mut m = empty_model();
+            for ac in comps {
+                total += 1;
+                m.ont.insert(ac);
+            }
+            let mut m = crate::cmd::annotate::annotate(m, Some(&iri), Some(&ver), &[], &[], false)?;
+            m.format_prefixes_cleared = true;
+            m.prefixes = crate::io::robot_ofn_prefixes(&m);
+            let path = shards_dir.join(&file);
+            crate::io::save_as(&mut m, &path, crate::io::Format::Functional)?;
+            written.insert(path);
+            shard_iris.push(iri);
+        }
+    }
+    // Stale shards from an earlier layout.
+    if let Ok(rd) = std::fs::read_dir(&shards_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "owl") && !written.contains(&p) {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+    // Protégé's catalog library resolves `<uri>` entries and not `rewriteURI`,
+    // so the catalog carries one entry per shard, in a group this build owns.
+    if let Some(rel) = plan.catalog_file.as_deref() {
+        let catalog = repo.dir.join(rel);
+        if catalog.exists() {
+            let entries: Vec<(String, String)> = shard_iris
+                .iter()
+                .map(|iri| {
+                    let file = iri.rsplit('/').next().unwrap_or(iri);
+                    (iri.clone(), format!("{shards_rel}/{file}"))
+                })
+                .collect();
+            write_catalog_group(&catalog, "merged import shards", &entries)?;
+        }
+    }
+    // The index: the module's own header, annotations and an import per shard.
+    let mut index = empty_model();
+    for ac in index_level {
+        index.ont.insert(ac);
+    }
+    for iri in &shard_iris {
+        index.ont.insert(Component::Import(Import(index.build.iri(iri.as_str()))));
+    }
+    index.format_prefixes_cleared = true;
+    index.prefixes = crate::io::robot_ofn_prefixes(&index);
+    crate::io::save_as(&mut index, out, crate::io::Format::Functional)?;
+    status!(
+        "import: wrote {} ({} components in {} shard(s) under {})",
+        out.display(),
+        total,
+        shard_iris.len(),
+        shards_dir.display()
+    );
     Ok(())
 }
 
@@ -1954,6 +3003,17 @@ fn build_one_import(
 
     let src_path = ensure_mirror(repo, imp, repo.refresh_mirrors)?;
 
+    // A term file the pipeline reads may be one the plan builds — the seed queried
+    // from the merged edit file — rather than a committed list. Bring each of
+    // those up to date before anything is extracted against it.
+    let mut seen = std::collections::HashSet::new();
+    for term_file in imp.seed_term_files() {
+        if repo.target(&term_file).is_some() {
+            run_target_recipe_inner(repo, &term_file, &mut seen)
+                .with_context(|| format!("import `{}`: building its seed {term_file}", imp.id))?;
+        }
+    }
+
     let mut model = crate::io::load(&src_path)?;
 
     // Drop globally-excluded IRIs (the plan's `exclude_iri_patterns`, e.g.
@@ -1979,7 +3039,11 @@ fn build_one_import(
     model = run_steps(repo, &steps, model, catalog, work, Some(&imp.output), true, Some(&src_path))
         .with_context(|| format!("building import {}", imp.id))?;
 
-    crate::io::save_as(&mut model, &out, crate::io::Format::RdfXml)?;
+    // The module is written in the format its pipeline converts to; one that
+    // names none is RDF/XML.
+    let format = steps_format(&imp.output, &steps).unwrap_or(crate::io::Format::RdfXml);
+    crate::io::save_as(&mut model, &out, format)?;
+    clear_staging_of(repo, &imp.output, &steps);
     // The stage files this pipeline threaded the model through carried it from
     // one step to the next and nothing reads them again; the built tree holds the
     // module, not the ⊥-module it was filtered from.
@@ -1989,8 +3053,8 @@ fn build_one_import(
         }
     }
     if !crate::progress::stage_active() {
-        eprintln!(
-            "odk: built import {} → {} ({} components)",
+        status!(
+            "import: built {} → {} ({} components)",
             imp.id,
             out.display(),
             model.ont.iter().count()
@@ -2027,7 +3091,7 @@ fn remove_transient(repo: &Repo, path: &str) {
 /// A run that did not remake one leaves it where it found it: the build removes
 /// what it wrote, not what was already there.
 pub fn sweep_transients(repo: &crate::odk::OdkRepo, plan: &Plan, goals: &[String]) {
-    let built = repo.built.borrow();
+    let built = repo.built.lock().unwrap();
     for target in &plan.transient_targets {
         if !built.iter().any(|b| same_path(b, target)) {
             continue;
@@ -2061,7 +3125,7 @@ fn is_shell_step(s: &crate::plan::step::Step) -> bool {
         Step::Shell { .. }
             | Step::Jq(_)
             | Step::Sssom(_)
-            | Step::CliRobot { .. }
+            | Step::OwlmakeCli { .. }
     )
 }
 
@@ -2069,7 +3133,7 @@ fn is_shell_step(s: &crate::plan::step::Step) -> bool {
 /// command line, decomposed here exactly as a recipe line would be (the
 /// `robot`/`jq`/`sssom` command words resolving to the owlmake binary, file ops
 /// run natively, only genuine text processors reaching `sh`). `Jq`/`Sssom`/
-/// `CliRobot` recorded argv tokens, so they invoke the binary directly.
+/// `OwlmakeCli` recorded argv tokens, so they invoke the binary directly.
 ///
 /// `UnsupportedShell` is "unsupported" only in the sense that owlmake has no
 /// native engine for the command word and does not probe the PATH at plan time —
@@ -2193,8 +3257,8 @@ fn run_shell_step(repo: &Repo, step: &Step) -> Result<()> {
         Step::Sssom(args) => {
             args_run(args).with_context(|| format!("step: {}", args.join(" ")))
         }
-        // A `CliRobot` outside a model pipeline (no ontology to thread) just runs.
-        Step::CliRobot { name, args } => {
+        // A `OwlmakeCli` outside a model pipeline (no ontology to thread) just runs.
+        Step::OwlmakeCli { name, args } => {
             let mut argv = vec![name.clone()];
             argv.extend(resolve_published_argv(repo, args));
             args_run(&argv).with_context(|| format!("step: robot {name}"))
@@ -2203,7 +3267,7 @@ fn run_shell_step(repo: &Repo, step: &Step) -> Result<()> {
     }
 }
 
-/// Run a `CliRobot` step *inside* a model pipeline.
+/// Run a `OwlmakeCli` step *inside* a model pipeline.
 ///
 /// owlmake exposes these as chained CLI commands that thread a model — UBERON's
 /// `create-species-subset` prunes the ontology and the recipe's `reason … relax …
@@ -2235,6 +3299,10 @@ fn run_cli_robot_step(
     // --queries … -O $(REPORTDIR)`, and `-O` does not match the scan, so
     // `--output <tmp>` would be appended to a command that has no such option and
     // clap would exit 2 — the QC check could not run at all.
+    // `explain` is NOT terminal: the model it hands the next command is the
+    // ontology of its justification axioms (empty when nothing needed
+    // explaining), so the chain file it writes through the appended `--output`
+    // is exactly that ontology and the pass-through would be wrong.
     const TERMINAL_COMMANDS: &[&str] = &[
         "report",
         "verify",
@@ -2243,11 +3311,13 @@ fn run_cli_robot_step(
         "diff",
         "export",
         "export-prefixes",
-        "explain",
         "mirror",
         "check-rdfxml",
         "validate-id-ranges",
         "validate-patterns",
+        // A sub-make runs targets for their side effects; it threads no model
+        // and takes no `--input`/`--output` of its own.
+        "make",
     ];
     let terminal = TERMINAL_COMMANDS.contains(&name)
         || args.iter().any(|a| a == "-o" || a == "--output");
@@ -2315,7 +3385,9 @@ fn run_cli_robot_step(
         });
         i += 1;
     }
-    if !saw_input {
+    // A sub-make reads no ontology at all — handing it the chain file would be
+    // an argument it does not take.
+    if !saw_input && name != "make" {
         argv.push("--input".to_string());
         argv.push(arg_path(&piped_in));
     }
@@ -2357,7 +3429,7 @@ fn step_command_text(step: &Step) -> Option<String> {
     match step {
         Step::Shell { command: c, .. } => Some(c.clone()),
         Step::Jq(args) | Step::Sssom(args) => Some(args.join(" ")),
-        Step::CliRobot { name, args } => Some(format!("{name} {}", args.join(" "))),
+        Step::OwlmakeCli { name, args } => Some(format!("{name} {}", args.join(" "))),
         _ => None,
     }
 }
@@ -2423,10 +3495,15 @@ fn run_shell_step_in_pipeline(
     // would hand that perl owlmake's OBO output instead of the first perl's.
     model_on_disk: bool,
     pipeline_input: Option<&Path>,
+    // The format the recipe writes its target in. A command that edits the target
+    // in place was written against THAT text — `sed` over functional syntax finds
+    // nothing in RDF/XML — so the target is put on disk for it in that format, not
+    // in whichever one its file name suggests.
+    format: Option<crate::io::Format>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
     // A chained command step threads the model rather than touching files.
-    if let Step::CliRobot { name, args } = step {
+    if let Step::OwlmakeCli { name, args } = step {
         return run_cli_robot_step(repo, name, args, model, work, pipeline_input);
     }
     let touches_target = match (target, step_command_text(step)) {
@@ -2468,12 +3545,29 @@ fn run_shell_step_in_pipeline(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if !model_on_disk {
-        crate::io::save(&mut model, &path)?;
+    // The command gets the ontology the pipeline holds — when it holds one. With
+    // nothing loaded and nothing built, the target is the command's own to write
+    // (UBERON's `… && ln -f -s ../mirror/ncbitaxondisjoints.owl $@`).
+    let handed_over = !model_on_disk && !model.is_empty();
+    if handed_over {
+        match format {
+            Some(f) => crate::io::save_as(&mut model, &path, f)?,
+            None => crate::io::save(&mut model, &path)?,
+        }
     }
-    run_shell_step(repo, step)?;
+    if let Err(e) = run_shell_step(repo, step) {
+        // What was handed to the command is not the target, and left in place it
+        // would count as one built.
+        if handed_over {
+            let _ = std::fs::remove_file(&path);
+        }
+        return Err(e);
+    }
     // The command may have rewritten the target in place; if it did not, this
-    // re-reads exactly what was just written.
+    // re-reads exactly what was handed over.
+    if !handed_over && !model_on_disk && !path.exists() {
+        return Ok(model);
+    }
     crate::io::load(&path)
 }
 
@@ -2628,6 +3722,29 @@ fn run_steps(
                 model =
                     run_steps(repo, body, model, catalog, work, target, writes_model_after, pipe.as_deref())?;
             }
+            // `cmd || true`. The model is kept aside so a failed step leaves the
+            // pipeline exactly as it was rather than half-applied, and the failure
+            // is REPORTED: the recipe tolerates it, which is not a reason for the
+            // build to be quiet about having done less than it says.
+            Step::MayFail(inner) => {
+                let spare = model.clone();
+                model = match run_steps(
+                    repo,
+                    std::slice::from_ref(inner.as_ref()),
+                    model,
+                    catalog,
+                    work,
+                    target,
+                    writes_model_after,
+                    pipe.as_deref(),
+                ) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        status!("(tolerated) {}: {e:#}", inner.label());
+                        spare
+                    }
+                };
+            }
             // Side-effect file ops (append/sort/print) genuinely mutate the
             // filesystem later steps read, so run them; output-bookkeeping ops
             // (cp/mv of the target) are no-ops here — the model write handles them.
@@ -2638,11 +3755,11 @@ fn run_steps(
             // the repository root; falling off the end of this match would drop
             // it, and the build would produce every artefact and ship none of them.
             Step::File(op) if !op.is_side_effect() && !names_target(op, target) => {
-                op.run(&repo.dir)?;
+                run_file_op(repo, op)?;
             }
             Step::File(op) => {
                 if op.is_side_effect() {
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                 } else if let Some(dst) =
                     staged_target(repo, op, target).filter(|_| staged_by_shell || !writes_model_after)
                 {
@@ -2662,7 +3779,7 @@ fn run_steps(
                     // of the recipe operates on. A closing `mv $@.tmp $@` over a
                     // temp file the pipeline never wrote still falls through to the
                     // final write.
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                     // Re-read only where a later op will operate on it. The
                     // re-read exists to hand the REST of the recipe what is now on
                     // disk; with nothing left to hand it to, a target whose
@@ -2680,12 +3797,28 @@ fn run_steps(
                 }
             }
             Step::Inert(_) => {} // no observable effect; never reaches a plan
+            Step::UnsupportedSubcommand(name) => {
+                bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
+            }
             s if is_shell_step(s) => {
                 model = run_shell_step_in_pipeline(
-                    repo, s, model, target, work, model_on_disk, pipeline_input,
+                    repo,
+                    s,
+                    model,
+                    target,
+                    work,
+                    model_on_disk,
+                    pipeline_input,
+                    target.and_then(|t| steps_format(t, steps)),
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;
+            }
+            // A recorded subcommand owlmake cannot run fails by NAME, not as an
+            // "internal" error: the plan says exactly which command the recipe
+            // wanted, and that is the message the failure has to carry.
+            Step::UnsupportedSubcommand(name) => {
+                bail!("unsupported ontology subcommand `{name}`: this step has no owlmake implementation")
             }
             other => bail!("internal: uncovered step reached executor: {}", other.label()),
         }
@@ -2770,9 +3903,12 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
 
     // Already made this run, or pinned by `MIR=false` — either way it is final.
     let once = format!("\u{1}mirror:{}", imp.id);
-    if dest.exists() && (!refresh || repo.built.borrow().contains(&once)) {
+    // Claimed for the whole of the build below: a second builder of the same
+    // mirror waits here and then finds it on disk.
+    let held = claim(repo, &once);
+    if dest.exists() && (!refresh || held.is_none()) {
         if !refresh && !crate::progress::stage_active() {
-            eprintln!("odk: mirror {} pinned (MIR=false), reusing {}", imp.id, dest.display());
+            status!("mirror: {} pinned (MIR=false), reusing {}", imp.id, dest.display());
         }
         return Ok(dest);
     }
@@ -2783,19 +3919,31 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
     // nothing. A pinned input that is absent is an error, not a licence to go and
     // get a different one (P5).
     if !refresh {
-        bail!(
-            "mirror `{}` is pinned by MIR=false but {} is not present. \
-             Under MIR=false the mirror rules do not exist, so there is nothing to fetch it \
-             with — re-run with MIR=true (or `--rebuild mirrors`) to download it",
-            imp.id,
-            dest.display()
-        );
+        if repo.mirrors_pinned {
+            bail!(
+                "mirror `{}` is pinned by MIR=false but {} is not present. \
+                 Under MIR=false the mirror rules do not exist, so there is nothing to fetch it \
+                 with — re-run with MIR=true (or `--rebuild mirrors`) to download it",
+                imp.id,
+                dest.display()
+            );
+        }
+        // Kept by the group's default and absent: there is no pinned copy to
+        // build against, so the fetch is the only way any consumer proceeds.
+        // The explicit `MIR=false` above still refuses — that pin was stated
+        // about this run (P5) — and the fetch announces itself.
+        status!("make: mirror `{}` is kept by default but absent — fetching it this once", imp.id);
     }
-    if !repo.built.borrow_mut().insert(once) && dest.exists() {
-        return Ok(dest);
-    }
+    let Some(mut held) = held else {
+        if dest.exists() {
+            return Ok(dest);
+        }
+        bail!("mirror `{}` was built by an earlier step of this run, and {} is not there", imp.id, dest.display());
+    };
+    held.succeed();
     if !imp.mirror_steps.is_empty() {
         run_mirror_pipeline(repo, imp, &dest)?;
+        install_staged_mirror(repo, &imp.id, &dest)?;
         if !dest.exists() {
             bail!(
                 "import `{}`: the plan's mirror steps produced no {}",
@@ -2818,7 +3966,7 @@ fn ensure_mirror(repo: &Repo, imp: &crate::plan::ImportPlan, refresh: bool) -> R
         return Ok(dest);
     }
     if !crate::progress::stage_active() {
-        eprintln!("odk: downloading mirror {} ← {}", imp.id, imp.source);
+        status!("mirror: downloading {} ← {}", imp.id, imp.source);
     }
     let bytes = http_get(&imp.source)?;
     std::fs::write(&dest, &bytes)?;
@@ -2864,7 +4012,7 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     let mut rest = imp.mirror_steps.as_slice();
     let mut fetched: Option<PathBuf> = None;
     while let Some(Step::File(op)) = rest.first() {
-        op.run(&repo.dir)?;
+        run_file_op(repo, op)?;
         if let FileOp::Fetch { dst, .. } = op {
             fetched = Some(repo.dir.join(dst));
         }
@@ -2877,12 +4025,13 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     if rest.iter().all(|s| matches!(s, Step::Shell { .. } | Step::File(_))) {
         for step in rest {
             match step {
-                Step::File(op) => op.run(&repo.dir)?,
+                Step::File(op) => run_file_op(repo, op)?,
                 s => run_shell_step(repo, s)?,
             }
         }
         return Ok(());
     }
+    let staged = staged_mirror(repo, &imp.id);
 
     let src = match fetched {
         Some(p) => p,
@@ -2909,7 +4058,7 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
                 );
             } else {
                 if !crate::progress::stage_active() {
-                    eprintln!("odk: mirror {} \u{2190} {}", imp.id, imp.source);
+                    status!("mirror: {} \u{2190} {}", imp.id, imp.source);
                 }
                 let bytes = http_get(&imp.source)?;
                 let p = work.join(format!("{}-download.owl", imp.id));
@@ -2920,11 +4069,50 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     };
     let model = crate::io::load(&src)?;
     let rel = dest.strip_prefix(&repo.dir).unwrap_or(dest).to_string_lossy().to_string();
-    // `writes_model_after: false` — the recipe's own closing `cp
-    // tmp/mirror-<id>.owl mirror/<id>.owl` is what puts the file there, and
-    // nothing else will.
-    run_steps(repo, rest, model, &catalog, &work, Some(&rel), false, Some(&src))
+    // The steps stage the mirror at `tmp/mirror-<id>.owl` by their own outputs,
+    // and `install_staged_mirror` puts it in place; the model is written there
+    // only for a pipeline that names no output of its own.
+    let mut model = run_steps(repo, rest, model, &catalog, &work, Some(&rel), false, Some(&src))
         .with_context(|| format!("building mirror for import `{}`", imp.id))?;
+    if !staged.exists() && !dest.exists() {
+        if let Some(parent) = staged.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::io::save(&mut model, &staged)?;
+    }
+    Ok(())
+}
+
+/// Where a mirror's steps stage their result before it is installed.
+fn staged_mirror(repo: &Repo, id: &str) -> PathBuf {
+    repo.tmp_dir().join(format!("mirror-{id}.owl"))
+}
+
+/// Put the staged mirror in place: `mirror/<id>.owl` becomes the staged file
+/// when the two differ, and is left untouched — timestamp included — when they
+/// are the same, so nothing built from an unchanged mirror is rebuilt. No staged
+/// file means the steps wrote the mirror themselves, or nothing; the caller
+/// checks that it exists.
+fn install_staged_mirror(repo: &Repo, id: &str, dest: &Path) -> Result<()> {
+    let staged = staged_mirror(repo, id);
+    if !staged.is_file() {
+        return Ok(());
+    }
+    let same = dest.is_file() && {
+        let a = std::fs::read(&staged)?;
+        let b = std::fs::read(dest)?;
+        a == b
+    };
+    if same {
+        status!("mirror: {id} unchanged");
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(&staged, dest)
+        .with_context(|| format!("installing {} as {}", staged.display(), dest.display()))?;
+    status!("mirror: {id} updated");
     Ok(())
 }
 
@@ -2943,12 +4131,12 @@ fn run_custom_mirror(repo: &Repo, id: &str, recorded: &[Step]) -> Result<()> {
     // commands name their own `-i`/`-o`), so every step carries a full command
     // line and is run as one.
     if !recorded.is_empty() {
-        eprintln!("odk: import {id} (custom) — running the recorded mirror steps");
+        status!("mirror: {id} (custom) — running the recorded mirror steps");
         for step in recorded {
             match step {
                 Step::Shell { command: _, .. } | Step::File(_) => {
                     if let Step::File(op) = step {
-                        op.run(&repo.dir)?;
+                        run_file_op(repo, op)?;
                     }
                 }
                 s => run_shell_step(repo, s)?,
@@ -2961,7 +4149,7 @@ fn run_custom_mirror(repo: &Repo, id: &str, recorded: &[Step]) -> Result<()> {
     // prerequisite doing the download and processing.
     let phony = format!("mirror-{id}");
     if repo.target(&target).is_some() || repo.target(&phony).is_some() {
-        eprintln!("odk: import {id} (custom) — running planned mirror target `{target}`");
+        status!("mirror: {id} (custom) — running planned mirror target `{target}`");
         ensure_built(repo, &target, 8)?;
         // Some projects only define the phony rule (which writes the mirror
         // itself); run it directly if the file target didn't materialize one.
@@ -3041,15 +4229,22 @@ fn merge_model_into(model: &mut crate::model::Model, other: crate::model::Model)
 ///    `PO_`/`CL_`/`OBI_` scaffolding is re-attached to the surviving superclasses
 ///    of what was removed. That is 168 `SubClassOf` axioms in ECTO's merged
 ///    import that a filter cannot produce at all, because they are in no input.
-fn drop_excluded(mut model: crate::model::Model, plan: &Plan) -> Result<crate::model::Model> {
-    for pattern in &plan.exclude_iri_patterns {
-        let pattern = pattern.trim();
-        if pattern.is_empty() {
-            continue;
-        }
-        model = crate::cmd::remove::remove(model, &[], &[], &[pattern.to_string()], &[], &[])?;
+fn drop_excluded(model: crate::model::Model, plan: &Plan) -> Result<crate::model::Model> {
+    // One `remove` over the union of the patterns: every pattern selects
+    // against the same signature, and `--preserve-structure` bridges each
+    // removed class to its surviving superclasses whether the set is removed
+    // in one pass or sixteen, so the result is the chain's result at a
+    // sixteenth of the cost.
+    let patterns: Vec<String> = plan
+        .exclude_iri_patterns
+        .iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if patterns.is_empty() {
+        return Ok(model);
     }
-    Ok(model)
+    crate::cmd::remove::remove(model, &[], &[], &patterns, &[], &[])
 }
 
 /// The merged-import seed: the union of every import's declared seed term file
@@ -3401,7 +4596,7 @@ fn step_writes_target(steps: &[Step], target: &str) -> bool {
         // over it: 267,196 lines of full ontology — Declarations, SubClassOf,
         // DisjointClasses — where ROBOT writes tags alone. `uberon.owl` merges
         // both tags files, so the 10x bloat reached every subset built from it.
-        Step::CliRobot { args, .. } => args
+        Step::OwlmakeCli { args, .. } => args
             .windows(2)
             .any(|w| matches!(w[0].as_str(), "--write-tags-to" | "--bridge-file" | "-o" | "--output")
                 && w[1] == target),
@@ -3443,7 +4638,7 @@ fn step_writes_target(steps: &[Step], target: &str) -> bool {
 fn step_built_paths(steps: &[Step]) -> Vec<String> {
     let mut out = Vec::new();
     for s in steps {
-        match s {
+        match s.effective() {
             Step::Op(Op::RoundTrip { path, .. }) | Step::Partial { op: Op::RoundTrip { path, .. }, .. } => {
                 out.push(path.clone());
             }
@@ -3453,7 +4648,7 @@ fn step_built_paths(steps: &[Step]) -> Vec<String> {
             }
             Step::Op(Op::Babelon { output: Some(o), .. })
             | Step::Partial { op: Op::Babelon { output: Some(o), .. }, .. } => out.push(o.clone()),
-            Step::CliRobot { args, .. } => {
+            Step::OwlmakeCli { args, .. } => {
                 for w in args.windows(2) {
                     if matches!(w[0].as_str(), "-o" | "--output" | "--write-tags-to" | "--bridge-file") {
                         out.push(w[1].clone());
@@ -3528,7 +4723,13 @@ fn run_artefact(
             // `git show … > $@`, then `merge -i $@`). Nothing has built it yet
             // because nothing was supposed to.
             let self_input = i == a.target;
-            if names_ontology && !self_input && repo.target(i).is_some() {
+            let not_built_this_run =
+                assumed_new(repo, i) || skip_missing_intermediate(repo, &a.target, i);
+            // A mirror is as buildable as a planned target — `resolve_input`
+            // fetches it — so reaching here with one means that fetch FAILED,
+            // and carrying on from an empty model would bury the failure.
+            let buildable = repo.target(i).is_some() || mirror_import_for(repo, i).is_some();
+            if names_ontology && !self_input && !not_built_this_run && buildable {
                 bail!(
                     "input `{i}` of `{}` was not built — its rule failed or was skipped, \
                      so there is nothing to build `{}` from",
@@ -3557,7 +4758,7 @@ fn run_artefact(
     crate::io::reset_anon_counter();
     let threads_model = a.steps.iter().any(|s| match s {
         Step::File(op) => !op.is_side_effect(),
-        Step::Op(_) | Step::Partial { .. } | Step::CliRobot { .. } => true,
+        Step::Op(_) | Step::Partial { .. } | Step::OwlmakeCli { .. } => true,
         _ => false,
     });
     // A *source* op (`babelon convert`) reads a non-OWL input — `$<` is a TSV — and
@@ -3588,10 +4789,28 @@ fn run_artefact(
             .steps
             .iter()
             .any(|s| !matches!(s, Step::File(_) | Step::Inert(_)));
-        let model = match &input_path {
+        let mut model = match &input_path {
             Some(p) if input_is_ontology && needs_model => crate::io::load(p)?,
             _ => crate::model::Model::new(),
         };
+        // Same closure-label rule as the artefact path: a functional write
+        // banners each entity with the label it carries ANYWHERE in the closure
+        // (`normalize_src` re-serialises the edit file, whose pattern classes
+        // are labelled only by the imported definitions module). The read spends
+        // no blank-node ids — see the artefact path.
+        if model.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+            let mark = crate::io::anon_counter();
+            // The document's identity at write time: the last version IRI a step
+            // of this pipeline sets, if any.
+            let write_version = a.steps.iter().rev().find_map(|s| match s {
+                Step::Op(Op::Annotate(sp))
+                | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
+                _ => None,
+            });
+            model.banner_labels =
+                closure_banner_labels(&model, &repo.dir, catalog, write_version.as_deref());
+            crate::io::set_anon_counter(mark);
+        }
         // Named the way `Op::Merge` will name it, so `merge -i $<` recognises the
         // file the model already holds however either side spelled the token.
         let threaded_from = input_path
@@ -3681,7 +4900,22 @@ fn run_artefact(
         // a load of every imported document, and no other serialization has these
         // banners to fill in.
         if m.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
-            m.banner_labels = closure_banner_labels(&m, &repo.dir, catalog);
+            // …and it spends no blank-node ids either. The documents are read for
+            // their labels and dropped, so the ids their anonymous individuals
+            // would take are ids this artefact never writes; leaving the count
+            // where the read pushed it numbers the artefact's OWN nodes from after
+            // a whole closure that is not in it.
+            let mark = crate::io::anon_counter();
+            // The document's identity at write time: the last version IRI a step
+            // of this pipeline sets, if any.
+            let write_version = a.steps.iter().rev().find_map(|s| match s {
+                Step::Op(Op::Annotate(sp))
+                | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
+                _ => None,
+            });
+            m.banner_labels =
+                closure_banner_labels(&m, &repo.dir, catalog, write_version.as_deref());
+            crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
         m
@@ -3750,6 +4984,15 @@ fn run_artefact(
             Step::Boundary { input } => {
                 crate::io::reset_anon_counter();
                 match input.as_deref() {
+                    // A boundary whose input is an IRI is fetched, exactly as the
+                    // prerequisite loop does. Both loops walk the same step list,
+                    // so a case handled in one and missed in the other is a
+                    // run-time failure on whichever repo has a recipe of that
+                    // shape — `--input-iri` on an artefact's own pipeline.
+                    Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
+                        model = crate::io::load_iri(first, None)?;
+                        threaded_from = None;
+                    }
                     Some(first) => {
                         let p = resolve_repo_file(repo, first, work).with_context(|| {
                             format!("invocation input `{first}` of `{}` does not exist", a.target)
@@ -3772,14 +5015,14 @@ fn run_artefact(
             Step::Inert(_) => continue,
             Step::File(op) => {
                 if op.is_side_effect() {
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                 } else if let Some(dst) =
                     staged_target(repo, op, Some(&a.target)).filter(|_| staged_by_shell)
                 {
                     // See `staged_target`: a mid-recipe `mv $@.tmp $@` over a file
                     // a shell step really produced is not bookkeeping — the rest of
                     // the recipe reads it.
-                    op.run(&repo.dir)?;
+                    run_file_op(repo, op)?;
                     if crate::io::Format::from_path(Path::new(&dst)).is_ok() {
                         model = crate::io::load(&repo.dir.join(&dst))
                             .with_context(|| format!("re-reading {dst} after a staged move"))?;
@@ -3804,6 +5047,22 @@ fn run_artefact(
                 )?;
                 continue;
             }
+            // `cmd || true` — handed to `run_steps`, which owns the one
+            // implementation of tolerating a failure.
+            Step::MayFail(_) => {
+                model = run_steps(
+                    repo,
+                    std::slice::from_ref(step),
+                    model,
+                    catalog,
+                    work,
+                    Some(&a.target),
+                    true,
+                    threaded_from.as_deref(),
+                )?;
+                model_on_disk = false;
+                continue;
+            }
             // An out-of-pipeline step (perl/sed/jq/`report`/…) runs where it
             // sits, so the ops around it stay native.
             s if is_shell_step(s) => {
@@ -3824,10 +5083,14 @@ fn run_artefact(
                     work,
                     model_on_disk,
                     threaded_from.as_deref(),
+                    recipe_format(a),
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;
                 continue;
+            }
+            Step::UnsupportedSubcommand(name) => {
+                bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
             }
             _ => bail!("internal: uncovered step reached executor: {}", step.label()),
         };
@@ -3869,6 +5132,20 @@ fn run_artefact(
             model.banner_labels = closure_labels(cl);
         }
         withdraw_materialised_declarations(&mut model);
+    }
+    // An OBO document comments every clause target that has a label — and a
+    // target the root only references (a GO process in a `relationship:`, a
+    // BFO class in an `is_a:`) is labelled by the ontology that declares it.
+    // MONDO's `filtered.obo` keeps its four imports, so its 34,000 clause
+    // comments come from the closure.
+    if a.target.ends_with(".obo") && model_has_imports(&model) {
+        if !closure_loaded {
+            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure_loaded = true;
+        }
+        if let Some(cl) = &closure {
+            model.banner_labels = closure_labels(cl);
+        }
     }
 
     // Every referenced entity is declared: an annotation property a merged non-OBO
@@ -3943,6 +5220,13 @@ fn run_artefact(
     //     write and destroy the output rather than merely fail to check for it.
     if repo.plan.is_phony(&a.target) {
         return surface_produced(repo, &a.target, &a.steps, work, out);
+    }
+    // A side-effect-only rule writes the files its steps name and nothing at
+    // the target path: no target file exists afterwards, the rule is simply
+    // always out of date, and materialising the pipeline model here would
+    // create an artefact the build never meant to produce.
+    if a.side_effect_only {
+        return Ok(());
     }
     let write_res = match explicit_fmt.or_else(|| crate::io::Format::from_path(out).ok()) {
         Some(f) => crate::io::save_as(&mut model, out, f),
@@ -4235,7 +5519,7 @@ fn ensure_built(repo: &Repo, rel: &str, depth: usize) -> Result<bool> {
             ensure_built(repo, pre, depth - 1)?;
         }
     }
-    eprintln!("odk:   building prerequisite {rel}");
+    status!("make:   building prerequisite {rel}");
     let mut seen = std::collections::HashSet::new();
     run_target_recipe_inner(repo, rel, &mut seen)?;
     Ok(repo.dir.join(rel).exists())
@@ -4252,12 +5536,12 @@ fn ensure_prerequisite(
     repo: &Repo,
     target: &str,
     by_target: &std::collections::HashMap<&str, &crate::plan::ArtefactPlan>,
-    done: &mut std::collections::HashSet<String>,
+    done: &std::sync::Mutex<std::collections::HashSet<String>>,
     catalog: &BTreeMap<String, PathBuf>,
     work: &Path,
     opts: &ExecOpts,
 ) -> Result<()> {
-    if done.contains(target) {
+    if done.lock().unwrap().contains(target) {
         return Ok(());
     }
     // A target whose recipe already ran — or was already judged up to date — earlier
@@ -4269,11 +5553,9 @@ fn ensure_prerequisite(
     // file the release ships — a different ontology id and 16 extra Typedef
     // stanzas. The artefact loop already skips its own targets on this memo;
     // prerequisites need the same rule.
-    if memo_has(repo, target) {
-        return Ok(());
-    }
-    done.insert(target.to_string());
-    repo.built.borrow_mut().insert(target.to_string());
+    let Some(mut held) = claim(repo, target) else { return Ok(()) };
+    held.succeed();
+    done.lock().unwrap().insert(target.to_string());
     // A pinned target's rules are not in play, so the file on disk is final and
     // the walk must not descend through it. It has to be
     // decided HERE, before the recursion below — `imports/merged_import.owl` is
@@ -4299,6 +5581,12 @@ fn ensure_prerequisite(
     // the release must not carry. Building the tsv first makes it newer, so the
     // translation is regenerated every run.
     for need in &p.needs {
+        if assumed_new(repo, need) {
+            continue;
+        }
+        if skip_missing_intermediate(repo, target, need) {
+            continue;
+        }
         ensure_prerequisite(repo, need, by_target, done, catalog, work, opts)?;
     }
     if repo.target_file(target).is_some()
@@ -4339,6 +5627,9 @@ fn prereq_is_newer(
         return false;
     };
     for need in p.needs.iter().map(String::as_str).chain(p.input.as_deref()) {
+        if assumed_new(repo, need) {
+            return true;
+        }
         // A release artefact is written to the OUTPUT dir, not the ontology dir,
         // so look in both — `mondo-base.owl` lives at the repo root by the time
         // this report's turn comes.
@@ -4373,7 +5664,26 @@ fn build_prerequisite(
     work: &Path,
     output_dir: &Path,
 ) -> Result<()> {
-    eprintln!("odk:   building prerequisite {}", p.target);
+    // The same refusal as the recipe path: a prerequisite that neither exists
+    // nor has a rule fails the target BEFORE its recipe runs, so a doomed
+    // recipe's redirect and staging files are never created.
+    for pre in &p.needs {
+        if pre == "all_robot_plugins" || pre.ends_with(".jar") {
+            continue;
+        }
+        if repo.dir.join(pre).exists()
+            || repo.target(pre).is_some()
+            || repo.plan.is_phony(pre)
+            || recipe::is_served_image_asset(pre)
+            || assumed_new(repo, pre)
+            || is_native_pattern_product(repo, pre)
+            || mirror_import_for(repo, pre).is_some()
+        {
+            continue;
+        }
+        bail!("no rule to make target `{pre}`, needed by `{}`", p.target);
+    }
+    status!("make:   building prerequisite {}", p.target);
     // A target's directory is not created for it, and recipes usually don't
     // create it either — they rely on some earlier rule having made it. That
     // earlier rule is often conditional on what is already on disk: a
@@ -4767,19 +6077,87 @@ fn reason_with_closure(
     reasoner: &str,
     opts: &cmd::reason::ReasonOptions,
 ) -> Result<crate::model::Model> {
-    use horned_owl::model::MutableOntology;
-    // Reason over root + the import closure, then assert the newly-inferred axioms
-    // into the root only (the imported axioms re-enter verbatim at the later
+    use horned_owl::model::{Component, MutableOntology};
+    // Reason over root + the import closure, then assert the inferred axioms
+    // into the root only (the imported axioms re-enter verbatim at a later
     // collapsing merge). NB: `-X` does NOT drop inferred axioms about imported
     // classes at this point — MONDO's `reasoned.owl` keeps inferred
-    // `CHEBI ⊑ BFO_…` and the like — so every newly-inferred axiom is added.
+    // `CHEBI ⊑ BFO_…` and the like.
+    //
+    // What counts as "inferred" follows `--exclude-duplicate-axioms`: with it,
+    // an axiom the union already asserts is a duplicate and stays out; without
+    // it, every generated inference lands in the root even when the closure
+    // asserts the same axiom — MONDO's `mondo-tags-reasoned.owl` carries
+    // 18,000 `hgnc ⊑ SO_0000704` edges re-asserted from its uncollapsed
+    // imports exactly that way.
     let union = union_with_closure(&root, closure);
-    let before: std::collections::HashSet<_> = union.ont.iter().cloned().collect();
-    let reasoned = cmd::reason::reason_with(union, reasoner, opts)?;
     let mut out = root;
-    for ac in reasoned.ont.iter() {
-        if !before.contains(ac) {
-            out.ont.insert(ac.clone());
+    if opts.exclude_duplicate_axioms {
+        let before: std::collections::HashSet<_> = union.ont.iter().cloned().collect();
+        let reasoned = cmd::reason::reason_with(union, reasoner, opts)?;
+        for ac in reasoned.ont.iter() {
+            if !before.contains(ac) {
+                out.ont.insert(ac.clone());
+            }
+        }
+    } else {
+        let mut iopts = opts.clone();
+        iopts.create_new_ontology = true;
+        iopts.create_new_ontology_with_annotations = false;
+        let inferred = cmd::reason::reason_with(union, reasoner, &iopts)?;
+        for ac in inferred.ont.iter() {
+            if matches!(
+                ac.component,
+                Component::SubClassOf(_)
+                    | Component::EquivalentClasses(_)
+                    | Component::ClassAssertion(_)
+            ) {
+                out.ont.insert(ac.clone());
+            }
+        }
+        // The redundant-subclass sweep runs against the merged result, and the
+        // inferred model carries exactly the direct pairs it needs: an
+        // un-annotated asserted `C ⊑ X` that is not a proper direct super goes,
+        // the same rule the non-closure path applies to its own merge.
+        if opts.remove_redundant_subclass_axioms {
+            use horned_owl::model::ClassExpression as CE;
+            let mut direct_set: std::collections::HashSet<(String, String)> = Default::default();
+            for ac in inferred.ont.iter() {
+                if let Component::SubClassOf(sc) = &ac.component {
+                    if let (CE::Class(c), CE::Class(x)) = (&sc.sub, &sc.sup) {
+                        direct_set
+                            .insert((c.0.as_ref().to_string(), x.0.as_ref().to_string()));
+                    }
+                }
+            }
+            const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+            const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+            let doomed: Vec<_> = out
+                .ont
+                .iter()
+                .filter(|ac| {
+                    if !ac.ann.is_empty() {
+                        return false;
+                    }
+                    match &ac.component {
+                        Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
+                            (CE::Class(c), CE::Class(x)) => {
+                                let (c, x) = (c.0.as_ref(), x.0.as_ref());
+                                let proper = direct_set
+                                    .contains(&(c.to_string(), x.to_string()))
+                                    && !direct_set.contains(&(x.to_string(), c.to_string()));
+                                x != OWL_THING && x != OWL_NOTHING && !proper
+                            }
+                            _ => false,
+                        },
+                        _ => false,
+                    }
+                })
+                .cloned()
+                .collect();
+            for ac in doomed {
+                out.ont.remove(&ac);
+            }
         }
     }
     Ok(out)
@@ -4799,6 +6177,10 @@ fn reduce_with_closure(
     let reduced = cmd::reduce::reduce_with_opts(&union, false, false, include_subproperties);
     let mut out = empty_model();
     out.prefixes = root.prefixes.clone();
+    // The root's document state — blank-node sharing recorded by relax above
+    // all — describes axioms that survive into `out`; rebuilding from an empty
+    // model without it makes every relax-shared node render as two copies.
+    out.carry_meta_from(&root);
     for ac in reduced.ont.iter() {
         if root_set.contains(ac) {
             out.ont.insert(ac.clone());
@@ -4829,6 +6211,7 @@ fn strip_external_subject_axioms(
     };
     let mut out = empty_model();
     out.prefixes = model.prefixes.clone();
+    out.carry_meta_from(&model);
     for ac in model.ont.iter() {
         if !fully_external(&ac.component) {
             out.ont.insert(ac.clone());
@@ -4875,9 +6258,15 @@ fn names_target(op: &recipe::FileOp, target: Option<&str>) -> bool {
 /// never names it. Matching file names alone would write every such artefact as
 /// RDF/XML.
 fn recipe_format(a: &crate::plan::ArtefactPlan) -> Option<crate::io::Format> {
+    steps_format(&a.target, &a.steps)
+}
+
+/// [`recipe_format`] for any recorded pipeline: the format `steps` write `target`
+/// in.
+fn steps_format(target: &str, steps: &[Step]) -> Option<crate::io::Format> {
     let name_of = |p: &str| Path::new(p).file_name().map(|s| s.to_os_string());
-    let mut built: Vec<Option<std::ffi::OsString>> = vec![name_of(&a.target)];
-    for s in &a.steps {
+    let mut built: Vec<Option<std::ffi::OsString>> = vec![name_of(target)];
+    for s in steps {
         let Step::File(recipe::FileOp::Copy { src, dst, .. } | recipe::FileOp::Move { src, dst }) =
             s
         else {
@@ -4887,7 +6276,7 @@ fn recipe_format(a: &crate::plan::ArtefactPlan) -> Option<crate::io::Format> {
             built.extend(src.iter().map(|p| name_of(p)));
         }
     }
-    a.steps.iter().rev().find_map(|s| match s {
+    steps.iter().rev().find_map(|s| match s {
         Step::Op(Op::Convert { format: Some(f), output, .. })
             if output.is_none()
                 || built.contains(&output.as_deref().and_then(|o| name_of(o))) =>
@@ -4904,9 +6293,14 @@ fn recipe_format(a: &crate::plan::ArtefactPlan) -> Option<crate::io::Format> {
 /// NOTHING at the source, and the staging file is still there from the step's own
 /// `-o`. Removing it is what the recipe asks for.
 fn clear_staging(repo: &Repo, a: &crate::plan::ArtefactPlan) {
-    for step in &a.steps {
+    clear_staging_of(repo, &a.target, &a.steps)
+}
+
+/// [`clear_staging`] for any recorded pipeline that builds `target`.
+fn clear_staging_of(repo: &Repo, target: &str, steps: &[Step]) {
+    for step in steps {
         let Step::File(recipe::FileOp::Move { src, dst }) = step else { continue };
-        if Path::new(&a.target).file_name() != Path::new(dst).file_name() {
+        if Path::new(target).file_name() != Path::new(dst).file_name() {
             continue;
         }
         for s in src {
@@ -4946,17 +6340,16 @@ fn staged_target(
     Some(dst.clone())
 }
 
-thread_local! {
-    /// Every target the plan builds as an artefact of its own. A step's `-o` that
-    /// names one of these must NOT be written here: it is a CO-TARGET of a
-    /// multi-output rule (MONDO's `$(ONT).owl tmp/mondo.owl.ofn: reasoned.owl`),
-    /// and writing it early makes it newer than its prerequisites, so the artefact
-    /// that would have built it properly is skipped as up to date. That costs
-    /// `tmp/mondo.owl.ofn` its `#idspaces`/`#explicit-prefixes` cache markers and
-    /// `mondo.obo` 29 of its 35 `idspace:` lines.
-    static PLANNED_TARGETS: std::cell::RefCell<std::collections::HashSet<String>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
-}
+/// Every target the plan builds as an artefact of its own. A step's `-o` that
+/// names one of these must NOT be written here: it is a CO-TARGET of a
+/// multi-output rule (MONDO's `$(ONT).owl tmp/mondo.owl.ofn: reasoned.owl`),
+/// and writing it early makes it newer than its prerequisites, so the artefact
+/// that would have built it properly is skipped as up to date. That costs
+/// `tmp/mondo.owl.ofn` its `#idspaces`/`#explicit-prefixes` cache markers and
+/// `mondo.obo` 29 of its 35 `idspace:` lines. Set once per run, read by every
+/// builder thread.
+static PLANNED_TARGETS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
 
 /// Record the plan's own artefact targets for [`write_step_output`].
 fn set_planned_targets(plan: &Plan) {
@@ -4966,18 +6359,16 @@ fn set_planned_targets(plan: &Plan) {
         .map(|a| a.target.clone())
         .chain(plan.prerequisites.iter().map(|p| p.target.clone()))
         .collect();
-    PLANNED_TARGETS.with(|t| *t.borrow_mut() = names);
+    *PLANNED_TARGETS.lock().unwrap() = names;
 }
 
 fn is_planned_target(path: &str) -> bool {
-    PLANNED_TARGETS.with(|t| {
-        let t = t.borrow();
-        t.contains(path)
-            || Path::new(path)
-                .file_name()
-                .and_then(|f| f.to_str())
-                .is_some_and(|base| t.iter().any(|p| p == base || p.ends_with(&format!("/{base}"))))
-    })
+    let t = PLANNED_TARGETS.lock().unwrap();
+    t.contains(path)
+        || Path::new(path)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .is_some_and(|base| t.iter().any(|p| p == base || p.ends_with(&format!("/{base}"))))
 }
 
 /// Write a step's own `-o/--output` when it names a file OTHER than the artefact.
@@ -5031,6 +6422,16 @@ fn write_step_output(
         }
         withdraw_materialised_declarations(model);
     }
+    // An OBO write comments every clause target that has a label, and a target
+    // the root only references is labelled by the ontology that declares it —
+    // the closure's labels fill the map exactly as they do for a target's own
+    // closing write.
+    if matches!(fmt, Some(crate::io::Format::Obo)) && model_has_imports(model) {
+        let catalog = load_catalog_planned(repo);
+        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+            model.banner_labels = closure_labels(&cl);
+        }
+    }
     match fmt {
         Some(f) => crate::io::save_as(model, &out, f),
         None => crate::io::save(model, &out),
@@ -5051,6 +6452,9 @@ fn apply_op(
     pipeline_input: Option<&Path>,
 ) -> Result<crate::model::Model> {
     let mut model = model;
+    if std::env::var_os("OM_PIPE_DEBUG").is_some() {
+        eprintln!("[pipe] {:?} in: shared_anon={} owners", std::mem::discriminant(op), model.shared_anon.len());
+    }
     Ok(match op {
         Op::Merge { inputs, collapse_import_closure } => {
             let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -5167,6 +6571,8 @@ fn apply_op(
             create_new_ontology,
             create_new_ontology_with_annotations,
             exclude_duplicate_axioms,
+            axiom_generators,
+            properties,
         } => {
             let reasoner = reasoner.as_deref().unwrap_or("elk");
             // Honour the recipe's reason flags rather than hardcoding them. A
@@ -5195,6 +6601,8 @@ fn apply_op(
                 exclude_duplicate_axioms: exclude_duplicate_axioms.unwrap_or(false),
                 exclude_external_entities: exclude_external_entities.unwrap_or(false),
                 exclude_owl_thing: exclude_owl_thing.unwrap_or(false),
+                axiom_generators: axiom_generators.clone(),
+                properties: properties.clone(),
                 ..Default::default()
             };
             match closure {
@@ -5280,7 +6688,7 @@ fn apply_op(
             // nothing else.
             if !spec.prefixes.is_empty() {
                 let common = cmd::CommonArgs {
-                    add_prefix: spec.prefixes.clone(),
+                    prefix: spec.prefixes.clone(),
                     ..Default::default()
                 };
                 common.apply(&mut model)?;
@@ -5319,7 +6727,7 @@ fn apply_op(
             // The recipe's `--prefix` bindings resolve the template's header
             // CURIEs, so they have to reach the command that reads the header.
             let common =
-                cmd::CommonArgs { add_prefix: prefixes.clone(), ..Default::default() };
+                cmd::CommonArgs { prefix: prefixes.clone(), ..Default::default() };
             let targs = cmd::template::Args {
                 template: templates.iter().map(|t| rp(t)).collect(),
                 input: None,
@@ -5676,7 +7084,13 @@ fn apply_op(
                     update: updates.iter().map(|u| rp(u)).collect(),
                     output: None,
                     output_dir: None,
-                    format: format.clone().unwrap_or_else(|| "csv".into()),
+                    // A recipe that names no `--format` leaves the choice to the
+                    // OUTPUT PATH: an empty format is "not given", and resolution
+                    // falls through to the output's extension. A recipe whose
+                    // whole query step is `query --select $*.sparql $@` therefore
+                    // writes TSV to a `.tsv` and CSV to a `.csv`. An extension that
+                    // is not a result-format name — `$@.tmp` — resolves to CSV.
+                    format: format.clone().unwrap_or_default(),
                     use_graphs: None,
                     tdb: Some(*tdb),
                     keep_tdb_mappings: None,
@@ -5841,7 +7255,7 @@ fn fetch_import_iri(iri: &str, dir: &Path) -> Result<PathBuf> {
     if path.exists() {
         return Ok(path);
     }
-    eprintln!("odk: owl:imports <{iri}> (network — not in the catalog)");
+    status!("import: owl:imports <{iri}> (network — not in the catalog)");
     let bytes = http_get(iri)?;
     std::fs::write(&path, &bytes)?;
     Ok(path)
@@ -5861,23 +7275,66 @@ fn writes_functional_syntax(steps: &[Step]) -> bool {
     })
 }
 
-/// The banner label set for a document with an import closure: the labels its own
-/// axioms assert together with those its closure asserts, decided between by the
-/// one rule (`cmd::rdfs_labels`). Best-effort — a closure that cannot be read
-/// leaves the document's own labels, and banners fall back to the entity IRI.
+/// The banner label set for a document with an import closure. Each document —
+/// the pipeline input and every file its closure resolves to — settles its own
+/// candidates by the one per-document rule (`cmd::rdfs_labels`); between
+/// documents, the first one in `owlapi_hash::ontology_set_order` that labels a
+/// subject names it. The input document's identity is the one it will be
+/// WRITTEN under: `write_version_iri` (the version a later step of the same
+/// pipeline sets) overrides the version it was read with, so a banner pick
+/// tracks the run's release date. Best-effort — a closure file that cannot be
+/// read contributes nothing, and banners fall back to the entity IRI.
 fn closure_banner_labels(
     model: &crate::model::Model,
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
+    write_version_iri: Option<&str>,
 ) -> std::collections::HashMap<String, String> {
-    let mut scratch = model.clone();
+    let main_id = model_ontology_id(model);
+    let main_version = write_version_iri.map(str::to_string).or(main_id.1);
+    if std::env::var("OM_BANNER_DEBUG").is_ok() {
+        eprintln!("[banner] input document id={:?} write version={:?}", main_id.0, main_version);
+    }
+    let mut docs: Vec<(i32, std::collections::HashMap<String, String>)> = vec![(
+        crate::owlapi_hash::ontology_id_hash(main_id.0.as_deref(), main_version.as_deref()),
+        crate::cmd::rdfs_labels(model),
+    )];
     let mut seen = std::collections::HashSet::new();
     if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
         for f in &files {
-            let _ = merge_file_into(&mut scratch, f);
+            let Ok(m) = crate::io::load(f) else { continue };
+            let (iri, ver) = model_ontology_id(&m);
+            docs.push((
+                crate::owlapi_hash::ontology_id_hash(iri.as_deref(), ver.as_deref()),
+                crate::cmd::rdfs_labels(&m),
+            ));
         }
     }
-    crate::cmd::rdfs_labels(&scratch)
+    let hashes: Vec<i32> = docs.iter().map(|(h, _)| *h).collect();
+    let mut out = std::collections::HashMap::new();
+    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
+        if std::env::var("OM_BANNER_DEBUG").is_ok() {
+            eprintln!("[banner] doc#{i} id-hash={} labels={}", hashes[i], docs[i].1.len());
+        }
+        for (subj, label) in &docs[i].1 {
+            out.entry(subj.clone()).or_insert_with(|| label.clone());
+        }
+    }
+    out
+}
+
+/// The ontology IRI and version IRI a model's document identifies itself by.
+fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+    use horned_owl::model::Component;
+    for ac in model.ont.iter() {
+        if let Component::OntologyID(id) = &ac.component {
+            return (
+                id.iri.as_ref().map(|i| i.to_string()),
+                id.viri.as_ref().map(|v| v.to_string()),
+            );
+        }
+    }
+    (None, None)
 }
 
 fn import_closure_of_model(
@@ -5901,7 +7358,7 @@ fn import_closure_of_model(
         // basename probe of the sibling directory — is a filesystem convention
         // that matches neither the catalog nor the `/obo/` PURL rule, i.e. a
         // third resolution policy discovered at build time.
-        match catalog.get(&iri).cloned() {
+        match crate::cmd::catalog_resolve(catalog, &iri) {
             Some(p) => {
                 if seen.insert(p.clone()) {
                     if p.exists() {
@@ -5951,9 +7408,13 @@ fn drop_imports(model: crate::model::Model) -> crate::model::Model {
 }
 
 /// Remove every axiom present in `other` from `model` (`unmerge`).
+///
+/// Defers to [`crate::cmd::unmerge::subtract`] so a plan step and `om unmerge`
+/// cannot drift apart: this was a second implementation, and it both subtracted
+/// the base's own ontology identity and matched on the bare component.
 fn unmerge_model(model: crate::model::Model, other: &crate::model::Model) -> crate::model::Model {
-    let rm: std::collections::BTreeSet<_> = other.ont.iter().map(|ac| ac.component.clone()).collect();
-    crate::cmd::select::retain(model, |c| !rm.contains(c))
+    let rm: std::collections::HashSet<_> = other.ont.iter().cloned().collect();
+    crate::cmd::unmerge::subtract(model, &rm).0
 }
 
 /// Merge a file's axioms into `model` (skipping the file's own ontology
@@ -5977,7 +7438,6 @@ pub(crate) fn merge_file_into_as(
     path: &Path,
     role: MergeRole,
 ) -> Result<()> {
-    use horned_owl::model::{Component, MutableOntology};
     // A merge prerequisite may be a *stamp* — an empty marker `touch`ed by a
     // rule whose real outputs are written elsewhere (UBERON's `collected-%.owl`
     // merges `$^`, which includes the 0-byte `tmp/bridges` stamp). It carries no
@@ -5986,6 +7446,18 @@ pub(crate) fn merge_file_into_as(
         return Ok(());
     }
     let other = crate::io::load(path)?;
+    merge_loaded_into_as(model, &other, role)
+}
+
+/// `merge_file_into_as` for an ontology the caller has already loaded — so a
+/// caller that needs to look at the input (the merged-import builder seeds from
+/// a cached module's declarations) parses it once.
+pub(crate) fn merge_loaded_into_as(
+    model: &mut crate::model::Model,
+    other: &crate::model::Model,
+    role: MergeRole,
+) -> Result<()> {
+    use horned_owl::model::{Component, MutableOntology};
     for ac in other.ont.iter() {
         if matches!(
             ac.component,
@@ -6004,9 +7476,9 @@ pub(crate) fn merge_file_into_as(
     for (prefix, ns) in &other.idspaces {
         let _ = model.prefixes.add_prefix(prefix, ns);
     }
-    crate::cmd::merge::carry_shared_anon(model, &other);
+    crate::cmd::merge::carry_shared_anon(model, other);
     if role == MergeRole::Import {
-        crate::cmd::merge::charge_import_allocations(model, &other);
+        crate::cmd::merge::charge_import_allocations(model, other);
     }
     Ok(())
 }
@@ -6107,6 +7579,12 @@ fn resolve_input(
         );
     }
     if let Some(planned) = repo.target(inp) {
+        // An `--assume-new` input is treated as just modified and is never
+        // rebuilt; a pattern-chain intermediate the target does not need stays
+        // uncreated. Either way the recipe runs without the file.
+        if assumed_new(repo, inp) || skip_missing_intermediate(repo, target, inp) {
+            bail!("input `{inp}` is not built for this run (assume-new or unneeded intermediate)");
+        }
         let pure_convert = planned
             .steps
             .iter()
@@ -6140,6 +7618,13 @@ fn resolve_input(
                 return Ok(tmp_ofn);
             }
         }
+    }
+    // A mirror carries no plan rule of its own — the import's `source` and
+    // `mirror_steps` ARE the mirror — so it resolves through the mirror
+    // machinery, which fetches an absent one or refuses under an explicit
+    // `MIR=false`, exactly as it does for the import pipeline.
+    if let Some(imp) = mirror_import_for(repo, inp) {
+        return ensure_mirror(repo, imp, repo.refresh_mirrors);
     }
     bail!(
         "could not resolve pipeline input `{inp}` (no file in {} or {}, and no buildable rule)",
@@ -6310,7 +7795,7 @@ fn build_seed(repo: &Repo, seed_rel: &str, work: &Path) -> Result<PathBuf> {
 
     let out = work.join(Path::new(seed_rel).file_name().unwrap_or(std::ffi::OsStr::new("seed.txt")));
     std::fs::write(&out, terms.into_iter().collect::<Vec<_>>().join("\n") + "\n")?;
-    eprintln!("odk:   built seed {} ({} terms)", out.display(), std::fs::read_to_string(&out)?.lines().count());
+    status!("import:   built seed {} ({} terms)", out.display(), std::fs::read_to_string(&out)?.lines().count());
     Ok(out)
 }
 
@@ -6345,7 +7830,7 @@ fn build_srcmerged(repo: &Repo, work: &Path) -> Result<PathBuf> {
 fn step_shell_text(step: &Step) -> Option<String> {
     match step {
         Step::Shell { command: c, .. } => Some(c.clone()),
-        Step::CliRobot { name, args } => Some(format!("{name} {}", args.join(" "))),
+        Step::OwlmakeCli { name, args } => Some(format!("{name} {}", args.join(" "))),
         _ => None,
     }
 }
@@ -6467,6 +7952,23 @@ fn read_catalog(dir: &Path, path: &Path) -> BTreeMap<String, PathBuf> {
     let mut map = BTreeMap::new();
     if let Ok(text) = std::fs::read_to_string(path) {
         for line in text.lines() {
+            // `<rewriteURI uriStartString=… rewritePrefix=…/>`: a prefix rule,
+            // kept under the marker key `catalog_resolve` looks for.
+            if line.contains("<rewriteURI") {
+                if let (Some(s0), Some(p0)) = (line.find("uriStartString=\""), line.find("rewritePrefix=\"")) {
+                    let start = &line[s0 + 16..];
+                    let start = &start[..start.find('"').unwrap_or(0)];
+                    let prefix = &line[p0 + 15..];
+                    let prefix = &prefix[..prefix.find('"').unwrap_or(0)];
+                    if !start.is_empty() && !prefix.is_empty() {
+                        map.insert(
+                            format!("{}{start}", crate::cmd::CATALOG_REWRITE_KEY),
+                            dir.join(percent_decode(prefix)),
+                        );
+                    }
+                }
+                continue;
+            }
             if let (Some(n0), Some(u0)) = (line.find("name=\""), line.find("uri=\"")) {
                 let name = &line[n0 + 6..];
                 let name = &name[..name.find('"').unwrap_or(0)];
@@ -6491,8 +7993,10 @@ fn read_catalog(dir: &Path, path: &Path) -> BTreeMap<String, PathBuf> {
     map
 }
 
-/// Decode `%XX` percent-escapes in a catalog URI path (other bytes untouched).
-fn percent_decode(s: &str) -> String {
+/// Decode `%XX` percent-escapes in a URI path — a catalog's, a `file:` URL's — to
+/// the path it names: the escapes are bytes of UTF-8, and other bytes are left
+/// untouched.
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -6531,7 +8035,7 @@ fn import_closure(
             Err(_) => continue,
         };
         for iri in import_iris(&text) {
-            let local = catalog.get(&iri).cloned();
+            let local = crate::cmd::catalog_resolve(catalog, &iri);
             if let Some(p) = local {
                 if seen.insert(p.clone()) && p.exists() {
                     out.push(p.clone());
@@ -6588,7 +8092,9 @@ mod aggregate_tests {
             steps,
             gaps: vec![],
             missing_rule: false,
+            side_effect_only: false,
             stdout_file: None,
+            intermediate: false,
             branches: vec![],
         }
     }
@@ -6639,5 +8145,33 @@ mod aggregate_tests {
     #[test]
     fn a_leaf_target_is_not_an_aggregate() {
         assert!(!is_aggregate(&target(&[], vec![])));
+    }
+}
+
+#[cfg(test)]
+mod merged_import_iri_tests {
+    use super::merged_import_iris;
+
+    #[test]
+    fn merged_import_iri_names_the_document_not_the_file() {
+        let (iri, ver) = merged_import_iris(
+            "http://purl.obolibrary.org/obo/efo.owl",
+            "4.0.0",
+            None,
+            "src/ontology/imports/merged_import.owl.gz",
+            "src/ontology",
+        );
+        assert_eq!(iri, "http://purl.obolibrary.org/obo/efo/imports/merged_import.owl");
+        assert_eq!(ver, "http://purl.obolibrary.org/obo/efo/releases/4.0.0/imports/merged_import.owl");
+        let (iri, _) = merged_import_iris(
+            "http://purl.obolibrary.org/obo/efo.owl",
+            "4.0.0",
+            Some("http://www.ebi.ac.uk/efo/imports/merged_import.owl"),
+            "src/ontology/imports/merged_import.owl.gz",
+            "src/ontology",
+        );
+        assert_eq!(iri, "http://www.ebi.ac.uk/efo/imports/merged_import.owl");
+        let (iri, _) = merged_import_iris("http://purl.obolibrary.org/obo/x.owl", "1", None, "imports/merged_import.owl", "");
+        assert_eq!(iri, "http://purl.obolibrary.org/obo/x/imports/merged_import.owl");
     }
 }

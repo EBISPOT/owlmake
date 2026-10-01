@@ -1,0 +1,11 @@
+id: force
+use_mappings: true
+sssom_mappingset_group:
+  products:
+    - id: upstream
+      maintenance: manual
+    - id: force
+      maintenance: merged
+      source_mappings:
+        - upstream
+      release_mappings: true
