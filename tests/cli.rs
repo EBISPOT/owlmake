@@ -323,6 +323,38 @@ fn explain_finds_justification() {
 }
 
 #[test]
+fn one_disjointness_axiom_however_its_members_are_ordered() {
+    // OWL makes DisjointClasses a SET: `DisjointClasses(A B)` in one source and
+    // `DisjointClasses(B A)` in another are ONE axiom, and any serialization
+    // must render it once. Keeping both rendered UBERON's
+    // `DisjointClasses(UBERON_0000001 GO_0110165)` twice — once under each
+    // member's RDF/XML frame.
+    let ont = tmp("disjoint-orders.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         Declaration(Class(:A))\n\
+         Declaration(Class(:B))\n\
+         DisjointClasses(:A :B)\n\
+         DisjointClasses(:B :A)\n\
+         )\n",
+    )
+    .unwrap();
+    let out_owl = tmp("disjoint-orders.owl");
+    let st = bin().args(["convert", "-i"]).arg(&ont).arg("-o").arg(&out_owl).status().unwrap();
+    assert!(st.success());
+    let text = std::fs::read_to_string(&out_owl).unwrap();
+    assert_eq!(
+        text.matches("disjointWith").count(),
+        1,
+        "one disjointness axiom must render exactly once:\n{text}"
+    );
+    let _ = std::fs::remove_file(&ont);
+    let _ = std::fs::remove_file(&out_owl);
+}
+
+#[test]
 fn explain_unsatisfiability_justification_is_minimal() {
     // :A is unsatisfiable through exactly three axioms. The rest of the ontology
     // is a decoy: a redundant second route to :C and axioms about unrelated

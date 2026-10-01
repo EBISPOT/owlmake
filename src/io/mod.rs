@@ -2257,6 +2257,14 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating directory {}", parent.display()))?;
     }
+    // Set-valued operand lists are canonicalised at the one boundary every
+    // serialization passes through, so two spellings of one OWL axiom —
+    // `DisjointClasses(A B)` in one source and `DisjointClasses(B A)` in
+    // another — leave as the single axiom they are. Doing this on one build
+    // route and not the others rendered UBERON's
+    // `DisjointClasses(UBERON_0000001 GO_0110165)` twice, once per member's
+    // frame, in every artefact of the recipe route.
+    normalize_set_operands(model);
     // The `#…` marker lines the Functional writer uses to carry source state
     // (xmlns block, shared blank nodes, cleared prefixes) belong to owlmake's
     // own `*.ofn` cache files, never to a released artefact: MONDO's

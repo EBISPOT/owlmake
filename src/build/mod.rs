@@ -3875,15 +3875,9 @@ fn run_artefact(
     // file introduced (skos:exactMatch …) must get a Declaration.
     declare_used_annotation_properties(&mut model);
 
-    // horned-owl keeps set-valued operands (`ObjectIntersectionOf`,
-    // `EquivalentClasses`, …) in a Vec, so two axioms that differ only in the
-    // ORDER of a set operand — one axiom in OWL — can both survive as distinct
-    // values here. Canonicalise the order and let
-    // `SetOntology` collapse them — otherwise the equivalence, its blank node and
-    // its `owl:Axiom` reification are each rendered twice.
-    crate::io::normalize_set_operands(&mut model);
-
     // Write the final result in the artefact's format (from its extension).
+    // (Set-valued operand lists are canonicalised by `save_as` itself, the one
+    // boundary every serialization passes through.)
     // Targets can name a subdirectory (e.g. `tmp/<id>-preprocess.owl`); ensure it
     // exists under the output directory.
     if let Some(parent) = out.parent() {
