@@ -532,6 +532,11 @@ pub fn ontology_set_order(hashes: &[i32]) -> Vec<usize> {
 /// the members passed through on their way in. Verified against 170/170
 /// unambiguous real cliques; the residual tie (same bucket in BOTH tables)
 /// falls back to IRI order.
+/// The hash of a named class, as a set of classes keys it.
+pub fn class_hash(iri: &str) -> i32 {
+    tag(P_CLASS, &[iri_hash(iri)])
+}
+
 pub fn class_node_order(iris: &[String]) -> Vec<usize> {
     let mut cap = 1usize;
     let want = iris.len() * 4 / 3 + 1;

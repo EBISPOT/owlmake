@@ -496,7 +496,10 @@ fn filter_core(
             ont.insert(ac);
         }
         let mut out = crate::model::Model::from_parts(ont, model.prefixes);
-        out.banner_labels = model.banner_labels;
+        // The banner labels are NOT carried: a filter keeps a subset, and a
+        // label it dropped is not one the written document has. The writer
+        // names each section from what it writes, and from the closure where
+        // imports remain.
         out.import_order = model.import_order;
         // NOT the document format's prefix map. `filter` builds a NEW ontology from
         // the retained axioms, and a new ontology has a fresh format — so its

@@ -732,7 +732,7 @@ pub(crate) fn cleanup_tdb(tdb: Option<Tdb>, keep: bool) {
 }
 
 /// Collect the `owl:imports` IRIs declared by `model`.
-fn imports_of(model: &Model) -> Vec<String> {
+pub(crate) fn imports_of(model: &Model) -> Vec<String> {
     model
         .ont
         .iter()

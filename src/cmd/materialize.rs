@@ -132,7 +132,6 @@ pub fn materialize_with_opts(
     // materialized property's restriction included, or a named class — is not
     // direct, and only direct superclasses are asserted. The named direct
     // subsumptions come from the same augmented hierarchy.
-    const AUX_NS: &str = "urn:owlmake:materialize#";
     const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
     const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
     let mut classes: std::collections::BTreeSet<String> = Default::default();
@@ -155,54 +154,7 @@ pub fn materialize_with_opts(
         v.sort();
         v
     };
-    let (relations, named_subs) = {
-        let mut aux = model.clone();
-        let mut aux_map: std::collections::HashMap<String, (String, String)> = Default::default();
-        let mut n = 0usize;
-        for r in &prop_list {
-            for c in &classes {
-                let iri = format!("{AUX_NS}{n}");
-                n += 1;
-                aux.ont.insert(Component::EquivalentClasses(
-                    horned_owl::model::EquivalentClasses(vec![
-                        CE::Class(aux.build.class(iri.clone())),
-                        CE::ObjectSomeValuesFrom {
-                            ope: OPE::ObjectProperty(aux.build.object_property(r.clone())),
-                            bce: Box::new(CE::Class(aux.build.class(c.clone()))),
-                        },
-                    ]),
-                ));
-                aux_map.insert(iri, (r.clone(), c.clone()));
-            }
-        }
-        let reasoner = Reasoner::classify(&aux);
-        let direct = reasoner.direct_subsumptions();
-        let mutual: std::collections::HashSet<(&str, &str)> =
-            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-        let mut relations: Vec<(String, String, String)> = Vec::new();
-        let mut named_subs: Vec<(String, String)> = Vec::new();
-        for (sub, sup) in &direct {
-            if sub.starts_with(AUX_NS) {
-                continue;
-            }
-            match aux_map.get(sup) {
-                Some((r, d)) => {
-                    // An equivalent restriction is the class's own node, not a
-                    // superclass.
-                    if mutual.contains(&(sup.as_str(), sub.as_str())) {
-                        continue;
-                    }
-                    relations.push((sub.clone(), r.clone(), d.clone()));
-                }
-                None => named_subs.push((sub.clone(), sup.clone())),
-            }
-        }
-        relations.sort();
-        relations.dedup();
-        named_subs.sort();
-        named_subs.dedup();
-        (relations, named_subs)
-    };
+    let (relations, named_subs, _) = existential_relations(&model, &prop_list, &classes);
 
     // Restrictions the ontology asserts WITH axiom annotations: the reification
     // points at a labeled node, and a materialized twin at the same owner
@@ -341,4 +293,69 @@ pub fn materialize_with_opts(
     }
     status!("materialize: asserted {added} existential restriction(s), {named_added} named subsumption(s)");
     model
+}
+
+/// The DIRECT existential superclasses of every named class over `props`, as
+/// `(class, property, filler)`, with the direct named subsumptions and the
+/// unsatisfiable classes found on the way.
+///
+/// Directness is a question the CLASS HIERARCHY answers, so it is computed in
+/// a synthetic space: one fresh named class per (property, filler) pair,
+/// equivalent to the restriction it stands for, classified together with the
+/// ontology. A restriction with anything between it and the class — another
+/// materialized property's restriction included, or a named class — is not
+/// direct.
+pub(crate) fn existential_relations(
+    model: &crate::model::Model,
+    prop_list: &[String],
+    classes: &std::collections::BTreeSet<String>,
+) -> (Vec<(String, String, String)>, Vec<(String, String)>, Vec<String>) {
+    const AUX_NS: &str = "urn:owlmake:materialize#";
+        let mut aux = model.clone();
+        let mut aux_map: std::collections::HashMap<String, (String, String)> = Default::default();
+        let mut n = 0usize;
+        for r in prop_list {
+            for c in classes {
+                let iri = format!("{AUX_NS}{n}");
+                n += 1;
+                aux.ont.insert(Component::EquivalentClasses(
+                    horned_owl::model::EquivalentClasses(vec![
+                        CE::Class(aux.build.class(iri.clone())),
+                        CE::ObjectSomeValuesFrom {
+                            ope: OPE::ObjectProperty(aux.build.object_property(r.clone())),
+                            bce: Box::new(CE::Class(aux.build.class(c.clone()))),
+                        },
+                    ]),
+                ));
+                aux_map.insert(iri, (r.clone(), c.clone()));
+            }
+        }
+        let reasoner = Reasoner::classify(&aux);
+        let unsat: Vec<String> = reasoner.unsatisfiable().into_iter().map(|u| u.to_string()).collect();
+        let direct = reasoner.direct_subsumptions();
+        let mutual: std::collections::HashSet<(&str, &str)> =
+            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let mut relations: Vec<(String, String, String)> = Vec::new();
+        let mut named_subs: Vec<(String, String)> = Vec::new();
+        for (sub, sup) in &direct {
+            if sub.starts_with(AUX_NS) {
+                continue;
+            }
+            match aux_map.get(sup) {
+                Some((r, d)) => {
+                    // An equivalent restriction is the class's own node, not a
+                    // superclass.
+                    if mutual.contains(&(sup.as_str(), sub.as_str())) {
+                        continue;
+                    }
+                    relations.push((sub.clone(), r.clone(), d.clone()));
+                }
+                None => named_subs.push((sub.clone(), sup.clone())),
+            }
+        }
+        relations.sort();
+        relations.dedup();
+        named_subs.sort();
+        named_subs.dedup();
+        (relations, named_subs, unsat)
 }

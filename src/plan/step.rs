@@ -102,6 +102,9 @@ pub enum Op {
         /// OFN abbreviates `Orphanet:377788` while declaring no such prefix, and a
         /// downstream re-read expands it to `obo:Orphanet_377788`.
         add_prefixes: Vec<String>,
+        /// `--check false`: write an OBO document whose frames repeat a
+        /// single-valued tag, instead of refusing it.
+        check: Option<bool>,
     },
     /// `query` — SPARQL `--update` (transforms the model) and/or `--query`/
     /// `--select`/`--construct FILE OUTPUT` (writes a result file). owlmake runs

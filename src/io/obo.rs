@@ -208,10 +208,16 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         }
     });
 
-    // Header → ontology id + annotations.
-    if let Some(ont_id) = header.get("ontology") {
+    // Header → ontology id + annotations. A document with no `ontology:` line
+    // is the ontology `TEMP`, and `TEMP` is the idspace its bare local names
+    // resolve in.
+    let ontology_id: &str = header.get("ontology").unwrap_or("TEMP");
+    {
+        let ont_id = ontology_id;
         let iri = if ont_id.starts_with("http") {
             ont_id.to_string()
+        } else if ont_id == "TEMP" && header.get("ontology").is_none() {
+            format!("{OBO_BASE}TEMP")
         } else {
             format!("{OBO_BASE}{ont_id}.owl")
         };
@@ -252,9 +258,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         )));
     }
 
-    let onto_ns_for_defs = header.get("ontology").and_then(|o| {
-        if o.starts_with("http") { None } else { Some(format!("{OBO_BASE}{o}#")) }
-    });
+    let onto_ns_for_defs = Some(ontology_id)
+        .filter(|o| !o.starts_with("http"))
+        .map(|o| format!("{OBO_BASE}{o}#"));
     // `synonymtypedef:`/`subsetdef:` header lines declare an annotation property
     // that is a sub-property of oboInOwl:SynonymTypeProperty / :SubsetProperty.
     // The quoted description is carried as `rdfs:label` for a synonymtypedef but
@@ -280,9 +286,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
             } else {
                 resolve_local(id, onto_ns_for_defs.as_deref())
             };
-            ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
-                b.annotation_property(iri.as_str()),
-            )));
+            // The property itself is declared as every referenced property is
+            // — by `declare_referenced_entities`, so that an import closure
+            // that already types it can withdraw the declaration.
             ont.insert(Component::SubAnnotationPropertyOf(SubAnnotationPropertyOf {
                 sub: b.annotation_property(iri.as_str()),
                 sup: b.annotation_property(format!("{OIO}{parent}").as_str()),
@@ -299,13 +305,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // namespace, `http://purl.obolibrary.org/obo/<ontology>#<name>` — e.g.
     // `ontology: uberon/core` ⇒ `obo/uberon/core#efo_slim`. That is the OBO→OWL
     // mapping for a bare local name.
-    let onto_ns = header.get("ontology").and_then(|o| {
-        if o.starts_with("http") {
-            None
-        } else {
-            Some(format!("{OBO_BASE}{o}#"))
-        }
-    });
+    let onto_ns = Some(ontology_id)
+        .filter(|o| !o.starts_with("http"))
+        .map(|o| format!("{OBO_BASE}{o}#"));
 
     // Relation shorthands: a `[Typedef]` whose `id` is a bare name and which has
     // a single `xref` to an ontology term (e.g. `id: disease_has_basis_in_…` +
@@ -685,6 +687,12 @@ fn declare_referenced_entities(
                 if let OPE::ObjectProperty(p) = &ax.ope {
                     obj_props.insert(p.0.to_string());
                 }
+            }
+            // Both ends of a property hierarchy are properties the document
+            // names: a synonym type or subset is declared by its line alone.
+            Component::SubAnnotationPropertyOf(ax) => {
+                ann_props.insert(ax.sub.0.to_string());
+                ann_props.insert(ax.sup.0.to_string());
             }
             Component::AnnotationAssertion(ax) => {
                 ann_props.insert(ax.ann.ap.0.to_string());
@@ -2118,6 +2126,20 @@ struct Ctx {
     owlapi_456: bool,
 }
 
+/// The OBO identifier of an entity, as the writer spells it: a CURIE in the
+/// document's own prefixes, or the full IRI.
+pub struct IdCtx(Ctx);
+
+impl IdCtx {
+    pub fn new(model: &Model) -> IdCtx {
+        IdCtx(Ctx::new(model))
+    }
+
+    pub fn id(&self, iri: &str) -> String {
+        self.0.id(iri)
+    }
+}
+
 impl Ctx {
     fn new(model: &Model) -> Ctx {
         // The prefixes usable for CURIE shortening are the document's own declared
@@ -3008,6 +3030,33 @@ fn pv_literal_token(val: &str, owlapi_456: bool) -> String {
     }
 }
 
+/// A frame may carry at most one of its single-valued tags: a term with two
+/// definitions cannot be written as OBO. The document is refused before a line
+/// of it is written, so what the caller finds at the output path is empty.
+fn check_frame_structure<'a>(
+    data: &BTreeMap<String, SubjData>,
+    frames: impl Iterator<Item = &'a String>,
+) -> Result<()> {
+    for subj in frames {
+        let Some(sd) = data.get(subj) else { continue };
+        let counts = [
+            ("name", sd.name.iter().count() + sd.extra_names.len()),
+            ("def", sd.def.iter().count() + sd.extra_defs.len()),
+            ("comment", sd.comments.len()),
+            ("created_by", sd.created_by.len()),
+            ("creation_date", sd.creation_date.len()),
+        ];
+        if let Some((tag, _)) = counts.iter().find(|(_, n)| *n > 1) {
+            anyhow::bail!(
+                "OBO STRUCTURE ERROR Ontology does not conform to OBO structure rules:\n\
+                 multiple {tag} tags not allowed. in frame: {}",
+                sd.id.as_deref().unwrap_or(subj)
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     let ctx = Ctx::new(model);
     let mut classes: BTreeSet<String> = BTreeSet::new();
@@ -3357,6 +3406,12 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         };
     }
 
+    if model.obo_structure_check {
+        check_frame_structure(
+            &data,
+            classes.iter().chain(obj_props.iter()).chain(ann_props.iter()).chain(individuals.iter()),
+        )?;
+    }
     writeln!(writer, "format-version: {}", format_version.as_deref().unwrap_or("1.2"))?;
     if let Some(dv) = data_version(ont_iri.as_deref(), ont_version_iri.as_deref()) {
         writeln!(writer, "data-version: {dv}")?;
@@ -4802,7 +4857,7 @@ fn owlapi_lit_hash(value: &str, datatype: Option<&str>, lang: Option<&str>) -> i
 
 /// The `(value, datatype, language)` the literal hash needs from an annotation
 /// value; an IRI value returns its IRI in `value` with `is_iri` true.
-fn av_lit_parts(av: &AnnotationValue<RcStr>) -> (String, Option<String>, Option<String>, bool) {
+pub(crate) fn av_lit_parts(av: &AnnotationValue<RcStr>) -> (String, Option<String>, Option<String>, bool) {
     match av {
         AnnotationValue::IRI(i) => (i.as_ref().to_string(), None, None, true),
         AnnotationValue::Literal(Literal::Simple { literal }) => (literal.clone(), None, None, false),
@@ -4823,7 +4878,7 @@ fn owlapi_annotation_hash(prop_iri: &str, value: &str, is_iri: bool) -> i32 {
 
 /// [`owlapi_annotation_hash`] with the value's datatype/language, so typed and
 /// language-tagged qualifier values hash exactly.
-fn owlapi_annotation_hash_full(
+pub(crate) fn owlapi_annotation_hash_full(
     prop_iri: &str,
     value: &str,
     datatype: Option<&str>,

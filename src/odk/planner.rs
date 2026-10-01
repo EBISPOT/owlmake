@@ -2692,7 +2692,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             input: Some(full_target.clone()),
         needs: vec![],
         order_only: vec![],
-        steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![] })],
+        steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![], check: None })],
             gaps: vec![],
             missing_rule: false,
         side_effect_only: false,

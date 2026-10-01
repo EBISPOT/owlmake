@@ -575,6 +575,40 @@ pub struct ExecOpts {
     pub jobs: usize,
 }
 
+thread_local! {
+    /// Where a step's console output goes while a target redirects it: the file
+    /// the recipe's `> $@` names. Unset, it goes to standard output.
+    static CONSOLE_FILE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Print one line of a step's console output — to the file the target
+/// redirects to, or to standard output.
+pub fn console_line(line: &str) {
+    use std::io::Write;
+    CONSOLE_FILE.with(|c| match &*c.borrow() {
+        Some(path) => {
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(path) {
+                let _ = writeln!(f, "{line}");
+            }
+        }
+        None => println!("{line}"),
+    });
+}
+
+/// Redirects console output to `path` for as long as it lives.
+struct ConsoleRedirect;
+
+impl Drop for ConsoleRedirect {
+    fn drop(&mut self) {
+        CONSOLE_FILE.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+fn redirect_console(path: PathBuf) -> ConsoleRedirect {
+    CONSOLE_FILE.with(|c| *c.borrow_mut() = Some(path));
+    ConsoleRedirect
+}
+
 /// The targets being built at this moment.
 ///
 /// A target is built at most once per run, and `Repo::built` records the ones
@@ -1561,7 +1595,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
     let edit = find_edit_ontology(repo, plan)?;
     let catalog = load_catalog_planned(repo);
     let edit_model = crate::io::load(&edit)?;
-    let closure = load_closure(&edit_model, &repo.dir, &catalog)?;
+    let closure = load_closure(repo, &edit_model, &catalog)?;
     let mut sources: Vec<&crate::model::Model> = vec![&edit_model];
     if let Some(c) = &closure {
         sources.push(c);
@@ -4694,14 +4728,18 @@ fn run_artefact(
     // nothing is printed, which is the ordinary outcome of a check that passes.
     // owlmake's ops report on stderr, so the file records the same thing the
     // redirect does: that the recipe ran to the end.
-    if let Some(dst) = a.stdout_file.as_deref() {
-        let dst = repo.dir.join(dst);
-        if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent).ok();
+    let _console = match a.stdout_file.as_deref() {
+        Some(dst) => {
+            let dst = repo.dir.join(dst);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(&dst, b"")
+                .with_context(|| format!("creating {} for `{}`", dst.display(), a.target))?;
+            Some(redirect_console(dst))
         }
-        std::fs::write(&dst, b"")
-            .with_context(|| format!("creating {} for `{}`", dst.display(), a.target))?;
-    }
+        None => None,
+    };
     let input_path =
         a.input.as_deref().and_then(|i| resolve_input(repo, Some(i), out_dir, work, &a.target).ok());
     // …but an input the plan can BUILD and that is still missing is a failed
@@ -5098,7 +5136,7 @@ fn run_artefact(
         // import declarations at a reason/reduce step.
         let use_closure = matches!(op, Op::Reason { .. } | Op::Reduce { .. }) && model_has_imports(&model);
         if use_closure && !closure_loaded {
-            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         let cl = if use_closure { closure.as_ref() } else { None };
@@ -5118,7 +5156,7 @@ fn run_artefact(
     let write_owlrdf = a.target.ends_with(".owl");
     if write_owlrdf && model_has_imports(&model) {
         if !closure_loaded {
-            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         if let Some(cl) = &closure {
@@ -5140,7 +5178,7 @@ fn run_artefact(
     // comments come from the closure.
     if a.target.ends_with(".obo") && model_has_imports(&model) {
         if !closure_loaded {
-            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         if let Some(cl) = &closure {
@@ -6019,10 +6057,13 @@ fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
 }
 
 pub(crate) fn load_closure(
+    repo: &Repo,
     model: &crate::model::Model,
-    dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
 ) -> Result<Option<crate::model::Model>> {
+    let dir = &repo.dir;
+    // What the closure holds is read after the run has brought it up to date.
+    ensure_closure_current(repo, crate::cmd::imports_of(model), catalog)?;
     // The build reaches the closure here rather than through
     // `resolve_import_closure`, so it reports itself here too — otherwise
     // `OM_IMPORT_DEBUG` is silent on this path while the closure IS loaded, and
@@ -6276,15 +6317,26 @@ fn steps_format(target: &str, steps: &[Step]) -> Option<crate::io::Format> {
             built.extend(src.iter().map(|p| name_of(p)));
         }
     }
-    steps.iter().rev().find_map(|s| match s {
-        Step::Op(Op::Convert { format: Some(f), output, .. })
-            if output.is_none()
-                || built.contains(&output.as_deref().and_then(|o| name_of(o))) =>
-        {
-            crate::io::Format::from_name(f).ok()
-        }
-        _ => None,
-    })
+    steps
+        .iter()
+        .rev()
+        .find_map(|s| match s {
+            Step::Op(Op::Convert { format: Some(f), output, .. })
+                if output.is_none()
+                    || built.contains(&output.as_deref().and_then(|o| name_of(o))) =>
+            {
+                crate::io::Format::from_name(f).ok()
+            }
+            _ => None,
+        })
+        // No conversion names the format, so the file a `mv` brought to the
+        // target is in the format its own name says: `reason -o $@.owl && mv
+        // $@.owl $@` leaves RDF/XML under a `.obo` name.
+        .or_else(|| {
+            built.iter().skip(1).last().and_then(|name| {
+                crate::io::Format::from_path(Path::new(name.as_ref()?)).ok()
+            })
+        })
 }
 
 /// Delete the staging file a closing `mv $@.tmp $@` would have consumed.
@@ -6416,7 +6468,7 @@ fn write_step_output(
     // every one of them belongs to the import rather than to this document.
     if matches!(fmt, Some(crate::io::Format::RdfXml) | None) && model_has_imports(model) {
         let catalog = load_catalog_planned(repo);
-        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+        if let Some(cl) = load_closure(repo, model, &catalog)? {
             model.closure_ann_ns = annotation_property_namespaces(&cl);
             model.closure_declared = closure_declared_entities(&cl);
         }
@@ -6428,7 +6480,7 @@ fn write_step_output(
     // closing write.
     if matches!(fmt, Some(crate::io::Format::Obo)) && model_has_imports(model) {
         let catalog = load_catalog_planned(repo);
-        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+        if let Some(cl) = load_closure(repo, model, &catalog)? {
             model.banner_labels = closure_labels(&cl);
         }
     }
@@ -6511,6 +6563,17 @@ fn apply_op(
                     merge_file_into(&mut model, &p)?;
                 }
             }
+            // The closure's plan-built members are brought up to date before
+            // they are read, whether they are merged here or reasoned over later.
+            let mut iris = crate::cmd::imports_of(&model);
+            for inp in inputs {
+                if let Some(p) = resolve_repo_file(repo, inp, work) {
+                    if let Ok(text) = std::fs::read_to_string(&p) {
+                        iris.extend(import_iris(&text));
+                    }
+                }
+            }
+            ensure_closure_current(repo, iris, catalog)?;
             if *collapse_import_closure == Some(false) {
                 // Keep imports as declarations and do NOT merge their axioms — they
                 // stay a read-only reasoning closure (`--collapse-import-closure
@@ -6811,7 +6874,7 @@ fn apply_op(
             // model does not have.
             if let Some(cl) = closure {
                 model.closure_declared = closure_declared_entities(cl);
-            } else if let Some(cl) = load_closure(&model, &repo.dir, catalog)? {
+            } else if let Some(cl) = load_closure(repo, &model, catalog)? {
                 model.closure_declared = closure_declared_entities(&cl);
             }
             // The plan NAMES the ID-ranges file; execution never globs the ontology
@@ -7059,7 +7122,7 @@ fn apply_op(
             // closure. The pipeline hands over the root ontology alone; union it
             // in here, over the catalog the plan names.
             if *use_graphs {
-                if let Some(cl) = load_closure(&m, &repo.dir, catalog)? {
+                if let Some(cl) = load_closure(repo, &m, catalog)? {
                     m = union_with_closure(&m, &cl);
                 }
             }
@@ -7168,8 +7231,13 @@ fn apply_op(
             back.carry_meta_from(&model);
             back
         }
-        Op::Convert { clean_obo, format, add_prefixes, .. } => {
+        Op::Convert { clean_obo, format, add_prefixes, check, .. } => {
             let mut model = model;
+            // `--check false` writes the OBO document however its frames repeat
+            // a single-valued tag; by default such a document is refused.
+            if *check == Some(false) {
+                model.obo_structure_check = false;
+            }
             // `--add-prefixes FILE`: fold each JSON-LD context's prefixes into
             // the model's map so the OFN/OBO output declares AND abbreviates with
             // them (and a cached-OFN re-read round-trips, e.g. `Orphanet:377788`).
@@ -8018,6 +8086,42 @@ pub(crate) fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Bring the plan-built members of an import closure up to date before they
+/// are read. An import module, or any target the plan builds, is a recipe's
+/// input as much as the file the recipe names: reading the committed copy of
+/// one the run is about to rebuild merges the previous release's import into
+/// this one. UBERON's `tmp/uberon-edit.owl` read a committed
+/// `imports/orcidio_import.owl` seven contributors short of the one the same
+/// run wrote an hour later. Walked by IRI through the catalog from `iris`, so
+/// the imports followed are those of the module as rebuilt.
+fn ensure_closure_current(
+    repo: &Repo,
+    iris: Vec<String>,
+    catalog: &BTreeMap<String, PathBuf>,
+) -> Result<()> {
+    let mut queue = iris;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut built: std::collections::HashSet<String> = std::collections::HashSet::new();
+    while let Some(iri) = queue.pop() {
+        if !seen.insert(iri.clone()) {
+            continue;
+        }
+        let Some(path) = crate::cmd::catalog_resolve(catalog, &iri) else { continue };
+        let rel = path.strip_prefix(&repo.dir).unwrap_or(&path).to_string_lossy().into_owned();
+        if let Some(imp) = import_module_for(repo.plan, &rel) {
+            ensure_import_module(repo, imp, &rel, &mut built)
+                .with_context(|| format!("bringing import `{rel}` up to date before it is read"))?;
+        } else if repo.target(&rel).is_some() {
+            run_target_recipe_inner(repo, &rel, &mut built)
+                .with_context(|| format!("bringing `{rel}` up to date before it is read"))?;
+        }
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            queue.extend(import_iris(&text));
+        }
+    }
+    Ok(())
 }
 
 /// Resolve the import closure of `file` to local paths via the catalog.

@@ -2351,6 +2351,7 @@ fn restore_cm(_model: &mut Model, _cm: CmOnto) {}
 /// RDF/XML writer instead.
 pub fn write_to_ref<W: Write>(model: &Model, writer: W, fmt: Format) -> Result<()> {
     let mut tmp = Model::from_parts(model.ont.clone(), crate::model::clone_prefixes(&model.prefixes));
+    tmp.obo_structure_check = model.obo_structure_check;
     write_to_with(&mut tmp, writer, fmt, RdfXmlWriter::Horned)
 }
 

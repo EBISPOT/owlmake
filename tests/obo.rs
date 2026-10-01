@@ -124,7 +124,9 @@ fn obo_label_comments_use_the_last_colliding_rdfxml_label() {
     </owl:Class>
 </rdf:RDF>
 "#;
-    let model = io::load_from(std::io::Cursor::new(rdfxml.as_bytes()), Format::RdfXml).unwrap();
+    let mut model = io::load_from(std::io::Cursor::new(rdfxml.as_bytes()), Format::RdfXml).unwrap();
+    // Two labels on one property is a frame the writer refuses by default.
+    model.obo_structure_check = false;
     let mut out = Vec::new();
     io::write_to_ref(&model, &mut out, Format::Obo).unwrap();
     let obo = String::from_utf8(out).unwrap();
@@ -431,7 +433,13 @@ comment: first note
 comment: second note
 xref: Y:2 {sssom:mapping_justification="semapv:ManualMappingCuration"}
 "#;
-    let m = load_obo(SRC);
+    let mut m = load_obo(SRC);
+    // A frame with two `comment:` clauses is not a valid OBO document, and the
+    // writer refuses it by default; `convert --check false` writes it anyway.
+    let mut out = Vec::new();
+    let refused = io::write_to_ref(&m, &mut out, Format::Obo).unwrap_err();
+    assert!(refused.to_string().contains("multiple comment tags not allowed"), "{refused:#}");
+    m.obo_structure_check = false;
     let mut out = Vec::new();
     io::write_to_ref(&m, &mut out, Format::Obo).unwrap();
     let obo = String::from_utf8(out).unwrap();

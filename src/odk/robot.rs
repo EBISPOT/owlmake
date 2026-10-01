@@ -1425,6 +1425,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             clean_obo: val("--clean-obo"),
             output: val2("--output", "-o"),
             add_prefixes: all("--add-prefixes"),
+            check: val("--check").map(|v| crate::plan::is_on(&v)),
         }),
         "query" => {
             let pairs = |keys: &[&str]| -> Vec<(String, String)> {

@@ -54,6 +54,10 @@ pub struct Model {
     /// edit file but resolves banner labels from its import closure). Empty for
     /// ordinary models.
     pub banner_labels: std::collections::HashMap<String, String>,
+    /// Whether an OBO write of this model refuses a frame that carries a
+    /// single-valued tag twice. On by default; `convert --check false` turns it
+    /// off for the document it writes.
+    pub obo_structure_check: bool,
     /// Per owning entity, the FNV-1a hashes of the anonymous class-expression
     /// signatures that shared ONE blank node in the RDF/XML this model came from.
     ///
@@ -340,6 +344,7 @@ impl Model {
             prefixes: default_prefixes(),
             build: Build::new(),
             banner_labels: std::collections::HashMap::new(),
+            obo_structure_check: true,
             shared_anon: std::collections::HashMap::new(),
             rdf_shared_anon: std::collections::HashMap::new(),
             inlined_imports: Vec::new(),
@@ -378,6 +383,7 @@ impl Model {
             prefixes,
             build: Build::new(),
             banner_labels: std::collections::HashMap::new(),
+            obo_structure_check: true,
             shared_anon: std::collections::HashMap::new(),
             rdf_shared_anon: std::collections::HashMap::new(),
             inlined_imports: Vec::new(),
@@ -419,6 +425,7 @@ impl Model {
     /// silently dropped mid-pipeline.
     pub fn carry_meta_from(&mut self, other: &Model) {
         self.banner_labels = other.banner_labels.clone();
+        self.obo_structure_check = other.obo_structure_check;
         self.shared_anon = other.shared_anon.clone();
         self.rdf_shared_anon = other.rdf_shared_anon.clone();
         self.inlined_imports = other.inlined_imports.clone();
@@ -495,6 +502,7 @@ impl Clone for Model {
     fn clone(&self) -> Self {
         let mut m = Model::from_parts(self.ont.clone(), clone_prefixes(&self.prefixes));
         m.banner_labels = self.banner_labels.clone();
+        m.obo_structure_check = self.obo_structure_check;
         m.shared_anon = self.shared_anon.clone();
         m.rdf_shared_anon = self.rdf_shared_anon.clone();
         m.inlined_imports = self.inlined_imports.clone();
