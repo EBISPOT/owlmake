@@ -169,8 +169,8 @@ where
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .map(|g| g.saturating_mul(GIB))
-        .unwrap_or(4 * GIB);
-    for size in [want, 2 * GIB, GIB, GIB / 4] {
+        .unwrap_or(GIB.saturating_mul(4));
+    for size in [want, GIB.saturating_mul(2), GIB, GIB / 4] {
         if size == 0 || size > want {
             continue;
         }
