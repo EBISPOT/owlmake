@@ -2498,9 +2498,10 @@ fn write_to_with<W: Write>(
             // A document merged in after the pipeline opened is one more the
             // banners draw from, so the labels are settled now, under the
             // identity the document is written with.
-            let labels = if model.banner_docs.len() > 1 {
+            let labels = if !model.banner_docs.is_empty() {
                 let (iri, version) = crate::build::model_ontology_id(model);
-                crate::cmd::fold_banner_docs(&model.banner_docs, iri.as_deref(), version.as_deref())
+                let own = crate::cmd::rdfs_labels(model);
+                crate::cmd::fold_banner_docs(&model.banner_docs, iri.as_deref(), version.as_deref(), &own)
             } else {
                 model.banner_labels.clone()
             };

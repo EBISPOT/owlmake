@@ -46,7 +46,7 @@ pub struct AnonBlock {
 pub struct BannerDoc {
     pub iri: Option<String>,
     pub version: Option<String>,
-    pub labels: std::collections::HashMap<String, String>,
+    pub labels: std::sync::Arc<std::collections::HashMap<String, String>>,
     /// The document that opened the pipeline, whose identity is the one it
     /// carries when written.
     pub root: bool,

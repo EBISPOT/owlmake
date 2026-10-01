@@ -3767,7 +3767,13 @@ fn run_steps(
                 staged_by_shell = false;
             }
             Step::Op(op) | Step::Partial { op, .. } => {
+                // The documents the banners draw on survive a step that builds
+                // its result afresh.
+                let docs = model.banner_docs.clone();
                 model = apply_op(repo, op, model, catalog, work, None, pipe.as_deref())?;
+                if model.banner_docs.is_empty() {
+                    model.banner_docs = docs;
+                }
                 if let Some(t) = target {
                     dump_step(t, &model);
                 }
@@ -4875,6 +4881,7 @@ fn run_artefact(
                 &model.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&model).1.as_deref()),
+                &crate::cmd::rdfs_labels(&model),
             );
             crate::io::set_anon_counter(mark);
         }
@@ -4986,6 +4993,7 @@ fn run_artefact(
                 &m.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&m).1.as_deref()),
+                &crate::cmd::rdfs_labels(&m),
             );
             crate::io::set_anon_counter(mark);
         }
@@ -5174,7 +5182,11 @@ fn run_artefact(
             closure_loaded = true;
         }
         let cl = if use_closure { closure.as_ref() } else { None };
+        let docs = model.banner_docs.clone();
         model = apply_op(repo, op, model, catalog, work, cl, threaded_from.as_deref())?;
+        if model.banner_docs.is_empty() {
+            model.banner_docs = docs;
+        }
         dump_step(&a.target, &model);
         write_step_output(repo, op, &mut model, Some(&a.target))?;
         model_on_disk = false;
@@ -6874,7 +6886,12 @@ fn apply_op(
                 output_iri: None,
                 common: Default::default(),
             };
-            cmd::extract::step(Some(model), &eargs)?.unwrap_or_else(crate::model::Model::new)
+            let mut out = cmd::extract::step(Some(model), &eargs)?.unwrap_or_else(crate::model::Model::new);
+            // The extracted module is a new document, on its own: a functional
+            // write of it banners each entity from the module's own labels.
+            out.banner_docs = vec![crate::cmd::banner_doc_of(&out, true)];
+            out.banner_labels.clear();
+            out
         }
         Op::ExtractUphenoRelations { relations, terms, term_files, roots, root_files } => {
             crate::cmd::extract_upheno_relations::apply(

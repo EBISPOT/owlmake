@@ -626,49 +626,41 @@ pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, St
 /// The banner-label document for `model` as it stands.
 pub(crate) fn banner_doc_of(model: &Model, root: bool) -> crate::model::BannerDoc {
     let (iri, version) = crate::build::model_ontology_id(model);
-    crate::model::BannerDoc { iri, version, labels: rdfs_labels(model), root }
+    crate::model::BannerDoc { iri, version, labels: std::sync::Arc::new(rdfs_labels(model)), root }
 }
 
 /// The label a functional write banners each entity with, over every loaded
 /// document: the documents stand in the order a set of them is iterated in,
-/// keyed on each one's identity — the root's as `root_iri`/`root_version`,
-/// the identity it is written under — and the first document with a label
-/// for an entity supplies it.
+/// keyed on each one's identity, and the first document with a label for an
+/// entity supplies it. The document being written is the root: it absorbed
+/// whatever was merged into it, so its labels are the model's own as it
+/// stands (`root_labels`), under the identity it is written with
+/// (`root_iri`/`root_version`); every other document keeps the labels it
+/// was loaded with.
 pub(crate) fn fold_banner_docs(
     docs: &[crate::model::BannerDoc],
     root_iri: Option<&str>,
     root_version: Option<&str>,
+    root_labels: &std::collections::HashMap<String, String>,
 ) -> std::collections::HashMap<String, String> {
-    // A document the pipeline opened and later merged by way of its closure
-    // is one document.
+    let root_id = (root_iri.map(str::to_string), root_version.map(str::to_string));
     let mut seen: std::collections::HashSet<(Option<String>, Option<String>)> = Default::default();
-    let docs: Vec<&crate::model::BannerDoc> = docs
+    seen.insert(root_id.clone());
+    let others: Vec<&crate::model::BannerDoc> = docs
         .iter()
-        .filter(|d| {
-            let id = if d.root {
-                (root_iri.map(str::to_string), root_version.map(str::to_string))
-            } else {
-                (d.iri.clone(), d.version.clone())
-            };
-            id.0.is_none() || seen.insert(id)
-        })
+        .filter(|d| !d.root)
+        .filter(|d| d.iri.is_none() || seen.insert((d.iri.clone(), d.version.clone())))
         .collect();
-    let hashes: Vec<i32> = docs
-        .iter()
-        .map(|d| {
-            if d.root {
-                crate::owlapi_hash::ontology_id_hash(root_iri, root_version)
-            } else {
-                crate::owlapi_hash::ontology_id_hash(d.iri.as_deref(), d.version.as_deref())
-            }
-        })
-        .collect();
+    let mut hashes: Vec<i32> = vec![crate::owlapi_hash::ontology_id_hash(root_iri, root_version)];
+    hashes.extend(others.iter().map(|d| crate::owlapi_hash::ontology_id_hash(d.iri.as_deref(), d.version.as_deref())));
     let mut out = std::collections::HashMap::new();
     for i in crate::owlapi_hash::ontology_set_order(&hashes) {
+        let labels: &std::collections::HashMap<String, String> =
+            if i == 0 { root_labels } else { &others[i - 1].labels };
         if std::env::var("OM_BANNER_DEBUG").is_ok() {
-            eprintln!("[banner] doc#{i} id-hash={} labels={} root={}", hashes[i], docs[i].labels.len(), docs[i].root);
+            eprintln!("[banner] doc#{i} id-hash={} labels={} root={}", hashes[i], labels.len(), i == 0);
         }
-        for (subj, label) in &docs[i].labels {
+        for (subj, label) in labels.iter() {
             out.entry(subj.clone()).or_insert_with(|| label.clone());
         }
     }
