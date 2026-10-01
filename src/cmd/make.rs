@@ -795,6 +795,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         jobs: args.jobs,
         assume_new: args.assume_new.clone(),
         goals: artefacts.clone(),
+        rebuild_imports: args.rebuild.iter().any(|g| g == "imports"),
     };
     let run_one = |t: &str, kind: &Kind, repo: &OdkRepo, plan: &Plan| -> Result<()> {
         match kind {

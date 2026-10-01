@@ -3615,8 +3615,25 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
             && matches!((staged, src.as_slice()), (Some(o), [only]) if o == only && !same_file(o, target));
         if folds {
             steps.pop();
+            // The staging file's extension chose the format the target is
+            // written in: `-o $@.owl && mv $@.owl $@` writes RDF/XML to a
+            // target whose own name says otherwise.
+            let staged_ext = |p: &str| {
+                std::path::Path::new(p).extension().and_then(|e| e.to_str()).map(str::to_lowercase)
+            };
+            let target_ext = staged_ext(target);
             match steps.last_mut() {
                 Some(Step::Op(robot::Op::Convert { output, .. })) => *output = None,
+                Some(Step::Op(robot::Op::RoundTrip { path })) if staged_ext(path) != target_ext => {
+                    let format = staged_ext(path);
+                    *steps.last_mut().unwrap() = Step::Op(robot::Op::Convert {
+                        format,
+                        clean_obo: None,
+                        output: None,
+                        add_prefixes: Vec::new(),
+                        check: None,
+                    });
+                }
                 _ => {
                     steps.pop();
                 }

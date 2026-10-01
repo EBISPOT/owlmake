@@ -61,6 +61,11 @@ pub struct Repo<'a> {
     /// into rebuilding `mirror/merged.owl` from mirrors a release build never
     /// downloads.
     pub refresh_imports: bool,
+    /// Whether the caller asked for the imports group to be REBUILT
+    /// (`--rebuild imports`): its recipes then run even where their outputs are
+    /// present. `IMP=true` alone only makes the group's rules exist, and a
+    /// target of theirs runs when a prerequisite is newer, as any target does.
+    pub rebuild_imports: bool,
     /// The mirrors / imports group was pinned EXPLICITLY this run (`MIR=false`,
     /// `IMP=false`, `--keep`). See [`ExecOpts::mirrors_pinned`]: it decides what
     /// a pin means for a file that is absent.
@@ -123,6 +128,7 @@ impl<'a> Repo<'a> {
             always_make: false,
             refresh_mirrors: true,
             refresh_imports: true,
+            rebuild_imports: false,
             mirrors_pinned: false,
             imports_pinned: false,
             regenerate_patterns: true,
@@ -147,6 +153,7 @@ impl<'a> Repo<'a> {
             always_make: opts.always_make,
             refresh_mirrors: opts.refresh_mirrors,
             refresh_imports: matches!(opts.imports_mode, ImportsMode::Fresh),
+            rebuild_imports: opts.rebuild_imports,
             mirrors_pinned: opts.mirrors_pinned,
             imports_pinned: opts.imports_pinned,
             regenerate_patterns: opts.patterns_mode == PatternsMode::Regenerate,
@@ -574,6 +581,10 @@ pub struct ExecOpts {
     pub assume_new: Vec<String>,
     /// `-j`/`--jobs`: how many targets to build at once.
     pub jobs: usize,
+    /// `--rebuild imports`: the imports group's recipes run even where their
+    /// outputs are present. Not implied by `IMP=true`, which only makes the
+    /// group's rules exist.
+    pub rebuild_imports: bool,
     /// The artefacts this run was asked for, in the order asked. They are built
     /// in that order, each after what it needs; what the plan holds beyond them
     /// follows in the plan's own order.
@@ -2406,7 +2417,7 @@ fn run_target_recipe_inner(
     // them to be considered: `--rebuild imports` says "even where their outputs
     // are present", so a module already on disk is no answer.
     let forced = repo.always_make
-        || (repo.refresh_imports && is_import_target(repo, target))
+        || (repo.rebuild_imports && is_import_target(repo, target))
         || (repo.refresh_mirrors && is_mirror_target(repo, target));
     if !a.steps.is_empty() && !forced && !repo.plan.is_phony(target) {
         if let Some(out) = repo.target_file(target).filter(|p| p.is_file()) {
