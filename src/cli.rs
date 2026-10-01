@@ -373,6 +373,9 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
         Some("runoak") => return crate::cmd::runoak::main(&argv[1..]),
         // `check-rdfxml <product>.owl` — the RDF/XML parse check over a product.
         Some("check-rdfxml") => return crate::cmd::check_rdfxml::main(&argv[1..]),
+        // `obo-grep -r <regex> <file>` — the stanza filter UBERON's and MONDO's
+        // text pipelines run, under the name of the script they used to call.
+        Some("obo-grep") | Some("obo-grep.pl") => return crate::cmd::obo_grep::main(&argv[1..]),
         // MONDO's `pattern_schema_checks`, a member of its `test` target.
         Some("simple_pattern_tester.py") | Some("simple-pattern-tester") => {
             return crate::cmd::pattern_tester::main(&argv[1..])
