@@ -832,3 +832,32 @@ fn a_file_is_refused_for_what_its_base_cannot_honour() {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+/// Built on several threads, a release is the same bytes as built on one: the
+/// scheduler changes when a target runs, never what it writes. A named target's
+/// prerequisites are built side by side the same way, and an aggregate still
+/// reports each.
+#[test]
+fn a_release_built_with_jobs_is_the_same_bytes() {
+    let targets = "- target: greeting\n  steps:\n  - op: print\n    message: built-its-own-way\n\
+                   - target: farewell\n  steps:\n  - op: print\n    message: and-again\n\
+                   - target: test\n  extends: true\n  needs:\n  - greeting\n  - farewell\n";
+    let one = tiny_repo("jobs1", targets);
+    let four = tiny_repo("jobs4", targets);
+    let (out, said) = om_in(&one, &["make", "-j1", "tiny.owl", "tiny-base.owl", "tiny.obo"]);
+    assert!(out.status.success(), "{said}");
+    let (out, said) = om_in(&four, &["make", "-j4", "tiny.owl", "tiny-base.owl", "tiny.obo"]);
+    assert!(out.status.success(), "{said}");
+    for file in ["tiny.owl", "tiny-base.owl", "tiny.obo"] {
+        let a = std::fs::read(one.join("src/ontology").join(file)).unwrap();
+        let b = std::fs::read(four.join("src/ontology").join(file)).unwrap();
+        assert!(a == b, "{file} differs between -j1 and -j4");
+        assert!(!a.is_empty());
+    }
+    let (out, said) = om_in(&four, &["make", "-j4", "test"]);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains("[PASS] greeting") && said.contains("[PASS] farewell"),
+        "an aggregate reports each member under -j:\n{said}"
+    );
+}

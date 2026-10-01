@@ -42,6 +42,13 @@ pub struct Args {
     #[arg(short = 'k', long = "keep-going")]
     pub keep_going: bool,
 
+    /// `-j`/`--jobs`: build up to this many targets at once. A target starts
+    /// once everything it needs is built, and targets that need nothing of each
+    /// other run side by side; with one job, targets are built one after another
+    /// in plan order.
+    #[arg(short = 'j', long = "jobs", value_name = "N", default_value_t = 1)]
+    pub jobs: usize,
+
     /// `-W`/`--assume-new`: pretend the named file was just modified. Targets
     /// that depend on it run their recipes; the file itself is neither rebuilt
     /// nor touched. This is how `recreate-components` forces the component
@@ -277,17 +284,12 @@ fn mirror_target_id(plan: &Plan, target: &str) -> Option<String> {
     plan.imports.iter().any(|i| i.id == id).then_some(id)
 }
 
-/// Whether `target` names one of the DOSDP products the pattern stage writes —
-/// `definitions.owl` (the plan's `dosdp.output`) or the `pattern.owl` beside it.
+/// Whether `target` names one of the DOSDP products the pattern stage writes.
+/// The one answer is `pattern_product_targets`: whatever that enumeration names,
+/// this predicate accepts, so a product a caller can list is always one a caller
+/// can ask for.
 fn is_pattern_product(plan: &Plan, target: &str) -> bool {
-    let Some(d) = plan.dosdp.as_ref() else { return false };
-    if target == d.output {
-        return true;
-    }
-    std::path::Path::new(&d.output)
-        .parent()
-        .map(|p| p.join("pattern.owl"))
-        .is_some_and(|p| p.to_string_lossy() == target)
+    pattern_product_targets(plan).iter().any(|t| t == target)
 }
 
 /// Whether `target` names one of the plan's release artefacts (by filename,
@@ -791,6 +793,7 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         run_env: make_vars.env.clone(),
         always_make: args.always_make,
         keep_going: args.keep_going,
+        jobs: args.jobs,
         assume_new: args.assume_new.clone(),
     };
     let run_one = |t: &str, kind: &Kind, repo: &OdkRepo, plan: &Plan| -> Result<()> {
@@ -924,6 +927,7 @@ fn make_target(
         targets: std::iter::once(target.to_string()).chain(assignments.iter().cloned()).collect(),
         always_make: false,
         keep_going: false,
+        jobs: 1,
         assume_new: Vec::new(),
         repo: repo.to_path_buf(),
         rebuild: Vec::new(),

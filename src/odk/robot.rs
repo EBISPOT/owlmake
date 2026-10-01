@@ -117,6 +117,8 @@ pub(crate) const BUNDLED: &[&str] = &[
     // provides them, so owlmake serves each one from its own implementation.
     "dicer-cli", "check-rdfxml", "odk-info", "sha256sum", "fastobo-validator",
     "simple_pattern_tester.py", "runoak",
+    // The OBO stanza filter, under the name of the script repositories call.
+    "obo-grep.pl", "obo-grep",
     // The ontology SQL database (`semsql make <name>.db`).
     "semsql",
     // Helpers of ODK's own that the standard build's recipes name.
@@ -128,8 +130,8 @@ pub(crate) const BUNDLED: &[&str] = &[
 /// word, so `git show x | robot convert` reports `git` and not `robot`.
 fn unvouched_tools(line: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for seg in line.split(['|', ';', '&']) {
-        let toks = tokenize(seg);
+    for seg in split_commands(line) {
+        let toks = tokenize(&seg);
         let Some(word) = toks.iter().find(|t| !is_env_assignment(t)) else { continue };
         // `!` negates a command in POSIX sh (`! grep -q x file`), so it is trimmed
         // off the command word rather than reported as a tool the machine needs.
@@ -145,10 +147,60 @@ fn unvouched_tools(line: &str) -> Vec<String> {
         {
             continue;
         }
-        if !out.iter().any(|o| o == base) {
-            out.push(base.to_string());
+        // A program named by path is a file of the repository (`../scripts/x.pl`),
+        // and the plan names it as the path it is, so the build can see whether it
+        // is there. A bare word is a program the machine provides on PATH.
+        let name = if word.contains('/') { word } else { base };
+        if !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
         }
     }
+    out
+}
+
+/// The simple commands of a line, split at every unquoted `|`, `;`, `&` or
+/// newline. Quoted text is one word whatever it contains: a regex argument
+/// `"(is_a|intersection_of):"` is an argument, not two commands, and splitting
+/// inside it would read `intersection_of` as a program and swallow the rest of
+/// the line into the unbalanced quote that follows.
+fn split_commands(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                } else if q == '"' && c == '\\' {
+                    // An escaped `"` does not close the string.
+                    if let Some(&n) = chars.peek() {
+                        cur.push(c);
+                        cur.push(n);
+                        chars.next();
+                        continue;
+                    }
+                }
+                cur.push(c);
+            }
+            None => match c {
+                '"' | '\'' | '`' => {
+                    quote = Some(c);
+                    cur.push(c);
+                }
+                '\\' => {
+                    cur.push(c);
+                    if let Some(n) = chars.next() {
+                        cur.push(n);
+                    }
+                }
+                '|' | ';' | '&' | '\n' => out.push(std::mem::take(&mut cur)),
+                _ => cur.push(c),
+            },
+        }
+    }
+    out.push(cur);
     out
 }
 
@@ -1997,5 +2049,39 @@ mod tests {
             matches!(steps.as_slice(), [Step::Shell { command, .. }] if command.ends_with("|| true")),
             "expected one tolerated shell command, got {steps:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod requires_tests {
+    use super::*;
+
+    fn requires(cmd: &str) -> Vec<String> {
+        match shell_step(cmd.to_string()) {
+            Step::Shell { requires, .. } => requires,
+            other => panic!("expected a shell step, got {other:?}"),
+        }
+    }
+
+    /// A quoted regex is one argument however many `|` it holds. UBERON's
+    /// orphan report pipes four stanza-filter calls, two of them over
+    /// alternations, and the only thing the machine has to provide is the script
+    /// — and when the script is `obo-grep.pl`, owlmake provides that too.
+    #[test]
+    fn a_quoted_alternation_is_not_a_pipeline() {
+        let cmd = r#"../scripts/obo-filter.pl --neg -r "(is_a|intersection_of|is_obsolete):" uberon.obo |  ../scripts/obo-filter.pl -r Term - |  ../scripts/obo-filter.pl --neg -r "id: UBERON:(0001062|0000000)" - |  ../scripts/obo-filter.pl -r Term - > reports/uberon-orphans.tmp"#;
+        assert_eq!(requires(cmd), vec!["../scripts/obo-filter.pl"]);
+        assert!(requires(&cmd.replace("obo-filter.pl", "obo-grep.pl")).is_empty());
+        let cmd = "(egrep '^(id|name):'  reports/uberon-orphans.tmp > reports/uberon-orphans || echo ok)";
+        assert!(requires(cmd).is_empty(), "{:?}", requires(cmd));
+    }
+
+    /// Each simple command contributes its own program word, and a program on
+    /// PATH is named bare.
+    #[test]
+    fn every_command_of_a_pipeline_is_seen() {
+        assert_eq!(requires("git show HEAD:x.owl | robot convert -o y.owl"), vec!["git"]);
+        assert_eq!(requires("wget -O a b && gzip -d a; curl x"), vec!["wget", "curl"]);
+        assert_eq!(requires("FOO=1 ./run.sh | sort"), vec!["./run.sh"]);
     }
 }

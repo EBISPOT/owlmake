@@ -118,7 +118,7 @@ pub struct OdkRepo {
     /// `test_obo` writes `hp.obo`; without a run-wide memo, rebuilding `hp.owl`
     /// afterwards makes it newer, the release rule re-makes `hp.obo`, and the build
     /// ships its own conversion instead of the product `test_obo` wrote.
-    pub built: std::cell::RefCell<std::collections::HashSet<String>>,
+    pub built: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Targets whose build FAILED in this invocation.
     ///
     /// Distinct from "not built yet", and the distinction cannot be recovered
@@ -127,7 +127,11 @@ pub struct OdkRepo {
     /// prerequisite reaches its staleness test with that prerequisite missing;
     /// read as "not newer" it declares the target up to date and whatever is on
     /// disk survives. This is the record that lets the test tell the two apart.
-    pub failed: std::cell::RefCell<std::collections::HashSet<String>>,
+    pub failed: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The targets being built right now, so that a second builder of one waits
+    /// for the first rather than racing it or taking a half-written file for a
+    /// finished one. See [`crate::build::Claims`].
+    pub claims: crate::build::Claims,
     /// The `src/ontology` directory.
     pub dir: PathBuf,
     /// The repository root — where `owlmake.json` lives (the nearest `.git`
@@ -244,11 +248,11 @@ fn configuration(
                 });
             }
             for t in &spec.targets {
-                // A target that exists only under a switch makes the switch one
-                // of the build's, as the conditional around its rule did.
-                for flag in &t.when {
-                    make.switch_vars.insert(flag.clone());
-                }
+                // A target that exists only under a group's switch makes the
+                // switch one of the build's, as the conditional around its rule
+                // did.
+                let guards: Vec<String> = t.when.iter().map(|g| planner::switch_flag(g)).collect();
+                make.switch_vars.extend(guards.iter().cloned());
                 let needs: Vec<String> =
                     t.needs.iter().filter(|n| !t.order_only.contains(n)).cloned().collect();
                 let rule = makefile::Rule {
@@ -256,7 +260,7 @@ fn configuration(
                     prereqs: needs,
                     order_only: t.order_only.clone(),
                     recipe: Vec::new(),
-                    guards: t.when.clone(),
+                    guards,
                 };
                 if t.extends {
                     // Its prerequisites join the standard target's.
@@ -308,6 +312,7 @@ impl OdkRepo {
         let root = repo_root(&dir);
         Ok(OdkRepo {
             built: Default::default(),
+            claims: Default::default(),
             failed: Default::default(),
             dir,
             root,
@@ -381,6 +386,7 @@ impl OdkRepo {
                 let root = repo_root(&dir);
                 return Ok(OdkRepo {
                     built: Default::default(),
+            claims: Default::default(),
                     failed: Default::default(),
                     dir,
                     root,
@@ -416,6 +422,7 @@ impl OdkRepo {
                 let root = repo_root(&dir);
                 return Ok(OdkRepo {
                     built: Default::default(),
+            claims: Default::default(),
                     failed: Default::default(),
                     dir,
                     root,
@@ -484,6 +491,7 @@ impl OdkRepo {
         let root = repo_root(&dir);
         Ok(OdkRepo {
             built: Default::default(),
+            claims: Default::default(),
             failed: Default::default(),
             dir,
             root,
@@ -525,7 +533,10 @@ impl OdkRepo {
         // nothing merges.
         if let Some(config) = &config {
             for import in &spec.imports {
-                if !config.import_ids().contains(&import.id.as_str()) {
+                // A mirror made into no module is the repository's own, and the
+                // products list only what is made into one.
+                let mirror_only = import.output.is_empty() && import.steps.is_empty();
+                if !mirror_only && !config.import_ids().contains(&import.id.as_str()) {
                     bail!(
                         "`imports` states `{}`, which `import_group` does not list: add it there, \
                          and state under `imports` only how it is built",
@@ -576,6 +587,7 @@ impl OdkRepo {
         }
         Ok(OdkRepo {
             built: Default::default(),
+            claims: Default::default(),
             failed: Default::default(),
             dir,
             root,

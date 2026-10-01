@@ -1189,15 +1189,22 @@ fn anon_description_end(text: &str, from: usize, open_tag: &str, close: &str) ->
     }
 }
 
-/// The blank-node counter. Anonymous individuals are numbered upwards from 2^31
-/// for the life of the process, so `_:genid2147483648` is the first one any parse
-/// in this run mints.
-static ANON_COUNTER: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(2_147_483_648);
+thread_local! {
+    /// The blank-node counter. Anonymous individuals are numbered upwards from
+    /// 2^31, so `_:genid2147483648` is the first one a parse mints. One counter
+    /// per thread: a target's recipe lines run on one thread and number on from
+    /// each other, and targets built beside each other on other threads do not
+    /// change what this one mints.
+    static ANON_COUNTER: std::cell::Cell<u64> = const { std::cell::Cell::new(2_147_483_648) };
+}
 
 /// Reserve `n` consecutive blank-node ids and return the first.
 fn mint_anon_ids(n: usize) -> u64 {
-    let first = ANON_COUNTER.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+    let first = ANON_COUNTER.with(|c| {
+        let first = c.get();
+        c.set(first + n as u64);
+        first
+    });
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
         eprintln!("[anon] mint {n} from {first} ({})", out_name());
     }
@@ -1206,19 +1213,16 @@ fn mint_anon_ids(n: usize) -> u64 {
 
 /// The id the next blank node takes.
 pub(crate) fn anon_counter() -> u64 {
-    ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
+    ANON_COUNTER.with(|c| c.get())
 }
 
 /// Carry the counter forward to where a parse left it, so the next document
 /// numbers on from there rather than over the top of it.
 pub(crate) fn set_anon_counter(n: u64) {
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
-        eprintln!(
-            "[anon] carry {} -> {n}",
-            ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
-        );
+        eprintln!("[anon] carry {} -> {n}", anon_counter());
     }
-    ANON_COUNTER.store(n, std::sync::atomic::Ordering::Relaxed);
+    ANON_COUNTER.with(|c| c.set(n));
 }
 
 /// Start the blank-node counter over.
@@ -1229,12 +1233,9 @@ pub(crate) fn set_anon_counter(n: u64) {
 /// artefact ids the first one's parses had already used up.
 pub fn reset_anon_counter() {
     if std::env::var_os("OM_ANON_DEBUG").is_some() {
-        eprintln!(
-            "[anon] reset from {}",
-            ANON_COUNTER.load(std::sync::atomic::Ordering::Relaxed)
-        );
+        eprintln!("[anon] reset from {}", anon_counter());
     }
-    ANON_COUNTER.store(2_147_483_648, std::sync::atomic::Ordering::Relaxed);
+    ANON_COUNTER.with(|c| c.set(2_147_483_648));
 }
 
 /// The byte spans of the `_:label` node ids a functional-syntax document states,

@@ -384,7 +384,7 @@ fn a_plan_only_repo_can_keep_a_switched_group() {
     assert!(bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap().status.success());
     let plan_text = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(
-        plan_text.contains("when:\n  - BRI") && plan_text.contains("BRI: 'true'"),
+        plan_text.contains("when:\n  - bridges") && plan_text.contains("BRI: 'true'"),
         "a switch of the repo's own invention must be declared, with the targets that exist \
          under it, or a repo with no build configuration cannot be told to keep it:\n{plan_text}"
     );
@@ -479,7 +479,7 @@ fn a_plan_only_repo_runs_the_other_branch_of_a_conditional() {
     assert!(bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap().status.success());
     let plan_text = std::fs::read_to_string(root.join("owlmake.yaml")).unwrap();
     assert!(
-        plan_text.contains("branches:") && plan_text.contains("flag: BRI"),
+        plan_text.contains("branches:") && plan_text.contains("group: bridges"),
         "the recipe the other branch defines must be recorded, or flipping the switch \
          leaves the target with no rule at all:\n{plan_text}"
     );

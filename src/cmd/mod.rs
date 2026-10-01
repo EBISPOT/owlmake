@@ -867,6 +867,7 @@ pub mod materialize;
 pub mod measure;
 pub mod normalize;
 pub mod ogrep;
+pub mod obo_grep;
 pub mod merge;
 pub mod merge_equivalent_sets;
 pub mod merge_species;

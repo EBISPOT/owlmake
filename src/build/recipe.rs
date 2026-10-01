@@ -855,7 +855,7 @@ pub fn run_line(
     robot_prefix: &str,
     env: &[(String, String)],
 ) -> Result<()> {
-    RUN_ENV.with(|c| *c.borrow_mut() = env.to_vec());
+    *RUN_ENV.lock().unwrap() = env.to_vec();
     let line = &serve_image_assets(line, dir);
     // Strip the per-line recipe prefixes: `@` (silent), `+` (always run), and a
     // leading `-` (ignore errors).
@@ -1092,24 +1092,19 @@ fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Resul
     Ok(())
 }
 
-thread_local! {
-    /// This invocation's `VAR=value` assignments, applied to every child this
-    /// recipe spawns. Scoped to the run rather than written into owlmake's own
-    /// environment, so one invocation's variables cannot reach a later
-    /// invocation in the same process.
-    static RUN_ENV: std::cell::RefCell<Vec<(String, String)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
+/// This invocation's `VAR=value` assignments, applied to every child a recipe
+/// spawns, on whichever thread it runs. Scoped to the run rather than written
+/// into owlmake's own environment, so one invocation's variables cannot reach a
+/// later invocation in the same process.
+static RUN_ENV: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
 
 /// Apply this run's command-line variable assignments to a child: a `VAR=value`
 /// given on the command line is exported into every recipe environment, so the
 /// commands a recipe spawns see it too.
 fn apply_run_env(cmd: &mut Command) {
-    RUN_ENV.with(|c| {
-        for (k, v) in c.borrow().iter() {
-            cmd.env(k, v);
-        }
-    });
+    for (k, v) in RUN_ENV.lock().unwrap().iter() {
+        cmd.env(k, v);
+    }
 }
 
 /// Run a command line through `sh -c`. The tools named directly in the line are
@@ -1186,7 +1181,7 @@ fn install_shims(exe: &Path, emulation: &[String]) -> std::io::Result<PathBuf> {
         .join(format!("owlmake-shims-{}-{:x}", std::process::id(), h.finish()));
     std::fs::create_dir_all(&dir)?;
     let exe = format!("{exe:?}{}", emulation.iter().map(|a| format!(" {a}")).collect::<String>());
-    let shims: [(&str, String); 28] = [
+    let shims: [(&str, String); 29] = [
         ("robot", format!("#!/bin/sh\nexec {exe} \"$@\"\n")),
         ("jq", format!("#!/bin/sh\nexec {exe} jq \"$@\"\n")),
         // A command-line SPARQL runner: MONDO's `mirror-ncbigene` is the only
@@ -1228,6 +1223,7 @@ fn install_shims(exe: &Path, emulation: &[String]) -> std::io::Result<PathBuf> {
             format!("#!/bin/sh\nexec {exe} simple_pattern_tester.py \"$@\"\n"),
         ),
         ("odk-info", format!("#!/bin/sh\nexec {exe} odk-info \"$@\"\n")),
+        ("obo-grep.pl", format!("#!/bin/sh\nexec {exe} obo-grep \"$@\"\n")),
         ("sha256sum", format!("#!/bin/sh\nexec {exe} sha256sum \"$@\"\n")),
         // The ontology SQL database (`semsql make <name>.db`), a release asset
         // for repos that publish one.
@@ -1323,6 +1319,9 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
     for tool in ["tsvalid", "context2csv", "make-release-assets.py"] {
         out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
     }
+    // A repository's `obo-grep.pl`, called bare or by path (`../scripts/obo-grep.pl`),
+    // is owlmake's own `obo-grep`.
+    out = replace_command_basename(&out, "obo-grep.pl", &format!("{exe} obo-grep"));
     // Recipe `sed`/`grep`/`comm` calls (in pipelines too) route to the in-binary
     // implementations, which accept the script dialect recipes are written in, so
     // builds don't rely on the machine's own text utilities (absent on Windows,
@@ -1331,6 +1330,52 @@ pub fn rewrite_tools(sub: &str, exe: &Path, robot_prefix: &str) -> String {
         out = replace_command_word(&out, tool, &format!("{exe} {tool}"));
     }
     out
+}
+
+/// Replace every command word whose final path component is `basename` with
+/// `repl`: `obo-grep.pl` and `../scripts/obo-grep.pl` alike, at command
+/// position only.
+fn replace_command_basename(s: &str, basename: &str, repl: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while !rest.is_empty() {
+        let n = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let (tok, tail) = rest.split_at(n);
+        let word = tok.trim_start_matches(['@', '+', '(']);
+        if word.rsplit('/').next() == Some(basename) && at_command_position(s, s.len() - rest.len()) {
+            out.push_str(&tok[..tok.len() - word.len()]);
+            out.push_str(repl);
+        } else {
+            out.push_str(tok);
+        }
+        let m = tail.find(|c: char| !c.is_whitespace()).unwrap_or(tail.len());
+        out.push_str(&tail[..m]);
+        rest = &tail[m..];
+    }
+    out
+}
+
+/// Whether the byte offset `i` of `s` starts a command: the string's start, or
+/// what follows `|`, `;`, `&` or `(` and any whitespace, or a run of leading
+/// `NAME=value` environment assignments after one of those.
+fn at_command_position(s: &str, i: usize) -> bool {
+    let bytes = s.as_bytes();
+    let mut j = i;
+    loop {
+        while j > 0 && bytes[j - 1].is_ascii_whitespace() {
+            j -= 1;
+        }
+        if j == 0 || matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
+            return true;
+        }
+        let end = j;
+        while j > 0 && !bytes[j - 1].is_ascii_whitespace() && !matches!(bytes[j - 1], b'|' | b';' | b'&' | b'(') {
+            j -= 1;
+        }
+        if !is_env_assignment_word(&s[j..end]) {
+            return false;
+        }
+    }
 }
 
 /// Replace `word` with `repl` only where it appears as a command name: at the
@@ -1728,7 +1773,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let first = Path::new(path.split(':').next().unwrap());
-        for tool in ["robot", "jq", "sssom", "sed", "grep", "comm", "dicer-cli", "dosdp", "check-rdfxml", "odk-info", "sha256sum", "tsvalid", "context2csv", "make-release-assets.py"] {
+        for tool in ["robot", "jq", "sssom", "sed", "grep", "comm", "dicer-cli", "dosdp", "check-rdfxml", "odk-info", "sha256sum", "tsvalid", "context2csv", "make-release-assets.py", "obo-grep.pl"] {
             assert!(first.join(tool).is_file(), "shim dir missing {tool}");
         }
     }
@@ -1778,5 +1823,25 @@ mod robot_prefix_tests {
             "java -jar robot.jar",
         );
         assert_eq!(got, "/opt/om merge -i x.obo");
+    }
+}
+
+#[cfg(test)]
+mod command_basename_tests {
+    use super::*;
+
+    /// A script called by path is rewritten at command position only, and in
+    /// every command of a pipeline.
+    #[test]
+    fn a_script_is_rewritten_wherever_it_commands() {
+        let line = "../scripts/obo-grep.pl -r Term x.obo | obo-grep.pl -c -r 'id: ../scripts/obo-grep.pl' - > out";
+        assert_eq!(
+            replace_command_basename(line, "obo-grep.pl", "OM obo-grep"),
+            "OM obo-grep -r Term x.obo | OM obo-grep -c -r 'id: ../scripts/obo-grep.pl' - > out"
+        );
+        assert_eq!(
+            replace_command_basename("X=1 ./obo-grep.pl -r a - && (@obo-grep.pl -c -r b -)", "obo-grep.pl", "OM"),
+            "X=1 OM -r a - && (@OM -c -r b -)"
+        );
     }
 }

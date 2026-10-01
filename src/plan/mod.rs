@@ -131,6 +131,14 @@ pub struct ImportPlan {
 }
 
 impl ImportPlan {
+    /// A mirror the repository keeps for its own targets, made into no module:
+    /// UBERON fetches nineteen taxon anatomies this way and reads each from
+    /// `mirror/<id>.owl` in rules of its own. The entry carries the fetch and
+    /// the post-processing, and nothing else.
+    pub fn is_mirror_only(&self) -> bool {
+        self.output.is_empty() && self.steps.is_empty() && !self.mirror_steps.is_empty()
+    }
+
     /// The seed term-file path(s) this import extracts over — the `--term-file`
     /// arguments of its first `extract`/`filter` step. Used for the human stage
     /// description ("…terms listed in <file>…") and the merged-import seed union.
@@ -697,6 +705,10 @@ impl fmt::Display for Plan {
             if self.use_base_merging { ", base-merging" } else { "" })?;
         for imp in &self.imports {
             let status = if imp.cached { "cached" } else { "DOWNLOAD" };
+            if imp.is_mirror_only() {
+                writeln!(f, "║   {:<12} mirror   [{}] {}", imp.id, status, imp.source)?;
+                continue;
+            }
             writeln!(f, "║   {:<12} {:<8} [{}] {}", imp.id, imp.method(), status, imp.source)?;
             let seeds = imp.seed_term_files();
             if !seeds.is_empty() {
