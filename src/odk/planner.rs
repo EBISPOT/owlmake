@@ -932,10 +932,14 @@ fn plan_rule(
         }
         // A line that opens over a REMOTE ontology is a boundary on ANY line,
         // including the first: an IRI cannot become the rule's `$<`, which is
-        // resolved to a path, so the boundary is how the plan names it.
+        // resolved to a path, so the boundary is how the plan names it. Only
+        // the input the line opens WITH counts: `merge -i a.owl -I <b>` opens
+        // over `a.owl`, and `<b>` is one more input merged into it.
         if !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
             if let Some(iri) = first_robot_iri_input(&expanded, robot_prefix) {
-                if !matches!(line_steps.first(), Some(Step::Boundary { .. })) {
+                let opens_with_iri = first_robot_input_of_any_kind(&expanded, robot_prefix)
+                    .is_some_and(|v| v == iri);
+                if opens_with_iri && !matches!(line_steps.first(), Some(Step::Boundary { .. })) {
                     line_steps.insert(0, Step::Boundary { input: Some(iri) });
                 }
             }
@@ -3017,6 +3021,34 @@ pub(super) fn first_robot_iri_input(cmd: &str, robot_prefix: &str) -> Option<Str
                 return Some(v);
             }
         }
+    }
+    None
+}
+
+/// The first input of any kind — a file or an IRI — the first `robot`
+/// invocation on this recipe line names, in command-line order.
+pub(super) fn first_robot_input_of_any_kind(cmd: &str, robot_prefix: &str) -> Option<String> {
+    for seg in cmd.split(['|', ';', '&']) {
+        let toks = robot::tokenize(seg);
+        if toks.is_empty() || !robot::is_robot(&toks, robot_prefix) {
+            continue;
+        }
+        let mut it = toks.iter();
+        while let Some(t) = it.next() {
+            let v = match t.as_str() {
+                "-i" | "--input" | "-I" | "--input-iri" => it.next().cloned(),
+                _ => t
+                    .strip_prefix("--input=")
+                    .or_else(|| t.strip_prefix("--input-iri="))
+                    .map(str::to_string),
+            };
+            if let Some(v) = v {
+                if !v.starts_with('-') {
+                    return Some(v);
+                }
+            }
+        }
+        return None;
     }
     None
 }

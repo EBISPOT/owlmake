@@ -7526,6 +7526,7 @@ pub(crate) fn merge_loaded_into_as(
     role: MergeRole,
 ) -> Result<()> {
     use horned_owl::model::{Component, MutableOntology};
+    let mut present = crate::cmd::merge::MergedAxioms::of(model);
     for ac in other.ont.iter() {
         if matches!(
             ac.component,
@@ -7533,7 +7534,11 @@ pub(crate) fn merge_loaded_into_as(
         ) {
             continue;
         }
+        if present.holds(model, ac) {
+            continue;
+        }
         model.ont.insert(ac.clone());
+        present.added(ac);
     }
     for (prefix, value) in other.prefixes.mappings() {
         let _ = model.prefixes.add_prefix(prefix, value);

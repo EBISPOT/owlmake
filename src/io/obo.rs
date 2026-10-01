@@ -48,9 +48,50 @@ pub fn expand_id(id: &str) -> String {
         return id.to_string();
     }
     match id.split_once(':') {
-        Some((pre, local)) => format!("{OBO_BASE}{pre}_{local}"),
+        // A prefixed id whose local part carries an underscore is not canonical,
+        // and its IRI keeps the two apart with `#`: `ncithesaurus:Nuclear_Structure`
+        // is `…/obo/ncithesaurus_#Nuclear_Structure`.
+        Some((pre, local)) if local.contains('_') => {
+            format!("{OBO_BASE}{pre}_#{}", url_encode_local(local))
+        }
+        Some((pre, local)) => format!("{OBO_BASE}{pre}_{}", url_encode_local(local)),
         None => format!("{OBO_BASE}{id}"),
     }
+}
+
+/// The local part of an id as its IRI carries it: letters, digits and `.-*_`
+/// stand, a space becomes `_`, and any other character is `%XX`-escaped — a
+/// character outside ASCII as the escape of `?`.
+fn url_encode_local(local: &str) -> String {
+    let mut out = String::with_capacity(local.len());
+    for c in local.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '-' | '*' | '_' => out.push(c),
+            ' ' => out.push('_'),
+            c if c.is_ascii() => out.push_str(&format!("%{:02X}", c as u32)),
+            _ => out.push_str("%3F"),
+        }
+    }
+    out
+}
+
+/// Undo [`url_encode_local`] on a canonical id's local part.
+fn url_decode_local(local: &str) -> String {
+    let bytes = local.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 3 <= bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&local[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| local.to_string())
 }
 
 thread_local! {
@@ -100,7 +141,7 @@ pub fn compress_iri(iri: &str) -> String {
             let (pre, local) = rest.split_at(idx);
             let local = &local[1..];
             if !pre.is_empty() && !local.is_empty() && !local.contains('_') {
-                return format!("{pre}:{local}");
+                return format!("{pre}:{}", url_decode_local(local));
             }
         }
         return rest.to_string();
@@ -483,10 +524,15 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // declaration lost on read never comes back.
     let declared: Vec<(String, String)> =
         IDSPACES.with(|m| m.borrow().iter().map(|(p, n)| (p.clone(), n.clone())).collect());
+    // They are what this document's own construction bound, so a functional
+    // or RDF/XML write of it declares them too.
     for (prefix, ns) in declared {
         let _ = m.prefixes.add_prefix(&prefix, &ns);
         if !m.explicit_prefixes.iter().any(|(p, _)| *p == prefix) {
-            m.explicit_prefixes.push((prefix, ns));
+            m.explicit_prefixes.push((prefix.clone(), ns.clone()));
+        }
+        if !m.built_prefixes.iter().any(|(p, _)| *p == prefix) {
+            m.built_prefixes.push((prefix, ns));
         }
     }
     Ok(m)
