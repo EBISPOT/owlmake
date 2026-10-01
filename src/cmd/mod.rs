@@ -584,8 +584,10 @@ pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, St
     // and the size of the set that axiom lives in.
     let mut cands: std::collections::HashMap<String, Vec<(i32, String)>> = Default::default();
     let mut subject_ann_count: std::collections::HashMap<String, usize> = Default::default();
+    let mut assertions = 0usize;
     for ac in model.ont.iter() {
         let Component::AnnotationAssertion(aa) = &ac.component else { continue };
+        assertions += 1;
         let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
         let subj = subj.as_ref().to_string();
         *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
@@ -614,7 +616,7 @@ pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, St
             } else {
                 let hashes: Vec<i32> = c.iter().map(|(h, _)| *h).collect();
                 let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
-                c[crate::owlapi_hash::hashset_order_of(&hashes, total)[0]].1.clone()
+                c[crate::owlapi_hash::subject_assertion_order(&hashes, total, assertions)[0]].1.clone()
             };
             (subj, text)
         })

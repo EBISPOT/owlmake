@@ -1776,8 +1776,10 @@ fn owltools_labels(model: &Model) -> HashMap<String, String> {
     const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
     let mut cands: HashMap<String, Vec<(i32, i32, Option<String>)>> = HashMap::new();
     let mut subject_ann_count: HashMap<String, usize> = HashMap::new();
+    let mut assertions = 0usize;
     for ac in model.ont.iter() {
         let Component::AnnotationAssertion(aa) = &ac.component else { continue };
+        assertions += 1;
         let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
         let subj = subj.as_ref().to_string();
         *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
@@ -1797,7 +1799,10 @@ fn owltools_labels(model: &Model) -> HashMap<String, String> {
             let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
             let by_axiom: Vec<i32> = c.iter().map(|(h, _, _)| *h).collect();
             let handed: Vec<&(i32, i32, Option<String>)> =
-                crate::owlapi_hash::hashset_order_of(&by_axiom, total).into_iter().map(|i| &c[i]).collect();
+                crate::owlapi_hash::subject_assertion_order(&by_axiom, total, assertions)
+                    .into_iter()
+                    .map(|i| &c[i])
+                    .collect();
             let by_ann: Vec<i32> = handed.iter().map(|(_, h, _)| *h).collect();
             crate::owlapi_hash::hashset_order(&by_ann)
                 .into_iter()
