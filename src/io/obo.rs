@@ -3189,6 +3189,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         }
     }
     let subclass_cap = owlapi_set_cap(subclass_count);
+    AA_ALL_CAP.with(|c| c.set(owlapi_set_cap(aa_counts.values().sum())));
     // Header-directive values are written case-insensitively sorted, like the
     // other multi-valued header tags (`subsetdef:`, the treat-xrefs lists).
     for vals in directives.values_mut() {
@@ -5106,6 +5107,25 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
                 rows.join("\u{2}")
             );
         }
+        // The subject's set is filled from the document-wide set of every
+        // annotation assertion, so two labels in one bucket of the subject's
+        // table stand in that larger table's order.
+        let all = AA_ALL_CAP.with(|c| c.get()).max(16);
+        let keys: Vec<(usize, usize)> = sd
+            .label_axioms
+            .iter()
+            .zip(buckets.iter())
+            .map(|((v, lang, anns), b)| {
+                let h = owlapi_label_axiom_hash(subj_iri, v, lang.as_deref(), owlapi_aa_collection_hash(ctx, anns));
+                (*b, owlapi_aa_bucket(h, all))
+            })
+            .collect();
+        if let Some(min) = keys.iter().min() {
+            if keys.iter().filter(|k| *k == min).count() == 1 {
+                let i = keys.iter().position(|k| k == min).unwrap();
+                return Some(sd.label_axioms[i].0.clone());
+            }
+        }
         let mut sorted = buckets.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -5201,6 +5221,20 @@ fn owlapi_aa_bucket(hash: i32, cap: usize) -> usize {
     let h = hash as u32;
     let spread = h ^ (h >> 16);
     (spread as usize) & (cap - 1)
+}
+
+thread_local! {
+    /// The table size of the set holding EVERY annotation assertion of the
+    /// document being written; a subject's own set is filled from it.
+    static AA_ALL_CAP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Where an annotation assertion stands among its subject's: its bucket in
+/// the subject's set, and within that bucket its place in the document-wide
+/// set the subject's was filled from.
+fn aa_set_key(hash: i32, cap: usize) -> u64 {
+    let all = AA_ALL_CAP.with(|c| c.get()).max(16);
+    ((owlapi_aa_bucket(hash, cap) as u64) << 32) | owlapi_aa_bucket(hash, all) as u64
 }
 
 /// Table size of the hash set after `n` incremental adds: start
@@ -5699,13 +5733,11 @@ fn write_stanza<W: Write>(
                 .iter()
                 .find(|(v, _, a)| v == text && a == anns)
                 .and_then(|(_, l, _)| l.clone());
-            let bucket = owlapi_aa_bucket(
-                owlapi_label_axiom_hash(iri, text, lang.as_deref(), coll),
-                aa_cap,
-            );
+            let bucket = aa_set_key(
+                owlapi_label_axiom_hash(iri, text, lang.as_deref(), coll), aa_cap);
             let quals = quals_with_xrefs_hashset(&dbxrefs, &quals);
             (
-                format!("{}\u{0}{}\u{1}{bucket:010}", fold(text), text),
+                format!("{}\u{0}{}\u{1}{bucket:020}", fold(text), text),
                 format!("{}{}", escape_name(text), render_quals(&quals)),
             )
         }).collect())?;
@@ -5744,9 +5776,9 @@ fn write_stanza<W: Write>(
         write_sorted(writer, "def", ditems.into_iter().map(|(text, anns)| {
             let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
             let coll = owlapi_aa_collection_hash(ctx, anns);
-            let bucket = owlapi_aa_bucket(owlapi_aa_axiom_hash(iri, IAO_DEF, text, false, coll), aa_cap);
+            let bucket = aa_set_key(owlapi_aa_axiom_hash(iri, IAO_DEF, text, false, coll), aa_cap);
             (
-                format!("{}\u{0}{}\u{1}{bucket:010}", fold(text), text),
+                format!("{}\u{0}{}\u{1}{bucket:020}", fold(text), text),
                 format!("\"{}\" {}{}", escape(text), render_bracket(&dbxrefs), render_quals(&plain(&owlapi_hashset_order(quals)))),
             )
         }).collect())?;
@@ -5774,12 +5806,10 @@ fn write_stanza<W: Write>(
         // already use. EFO:0000218 carries `gard_rare` twice, with different
         // `{source=…}` qualifiers, and sorting on the name alone reverses them.
         let coll = owlapi_aa_collection_hash(ctx, anns);
-        let bucket = owlapi_aa_bucket(
-            owlapi_aa_axiom_hash(iri, &format!("{OIO}inSubset"), raw, *is_iri, coll),
-            aa_cap,
-        );
+        let bucket = aa_set_key(
+            owlapi_aa_axiom_hash(iri, &format!("{OIO}inSubset"), raw, *is_iri, coll), aa_cap);
         (
-            format!("{}\u{1}{bucket:010}", fold(s)),
+            format!("{}\u{1}{bucket:020}", fold(s)),
             format!("{s}{}", render_quals(&quals_with_xrefs_hashset(&dbxrefs, &quals))),
         )
     }).collect())?;
@@ -5803,12 +5833,10 @@ fn write_stanza<W: Write>(
             _ => format!("{OIO}hasRelatedSynonym"),
         };
         let coll = owlapi_aa_collection_hash(ctx, anns);
-        let bucket = owlapi_aa_bucket(
-            owlapi_aa_axiom_hash_full(iri, &syn_prop, text, None, lang.as_deref(), false, coll),
-            aa_cap,
-        );
+        let bucket = aa_set_key(
+            owlapi_aa_axiom_hash_full(iri, &syn_prop, text, None, lang.as_deref(), false, coll), aa_cap);
         (
-            format!("{}\u{0}{}\u{0}{}\u{1}{bucket:010}", fold(text), text, scope),
+            format!("{}\u{0}{}\u{0}{}\u{1}{bucket:020}", fold(text), text, scope),
             format!("\"{}\" {} {}{}{}", escape(text), scope, type_tok, render_bracket(&dbxrefs), render_quals(&plain(&owlapi_hashset_order(quals)))),
         )
     }).collect())?;
@@ -5825,7 +5853,7 @@ fn write_stanza<W: Write>(
     in_owlapi_order.sort_by_key(|(x, anns)| {
         let coll = owlapi_aa_collection_hash(ctx, anns);
         let h = owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x.trim(), false, coll);
-        owlapi_aa_bucket(h, aa_cap)
+        aa_set_key(h, aa_cap)
     });
     let mut merged_xrefs: Vec<(String, BTreeSet<Annotation<RcStr>>)> = Vec::new();
     for (x, anns) in in_owlapi_order {
@@ -5854,7 +5882,7 @@ fn write_stanza<W: Write>(
     }
     write_sorted(writer, "xref", merged_xrefs.iter().map(|(x, anns)| {
         let coll = owlapi_aa_collection_hash(ctx, anns);
-        let bucket = owlapi_aa_bucket(owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x, false, coll), aa_cap);
+        let bucket = aa_set_key(owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x, false, coll), aa_cap);
         let (dbxrefs, _, mut quals) = ax_ann_pieces(ctx, anns);
         // An xref value may carry a trailing quoted description in the OBO
         // `IDSPACE:LOCAL "description"` form — CHEBI stores the whole thing in one
@@ -5898,7 +5926,7 @@ fn write_stanza<W: Write>(
         };
         let cmp = format!("{id_part} {}", label_raw.as_deref().unwrap_or("null"));
         (
-            format!("{}\u{0}{}\u{1}{bucket:010}", fold(&cmp), cmp),
+            format!("{}\u{0}{}\u{1}{bucket:020}", fold(&cmp), cmp),
             format!("{}{desc_tok}{}", escape_xref(xid), render_quals(&quals)),
         )
     }).collect())?;
@@ -5946,7 +5974,7 @@ fn write_stanza<W: Write>(
         // An IRI value hashes as its FULL IRI; `val` is only the CURIE the clause
         // prints, and hashing that puts every IRI-valued clause in the wrong bucket.
         let hash_val = if is_iri { val_iri } else { val.as_str() };
-        let bucket = owlapi_aa_bucket(
+        let bucket = aa_set_key(
             owlapi_aa_axiom_hash_full(
                 iri,
                 prop_iri,
@@ -5955,9 +5983,7 @@ fn write_stanza<W: Write>(
                 None,
                 is_iri,
                 coll,
-            ),
-            aa_cap,
-        );
+            ), aa_cap);
         if std::env::var_os("OM_PV_DEBUG").is_some() {
             eprintln!(
                 "[pv]\t{iri}\tcap={aa_cap}\tbucket={bucket}\thash={}\tcoll={coll}\tdt={:?}\t{line}",
@@ -5970,7 +5996,7 @@ fn write_stanza<W: Write>(
         // that tie on BOTH fall through to the axiom-set bucket.
         (
             format!(
-                "{}\u{0}{pred}\u{0}{}\u{0}{val}\u{1}{bucket:010}",
+                "{}\u{0}{pred}\u{0}{}\u{0}{val}\u{1}{bucket:020}",
                 fold(pred),
                 fold(val)
             ),
@@ -6009,7 +6035,7 @@ fn write_stanza<W: Write>(
             // `{gci_*}` qualifiers do not enter it, so same-parent clauses — plain and
             // GCI alike — tie and fall to the SubClassOf axiom-set bucket order.
             let bucket = owlapi_aa_bucket(*hash, subclass_cap);
-            let key = format!("{}\u{0}{}\u{1}{bucket:010}", fold(p), p);
+            let key = format!("{}\u{0}{}\u{1}{bucket:020}", fold(p), p);
             (key, format!("{p}{}{}", render_quals(&quals), label_comment(labels, &[p])))
         }).collect())?;
         // A genus line (one token) always precedes the differentiae, which are then
@@ -6073,7 +6099,7 @@ fn write_stanza<W: Write>(
             // `{gci_*}`/`{all_only}` qualifiers do not enter it, so same rel+target
             // clauses tie and break in the SubClassOf axiom-set bucket order.
             let bucket = owlapi_aa_bucket(*hash, subclass_cap);
-            let key = format!("{}\u{0}{r} {t}\u{1}{bucket:010}", fold(&format!("{r} {t}")));
+            let key = format!("{}\u{0}{r} {t}\u{1}{bucket:020}", fold(&format!("{r} {t}")));
             (key, format!("{r} {t}{}{}", render_quals(&quals), label_comment_pred(labels, &declared_prefixes, &[r, t])))
         }).collect())?;
         write_sorted(writer, "property_value", property_values)?;
