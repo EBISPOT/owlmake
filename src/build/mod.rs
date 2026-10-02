@@ -2120,8 +2120,8 @@ fn assumed_new(repo: &Repo, name: &str) -> bool {
 /// The release's import stages and a target's prerequisite walk both ask this
 /// one question, so both give the same answer for an absent module.
 /// Whether an import module on disk is older than one of its pipeline's
-/// inputs: the prerequisites its rule names, and the term files its steps
-/// read.
+/// inputs — the prerequisites its rule names, and the term files its steps
+/// read — or an input is not there yet, which the module's own build makes.
 fn import_module_is_stale(repo: &Repo, imp: &crate::plan::ImportPlan, name: &str) -> bool {
     let Ok(out) = std::fs::metadata(repo.dir.join(name)).and_then(|m| m.modified()) else {
         return true;
@@ -2130,7 +2130,7 @@ fn import_module_is_stale(repo: &Repo, imp: &crate::plan::ImportPlan, name: &str
     inputs.extend(crate::plan::gaps::step_term_files(&imp.steps));
     inputs.iter().any(|p| {
         let p = repo.target_file(p).unwrap_or_else(|| repo.dir.join(p));
-        std::fs::metadata(&p).and_then(|m| m.modified()).is_ok_and(|t| t > out)
+        std::fs::metadata(&p).and_then(|m| m.modified()).map_or(true, |t| t > out)
     })
 }
 
