@@ -3535,3 +3535,62 @@ fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "Number of cycles: 0\n");
     assert_eq!(out.status.code(), Some(0));
 }
+
+/// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
+/// the catalog maps is read from the file it maps it to — `robot --catalog
+/// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own
+/// CL module, never a download. A command that reads one input refuses two.
+#[test]
+fn merge_reads_input_iris_after_its_files_through_the_catalog() {
+    let dir = tmp("mergeiri");
+    std::fs::create_dir_all(dir.join("imports")).unwrap();
+    std::fs::write(
+        dir.join("a.ofn"),
+        "Prefix(:=<http://x.org/>)\nOntology(<http://x.org/a>\nDeclaration(Class(<http://x.org/A>))\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("imports/b.ofn"),
+        "Prefix(:=<http://x.org/>)\nOntology(<http://x.org/b>\nDeclaration(Class(<http://x.org/B>))\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://example.invalid/b.owl\" uri=\"imports/b.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    let out = dir.join("merged.ofn");
+    let status = bin()
+        .current_dir(&dir)
+        .args(["merge", "--catalog", "catalog-v001.xml", "-i", "a.ofn", "-I", "http://example.invalid/b.owl", "-o"])
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "merge with a catalog-mapped -I failed");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.contains("Ontology(<http://x.org/a>"), "the first --input is the primary:\n{text}");
+    assert!(text.contains("Declaration(Class(<http://x.org/A>))"), "the --input file was not merged:\n{text}");
+    assert!(text.contains("Declaration(Class(<http://x.org/B>))"), "the -I input was not merged:\n{text}");
+
+    // A mapped file that is missing is an error, never a download.
+    std::fs::remove_file(dir.join("imports/b.ofn")).unwrap();
+    let status = bin()
+        .current_dir(&dir)
+        .args(["merge", "--catalog", "catalog-v001.xml", "-i", "a.ofn", "-I", "http://example.invalid/b.owl", "-o"])
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(!status.success(), "a catalog entry naming a missing file must fail");
+
+    // One input only, for a command that reads one.
+    let status = bin()
+        .current_dir(&dir)
+        .args(["convert", "-i", "a.ofn", "-I", "http://example.invalid/b.owl", "-o"])
+        .arg(dir.join("c.ofn"))
+        .status()
+        .unwrap();
+    assert!(!status.success(), "convert accepted both --input and --input-iri");
+}

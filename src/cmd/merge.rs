@@ -104,39 +104,45 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
     // merge loads its inputs directly (not via take_or_load), so push the shared
     // `--strict`/`--xml-entities`/`-v` options into the I/O layer here.
     args.common.activate();
-    // Expand any `--inputs <glob>` patterns into concrete files, appended after
-    // the explicit `--input` files.
-    let mut all_inputs: Vec<PathBuf> = args.inputs.clone();
+    // The inputs in the order they are read: every `--input` file, then every
+    // `-I/--input-iri`, then each file an `--inputs <glob>` pattern matches. The
+    // first is the primary ontology and the rest are merged into it.
+    let mut files: Vec<PathBuf> = args.inputs.clone();
+    let mut globbed: Vec<PathBuf> = Vec::new();
     for pattern in &args.input_globs {
         let matched = expand_glob(pattern)?;
         if matched.is_empty() {
             status!("merge: WARNING — pattern `{pattern}` matched no files");
         }
-        all_inputs.extend(matched);
+        globbed.extend(matched);
     }
     // Drop empty *stamp* inputs (e.g. UBERON's `tmp/bridges`, a `touch`ed marker
     // listed among a `merge`'s prerequisites): they carry no axioms, so merging
     // them is a no-op — but `io::load` would fail to determine a format.
-    all_inputs.retain(|p| !io::is_empty_ontology_file(p));
+    files.retain(|p| !io::is_empty_ontology_file(p));
+    globbed.retain(|p| !io::is_empty_ontology_file(p));
+    let first_file: Option<PathBuf> = files.first().or(globbed.first()).cloned();
+    let mut sources: Vec<Source> = files.into_iter().map(Source::File).collect();
+    sources.extend(args.common.input_iri.iter().cloned().map(Source::Iri));
+    sources.extend(globbed.into_iter().map(Source::File));
+    let fmt = args.common.input_format.as_deref();
+    let catalog = match args.common.catalog.as_deref() {
+        Some(c) if !args.common.input_iri.is_empty() => crate::cmd::parse_catalog(c)
+            .map_err(|e| e.context(format!("reading catalog {}", c.display())))?,
+        _ => Default::default(),
+    };
 
     let opts = args.options();
-    let (mut merged, rest): (Model, Vec<PathBuf>) = match piped {
-        Some(m) => (m, all_inputs.clone()),
-        // The global `-I,--input-iri` works on `merge` too, and a component
-        // download needs it: CL builds `component-download-%.owl` from a remote
-        // subset IRI with no file input at all. Treat the IRI as the primary
-        // ontology, exactly as a first `--input` would be.
-        None if all_inputs.is_empty() && args.common.input_iri.is_some() => {
-            let iri = args.common.input_iri.clone().unwrap();
-            (io::load_iri(&iri, args.common.input_format.as_deref())?, Vec::new())
-        }
+    let (mut merged, rest): (Model, Vec<Source>) = match piped {
+        Some(m) => (m, sources),
         None => {
-            if all_inputs.is_empty() {
+            let mut it = sources.into_iter();
+            let Some(primary) = it.next() else {
                 anyhow::bail!(
                     "merge requires at least one --input/--inputs, an --input-iri, or a piped ontology"
                 );
-            }
-            (io::load(&all_inputs[0])?, all_inputs[1..].to_vec())
+            };
+            (primary.load(fmt, &catalog)?, it.collect())
         }
     };
     args.common.apply(&mut merged)?;
@@ -163,8 +169,8 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
             all_import_iris.push(imp.0.clone());
         }
     }
-    for path in &rest {
-        let other = io::load(path)?;
+    for source in &rest {
+        let other = source.load(fmt, &catalog)?;
         for ac in other.ont.iter() {
             if let Component::Import(imp) = &ac.component {
                 all_import_iris.push(imp.0.clone());
@@ -191,7 +197,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
         crate::cmd::resolve_imports_auto(
             &mut merged,
             args.common.catalog.as_deref(),
-            all_inputs.first().map(|p| p.as_path()),
+            first_file.as_deref(),
         )?;
         // Drop any imports that could not be resolved, so nothing dangles.
         use horned_owl::model::MutableOntology;
@@ -217,6 +223,25 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
 
     crate::cmd::maybe_save(&mut merged, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(merged))
+}
+
+/// One input of a merge: a file, or an ontology fetched from an IRI.
+enum Source {
+    File(PathBuf),
+    Iri(String),
+}
+
+impl Source {
+    fn load(
+        &self,
+        format: Option<&str>,
+        catalog: &std::collections::BTreeMap<String, PathBuf>,
+    ) -> anyhow::Result<Model> {
+        match self {
+            Source::File(path) => io::load(path),
+            Source::Iri(iri) => crate::cmd::load_iri_via_catalog(iri, format, catalog),
+        }
+    }
 }
 
 /// Drop an `InverseObjectProperties(B, A)` when `(A, B)` is already present.

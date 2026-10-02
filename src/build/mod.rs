@@ -3767,7 +3767,7 @@ fn run_steps(
                 crate::io::reset_anon_counter();
                 match input.as_deref() {
                     Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
-                        model = crate::io::load_iri(first, None)?;
+                        model = crate::cmd::load_iri_via_catalog(first, None, catalog)?;
                         pipe = None;
                     }
                     Some(first) => {
@@ -5105,7 +5105,7 @@ fn run_artefact(
                     // run-time failure on whichever repo has a recipe of that
                     // shape — `--input-iri` on an artefact's own pipeline.
                     Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
-                        model = crate::io::load_iri(first, None)?;
+                        model = crate::cmd::load_iri_via_catalog(first, None, catalog)?;
                         threaded_from = None;
                     }
                     Some(first) => {
@@ -6616,7 +6616,7 @@ fn apply_op(
                 // here in the same list because it is an input like any other, and
                 // the plan has to NAME it either way.
                 if inp.starts_with("http://") || inp.starts_with("https://") {
-                    let other = crate::io::load_iri(inp, None)?;
+                    let other = crate::cmd::load_iri_via_catalog(inp, None, catalog)?;
                     crate::cmd::merge::merge_into(
                         &mut model,
                         &other,
@@ -6672,7 +6672,7 @@ fn apply_op(
                 // `-I/--input-iri`: the ontology to subtract is fetched, not
                 // opened — CL removes the taxon disjointness axioms this way.
                 Some(si) if si.starts_with("http://") || si.starts_with("https://") => {
-                    let other = crate::io::load_iri(si, None)?;
+                    let other = crate::cmd::load_iri_via_catalog(si, None, catalog)?;
                     unmerge_model(model, &other)
                 }
                 Some(si) => {
