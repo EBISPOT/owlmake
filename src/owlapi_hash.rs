@@ -621,6 +621,121 @@ pub fn equivalent_classes_hash(
     tag(P_EQUIVALENT_CLASSES, &[list_hash(&member_hashes), ann_hash])
 }
 
+/// The hash of a named individual.
+pub fn named_individual_hash(iri: &str) -> i32 {
+    tag(P_NAMED_INDIVIDUAL, &[iri_hash(iri)])
+}
+
+/// The hash of a named object property.
+pub fn object_property_hash(iri: &str) -> i32 {
+    tag(P_OBJECT_PROPERTY, &[iri_hash(iri)])
+}
+
+/// The capacities a Trove 3 hash table takes, in the order its source lists
+/// them; [`trove_next_prime`] searches them sorted.
+const TROVE_PRIMES: [i32; 245] = [
+    i32::MAX,
+    5, 11, 23, 47, 97, 197, 397, 797, 1597, 3203, 6421, 12853, 25717, 51437, 102877, 205759,
+    411527, 823117, 1646237, 3292489, 6584983, 13169977, 26339969, 52679969, 105359939,
+    210719881, 421439783, 842879579, 1685759167,
+    433, 877, 1759, 3527, 7057, 14143, 28289, 56591, 113189, 226379, 452759, 905551, 1811107,
+    3622219, 7244441, 14488931, 28977863, 57955739, 115911563, 231823147, 463646329, 927292699,
+    1854585413,
+    953, 1907, 3821, 7643, 15287, 30577, 61169, 122347, 244703, 489407, 978821, 1957651, 3915341,
+    7830701, 15661423, 31322867, 62645741, 125291483, 250582987, 501165979, 1002331963,
+    2004663929,
+    1039, 2081, 4177, 8363, 16729, 33461, 66923, 133853, 267713, 535481, 1070981, 2141977, 4283963,
+    8567929, 17135863, 34271747, 68543509, 137087021, 274174111, 548348231, 1096696463,
+    31, 67, 137, 277, 557, 1117, 2237, 4481, 8963, 17929, 35863, 71741, 143483, 286973, 573953,
+    1147921, 2295859, 4591721, 9183457, 18366923, 36733847, 73467739, 146935499, 293871013,
+    587742049, 1175484103,
+    599, 1201, 2411, 4831, 9677, 19373, 38747, 77509, 155027, 310081, 620171, 1240361, 2480729,
+    4961459, 9922933, 19845871, 39691759, 79383533, 158767069, 317534141, 635068283, 1270136683,
+    311, 631, 1277, 2557, 5119, 10243, 20507, 41017, 82037, 164089, 328213, 656429, 1312867,
+    2625761, 5251529, 10503061, 21006137, 42012281, 84024581, 168049163, 336098327, 672196673,
+    1344393353,
+    3, 7, 17, 37, 79, 163, 331, 673, 1361, 2729, 5471, 10949, 21911, 43853, 87719, 175447, 350899,
+    701819, 1403641, 2807303, 5614657, 11229331, 22458671, 44917381, 89834777, 179669557,
+    359339171, 718678369, 1437356741,
+    43, 89, 179, 359, 719, 1439, 2879, 5779, 11579, 23159, 46327, 92657, 185323, 370661, 741337,
+    1482707, 2965421, 5930887, 11861791, 23723597, 47447201, 94894427, 189788857, 379577741,
+    759155483, 1518310967,
+    379, 761, 1523, 3049, 6101, 12203, 24407, 48817, 97649, 195311, 390647, 781301, 1562611,
+    3125257, 6250537, 12501169, 25002389, 50004791, 100009607, 200019221, 400038451, 800076929,
+    1600153859,
+];
+
+/// The smallest Trove capacity at least `desired`.
+fn trove_next_prime(desired: i64) -> usize {
+    static SORTED: std::sync::OnceLock<Vec<i32>> = std::sync::OnceLock::new();
+    let sorted = SORTED.get_or_init(|| {
+        let mut v = TROVE_PRIMES.to_vec();
+        v.sort_unstable();
+        v
+    });
+    let i = sorted.partition_point(|&p| (p as i64) < desired);
+    sorted[i.min(sorted.len() - 1)] as usize
+}
+
+/// The iteration order of a Trove 3 `THashSet` filled by one `addAll` per batch,
+/// each batch's elements in the order given as `(hash, key)`; an element equal
+/// to one already held is not added again.
+///
+/// The table is open-addressed over a prime capacity with load factor 0.5,
+/// starting from room for ten. Before a batch it grows, if the batch could
+/// overfill it, to the prime for `(batch + held) / 0.5 + 1`; past the load
+/// factor it grows to the prime for twice its capacity. Growing reinserts from
+/// the last slot down. A collision probes backwards by `1 + hash % (capacity -
+/// 2)`, and iteration runs from the last slot to the first.
+pub fn trove_set_order<K: Clone + PartialEq>(batches: &[Vec<(i32, K)>]) -> Vec<K> {
+    // Where `key` lands in `slots`, or `None` when an equal key is held.
+    fn insert<K: PartialEq>(slots: &mut [Option<(i32, K)>], hash: i32, key: K) -> Option<usize> {
+        let h = (hash & 0x7fff_ffff) as usize;
+        let len = slots.len();
+        let mut index = h % len;
+        let probe = 1 + h % (len - 2);
+        loop {
+            match &slots[index] {
+                None => {
+                    slots[index] = Some((hash, key));
+                    return Some(index);
+                }
+                Some((_, held)) if *held == key => return None,
+                Some(_) => {
+                    index = if index >= probe { index - probe } else { index + len - probe };
+                }
+            }
+        }
+    }
+    fn rehash<K: PartialEq>(slots: &mut Vec<Option<(i32, K)>>, capacity: usize) {
+        let old = std::mem::replace(slots, (0..capacity).map(|_| None).collect());
+        for (hash, key) in old.into_iter().rev().flatten() {
+            insert(slots, hash, key);
+        }
+    }
+    // `min(capacity - 1, ⌊capacity × 0.5⌋)` elements before the table grows.
+    let max_size = |capacity: usize| (capacity - 1).min(capacity / 2);
+
+    let mut slots: Vec<Option<(i32, K)>> = (0..trove_next_prime(20)).map(|_| None).collect();
+    let mut size = 0usize;
+    for batch in batches {
+        if batch.len() + size > max_size(slots.len()) {
+            let want = (size as i64 + 1).max(2 * (batch.len() + size) as i64 + 1);
+            rehash(&mut slots, trove_next_prime(want));
+        }
+        for (hash, key) in batch {
+            if insert(&mut slots, *hash, key.clone()).is_some() {
+                size += 1;
+                if size > max_size(slots.len()) {
+                    let doubled = trove_next_prime(2 * slots.len() as i64);
+                    rehash(&mut slots, doubled);
+                }
+            }
+        }
+    }
+    slots.into_iter().rev().flatten().map(|(_, k)| k).collect()
+}
+
 /// The capacity a `java.util.HashSet` ends at after inserting `n` elements
 /// one-by-one into a default-sized table (16 slots, load factor 0.75, doubling
 /// whenever the count exceeds the threshold).

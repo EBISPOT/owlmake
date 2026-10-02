@@ -1137,7 +1137,16 @@ fn rebuild(base: Model, comps: Vec<AnnotatedComponent<Str>>) -> Model {
 /// seeded by those classes to `FILE` — unconditionally, so a coherent ontology
 /// leaves an essentially empty module behind, which is exactly what MONDO's
 /// `debug.owl` is. An unsatisfiable class without `-x` fails the step; returning
-/// `Ok(None)` here is that failure.
+/// `Ok(None)` here is that failure. With `-x` the unsatisfiable classes are
+/// removed and the command ends there.
+///
+/// Otherwise it goes on to list what the reasoner infers: `all inferences`,
+/// `Consistent? <bool>`, then for each class a line
+/// `INFERENCE: <class> SubClassOf <super>` per direct inferred superclass that no
+/// `SubClassOf` axiom asserts (`owl:Thing` aside), and a line
+/// `INFERENCE: <class> EquivalentTo <other>` per other named class equivalent to
+/// it. Classes are listed in [`listing_order`]; a class's superclasses, and its
+/// equivalents, in hash-set order.
 ///
 /// The property domain/range check above it is skipped under an EL reasoner,
 /// which does not answer property-domain queries.
@@ -1147,53 +1156,152 @@ fn run_reasoner(
     remove_unsat: bool,
     module: Option<&str>,
 ) -> Result<Option<Model>> {
-    if !list_unsat && module.is_none() {
-        return Ok(Some(model));
-    }
-    let mut unsats = crate::reason::Reasoner::classify(&model).unsatisfiable();
-    unsats.sort();
-    unsats.retain(|c| !is_builtin_class(c));
-    if list_unsat {
-        for c in &unsats {
-            println!("UNSAT: {c}");
+    let reasoner = crate::reason::Reasoner::classify(&model);
+    let labels = owltools_labels(&model);
+    let ids = crate::io::obo::IdCtx::new(&model);
+    // A class as the command prints it: its identifier with any namespace up to
+    // the last `#` or `/` cut away, then its label in quotes — or the identifier
+    // again when it has no label.
+    let render = |iri: &str| {
+        let id = ids.id(iri);
+        let id = id.rsplit_once('#').map_or(id.as_str(), |(_, t)| t);
+        let id = id.rsplit_once('/').map_or(id, |(_, t)| t).to_string();
+        match labels.get(iri) {
+            Some(l) => format!("{id} '{l}'"),
+            None => format!("{id} {id}"),
         }
-        println!("NUMBER_OF_UNSATISFIABLE_CLASSES: {}", unsats.len());
-    }
-    if let Some(path) = module {
-        let seeds: HashSet<String> = unsats.iter().cloned().collect();
-        let mut m = crate::extract::extract(&model, &seeds, crate::extract::Method::Bot);
-        // The module is a NEW, anonymous ontology — it does not inherit the
-        // input's ontology IRI.
-        let ids: Vec<AnnotatedComponent<Str>> = m
-            .ont
-            .iter()
-            .filter(|ac| matches!(ac.component, Component::OntologyID(_) | Component::DocIRI(_)))
-            .cloned()
-            .collect();
-        for ac in ids {
-            m.ont.remove(&ac);
+    };
+    if list_unsat || module.is_some() {
+        let mut unsats = reasoner.unsatisfiable();
+        unsats.sort();
+        unsats.retain(|c| !is_builtin_class(c));
+        if list_unsat {
+            for c in &unsats {
+                println!("UNSAT: {}", render(c));
+            }
+            println!("NUMBER_OF_UNSATISFIABLE_CLASSES: {}", unsats.len());
         }
-        // Modules this command writes use the same inline-anonymous-node
-        // RDF/XML profile as its `-o` saves — see `Model::owlapi_456`.
-        m.owlapi_456 = true;
-        crate::io::save(&mut m, std::path::Path::new(path))?;
-    }
-    if !unsats.is_empty() {
-        if !remove_unsat {
-            eprintln!("Ontology has unsat classes - will not proceed");
-            return Ok(None);
+        if let Some(path) = module {
+            let seeds: HashSet<String> = unsats.iter().cloned().collect();
+            let mut m = crate::extract::extract(&model, &seeds, crate::extract::Method::Bot);
+            // The module is a NEW, anonymous ontology — it does not inherit the
+            // input's ontology IRI.
+            let ids: Vec<AnnotatedComponent<Str>> = m
+                .ont
+                .iter()
+                .filter(|ac| matches!(ac.component, Component::OntologyID(_) | Component::DocIRI(_)))
+                .cloned()
+                .collect();
+            for ac in ids {
+                m.ont.remove(&ac);
+            }
+            // Modules this command writes use the same inline-anonymous-node
+            // RDF/XML profile as its `-o` saves — see `Model::owlapi_456`.
+            m.owlapi_456 = true;
+            crate::io::save(&mut m, std::path::Path::new(path))?;
         }
-        let drop: Vec<AnnotatedComponent<Str>> = model
-            .ont
-            .iter()
-            .filter(|ac| crate::sig::signature(&ac.component).iter().any(|i| seeds_contains(&unsats, i)))
-            .cloned()
-            .collect();
-        for ac in drop {
-            model.ont.remove(&ac);
+        if list_unsat && !unsats.is_empty() {
+            if !remove_unsat {
+                eprintln!("Ontology has unsat classes - will not proceed");
+                return Ok(None);
+            }
+            let drop: Vec<AnnotatedComponent<Str>> = model
+                .ont
+                .iter()
+                .filter(|ac| crate::sig::signature(&ac.component).iter().any(|i| seeds_contains(&unsats, i)))
+                .cloned()
+                .collect();
+            for ac in drop {
+                model.ont.remove(&ac);
+            }
+            return Ok(Some(model));
+        }
+    }
+
+    println!("all inferences");
+    let consistent = reasoner.is_consistent();
+    println!("Consistent? {consistent}");
+    if !consistent {
+        eprintln!("Ontology is inconsistent: no class has superclasses to list");
+        return Ok(None);
+    }
+    let asserted: HashSet<(&str, &str)> = model
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
+                (CE::Class(c), CE::Class(d)) => Some((c.0.as_ref(), d.0.as_ref())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    let mut supers: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for (c, d) in reasoner.direct_subsumptions() {
+        supers.entry(c).or_default().push(d);
+    }
+    let mut equivalents: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for (c, d) in reasoner.equivalent_class_pairs() {
+        equivalents.entry(c.clone()).or_default().push(d.clone());
+        equivalents.entry(d).or_default().push(c);
+    }
+    // A class's superclasses, or its equivalents, in hash-set order, as the
+    // reasoner's node sets hand them over.
+    fn in_set_order(mut items: Vec<String>) -> Vec<String> {
+        items.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
+        let hashes: Vec<i32> = items.iter().map(|i| crate::owlapi_hash::class_hash(i)).collect();
+        crate::owlapi_hash::hashset_order(&hashes).into_iter().map(|i| items[i].clone()).collect()
+    }
+    for c in &listing_order(&model) {
+        if is_builtin_class(c) {
+            continue;
+        }
+        let shown = render(c);
+        for d in in_set_order(supers.get(c).cloned().unwrap_or_default()) {
+            if is_builtin_class(&d) || asserted.contains(&(c.as_str(), d.as_str())) {
+                continue;
+            }
+            println!("INFERENCE: {shown} SubClassOf {}", render(&d));
+        }
+        for d in in_set_order(equivalents.get(c).cloned().unwrap_or_default()) {
+            println!("INFERENCE: {shown} EquivalentTo {}", render(&d));
         }
     }
     Ok(Some(model))
+}
+
+/// The order `--run-reasoner` lists classes in: a Trove hash set's, filled with
+/// the ontology's classes, then its named individuals, then its object
+/// properties, each kind in IRI order. Only the classes are returned.
+fn listing_order(model: &Model) -> Vec<String> {
+    use crate::owlapi_hash::{class_hash, named_individual_hash, object_property_hash};
+    use crate::sig::kind;
+    let mut by_kind: [HashSet<String>; 3] = Default::default();
+    for ac in model.ont.iter() {
+        for (k, iri) in crate::sig::typed_signature(&ac.component) {
+            let at = match k {
+                kind::CLASS => 0,
+                kind::NAMED_INDIVIDUAL => 1,
+                kind::OBJECT_PROPERTY => 2,
+                _ => continue,
+            };
+            by_kind[at].insert(iri);
+        }
+    }
+    let hash: [fn(&str) -> i32; 3] = [class_hash, named_individual_hash, object_property_hash];
+    let batches: Vec<Vec<(i32, (usize, String))>> = by_kind
+        .into_iter()
+        .enumerate()
+        .map(|(k, iris)| {
+            let mut iris: Vec<String> = iris.into_iter().collect();
+            iris.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
+            iris.into_iter().map(|iri| (hash[k](&iri), (k, iri))).collect()
+        })
+        .collect();
+    crate::owlapi_hash::trove_set_order(&batches)
+        .into_iter()
+        .filter_map(|(k, iri)| (k == 0).then_some(iri))
+        .collect()
 }
 
 fn seeds_contains(unsats: &[String], iri: &str) -> bool {

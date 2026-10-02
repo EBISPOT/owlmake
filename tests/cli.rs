@@ -3542,6 +3542,64 @@ fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+/// `owltools … --run-reasoner -u` lists, after the unsatisfiable count, every
+/// direct superclass the reasoner infers that no `SubClassOf` asserts, and every
+/// named equivalence — each class as its id and quoted label, or its id twice
+/// when it has none. The classes come in the order owltools 2020-04-06
+/// (OWLAPI 4.5.6, Trove 3.0.3) lists them, the same three times over: not
+/// IRI order.
+#[test]
+fn owltools_run_reasoner_lists_inferences_in_hash_set_order() {
+    let inp = tmp("run-reasoner.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://purl.obolibrary.org/obo/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://purl.obolibrary.org/obo/x.owl>\n\
+         Declaration(Class(:X_1))\n\
+         Declaration(Class(:X_2))\n\
+         Declaration(Class(:X_3))\n\
+         Declaration(Class(:X_4))\n\
+         Declaration(Class(:X_5))\n\
+         Declaration(Class(:X_6))\n\
+         Declaration(Class(:X_8))\n\
+         Declaration(Class(:X_9))\n\
+         Declaration(ObjectProperty(:BFO_0000050))\n\
+         AnnotationAssertion(rdfs:label :X_1 \"one\")\n\
+         AnnotationAssertion(rdfs:label :X_2 \"two\")\n\
+         AnnotationAssertion(rdfs:label :X_3 \"three\")\n\
+         AnnotationAssertion(rdfs:label :X_4 \"four\")\n\
+         AnnotationAssertion(rdfs:label :X_5 \"five\")\n\
+         AnnotationAssertion(rdfs:label :X_6 \"six\")\n\
+         AnnotationAssertion(rdfs:label :X_8 \"eight\")\n\
+         EquivalentClasses(:X_1 ObjectIntersectionOf(:X_2 ObjectSomeValuesFrom(:BFO_0000050 :X_3)))\n\
+         SubClassOf(:X_4 :X_2)\n\
+         EquivalentClasses(:X_5 :X_6)\n\
+         SubClassOf(:X_8 :X_2)\n\
+         SubClassOf(:X_8 ObjectSomeValuesFrom(:BFO_0000050 :X_3))\n\
+         SubClassOf(:X_9 :X_2)\n\
+         SubClassOf(:X_9 ObjectSomeValuesFrom(:BFO_0000050 :X_3))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin()
+        .args(["owltools", "--no-debug", inp.to_str().unwrap(), "--silence-elk", "--run-reasoner", "-r", "elk", "-u"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "NUMBER_OF_UNSATISFIABLE_CLASSES: 0\n\
+         all inferences\n\
+         Consistent? true\n\
+         INFERENCE: X:9 X:9 SubClassOf X:1 'one'\n\
+         INFERENCE: X:8 'eight' SubClassOf X:1 'one'\n\
+         INFERENCE: X:6 'six' EquivalentTo X:5 'five'\n\
+         INFERENCE: X:5 'five' EquivalentTo X:6 'six'\n\
+         INFERENCE: X:1 'one' SubClassOf X:2 'two'\n"
+    );
+}
+
 /// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
 /// the catalog maps is read from the file it maps it to — `robot --catalog
 /// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own
