@@ -1457,10 +1457,18 @@ fn apply_jena_union_path_distinct_order(table: &mut QueryTable, q: &Queryable, s
         };
         t.rows.iter().filter_map(|r| Some((r.get(vc)?.clone(), r.get(wc)?.clone()))).collect()
     };
+    // Under `--use-graphs` the default graph is the union of the named graphs:
+    // every pattern is answered graph by graph, a triple counted once.
+    let graphs = q.named_graphs();
     let mut v_rank: std::collections::HashMap<String, usize> = Default::default();
     let mut k = 0usize;
     for root in &roots {
-        for node in q.path_order(root, &pred) {
+        let walk = if graphs.is_empty() {
+            q.path_order(root, &pred)
+        } else {
+            Queryable::union_path_order(graphs, root, &pred)
+        };
+        for node in walk {
             v_rank.entry(node).or_insert_with(|| {
                 let r = k;
                 k += 1;
@@ -1478,16 +1486,21 @@ fn apply_jena_union_path_distinct_order(table: &mut QueryTable, q: &Queryable, s
         if !seen_subject.insert(sub.as_str()) {
             continue;
         }
-        let Some(bunch) = q.subject_bunch(sub) else { continue };
-        let s = jo::node_hash(sub);
-        let hashes: Vec<Option<i32>> = bunch
-            .iter()
-            .map(|(p, _, oh)| oh.map(|oh| jo::triple_hash(s, jo::node_hash(p), oh)))
-            .collect();
-        for (slot, &i) in jo::bunch_order(&hashes).iter().enumerate() {
-            let (p, lex, _) = &bunch[i];
-            if *p == qpred {
-                w_rank.entry((sub.clone(), lex.clone())).or_insert(slot);
+        let sources: Vec<&Queryable> = if graphs.is_empty() { vec![q] } else { graphs.iter().collect() };
+        let mut slot = 0usize;
+        for g in sources {
+            let Some(bunch) = g.subject_bunch(sub) else { continue };
+            let s = jo::node_hash(sub);
+            let hashes: Vec<Option<i32>> = bunch
+                .iter()
+                .map(|(p, _, oh)| oh.map(|oh| jo::triple_hash(s, jo::node_hash(p), oh)))
+                .collect();
+            for &i in jo::bunch_order(&hashes).iter() {
+                let (p, lex, _) = &bunch[i];
+                if *p == qpred {
+                    w_rank.entry((sub.clone(), lex.clone())).or_insert(slot);
+                }
+                slot += 1;
             }
         }
     }
@@ -2283,7 +2296,20 @@ pub fn step(
         model = out;
     }
 
-    let q = Queryable::from_model(&model)?;
+    let mut q = Queryable::from_model(&model)?;
+    // `--use-graphs`: the root and each ontology it imports directly are graphs of
+    // their own, and the default graph is their union.
+    if use_graphs {
+        let direct: Vec<crate::model::ImportSource> =
+            model.import_sources.iter().filter(|s| s.direct).cloned().collect();
+        if !direct.is_empty() {
+            let mut root = model.clone();
+            crate::cmd::restore_root_for_save(&mut root);
+            let mut docs = vec![crate::sparql::GraphDoc::Root(root)];
+            docs.extend(direct.into_iter().map(crate::sparql::GraphDoc::Import));
+            q.set_graph_docs(docs);
+        }
+    }
 
     // `--tdb true` puts a SELECT with no `ORDER BY` into DOCUMENT order rather than
     // the store's own order: rows sort on the first column's term, keyed by where

@@ -431,6 +431,7 @@ pub(crate) fn resolve_import_closure(
     let opts = crate::cmd::merge::MergeOptions::default();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: Vec<String> = imports_of(model);
+    let direct: std::collections::HashSet<String> = queue.iter().cloned().collect();
     // Say that this ran, and with how many imports, BEFORE resolving any. The
     // per-import lines below are printed only when there is something to print,
     // so their absence would otherwise be ambiguous between "this path resolves
@@ -457,6 +458,11 @@ pub(crate) fn resolve_import_closure(
                 continue;
             }
         }
+        model.import_sources.push(crate::model::ImportSource {
+            iri: iri.clone(),
+            path: path.clone(),
+            direct: direct.contains(&iri),
+        });
         let (imported, source) = match path {
             Some(path) => {
                 let m = crate::io::load(&path)

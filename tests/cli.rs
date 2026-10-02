@@ -3648,3 +3648,77 @@ fn explain_writes_the_markdown_report() {
 - po (http://x.org/po)
 ");
 }
+
+
+/// Under `--use-graphs` the root and the ontology it imports are named graphs,
+/// and the query's default graph is their union: a pattern is answered graph by
+/// graph, in the order the union holds the graphs, and a triple both graphs
+/// assert is counted where it is first found. The expected rows are ROBOT
+/// 1.9.10's (three runs, identical).
+#[test]
+fn query_use_graphs_answers_graph_by_graph() {
+    let dir = tmp("usegraphs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("root.ofn"), "Prefix(:=<http://x.org/root#>)
+Prefix(o:=<http://www.geneontology.org/formats/oboInOwl#>)
+Ontology(<http://x.org/root>
+Import(<http://x.org/imp>)
+Declaration(Class(:L))
+Declaration(Class(:M))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(AnnotationProperty(o:hasDbXref))
+SubClassOf(:C :L)
+SubClassOf(:D :M)
+AnnotationAssertion(o:hasDbXref :L \"R:L1\")
+AnnotationAssertion(o:hasDbXref :L \"R:L2\")
+AnnotationAssertion(o:hasDbXref :C \"R:C1\")
+AnnotationAssertion(o:hasDbXref :C \"R:C2\")
+AnnotationAssertion(o:hasDbXref :D \"R:D1\")
+)
+").unwrap();
+    std::fs::write(dir.join("imp.ofn"), "Prefix(:=<http://x.org/root#>)
+Prefix(o:=<http://www.geneontology.org/formats/oboInOwl#>)
+Ontology(<http://x.org/imp>
+Declaration(AnnotationProperty(o:hasDbXref))
+AnnotationAssertion(o:hasDbXref :L \"I:L1\")
+AnnotationAssertion(o:hasDbXref :C \"I:C1\")
+AnnotationAssertion(o:hasDbXref :C \"R:C2\")
+AnnotationAssertion(o:hasDbXref :D \"I:D1\")
+)
+").unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://x.org/imp\" uri=\"imp.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("q.sparql"), "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX oboInOwl: <http://www.geneontology.org/formats/oboInOwl#>
+SELECT DISTINCT ?xref WHERE {
+  { ?sub rdfs:subClassOf* <http://x.org/root#L> . }
+  UNION
+  { ?sub rdfs:subClassOf* <http://x.org/root#M> . }
+  ?sub oboInOwl:hasDbXref ?xref .
+}
+").unwrap();
+    let status = bin()
+        .current_dir(&dir)
+        .args(["--catalog", "catalog-v001.xml", "query", "-i", "root.ofn", "--use-graphs", "true", "--query", "q.sparql", "out.tsv"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(dir.join("out.tsv")).unwrap(), "?xref
+\"I:L1\"
+\"R:L2\"
+\"R:L1\"
+\"R:C2\"
+\"I:C1\"
+\"R:C1\"
+\"I:D1\"
+\"R:D1\"
+");
+}
