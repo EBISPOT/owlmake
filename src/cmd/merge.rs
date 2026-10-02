@@ -146,12 +146,6 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
         }
     };
     args.common.apply(&mut merged)?;
-    // The primary's entity index is settled now, before anything is merged into
-    // it: a functional write banners each entity with the label the primary
-    // carried as loaded, and a merged input's label only where it carried none.
-    if merged.banner_labels.is_empty() {
-        merged.banner_labels = crate::cmd::rdfs_labels(&merged);
-    }
 
     // Provenance for the primary ontology, when annotating defined-by/derived-from.
     if opts.annotate_defined_by || opts.annotate_derived_from {
@@ -342,13 +336,6 @@ impl MergedAxioms {
 
 pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
     let source = ontology_iri(other);
-    // The primary's banner labels were settled when it was loaded; an entity
-    // the primary does not label takes the first merged input's label.
-    if !merged.banner_labels.is_empty() {
-        for (subject, label) in crate::cmd::rdfs_labels(other) {
-            merged.banner_labels.entry(subject).or_insert(label);
-        }
-    }
     let mut present = MergedAxioms::of(merged);
 
     // A merge keeps the PRIMARY's identity — but where there is no primary

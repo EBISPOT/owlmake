@@ -3628,6 +3628,47 @@ fn query_answers_predicate_scans_and_unions_in_index_order() {
     }
 }
 
+/// A functional write banners an entity with two labels by the one its
+/// annotation-assertion set yields first, and that set is sized by what the
+/// entity holds as written. `label4` precedes `label10` in a 16-slot table and
+/// follows it in a 32-slot one: merging twelve comments in takes E from 4
+/// assertions to 16, and extracting a module and stripping its comments takes
+/// it from 16 to 2. The expected documents are ROBOT 1.9.10's (ODK v1.6.1),
+/// the same three times over.
+#[test]
+fn banner_labels_follow_the_document_as_written() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/banner-labels");
+    let f = |name: &str| fixtures.join(name).to_str().unwrap().to_string();
+    let merged = tmp("banner-merged.ofn");
+    let run = bin()
+        .args(["merge", "-i", &f("two-labels.ofn"), "-i", &f("more-comments.ofn"), "convert", "-f", "ofn", "-o"])
+        .arg(&merged)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&merged).unwrap(),
+        std::fs::read_to_string(fixtures.join("merged.robot.ofn")).unwrap()
+    );
+
+    let extracted = tmp("banner-extracted.ofn");
+    let run = bin()
+        .args(["merge", "-i", &f("many-comments.ofn")])
+        .args(["extract", "--method", "BOT", "--term", "http://example.org/E", "--force", "true"])
+        .args(["--copy-ontology-annotations", "false"])
+        .args(["remove", "--term", "rdfs:label", "--term", "http://example.org/E"])
+        .args(["--select", "complement", "--select", "annotation-properties"])
+        .args(["convert", "-f", "ofn", "-o"])
+        .arg(&extracted)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&extracted).unwrap(),
+        std::fs::read_to_string(fixtures.join("extracted.robot.ofn")).unwrap()
+    );
+}
+
 /// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
 /// the catalog maps is read from the file it maps it to — `robot --catalog
 /// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own
