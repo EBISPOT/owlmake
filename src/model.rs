@@ -52,6 +52,42 @@ pub struct BannerDoc {
     pub root: bool,
 }
 
+/// One recorded node of an axiom (`Model::shared_occurrences`): an anonymous
+/// expression in it that is one object with every other recorded occurrence
+/// of the same node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SharedNode {
+    /// The node's structure: the `anon_sig_hash` of its signature.
+    pub sig: u64,
+    /// The shared object the node belongs to — the merged class whose
+    /// defining expression it is, or lies inside.
+    pub group: u64,
+    /// Whether the node lies inside that object rather than being it.
+    pub inside: bool,
+}
+
+impl SharedNode {
+    /// The group the node itself is numbered under: the object's own group, or
+    /// for a node inside it, that group mixed with the node's structure — the
+    /// group every occurrence of that node inside that object shares.
+    pub fn node_group(&self) -> u64 {
+        if self.inside {
+            descendant_group(self.group, self.sig)
+        } else {
+            self.group
+        }
+    }
+}
+
+/// The group of the node with structure `sig` inside the shared object of
+/// group `group`.
+pub fn descendant_group(group: u64, sig: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (group, sig, "inside").hash(&mut h);
+    h.finish()
+}
+
 /// An ontology together with the prefix/namespace mapping used to render it.
 ///
 /// This is the value that flows between commands in a pipeline.
@@ -337,7 +373,7 @@ pub struct Model {
     /// fresh object, however equal its structure: a later pass that rebuilds an
     /// axiom copies it, and a rename rewrites it under a new identity that no
     /// record names.
-    pub shared_occurrences: std::collections::HashMap<u64, Vec<(u64, u64)>>,
+    pub shared_occurrences: std::collections::HashMap<u64, Vec<SharedNode>>,
     /// The labels of each secondary input merged into this document, in merge
     /// order (`cmd::rdfs_labels` of each as it was loaded). A document's own
     /// entity index is settled when the document is first consulted, before
