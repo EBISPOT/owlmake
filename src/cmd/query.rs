@@ -1229,7 +1229,8 @@ fn finish_table(
             } else if !grouped {
                 // A plain SELECT has no order of its own: the rows come out in the
                 // order the graph answers the pattern in.
-                if !apply_jena_scan_order(table, q, sparql)
+                if !apply_jena_union_scan_order(table, q, sparql)
+                    && !apply_jena_scan_order(table, q, sparql)
                     && !apply_jena_path_distinct_order(table, q, sparql)
                 {
                     apply_jena_union_path_distinct_order(table, q, sparql);
@@ -1342,6 +1343,170 @@ fn apply_jena_path_distinct_order(table: &mut QueryTable, q: &Queryable, sparql:
     true
 }
 
+/// The groups a block opens with — `{ … } UNION { … } …` — each without its
+/// braces, and whatever follows the last of them. A block that does not open
+/// with a group has none. `None` when a group's braces do not close.
+fn union_groups(inner: &str) -> Option<(Vec<&str>, &str)> {
+    let mut groups: Vec<&str> = Vec::new();
+    let mut rest = inner;
+    loop {
+        let trimmed = rest.trim_start();
+        if !trimmed.starts_with('{') {
+            return Some((groups, trimmed));
+        }
+        let mut depth = 0usize;
+        let mut close = None;
+        for (i, &b) in trimmed.as_bytes().iter().enumerate() {
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let close = close?;
+        groups.push(&trimmed[1..close]);
+        let after = trimmed[close + 1..].trim_start();
+        if after.to_ascii_uppercase().starts_with("UNION") {
+            rest = &after[5..];
+        } else {
+            return Some((groups, after));
+        }
+    }
+}
+
+/// Order the rows of a `SELECT DISTINCT ?w` whose body is a UNION of groups
+/// that each hold one triple pattern — or is a lone pattern with only its
+/// predicate bound — by the order the graph answers it in: the branches in
+/// turn, each pattern answered from the index its bound terms select (the
+/// object's bunch when the object is bound, the predicate's when only the
+/// predicate is), and DISTINCT keeping each `?w` at its first appearance. A
+/// solution the body's filters remove establishes no appearance: the solutions
+/// come from a run of the same body that projects every variable.
+fn apply_jena_union_scan_order(table: &mut QueryTable, q: &Queryable, sparql: &str) -> bool {
+    const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    if table.columns.len() != 1 || table.rows.len() < 2 {
+        return false;
+    }
+    if !sparql.to_ascii_uppercase().contains("DISTINCT") {
+        return false;
+    }
+    let prefixes = query_prefixes(sparql);
+    let expand = |t: &str| -> Option<String> {
+        if let Some(i) = t.strip_prefix('<').and_then(|x| x.strip_suffix('>')) {
+            return Some(i.to_string());
+        }
+        if t == "a" {
+            return Some(RDF_TYPE.to_string());
+        }
+        let (name, local) = t.split_once(':')?;
+        let (_, ns) = prefixes.iter().find(|(n, _)| n == name)?;
+        Some(format!("{ns}{local}"))
+    };
+    let var_of = |t: &str| t.strip_prefix('?').or_else(|| t.strip_prefix('$')).map(str::to_string);
+    let w = table.columns[0].clone();
+    let Some(block) = where_block(sparql) else { return false };
+    let inner = &block[1..block.len() - 1];
+    let Some((groups, rest)) = union_groups(inner) else { return false };
+    let branches: Vec<(String, String, String)> = match groups.len() {
+        0 => {
+            let pats = patterns_in(&format!("{inner} ."));
+            let [(s, p, o)] = pats.as_slice() else { return false };
+            if var_of(s).is_none() || var_of(p).is_some() || var_of(o).is_none() {
+                return false;
+            }
+            vec![(s.clone(), p.clone(), o.clone())]
+        }
+        1 => return false,
+        _ => {
+            // Anything after the union other than a filter joins against it.
+            let tail = rest.trim();
+            if !(tail.is_empty() || tail.to_ascii_uppercase().starts_with("FILTER")) {
+                return false;
+            }
+            let mut v = Vec::new();
+            for g in &groups {
+                let pats = patterns_in(&format!("{g} ."));
+                let [pat] = pats.as_slice() else { return false };
+                v.push(pat.clone());
+            }
+            v
+        }
+    };
+    // Terms are compared in their solution-table form, so a literal and an IRI
+    // with the same text stay apart.
+    if table.tsv_rows.len() != table.rows.len() {
+        return false;
+    }
+    // Each solution the body keeps, as its bound variables and their values.
+    let surviving: std::collections::HashSet<Vec<(String, String)>> = {
+        let prologue = match sparql.to_ascii_uppercase().find("SELECT") {
+            Some(at) => &sparql[..at],
+            None => return false,
+        };
+        let Ok(t) = q.query_table(&format!("{prologue}SELECT * WHERE {block}")) else { return false };
+        t.tsv_rows
+            .iter()
+            .map(|r| {
+                let mut key: Vec<(String, String)> = t
+                    .columns
+                    .iter()
+                    .zip(r)
+                    .filter(|(_, v)| !v.is_empty())
+                    .map(|(c, v)| (c.clone(), v.clone()))
+                    .collect();
+                key.sort();
+                key
+            })
+            .collect()
+    };
+    let mut rank: std::collections::HashMap<String, usize> = Default::default();
+    for (s, p, o) in &branches {
+        let (Some(sv), Some(pred)) = (var_of(s), expand(p)) else { return false };
+        if p.ends_with('*') {
+            return false;
+        }
+        let solutions: Vec<Vec<(String, String)>> = match var_of(o) {
+            None => {
+                let Some(obj) = expand(o) else { return false };
+                let Some(subjects) = q.object_subjects(&obj, &pred) else { continue };
+                subjects.into_iter().map(|x| vec![(sv.clone(), format!("<{x}>"))]).collect()
+            }
+            Some(ov) if ov != sv => {
+                let Some(pairs) = q.predicate_terms(&pred) else { continue };
+                pairs.into_iter().map(|(x, y)| vec![(sv.clone(), format!("<{x}>")), (ov.clone(), y)]).collect()
+            }
+            Some(_) => return false,
+        };
+        for solution in solutions {
+            let mut key = solution.clone();
+            key.sort();
+            if !surviving.contains(&key) {
+                continue;
+            }
+            if let Some((_, value)) = solution.into_iter().find(|(v, _)| *v == w) {
+                let next = rank.len();
+                rank.entry(value).or_insert(next);
+            }
+        }
+    }
+    if rank.is_empty() {
+        return false;
+    }
+    let mut idx: Vec<usize> = (0..table.rows.len()).collect();
+    idx.sort_by_key(|&i| {
+        let val = table.tsv_rows[i].first().map(String::as_str).unwrap_or("");
+        (rank.get(val).copied().unwrap_or(usize::MAX), i)
+    });
+    reorder_rows(table, &idx);
+    true
+}
+
 /// Order the rows of a `SELECT DISTINCT ?w` whose body is a union of walks to
 /// one variable — `{ ?v <p>* <A> } UNION { ?v <p>* <B> } … ?v <q> ?w` — by the
 /// order the graph answers it in: the branches in turn, each enumerating `?v`
@@ -1371,40 +1536,7 @@ fn apply_jena_union_path_distinct_order(table: &mut QueryTable, q: &Queryable, s
     let w = table.columns[0].clone();
     let Some(block) = where_block(sparql) else { return false };
     let inner = &block[1..block.len() - 1];
-    // The union's groups, then whatever follows the last of them.
-    let mut groups: Vec<&str> = Vec::new();
-    let mut rest = inner;
-    loop {
-        let trimmed = rest.trim_start();
-        if !trimmed.starts_with('{') {
-            break;
-        }
-        let bytes = trimmed.as_bytes();
-        let mut depth = 0usize;
-        let mut close = None;
-        for (i, &b) in bytes.iter().enumerate() {
-            match b {
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        close = Some(i);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let Some(close) = close else { return false };
-        groups.push(&trimmed[1..close]);
-        let after = trimmed[close + 1..].trim_start();
-        if after.to_ascii_uppercase().starts_with("UNION") {
-            rest = &after[5..];
-        } else {
-            rest = after;
-            break;
-        }
-    }
+    let Some((groups, rest)) = union_groups(inner) else { return false };
     if groups.len() < 2 {
         if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 3"); } return false;
     }

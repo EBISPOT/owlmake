@@ -3600,6 +3600,34 @@ fn owltools_run_reasoner_lists_inferences_in_hash_set_order() {
     );
 }
 
+/// A `SELECT DISTINCT` over one pattern with only its predicate bound, and one
+/// over a UNION of single-pattern groups, come out in the order the graph
+/// answers them: each branch in turn from the index its bound terms select,
+/// each value at its first appearance. A literal and an IRI with the same text
+/// are two rows. The expected tables are ROBOT 1.9.10's (ODK v1.6.1), the same
+/// three times over.
+#[test]
+fn query_answers_predicate_scans_and_unions_in_index_order() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/query-order");
+    for (query, expected) in [("contributors.sparql", "contributors.robot.csv"), ("seed.sparql", "seed.robot.csv")] {
+        let out = tmp(expected);
+        let run = bin()
+            .args(["query", "-f", "csv", "-i"])
+            .arg(fixtures.join("contributors.ofn"))
+            .arg("--query")
+            .arg(fixtures.join(query))
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            std::fs::read_to_string(fixtures.join(expected)).unwrap(),
+            "{query}"
+        );
+    }
+}
+
 /// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
 /// the catalog maps is read from the file it maps it to — `robot --catalog
 /// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own

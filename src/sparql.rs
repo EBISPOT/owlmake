@@ -864,6 +864,68 @@ impl Queryable {
         )
     }
 
+    /// [`Queryable::predicate_pairs`] with each object in its solution-table
+    /// form (see [`term_to_tsv`]), and literal objects included: a literal is
+    /// read back from the store among its subject's values under the predicate,
+    /// by the value hash its slot was placed by. A literal whose value hash is
+    /// not modelled fills its slot but names no pair.
+    pub fn predicate_terms(&self, predicate: &str) -> Option<Vec<(String, String)>> {
+        use crate::sparql::jena_order as jo;
+        let bunch = self.object_order.pred_bunch(predicate)?;
+        let p = oxigraph::model::NamedNodeRef::new(predicate).ok()?;
+        let ph = jo::node_hash(predicate);
+        let hashes: Vec<Option<i32>> = bunch
+            .iter()
+            .map(|(s, o)| {
+                if *s == NO_SUBJECT {
+                    return None;
+                }
+                let oh = match o {
+                    PObj::Named(id) => Some(jo::node_hash(self.object_order.name(*id))),
+                    PObj::Lit(h) => *h,
+                    PObj::Anon => None,
+                }?;
+                Some(jo::triple_hash(jo::node_hash(self.object_order.name(*s)), ph, oh))
+            })
+            .collect();
+        // Each subject's literals under the predicate, as (value hash, form),
+        // handed out as the bunch reaches them.
+        let mut held: std::collections::HashMap<u32, Vec<(Option<i32>, String)>> = Default::default();
+        let mut out = Vec::new();
+        for i in jo::bunch_order(&hashes) {
+            let (s, o) = &bunch[i];
+            let subject = self.object_order.name(*s);
+            match o {
+                PObj::Named(oid) => {
+                    out.push((subject.to_string(), format!("<{}>", self.object_order.name(*oid))))
+                }
+                PObj::Lit(Some(h)) => {
+                    let values = held.entry(*s).or_insert_with(|| {
+                        let Ok(sn) = oxigraph::model::NamedNodeRef::new(subject) else {
+                            return Vec::new();
+                        };
+                        self.store
+                            .quads_for_pattern(Some(sn.into()), Some(p), None, None)
+                            .filter_map(|q| q.ok())
+                            .filter_map(|q| match &q.object {
+                                Term::Literal(l) => Some((
+                                    literal_value_hash(l.value(), l.datatype().as_str(), l.language().is_some()),
+                                    term_to_tsv(&q.object),
+                                )),
+                                _ => None,
+                            })
+                            .collect()
+                    });
+                    if let Some(at) = values.iter().position(|(vh, _)| *vh == Some(*h)) {
+                        out.push((subject.to_string(), values.remove(at).1));
+                    }
+                }
+                PObj::Lit(None) | PObj::Anon => {}
+            }
+        }
+        Some(out)
+    }
+
     /// The nodes an arbitrary-length path `?v <pred>* <root>` binds, in the order
     /// it binds them.
     ///
