@@ -27,6 +27,7 @@
 use std::ffi::OsString;
 
 pub mod grep;
+pub mod gzip_deflate;
 
 /// Run the bundled `sed` (uutils' POSIX/GNU sed). `args` are the arguments
 /// *after* the `sed` word. Returns the process exit code.
@@ -100,17 +101,23 @@ pub fn grep_main(args: &[String]) -> i32 {
 ///
 /// `gzip <file>` writes `<file>.gz` and removes the original; `-d` decompresses
 /// the other way, `-c` writes to stdout and keeps the input, `-k` keeps it, and
-/// with no operand the data comes from stdin and goes to stdout. A `-1`..`-9`
-/// level is accepted and ignored — the compressed bytes are the same for the
-/// same input whatever the caller asks for, which is the point.
+/// with no operand the data comes from stdin and goes to stdout.
 ///
-/// The header records no modification time and no original file name, so
-/// compressing the same bytes twice gives the same file.
+/// Compression is owlmake's own DEFLATE ([`gzip_deflate`]), always at level 6:
+/// a `-1`..`-9` level is accepted but the compressed bytes are the same for the
+/// same input whatever the caller asks for, and the header's XFL byte is
+/// always 0. The member header is `1f 8b 08 FLG MTIME XFL=0 OS=3`. For a named
+/// input file FLG carries the FNAME bit and the file's base name follows the
+/// header NUL-terminated, with MTIME the file's modification time; for stdin no
+/// name is written and MTIME is stdin's modification time when stdin is a
+/// regular file, else 0. `-n`/`--no-name` writes no name and MTIME 0, so the
+/// same bytes compress to the same file.
 pub fn gzip_main(args: &[String]) -> i32 {
     use std::io::{Read, Write};
     let mut decompress = false;
     let mut to_stdout = false;
     let mut keep = false;
+    let mut no_name = false;
     let mut files: Vec<&str> = Vec::new();
     let mut operands_only = false;
     for a in args {
@@ -123,7 +130,9 @@ pub fn gzip_main(args: &[String]) -> i32 {
             "-d" | "--decompress" | "--uncompress" => decompress = true,
             "-c" | "--stdout" | "--to-stdout" => to_stdout = true,
             "-k" | "--keep" => keep = true,
-            "-f" | "--force" | "-n" | "--no-name" | "-q" | "--quiet" | "-v" | "--verbose" => {}
+            "-n" | "--no-name" => no_name = true,
+            "-N" | "--name" => no_name = false,
+            "-f" | "--force" | "-q" | "--quiet" | "-v" | "--verbose" => {}
             _ if a.len() == 2 && a.as_bytes()[1].is_ascii_digit() => {}
             _ => {
                 eprintln!("gzip: unrecognized option `{a}`");
@@ -131,17 +140,24 @@ pub fn gzip_main(args: &[String]) -> i32 {
             }
         }
     }
-    let convert = |data: &[u8]| -> std::io::Result<Vec<u8>> {
+    // The header's MTIME: seconds since the epoch when that fits the field,
+    // else 0 (which the format reserves for "no time stamp").
+    let mtime_of = |m: &std::fs::Metadata| -> u32 {
+        if no_name || !m.is_file() {
+            return 0;
+        }
+        match m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
+            Some(d) if d.as_secs() > 0 && d.as_secs() <= u32::MAX as u64 => d.as_secs() as u32,
+            _ => 0,
+        }
+    };
+    let convert = |data: &[u8], mtime: u32, name: Option<&[u8]>| -> std::io::Result<Vec<u8>> {
         if decompress {
             let mut out = Vec::new();
             flate2::read::GzDecoder::new(data).read_to_end(&mut out)?;
             Ok(out)
         } else {
-            let mut enc = flate2::GzBuilder::new()
-                .mtime(0)
-                .write(Vec::new(), flate2::Compression::default());
-            enc.write_all(data)?;
-            enc.finish()
+            Ok(gzip_deflate::gzip_member(data, mtime, name))
         }
     };
     if files.is_empty() || files == ["-"] {
@@ -149,7 +165,8 @@ pub fn gzip_main(args: &[String]) -> i32 {
         if std::io::stdin().read_to_end(&mut data).is_err() {
             return 1;
         }
-        match convert(&data) {
+        let mtime = stdin_metadata().map(|m| mtime_of(&m)).unwrap_or(0);
+        match convert(&data, mtime, None) {
             Ok(out) => {
                 let _ = std::io::stdout().write_all(&out);
                 0
@@ -168,7 +185,10 @@ pub fn gzip_main(args: &[String]) -> i32 {
                     return 1;
                 }
             };
-            let out = match convert(&data) {
+            let mtime = std::fs::metadata(f).map(|m| mtime_of(&m)).unwrap_or(0);
+            let base = std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned());
+            let name = if no_name { None } else { base.as_deref().map(str::as_bytes) };
+            let out = match convert(&data, mtime, name) {
                 Ok(o) => o,
                 Err(e) => {
                     eprintln!("gzip: {f}: {e}");
@@ -196,12 +216,25 @@ pub fn gzip_main(args: &[String]) -> i32 {
     }
 }
 
+/// Metadata of standard input, for the header's MTIME when stdin is a file.
+#[cfg(unix)]
+fn stdin_metadata() -> Option<std::fs::Metadata> {
+    use std::os::fd::AsFd;
+    let fd = std::io::stdin().as_fd().try_clone_to_owned().ok()?;
+    std::fs::File::from(fd).metadata().ok()
+}
+
+#[cfg(not(unix))]
+fn stdin_metadata() -> Option<std::fs::Metadata> {
+    None
+}
+
 #[cfg(test)]
 mod gzip_tests {
     use std::io::Read;
 
-    /// The same bytes compress to the same file: no clock in the header, and no
-    /// original name.
+    /// Under `-n` the same bytes compress to the same file: no clock in the
+    /// header, and no original name.
     #[test]
     fn the_same_input_gives_the_same_file() {
         let dir = std::env::temp_dir().join(format!("om-gzip-{}", std::process::id()));
@@ -211,7 +244,7 @@ mod gzip_tests {
         std::fs::write(&a, b"the same bytes\n").unwrap();
         std::fs::write(&b, b"the same bytes\n").unwrap();
         let run = |p: &std::path::Path| {
-            assert_eq!(super::gzip_main(&[p.display().to_string()]), 0);
+            assert_eq!(super::gzip_main(&["-n".to_string(), p.display().to_string()]), 0);
         };
         run(&a);
         run(&b);
@@ -219,12 +252,38 @@ mod gzip_tests {
         let gb = std::fs::read(dir.join("b.txt.gz")).unwrap();
         assert_eq!(ga, gb, "two compressions of one input differ");
         assert_eq!(&ga[4..8], &[0, 0, 0, 0], "the header carries a modification time");
+        assert_eq!(ga[3], 0, "the header carries a name");
         // …and the file is real gzip, readable back.
         let mut out = String::new();
         flate2::read::GzDecoder::new(&ga[..]).read_to_string(&mut out).unwrap();
         assert_eq!(out, "the same bytes\n");
         // The original is gone, as `gzip <file>` leaves it.
         assert!(!a.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Without `-n` the header names the input file and carries its
+    /// modification time; `-k` leaves the input in place.
+    #[test]
+    fn the_header_names_the_file_and_its_time() {
+        let dir = std::env::temp_dir().join(format!("om-gzip-named-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("named.txt");
+        std::fs::write(&a, b"named bytes\n").unwrap();
+        let secs = std::fs::metadata(&a)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+        assert_eq!(super::gzip_main(&["-k".to_string(), a.display().to_string()]), 0);
+        let ga = std::fs::read(dir.join("named.txt.gz")).unwrap();
+        assert_eq!(&ga[..4], &[0x1f, 0x8b, 8, 0x08]);
+        assert_eq!(u32::from_le_bytes([ga[4], ga[5], ga[6], ga[7]]), secs);
+        assert_eq!(&ga[8..10], &[0, 3]);
+        assert_eq!(&ga[10..20], b"named.txt\0");
+        assert!(a.exists(), "-k keeps the input");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
