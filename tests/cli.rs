@@ -3745,6 +3745,34 @@ fn explain_output_saves_the_ontology_it_was_given() {
     );
 }
 
+/// A markdown diff writes a literal as ROBOT 1.9.10's owl-diff renderer does
+/// (ODK v1.6.1): `xsd:decimal`, `xsd:integer` and `xsd:boolean` values bare,
+/// `xsd:float` with an `f`, every other value quoted with its text
+/// HTML-escaped — newlines, tabs and backslashes as they stand. Only the
+/// `Loaded from` lines, which name where each side was read, are not compared.
+#[test]
+fn markdown_diff_writes_literals_as_robot_does() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markdown-literals");
+    let out = tmp("markdown-literals.md");
+    let run = bin()
+        .args(["diff", "--labels", "true", "--left"])
+        .arg(fixtures.join("left.ofn"))
+        .arg("--right")
+        .arg(fixtures.join("right.ofn"))
+        .args(["-f", "markdown", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let comparable = |text: String| -> String {
+        text.lines().filter(|l| !l.starts_with("- Loaded from: ")).map(|l| format!("{l}\n")).collect()
+    };
+    assert_eq!(
+        comparable(std::fs::read_to_string(&out).unwrap()),
+        comparable(std::fs::read_to_string(fixtures.join("diff.robot.md")).unwrap())
+    );
+}
+
 /// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
 /// the catalog maps is read from the file it maps it to — `robot --catalog
 /// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own

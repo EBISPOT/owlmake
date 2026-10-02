@@ -877,19 +877,29 @@ fn render_annval_md(
     }
 }
 
-/// `"lex"`, `"lex"@lang`, or `"lex"^^[short](datatype)` — the datatype is itself
-/// a markdown link, e.g. `"2026-06-08"^^[string](http://www.w3.org/2001/XMLSchema#string)`.
+/// A literal as the markdown report writes it. An `xsd:decimal`, `xsd:integer`
+/// or `xsd:boolean` value stands bare, and an `xsd:float` value bare with an
+/// `f`. Any other is quoted, its text HTML-escaped, and followed by its
+/// language tag or by its datatype as a markdown link — a plain literal by
+/// neither: `"a&lt;b"`, `"y"@en`,
+/// `"2026-06-08"^^[string](http://www.w3.org/2001/XMLSchema#string)`.
 fn render_literal_md(
     l: &horned_owl::model::Literal<RcStr>,
     labels: &HashMap<String, String>,
 ) -> String {
+    use crate::util::html_escape::escape_html4;
     use horned_owl::model::Literal;
+    const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+    const RDF_PLAIN_LITERAL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
     match l {
-        Literal::Simple { literal } => format!("{:?}", literal),
-        Literal::Language { literal, lang } => format!("{:?}@{lang}", literal),
-        Literal::Datatype { literal, datatype_iri } => {
-            format!("{:?}^^{}", literal, md_iri(datatype_iri.as_ref(), labels))
-        }
+        Literal::Simple { literal } => format!("\"{}\"", escape_html4(literal)),
+        Literal::Language { literal, lang } => format!("\"{}\"@{lang}", escape_html4(literal)),
+        Literal::Datatype { literal, datatype_iri } => match datatype_iri.as_ref().strip_prefix(XSD) {
+            Some("decimal" | "integer" | "boolean") => literal.to_string(),
+            Some("float") => format!("{literal}f"),
+            _ if datatype_iri.as_ref() == RDF_PLAIN_LITERAL => format!("\"{}\"", escape_html4(literal)),
+            _ => format!("\"{}\"^^{}", escape_html4(literal), md_iri(datatype_iri.as_ref(), labels)),
+        },
     }
 }
 

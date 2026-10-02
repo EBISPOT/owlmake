@@ -28,6 +28,7 @@ use std::ffi::OsString;
 
 pub mod grep;
 pub mod gzip_deflate;
+pub mod html_escape;
 
 /// Run the bundled `sed` (uutils' POSIX/GNU sed). `args` are the arguments
 /// *after* the `sed` word. Returns the process exit code.
