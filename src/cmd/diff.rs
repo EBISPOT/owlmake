@@ -89,10 +89,33 @@ fn document_iri(path: Option<&std::path::Path>, iri: Option<&str>) -> String {
     match (path, iri) {
         (Some(p), _) => {
             let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-            format!("file:{}", abs.display())
+            match odk_work_path(&abs) {
+                Some(w) => format!("file:{w}"),
+                None => format!("file:{}", abs.display()),
+            }
         }
         (None, Some(i)) => i.to_string(),
         (None, None) => String::new(),
+    }
+}
+
+/// The path a document has inside the ODK container, where the repository is
+/// mounted at `/work`: for a file under a repository whose plan emulates an
+/// ODK release, `/work/<path from the repository root>`.
+fn odk_work_path(abs: &std::path::Path) -> Option<String> {
+    let mut dir = abs.parent()?;
+    loop {
+        let plan = dir.join("owlmake.yaml");
+        if plan.is_file() {
+            let text = std::fs::read_to_string(&plan).ok()?;
+            let emulates = text.lines().any(|l| l.starts_with("emulate_odk_version:"));
+            if !emulates {
+                return None;
+            }
+            let rel = abs.strip_prefix(dir).ok()?;
+            return Some(format!("/work/{}", rel.display()));
+        }
+        dir = dir.parent()?;
     }
 }
 
@@ -652,11 +675,19 @@ fn render_axiom_md(c: &Component<RcStr>, labels: &HashMap<String, String>) -> St
         DeclareNamedIndividual(d) => format!("Individual: {}", md_iri(d.0 .0.as_ref(), labels)),
         DeclareDatatype(d) => format!("Datatype: {}", md_iri(d.0 .0.as_ref(), labels)),
         SubClassOf(a) => format!("{} SubClassOf {}", ce(&a.sub), ce(&a.sup)),
-        EquivalentClasses(a) => {
+        // A set of two class expressions is written as the pair, infix; a
+        // larger one as the list it is.
+        EquivalentClasses(a) if a.0.len() == 2 => {
             a.0.iter().map(ce).collect::<Vec<_>>().join(" EquivalentTo ")
         }
+        EquivalentClasses(a) => {
+            format!(" EquivalentClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
+        }
+        DisjointClasses(a) if a.0.len() == 2 => {
+            a.0.iter().map(ce).collect::<Vec<_>>().join(" DisjointWith ")
+        }
         DisjointClasses(a) => {
-            format!("DisjointClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
+            format!(" DisjointClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
         }
         AnnotationAssertion(a) => format!(
             "{} {} {}",
