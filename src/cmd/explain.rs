@@ -187,6 +187,7 @@ pub fn step(
     };
 
     let mut report = String::new();
+    let mut explained: Vec<crate::cmd::explain_markdown::Explained> = Vec::new();
     // The union of all justification axioms across targets — used when `--output`
     // (with `--format` or an ontology extension) asks for an ontology rather than
     // the human-readable report.
@@ -213,6 +214,14 @@ pub fn step(
             }
         }
     }
+    // What the markdown report needs of the examined ontology: the label each
+    // entity is shown with, and which ontology each axiom comes from.
+    let md_labels = if args.explanation.is_some() { crate::cmd::rdfs_labels(&model) } else { Default::default() };
+    let provenance = crate::cmd::explain_markdown::Provenance {
+        root: crate::build::model_ontology_id(&model).0,
+        import: if model.inlined_imports.len() == 1 { model.inlined_imports.first().cloned() } else { None },
+        imported: std::mem::take(&mut model.imported_components),
+    };
     let module = if targets.is_empty() {
         model
     } else {
@@ -230,9 +239,12 @@ pub fn step(
 
     for (n, (sub, sup)) in targets.iter().enumerate() {
         status!("explain: [{}/{}] {sub} ⊑ {sup}", n + 1, targets.len());
-        let (text, axioms) = explain_one(&module, backend, sub, sup, max);
+        let (text, axioms, justifications) = explain_one(&module, backend, sub, sup, max);
         report.push_str(&text);
         justification_axioms.extend(axioms);
+        for j in justifications {
+            explained.push(crate::cmd::explain_markdown::Explained { sub: sub.clone(), sup: sup.clone(), axioms: j });
+        }
     }
 
     // An ontology with nothing to explain still gets a report that says so, rather
@@ -250,10 +262,10 @@ pub fn step(
             None => std::fs::write(p, &report)?,
         }
     }
-    // `--explanation` always carries the human-readable report, whatever form
-    // `--output` was asked for.
+    // `--explanation` carries the markdown report, whatever form `--output` was
+    // asked for.
     if let Some(p) = &args.explanation {
-        std::fs::write(p, &report)?;
+        std::fs::write(p, crate::cmd::explain_markdown::report(&explained, &md_labels, &provenance))?;
     }
     if args.output.is_none() && args.explanation.is_none() {
         print!("{report}");
@@ -521,7 +533,7 @@ fn explain_one(
     sub: &str,
     sup: &str,
     max: usize,
-) -> (String, Vec<AnnotatedComponent<RcStr>>) {
+) -> (String, Vec<AnnotatedComponent<RcStr>>, Vec<Vec<AnnotatedComponent<RcStr>>>) {
     let t0 = std::time::Instant::now();
     // Shrink to the ⊥-module for the two terms: it contains every justification
     // for the entailment, so the search never has to look outside it.
@@ -585,7 +597,7 @@ fn explain_one(
             }
         }
     }
-    (report, union)
+    (report, union, justifications)
 }
 
 /// A single justification, identified by the indices of the axioms (into the

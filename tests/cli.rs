@@ -3600,3 +3600,51 @@ fn merge_reads_input_iris_after_its_files_through_the_catalog() {
         .unwrap();
     assert!(!status.success(), "convert accepted both --input and --input-iri");
 }
+
+
+/// `--explanation` writes the markdown report: the justification as a tree grown
+/// from the entailment's subject, each axiom in Manchester syntax with every
+/// entity a `[label](IRI)` link, then the axiom impact summary tagging each
+/// axiom with the ontology it comes from. The expected text is ROBOT 1.9.10's
+/// report for the same command.
+#[test]
+fn explain_writes_the_markdown_report() {
+    let root = plant_import_fixture("plant-md");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let md = root.with_file_name("tepal.md");
+    let status = bin()
+        .args(["explain", "-i"])
+        .arg(&root)
+        .arg("--catalog")
+        .arg(&catalog)
+        .args(["--prefix", "po: http://x.org/po#", "--prefix", "rs: http://x.org/root#"])
+        .args(["--axiom", "po:Tepal SubClassOf rs:ReproSystem", "--explanation"])
+        .arg(&md)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), "## [Tepal](http://x.org/po#Tepal) SubClassOf [ReproSystem](http://x.org/root#ReproSystem) ##
+
+  - [Tepal](http://x.org/po#Tepal) SubClassOf [Perianth](http://x.org/po#Perianth)
+    - [Perianth](http://x.org/po#Perianth) EquivalentTo [Organ](http://x.org/po#Organ) and ([part_of](http://x.org/po#part_of) some [Flower](http://x.org/po#Flower))
+      - [Flower](http://x.org/po#Flower) SubClassOf [part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem)
+        - [ReproSystem](http://x.org/root#ReproSystem) EquivalentTo [Structure](http://x.org/po#Structure) and ([part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem))
+      - [Organ](http://x.org/po#Organ) SubClassOf [Structure](http://x.org/po#Structure)
+      - [Flower](http://x.org/po#Flower) SubClassOf [Structure](http://x.org/po#Structure)
+
+# Axiom Impact 
+## Axioms used 1 times
+- [Perianth](http://x.org/po#Perianth) EquivalentTo [Organ](http://x.org/po#Organ) and ([part_of](http://x.org/po#part_of) some [Flower](http://x.org/po#Flower)) [po]
+- [ReproSystem](http://x.org/root#ReproSystem) EquivalentTo [Structure](http://x.org/po#Structure) and ([part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem)) [root]
+- [Flower](http://x.org/po#Flower) SubClassOf [Structure](http://x.org/po#Structure) [po]
+- [Flower](http://x.org/po#Flower) SubClassOf [part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem) [root]
+- [Organ](http://x.org/po#Organ) SubClassOf [Structure](http://x.org/po#Structure) [po]
+- [Tepal](http://x.org/po#Tepal) SubClassOf [Perianth](http://x.org/po#Perianth) [po]
+
+
+
+# Ontologies used: 
+- root (http://x.org/root)
+- po (http://x.org/po)
+");
+}
