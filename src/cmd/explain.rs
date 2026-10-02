@@ -201,6 +201,18 @@ pub fn step(
     // the moment it is built: the search below never looks at it again, and on a
     // multi-hundred-megabyte input that is most of the resident memory.
     let seed: HashSet<String> = targets.iter().flat_map(|(a, b)| [a.clone(), b.clone()]).collect();
+    // The examined ontology's label assertions, by subject: the ontology of the
+    // justifications carries the labels of every term they name.
+    let mut labels: std::collections::HashMap<String, Vec<AnnotatedComponent<RcStr>>> = Default::default();
+    for ac in model.ont.iter() {
+        if let Component::AnnotationAssertion(aa) = &ac.component {
+            if aa.ann.ap.0.as_ref() == "http://www.w3.org/2000/01/rdf-schema#label" {
+                if let horned_owl::model::AnnotationSubject::IRI(iri) = &aa.subject {
+                    labels.entry(iri.as_ref().to_string()).or_default().push(ac.clone());
+                }
+            }
+        }
+    }
     let module = if targets.is_empty() {
         model
     } else {
@@ -251,11 +263,23 @@ pub fn step(
     // explaining — not the ontology that was examined. A chain ending
     // `explain … annotate --output x.ofn` therefore writes the explanation
     // ontology, carrying only the default prefix set.
+    let mut terms: HashSet<String> = HashSet::new();
+    for ac in &justification_axioms {
+        terms.extend(crate::sig::typed_signature(&ac.component).into_iter().map(|(_, iri)| iri));
+        terms.extend(ac.ann.iter().map(|a| a.ap.0.to_string()));
+    }
     let mut just = SetOntology::new();
     for ac in justification_axioms {
         just.insert(ac);
     }
-    Ok(Some(Model::from_parts(just, horned_owl::curie::PrefixMapping::default())))
+    for t in &terms {
+        for ac in labels.get(t).into_iter().flatten() {
+            just.insert(ac.clone());
+        }
+    }
+    let mut out = Model::from_parts(just, horned_owl::curie::PrefixMapping::default());
+    out.banner_labels = crate::cmd::rdfs_labels(&out);
+    Ok(Some(out))
 }
 
 /// Resolve the ontology serialization for `--output`: an explicit `--format`
@@ -507,7 +531,32 @@ fn explain_one(
     let search = Search::new(&module, backend, sub, sup);
     let justifications = {
         let _hb = crate::progress::Heartbeat::start(format!("explain: justifying {sub} ⊑ {sup}"));
-        search.enumerate(max)
+        if max == 1 {
+            // One justification: the one black-box search finds.
+            let axioms: Vec<AnnotatedComponent<RcStr>> = module.ont.iter().cloned().collect();
+            let entails = |axs: &[&AnnotatedComponent<RcStr>]| -> bool {
+                search.tests.set(search.tests.get() + 1);
+                search.widest.set(search.widest.get().max(axs.len()));
+                let mut ont = SetOntology::new();
+                let mut entities: HashSet<String> = HashSet::new();
+                for ac in axs {
+                    ont.insert((*ac).clone());
+                    entities.extend(crate::sig::typed_signature(&ac.component).into_iter().map(|(_, iri)| iri));
+                }
+                for e in &entities {
+                    if let Some(decl) = search.declarations.get(e) {
+                        ont.insert(decl.clone());
+                    }
+                }
+                let m = Model::from_parts(ont, clone_prefixes(&module.prefixes));
+                backend.is_subsumed(&m, sub, sup)
+            };
+            crate::cmd::explain_blackbox::justification(&axioms, sub, sup, &entails)
+                .map(|j| vec![j])
+                .unwrap_or_default()
+        } else {
+            search.enumerate(max)
+        }
     };
     // The two numbers that say what the search cost: how many entailment tests it
     // asked, and how big the largest ontology it classified was. The module's

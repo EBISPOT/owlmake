@@ -925,6 +925,7 @@ fn attr(frag: &str, key: &str) -> Option<String> {
 }
 
 pub mod annotate;
+pub mod explain_blackbox;
 pub mod babelon;
 pub mod babelon_tsv;
 pub mod collapse;

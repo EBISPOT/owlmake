@@ -2752,10 +2752,16 @@ fn explain_derives_the_imported_plant_shape_under_elk_and_hermit() {
             let text = String::from_utf8_lossy(&out.stdout);
             assert!(text.contains("1 justification(s)"), "{reasoner} {sub}: {text}");
             if sub == "po:Tepal" {
+                // The justification ROBOT finds: Tepal is a perianth, a perianth is
+                // an organ part of a flower, and a flower is a structure part of a
+                // reproductive system — so a flower is one, and Tepal is part of
+                // one without leaning on part_of's transitivity.
+                assert!(text.contains("Justification 1 (6 axioms)"), "{reasoner}: {text}");
                 assert!(
-                    text.contains("TransitiveObjectProperty"),
-                    "the chain through the flower is part of the justification:\n{text}"
+                    text.contains("sup: Class(Class(IRI(\"http://x.org/po#Structure\"))), sub: Class(Class(IRI(\"http://x.org/po#Flower\")))"),
+                    "the imported Flower ⊑ Structure is part of the justification:\n{text}"
                 );
+                assert!(!text.contains("TransitiveObjectProperty"), "{reasoner}: {text}");
             }
             assert_eq!(
                 reasoner == "hermit",
