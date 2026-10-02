@@ -7198,14 +7198,13 @@ fn apply_op(
             // Recipe paths are relative to the ontology dir.
             let rp = |s: &str| repo.dir.join(s);
             let mut m = model;
-            // `--use-graphs true` loads the import closure as named graphs and
-            // makes the default graph their UNION, so the query sees the whole
-            // closure. The pipeline hands over the root ontology alone; union it
-            // in here, over the catalog the plan names.
+            // `--use-graphs true` loads the root and each ontology it imports as
+            // named graphs and makes the default graph their union. The pipeline
+            // hands over the root ontology alone: its closure is resolved here,
+            // over the catalog the plan names, recording where each import came
+            // from so the query can open it as a graph of its own.
             if *use_graphs {
-                if let Some(cl) = load_closure(repo, &m, catalog)? {
-                    m = union_with_closure(&m, &cl);
-                }
+                crate::cmd::resolve_import_closure(&mut m, catalog, &repo.dir)?;
             }
             // Updates (transform the model) + SELECTs (write result tables) in one
             // pass; owlmake's query engine handles both.
@@ -7235,7 +7234,7 @@ fn apply_op(
                     // writes TSV to a `.tsv` and CSV to a `.csv`. An extension that
                     // is not a result-format name — `$@.tmp` — resolves to CSV.
                     format: format.clone().unwrap_or_default(),
-                    use_graphs: None,
+                    use_graphs: Some(*use_graphs),
                     tdb: Some(*tdb),
                     keep_tdb_mappings: None,
                     tdb_directory: None,
