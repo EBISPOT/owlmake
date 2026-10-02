@@ -41,16 +41,30 @@ const IAO_TERM_REPLACED_BY: &str = "http://purl.obolibrary.org/obo/IAO_0100001";
 const IAO_OBSOLESCENCE_REASON: &str = "http://purl.obolibrary.org/obo/IAO_0000231";
 const IAO_TERMS_MERGED: &str = "http://purl.obolibrary.org/obo/IAO_0000227";
 
-/// Expand an OBO id to a full IRI string.
+/// Expand a CURIE to a full IRI string: a declared OBO-style prefix is
+/// `http://purl.obolibrary.org/obo/<prefix>_<local>`, and a full IRI stands.
 pub fn expand_id(id: &str) -> String {
     let id = id.trim();
     if id.starts_with("http://") || id.starts_with("https://") {
         return id.to_string();
     }
     match id.split_once(':') {
-        // A prefixed id whose local part carries an underscore is not canonical,
-        // and its IRI keeps the two apart with `#`: `ncithesaurus:Nuclear_Structure`
-        // is `…/obo/ncithesaurus_#Nuclear_Structure`.
+        Some((pre, local)) => format!("{OBO_BASE}{pre}_{local}"),
+        None => format!("{OBO_BASE}{id}"),
+    }
+}
+
+/// Expand an id read from an OBO document to its IRI. A prefixed id whose
+/// local part is not canonical — it carries an underscore, a space or a
+/// character outside the id alphabet — keeps prefix and local part apart with
+/// `#` and escapes the local part.
+pub fn expand_obo_id(id: &str) -> String {
+    let id = id.trim();
+    if id.starts_with("http://") || id.starts_with("https://") {
+        return id.to_string();
+    }
+    match id.split_once(':') {
+        // `ncithesaurus:Nuclear_Structure` is `…/obo/ncithesaurus_#Nuclear_Structure`.
         Some((pre, local)) if local.contains('_') => {
             format!("{OBO_BASE}{pre}_#{}", url_encode_local(local))
         }
@@ -122,7 +136,7 @@ fn expand_curie(id: &str) -> String {
             return format!("{ns}{local}");
         }
     }
-    expand_id(id)
+    expand_obo_id(id)
 }
 
 /// Compress a full IRI to an OBO id where possible (inverse of [`expand_id`]).
@@ -1361,7 +1375,7 @@ fn resolve_local(name: &str, onto_ns: Option<&str>) -> String {
     } else if let Some(ns) = onto_ns {
         format!("{ns}{name}")
     } else {
-        expand_id(name)
+        expand_obo_id(name)
     }
 }
 
@@ -2347,9 +2361,9 @@ impl Ctx {
             match id.split_once(':') {
                 Some((prefix, local)) => match self.idspaces.iter().find(|(p, _)| p == prefix) {
                     Some((_, ns)) => format!("{ns}{local}") == iri,
-                    None => expand_id(&id) == iri,
+                    None => expand_obo_id(&id) == iri,
                 },
-                None => expand_id(&id) == iri,
+                None => expand_obo_id(&id) == iri,
             }
         };
         if expands_back {
@@ -3681,7 +3695,7 @@ fn fold_alt_ids(
             && sd.obsolescence_reason.as_deref() == Some("IAO:0000227")
             && sd.replaced_by.len() == 1
         {
-            merged.push((expand_id(&sd.replaced_by[0]), ctx.id(iri)));
+            merged.push((expand_obo_id(&sd.replaced_by[0]), ctx.id(iri)));
             if sd.is_a.is_empty()
                 && sd.relationships.is_empty()
                 && sd.intersection_of.is_empty()
@@ -3727,7 +3741,7 @@ fn fold_alt_ids(
     // `intersection_of` and a `relationship`, and it is still a term.
     let alt_targets: Vec<String> = data
         .values()
-        .flat_map(|sd| sd.alt_ids.iter().map(|a| expand_id(a)))
+        .flat_map(|sd| sd.alt_ids.iter().map(|a| expand_obo_id(a)))
         .collect();
     for a in alt_targets {
         let is_real = data.get(&a).is_some_and(has_content);
