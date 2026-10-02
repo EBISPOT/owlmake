@@ -258,10 +258,19 @@ fn merge_one(
     for (sub, sup) in dir_subs {
         sup_dir.entry(sub).or_default().insert(sup);
     }
-    let tx_classes: Vec<String> = sup_all
+    // The classes are taken in the order a set of them is iterated in — bucket
+    // order over the class hashes — because an axiom two classes translate
+    // alike is kept as the FIRST class's object, with what that object shares.
+    let mut tx_classes: Vec<String> = sup_all
         .iter()
         .filter(|(_, sups)| sups.contains(&tx_root))
         .map(|(c, _)| c.clone())
+        .collect();
+    tx_classes.sort();
+    let hashes: Vec<i32> = tx_classes.iter().map(|c| crate::owlapi_hash::class_hash(c)).collect();
+    let tx_classes: Vec<String> = crate::owlapi_hash::hashset_order_of(&hashes, tx_classes.len())
+        .into_iter()
+        .map(|i| tx_classes[i].clone())
         .collect();
 
     // 2. ecMap (C → N) and exMap (C → "N ⊓ (P some T)") from equivalence axioms
@@ -357,7 +366,11 @@ fn merge_one(
         }
     }
 
+    // Keyed by the axiom's identity; the first record is the one that counts,
+    // because the first insertion of an axiom is the object the ontology keeps.
+    let mut shared_recs: HashMap<u64, Vec<(u64, u64)>> = HashMap::new();
     let tr = Translator {
+        used: Default::default(),
         b: &b,
         ec_map: &ec_map,
         ex_map: &ex_map,
@@ -439,10 +452,12 @@ fn merge_one(
             // brain-atlas equivalences come back without their `rdfs:label`
             // reification blocks.
             let keep_anns = t == axiom && matches!(t, Component::AnnotationAssertion(_));
-            to_add.push(AnnotatedComponent {
+            let ac = AnnotatedComponent {
                 component: t,
                 ann: if keep_anns { anns } else { Default::default() },
-            });
+            };
+            tr.record_shared(&ac, &mut shared_recs);
+            to_add.push(ac);
         }
     }
 
@@ -452,10 +467,10 @@ fn merge_one(
     // sides now translate to the SAME expression collapses to unary and is
     // dropped, which is how the anonymous taxon-bridge equivalences disappear.
     for r in to_remove.drain(..) {
-        model.ont.remove(&r);
+        remove_translated(&mut model, &r);
     }
     for a in to_add.drain(..) {
-        model.ont.insert(a);
+        insert_translated(&mut model, a, &mut shared_recs);
     }
 
     // 4. General class axioms referencing a merged class: a SubClassOf with an
@@ -484,19 +499,48 @@ fn merge_one(
             to_remove.push(ac.clone());
             if opts.gca_mode == GcaMode::Translate {
                 if let Some(t) = tr.translate_axiom(&ac.component, "", suffix, &sup_all, &sub_axioms, included) {
-                    to_add.push(AnnotatedComponent { component: t, ann: ac.ann.clone() });
+                    let ac = AnnotatedComponent { component: t, ann: ac.ann.clone() };
+                    tr.record_shared(&ac, &mut shared_recs);
+                    to_add.push(ac);
                 }
             }
         }
     }
 
     for r in &to_remove {
-        model.ont.remove(r);
+        remove_translated(&mut model, r);
     }
     for a in to_add {
-        model.ont.insert(a);
+        insert_translated(&mut model, a, &mut shared_recs);
     }
     Ok(model)
+}
+
+/// Remove an axiom the translation replaces, and with it the record of what it
+/// shared: whatever comes back for it is built afresh.
+fn remove_translated(model: &mut Model, a: &AnnotatedComponent<Str>) {
+    model.ont.remove(a);
+    model.shared_occurrences.remove(&crate::io::genid::axiom_identity(a));
+}
+
+/// Insert a translated axiom, recording its substituted occurrences only when
+/// the axiom is new: an axiom the ontology already holds keeps the object it
+/// had, with whatever that object shared, and the translation's copy is
+/// discarded. A new axiom's record is the translation's own, however an
+/// earlier pass's axiom of the same structure was recorded: that one was
+/// removed, and this one is built afresh.
+fn insert_translated(
+    model: &mut Model,
+    a: AnnotatedComponent<Str>,
+    recs: &mut HashMap<u64, Vec<(u64, u64)>>,
+) {
+    let id = crate::io::genid::axiom_identity(&a);
+    if model.ont.insert(a) {
+        model.shared_occurrences.remove(&id);
+        if let Some(used) = recs.remove(&id) {
+            model.shared_occurrences.insert(id, used);
+        }
+    }
 }
 
 struct Translator<'a> {
@@ -504,9 +548,23 @@ struct Translator<'a> {
     ec_map: &'a HashMap<String, String>,
     ex_map: &'a HashMap<String, CE<Str>>,
     extended: bool,
+    /// The defining expressions substituted into the axiom being translated
+    /// (`Model::shared_occurrences` values, keyed by signature hash with the
+    /// merged class as the group): each is the one object its class's
+    /// equivalence held, carried into every axiom the translation puts it in.
+    used: std::cell::RefCell<HashMap<u64, u64>>,
 }
 
 impl Translator<'_> {
+    /// Record which substituted defining expressions `ac` holds, and start the
+    /// count afresh for the next axiom.
+    fn record_shared(&self, ac: &AnnotatedComponent<Str>, recs: &mut HashMap<u64, Vec<(u64, u64)>>) {
+        let used: Vec<(u64, u64)> = self.used.borrow_mut().drain().collect();
+        if !used.is_empty() {
+            recs.entry(crate::io::genid::axiom_identity(ac)).or_insert(used);
+        }
+    }
+
     /// Translate one axiom about class `subject`. Returns `None` if it can't be
     /// fully translated (then it is simply dropped).
     fn translate_axiom(
@@ -518,6 +576,9 @@ impl Translator<'_> {
         sub_axioms: &HashMap<String, Vec<CE<Str>>>,
         included: &[String],
     ) -> Option<Component<Str>> {
+        // The substitutions of a translation that is then dropped belong to no
+        // axiom.
+        self.used.borrow_mut().clear();
         match comp {
             Component::EquivalentClasses(eqc) => {
                 // The translated expressions form a SET. When translating C to
@@ -642,7 +703,26 @@ impl Translator<'_> {
             CE::Class(c) => {
                 let iri = c.0.as_ref();
                 if must_be_equiv {
-                    Some(self.ex_map.get(iri).cloned().unwrap_or_else(|| x.clone()))
+                    Some(match self.ex_map.get(iri) {
+                        Some(ex) => {
+                            // The expression and every anonymous node inside it
+                            // are one object each across every axiom they reach;
+                            // a node inside is grouped under its class and its
+                            // own structure.
+                            let g = crate::io::anon_sig_hash(iri);
+                            let mut used = self.used.borrow_mut();
+                            used.insert(crate::io::anon_sig_hash(&crate::io::genid::ce_sig(ex)), g);
+                            for d in crate::io::genid::anonymous_descendants(ex) {
+                                let s = crate::io::genid::ce_sig(d);
+                                used.insert(
+                                    crate::io::anon_sig_hash(&s),
+                                    crate::io::anon_sig_hash(&format!("{iri}\u{1}{s}")),
+                                );
+                            }
+                            ex.clone()
+                        }
+                        None => x.clone(),
+                    })
                 } else {
                     Some(
                         self.ec_map

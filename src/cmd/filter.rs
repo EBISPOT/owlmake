@@ -537,6 +537,7 @@ fn filter_core(
         // spends a blank node on each.
         out.span_shared = model.span_shared;
         out.cross_shared = model.cross_shared;
+        out.shared_occurrences = model.shared_occurrences;
         out
     };
 

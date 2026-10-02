@@ -323,6 +323,21 @@ pub struct Model {
     /// `owner\u{1}property\u{1}filler -> group` for blank nodes the SOURCE shared
     /// between several classes (see `io::scan_cross_owner_shared`).
     pub cross_shared: std::collections::HashMap<String, u64>,
+    /// Per axiom (`genid::axiom_identity`), the class expressions in it that
+    /// are ONE object with the other recorded occurrences of the same group:
+    /// `(signature hash, group)`, the hash being `io::anon_sig_hash` of
+    /// `genid::ce_sig`. The species merge substitutes a merged class's defining
+    /// expression itself — the object its own equivalence held — into every
+    /// axiom that named the class, so one anonymous node stands for it across
+    /// the whole document: a graph that reaches it again re-spends only its
+    /// list cells, and a graph that holds it twice spends nothing the second
+    /// time. The group is the merged class, because two merged classes can
+    /// define themselves by the same structure (two mouse ontologies, one
+    /// taxon) and still be two objects. An occurrence not recorded here is a
+    /// fresh object, however equal its structure: a later pass that rebuilds an
+    /// axiom copies it, and a rename rewrites it under a new identity that no
+    /// record names.
+    pub shared_occurrences: std::collections::HashMap<u64, Vec<(u64, u64)>>,
     /// True when this model came out of a step that built a BRAND-NEW ontology,
     /// so its document format carries no prefixes at all.
     ///
@@ -390,6 +405,7 @@ impl Model {
             materialised_declarations: std::collections::HashSet::new(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
+            shared_occurrences: std::collections::HashMap::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -430,6 +446,7 @@ impl Model {
             materialised_declarations: std::collections::HashSet::new(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
+            shared_occurrences: std::collections::HashMap::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -473,6 +490,7 @@ impl Model {
         self.materialised_declarations = other.materialised_declarations.clone();
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
+        self.shared_occurrences = other.shared_occurrences.clone();
         self.format_prefixes_cleared = other.format_prefixes_cleared;
         self.obo_source = other.obo_source;
         self.obo_drop_untranslatable = other.obo_drop_untranslatable;
@@ -550,6 +568,7 @@ impl Clone for Model {
         m.materialised_declarations = self.materialised_declarations.clone();
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
+        m.shared_occurrences = self.shared_occurrences.clone();
         m.format_prefixes_cleared = self.format_prefixes_cleared;
         m.obo_drop_untranslatable = self.obo_drop_untranslatable;
         m

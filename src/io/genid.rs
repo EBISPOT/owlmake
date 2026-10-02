@@ -54,6 +54,69 @@ fn ann_value_tsig(av: &AnnotationValue<RcStr>) -> String {
     }
 }
 
+/// A stable identity for an axiom as a structure, so a step that rebuilds some
+/// axioms can name them to the numbering pass (`Model::shared_occurrences`).
+/// Every set-valued position — the members of an n-ary axiom, the operands of
+/// an intersection or union — is put in one order first, so the identity does
+/// not depend on the order a step happened to build them in.
+pub fn axiom_identity(ac: &AnnotatedComponent<RcStr>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    canonical_component(&ac.component).hash(&mut h);
+    ac.ann.hash(&mut h);
+    h.finish()
+}
+
+/// `ce` with every operand list in signature order, recursively.
+fn canonical_ce(ce: &CE<RcStr>) -> CE<RcStr> {
+    let sorted = |ops: &Vec<CE<RcStr>>| -> Vec<CE<RcStr>> {
+        let mut v: Vec<CE<RcStr>> = ops.iter().map(canonical_ce).collect();
+        v.sort_by(|a, b| cmp_ce(a, b));
+        v
+    };
+    match ce {
+        CE::ObjectIntersectionOf(ops) => CE::ObjectIntersectionOf(sorted(ops)),
+        CE::ObjectUnionOf(ops) => CE::ObjectUnionOf(sorted(ops)),
+        CE::ObjectComplementOf(b) => CE::ObjectComplementOf(Box::new(canonical_ce(b))),
+        CE::ObjectSomeValuesFrom { ope, bce } => {
+            CE::ObjectSomeValuesFrom { ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectAllValuesFrom { ope, bce } => {
+            CE::ObjectAllValuesFrom { ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectMinCardinality { n, ope, bce } => {
+            CE::ObjectMinCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectMaxCardinality { n, ope, bce } => {
+            CE::ObjectMaxCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectExactCardinality { n, ope, bce } => {
+            CE::ObjectExactCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        other => other.clone(),
+    }
+}
+
+/// `c` with every class expression in canonical form and every n-ary member
+/// list in signature order.
+fn canonical_component(c: &Component<RcStr>) -> Component<RcStr> {
+    use horned_owl::model::{DisjointClasses, EquivalentClasses, SubClassOf};
+    let sorted = |v: &Vec<CE<RcStr>>| -> Vec<CE<RcStr>> {
+        let mut out: Vec<CE<RcStr>> = v.iter().map(canonical_ce).collect();
+        out.sort_by(|a, b| cmp_ce(a, b));
+        out
+    };
+    match c {
+        Component::SubClassOf(ax) => Component::SubClassOf(SubClassOf {
+            sub: canonical_ce(&ax.sub),
+            sup: canonical_ce(&ax.sup),
+        }),
+        Component::EquivalentClasses(ax) => Component::EquivalentClasses(EquivalentClasses(sorted(&ax.0))),
+        Component::DisjointClasses(ax) => Component::DisjointClasses(DisjointClasses(sorted(&ax.0))),
+        other => other.clone(),
+    }
+}
+
 /// Full axiom-type index (0–38), the first key an entity's axioms are ordered by.
 fn full_type_index(c: &Component<RcStr>) -> i32 {
     use Component::*;
@@ -136,6 +199,22 @@ pub(crate) fn has_shared_structure(c: &Component<RcStr>) -> bool {
         walk(ce, &mut seen);
     }
     seen.values().any(|n| *n > 1)
+}
+
+/// Every anonymous class expression nested inside `ce`, in walk order; `ce`
+/// itself is not included.
+pub(crate) fn anonymous_descendants(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
+    let mut out = Vec::new();
+    fn walk<'a>(ce: &'a CE<RcStr>, out: &mut Vec<&'a CE<RcStr>>) {
+        for sub in sub_expressions(ce) {
+            if !matches!(sub, CE::Class(_)) {
+                out.push(sub);
+                walk(sub, out);
+            }
+        }
+    }
+    walk(ce, &mut out);
+    out
 }
 
 /// The direct class-expression children of a class expression.
@@ -269,6 +348,22 @@ pub struct Genids {
     cross_pending: Option<u64>,
     /// group -> its allocated blank node, first member allocates.
     cross_intern: std::collections::HashMap<u64, u64>,
+    /// `Model::shared_occurrences`: per axiom, the expressions in it that are
+    /// one object with every other recorded occurrence.
+    shared_occurrences: HashMap<u64, Vec<(u64, u64)>>,
+    /// The shared occurrences of the axiom being translated: signature hash to
+    /// group.
+    axiom_shared: HashMap<u64, u64>,
+    /// Whether `OM_SUBTREE_DEBUG` asks for every shared-occurrence event.
+    subtree_debug: bool,
+    /// For each shared group translated so far: its node, and the graph
+    /// (`graph_seq`) that last reached it.
+    subtree_nodes: HashMap<u64, (u64, u64)>,
+    /// The graph being translated. Each entity's block is one graph, and so is
+    /// each general axiom: an object reached again within a graph is not
+    /// translated again, while the next graph re-walks it and re-spends its
+    /// list cells around the nodes it already has.
+    graph_seq: u64,
     /// How many times each carried-provenance signature has already been reused in
     /// this entity. `relax` derives ONE super from ONE equivalence operand, so the
     /// pair is one object and one id; a third structurally-equal occurrence is a
@@ -330,7 +425,20 @@ pub struct Genids {
 }
 
 impl Genids {
+    /// The next id for an anonymous node.
     fn fresh(&mut self) -> u64 {
+        let v = self.counter;
+        self.counter += 1;
+        if self.trace.as_deref() == Some(self.cur_owner.as_str()) {
+            eprintln!("  [trace {}] genid{v}", self.cur_owner);
+        }
+        v
+    }
+
+    /// The next id for an RDF list cell. A cell belongs to one rendering of one
+    /// collection: every rendering takes new cells around whatever nodes it
+    /// reuses.
+    fn fresh_cell(&mut self) -> u64 {
         let v = self.counter;
         self.counter += 1;
         if self.trace.as_deref() == Some(self.cur_owner.as_str()) {
@@ -376,7 +484,7 @@ impl Genids {
         let mut sorted: Vec<&CE<RcStr>> = ops.iter().collect();
         sorted.sort_by(|a, b| cmp_ce(a, b));
         for i in (0..sorted.len()).rev() {
-            self.fresh(); // list cell
+            self.fresh_cell(); // list cell
             // A conjunction LEAF is a reuse target however deeply it is nested.
             // `relax` flattens nested conjunctions, so `X ≡ A ⊓ (∃r.B ⊓ ∃s.C)`
             // derives `X ⊑ ∃r.B` and `X ⊑ ∃s.C` from the very objects inside the
@@ -419,7 +527,7 @@ impl Genids {
                 let mut sorted: Vec<&CE<RcStr>> = ops.iter().collect();
                 sorted.sort_by(|a, b| cmp_ce(a, b));
                 for i in (0..sorted.len()).rev() {
-                    self.fresh();
+                    self.fresh_cell();
                     self.spend_list_cells(sorted[i]);
                 }
             }
@@ -448,7 +556,7 @@ impl Genids {
         let mut sorted: Vec<&Individual<RcStr>> = inds.iter().collect();
         sorted.sort_by(|a, b| crate::io::owlfunc::cmp_individual(a, b));
         for i in (0..sorted.len()).rev() {
-            self.fresh(); // list cell
+            self.fresh_cell(); // list cell
             self.translate_individual(sorted[i]);
         }
     }
@@ -469,6 +577,46 @@ impl Genids {
         if matches!(ce, CE::Class(_)) {
             return None;
         }
+        // A shared occurrence is one object however many axioms and owners
+        // hold it, so it has one node. The graph that first reaches it
+        // translates it; a later graph walks it again and spends its list cells
+        // around the nodes it already has; the same graph reaching it twice
+        // spends nothing.
+        if !self.axiom_shared.is_empty() {
+            let h = crate::io::anon_sig_hash(&ce_sig(ce));
+            if let Some(&group) = self.axiom_shared.get(&h) {
+                if let Some(&(id, graph)) = self.subtree_nodes.get(&group) {
+                    if self.subtree_debug {
+                        eprintln!(
+                            "[subtree] reuse owner={} same_graph={} id={id} sig={}",
+                            self.cur_owner,
+                            graph == self.graph_seq,
+                            &ce_sig(ce)[..ce_sig(ce).len().min(160)]
+                        );
+                    }
+                    if graph != self.graph_seq {
+                        // Reached again in a new graph: the node keeps its id,
+                        // its own list cells are new, and its children are
+                        // reached again in turn — each keeping its node, and
+                        // each interned here so that an axiom derived from one
+                        // of them resolves to it.
+                        self.rewalk_children(ce);
+                        self.subtree_nodes.insert(group, (id, self.graph_seq));
+                    }
+                    return Some(id);
+                }
+                let id = self.translate_ce_fresh(ce)?;
+                if self.subtree_debug {
+                    eprintln!(
+                        "[subtree] first owner={} id={id} sig={}",
+                        self.cur_owner,
+                        &ce_sig(ce)[..ce_sig(ce).len().min(160)]
+                    );
+                }
+                self.subtree_nodes.insert(group, (id, self.graph_seq));
+                return Some(id);
+            }
+        }
         // A cross-owner GROUP member (an ANNOTATED axiom whose target is one
         // minted object shared across owners) takes the group's node ahead of
         // every per-owner reuse rule: the per-owner intern may hold a bare
@@ -480,12 +628,20 @@ impl Genids {
                     id
                 }
                 None => {
-                    // The owner may already hold this structure's node — the
-                    // axiom's bare statement translated first and interned it.
-                    // One axiom, one node: take it rather than minting a second.
-                    let id = match self.intern.get(&ce_sig(ce)) {
-                        Some(&id) => id,
-                        None => self.translate_ce_fresh(ce)?,
+                    // The group's node may already exist under another route: a
+                    // BARE member at an earlier owner took it through the span
+                    // path (keyed by group and structure), or this owner's own
+                    // bare statement translated first and interned it. One
+                    // object, one node: take it rather than minting a second.
+                    let id = match self.span_intern.get(&(g, ce_sig(ce))) {
+                        Some(&id) => {
+                            self.spend_list_cells(ce);
+                            id
+                        }
+                        None => match self.intern.get(&ce_sig(ce)) {
+                            Some(&id) => id,
+                            None => self.translate_ce_fresh(ce)?,
+                        },
                     };
                     self.cross_intern.insert(g, id);
                     id
@@ -609,6 +765,32 @@ impl Genids {
         self.translate_ce_fresh(ce)
     }
 
+    /// Walk the children of an expression whose own node is kept, exactly as a
+    /// fresh translation would, so that each child is reached (and reused or
+    /// allocated on its own account) and this level's list cells are spent.
+    fn rewalk_children(&mut self, ce: &CE<RcStr>) {
+        let record = std::mem::take(&mut self.record_operands);
+        match ce {
+            CE::ObjectIntersectionOf(ops) => self.translate_ce_list(ops, record),
+            CE::ObjectUnionOf(ops) => self.translate_ce_list(ops, false),
+            CE::ObjectSomeValuesFrom { bce, .. } | CE::ObjectAllValuesFrom { bce, .. } => {
+                self.translate_ce(bce);
+            }
+            CE::ObjectComplementOf(b) => {
+                self.translate_ce(b);
+            }
+            CE::ObjectMinCardinality { bce, .. }
+            | CE::ObjectMaxCardinality { bce, .. }
+            | CE::ObjectExactCardinality { bce, .. } => {
+                if !is_thing(bce) {
+                    self.translate_ce(bce);
+                }
+            }
+            CE::ObjectOneOf(_) => self.spend_list_cells(ce),
+            _ => {}
+        }
+    }
+
     /// Translate an anonymous CE that has not been interned this entity.
     fn translate_ce_fresh(&mut self, ce: &CE<RcStr>) -> Option<u64> {
         // Reuse-target recording covers THIS expression's own conjuncts. Taking
@@ -708,7 +890,7 @@ impl Genids {
             DR::DataIntersectionOf(v) | DR::DataUnionOf(v) => {
                 self.fresh();
                 for d in v {
-                    self.fresh();
+                    self.fresh_cell();
                     self.translate_dr(d);
                 }
             }
@@ -719,13 +901,13 @@ impl Genids {
             DR::DataOneOf(lits) => {
                 self.fresh();
                 for _ in lits {
-                    self.fresh();
+                    self.fresh_cell();
                 }
             }
             DR::DatatypeRestriction(_, facets) => {
                 self.fresh();
                 for _ in facets {
-                    self.fresh();
+                    self.fresh_cell();
                     self.fresh();
                 }
             }
@@ -849,6 +1031,8 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         doc_shared_intern: Default::default(),
         span_shared: model.span_shared.clone(),
         cross_shared: model.cross_shared.clone(),
+        shared_occurrences: model.shared_occurrences.clone(),
+        subtree_debug: std::env::var("OM_SUBTREE_DEBUG").is_ok(),
         span_pending: None,
         debug_lo,
         debug_hi,
@@ -979,8 +1163,12 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             if let Some(mut axioms) = by_entity.remove(iri) {
                 axioms.sort_by(|a, b| cmp_axiom(&a.component, &b.component));
                 g.entity_start.insert(iri.clone(), g.counter);
+                if g.subtree_debug {
+                    eprintln!("[start] {iri} {}", g.counter);
+                }
                 g.cur_owner = iri.clone();
                 g.intern.clear();
+                g.graph_seq += 1;
                 g.sub_sigs.clear();
                 g.eq_sigs.clear();
                 g.desharded_sigs.clear();
@@ -1070,6 +1258,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             // only the individual's own node is numbered here.
             for _ in &anon_blocks {
                 g.intern.clear();
+                g.graph_seq += 1;
                 g.fresh();
             }
         } else if model.anon_hash_capacity == 0 {
@@ -1089,6 +1278,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             ids.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.cmp(b)));
             for id in ids {
                 g.intern.clear();
+                g.graph_seq += 1;
                 g.fresh();
                 for ac in &by_ind[id] {
                     if !ac.ann.is_empty() {
@@ -1136,8 +1326,12 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             let mut axioms = by_entity.remove(&iri).unwrap_or_default();
             axioms.sort_by(|a, b| cmp_axiom(&a.component, &b.component));
             g.entity_start.insert(iri.clone(), g.counter);
+            if g.subtree_debug {
+                eprintln!("[start] {iri} {}", g.counter);
+            }
             g.cur_owner = iri.clone();
             g.intern.clear();
+            g.graph_seq += 1;
             g.sub_sigs.clear();
             g.eq_sigs.clear();
             g.desharded_sigs.clear();
@@ -1158,6 +1352,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
     g.cur_owner = "__general__".to_string();
     for ac in general {
         g.intern.clear();
+        g.graph_seq += 1;
         g.sub_sigs.clear();
         g.eq_sigs.clear();
         g.translate_axiom("__general__", ac);
@@ -1177,6 +1372,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         });
         g.cur_owner = "__rules__".to_string();
         g.intern.clear();
+        g.graph_seq += 1;
         for ac in rules {
             if let Component::Rule(r) = &ac.component {
                 let id = g.fresh();
@@ -1265,6 +1461,19 @@ impl Genids {
     /// Translate one axiom, assigning genids to its anonymous nodes and, for an
     /// annotated axiom with an anonymous CE object, recording the shared genid.
     fn translate_axiom(&mut self, owner: &str, ac: &AnnotatedComponent<RcStr>) {
+        // An axiom in which one anonymous structure appears twice is copied
+        // whole before it is translated, so nothing in it is the object another
+        // axiom holds, whatever the record says.
+        self.axiom_shared = if self.shared_occurrences.is_empty()
+            || has_shared_structure(&ac.component)
+        {
+            HashMap::new()
+        } else {
+            self.shared_occurrences
+                .get(&axiom_identity(ac))
+                .map(|v| v.iter().copied().collect())
+                .unwrap_or_default()
+        };
         // A pending group belongs to ONE axiom's translation. A translation that
         // short-circuits before its take() leaves the flag armed, and the next
         // axiom — possibly another OWNER's equivalence — would hand its target
@@ -1382,6 +1591,16 @@ impl Genids {
                 // one anonymous node per edge, fresh numbering — exactly as the
                 // reference files do for bare minted edges.
                 self.cross_pending = None;
+                if self.trace.as_deref() == Some(owner) {
+                    eprintln!(
+                        "  [trace {owner}] sup={} span_pending={:?} cross={:?} cross_shared={}",
+                        &sup_sig[..sup_sig.len().min(60)],
+                        self.span_pending,
+                        shared_key(&ax.sup)
+                            .and_then(|k| self.cross_shared.get(&format!("{owner}\u{1}{k}")).copied()),
+                        self.cross_shared.len()
+                    );
+                }
                 if self.span_pending.is_none() && !self.cross_shared.is_empty() {
                     if let Some(k) = shared_key(&ax.sup) {
                         let group =
@@ -1591,7 +1810,7 @@ impl Genids {
         let mut sorted: Vec<&Individual<RcStr>> = inds.iter().collect();
         sorted.sort_by(|a, b| cmp_individual(a, b));
         for i in (0..sorted.len()).rev() {
-            self.fresh(); // list cell
+            self.fresh_cell(); // list cell
             self.translate_individual(sorted[i]);
         }
     }
@@ -1835,4 +2054,45 @@ pub(crate) fn shared_key(ce: &CE<RcStr>) -> Option<String> {
 /// the writer, used to look up a shared node's genid.
 pub fn ce_sig(ce: &CE<RcStr>) -> String {
     format!("{ce:?}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(ofn: &str) -> Model {
+        let text = format!(
+            "Prefix(:=<http://x/>)\nPrefix(owl:=<http://www.w3.org/2002/07/owl#>)\n\
+             Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+             Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+             Prefix(oio:=<http://www.geneontology.org/formats/oboInOwl#>)\n\
+             Ontology(<http://x/o>\n{ofn}\n)\n"
+        );
+        crate::io::load_from(std::io::Cursor::new(text.into_bytes()), crate::io::Format::Functional)
+            .unwrap()
+    }
+
+    /// One minted `∃R.D` asserted bare for A and, with an annotation, for B is
+    /// one node: B's reification points at the node A's inline copy took, and
+    /// no second id is spent for it.
+    #[test]
+    fn an_annotated_group_member_takes_the_node_a_bare_member_minted() {
+        let ofn = "Declaration(Class(:A))\nDeclaration(Class(:B))\nDeclaration(Class(:D))\n\
+                   Declaration(ObjectProperty(:r))\n\
+                   SubClassOf(:A ObjectSomeValuesFrom(:r :D))\n\
+                   SubClassOf(Annotation(oio:source \"x\") :B ObjectSomeValuesFrom(:r :D))";
+        let plain = compute(&model(ofn), 0, 0);
+        let mut grouped = model(ofn);
+        let b = horned_owl::model::Build::new();
+        let sup = CE::ObjectSomeValuesFrom {
+            ope: OPE::ObjectProperty(b.object_property("http://x/r")),
+            bce: Box::new(CE::Class(b.class("http://x/D"))),
+        };
+        grouped.span_shared.insert(format!("http://x/A\u{1}{}", ce_sig(&sup)), 7);
+        grouped.cross_shared.insert("http://x/B\u{1}http://x/r\u{1}http://x/D".to_string(), 7);
+        let shared = compute(&grouped, 0, 0);
+        assert_eq!(shared.counter, plain.counter - 1);
+        let a_node = shared.entity_start["http://x/A"];
+        assert_eq!(shared.shared["http://x/B"][&ce_sig(&sup)], a_node);
+    }
 }

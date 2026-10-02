@@ -229,6 +229,7 @@ fn subset_module(
     // `owl:Axiom` blocks wherever it crosses a digit-length boundary.
     let span_before = model.span_shared.clone();
     let cross_before = model.cross_shared.clone();
+    let occurrences_before = model.shared_occurrences.clone();
     // The relation graph: every axiom the input has, plus every entailed
     // `C ⊑ R some D` over the chosen relations and every entailed `C ⊑ D`
     // between named classes, redundant ones included — a restriction the
@@ -287,6 +288,7 @@ fn subset_module(
     let mut out = crate::cmd::reduce::reduce(&filtered);
     out.span_shared = span_before;
     out.cross_shared = cross_before;
+    out.shared_occurrences = occurrences_before;
     // A materialized subset is a NEW ontology, so it takes no version from its
     // source. Its `<owl:Axiom>` blocks are ordered by the blank-node counter, not
     // by the source document: `reduce` builds its result from parts, which starts

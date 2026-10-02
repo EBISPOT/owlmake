@@ -203,7 +203,16 @@ pub fn relax_with(mut model: crate::model::Model, opts: &RelaxOptions) -> crate:
         })
         .collect();
 
+    // An axiom derived from a conjunct that is one object with the conjuncts
+    // of other axioms (`Model::shared_occurrences`) holds that very object as
+    // its superclass, so it carries the record on.
+    let mut derived_recs: Vec<(u64, Vec<(u64, u64)>)> = Vec::new();
     for ac in model.ont.iter() {
+        let shared_rec: Option<&Vec<(u64, u64)>> = if model.shared_occurrences.is_empty() {
+            None
+        } else {
+            model.shared_occurrences.get(&crate::io::genid::axiom_identity(ac))
+        };
         if let Component::EquivalentClasses(eq) = &ac.component {
             // Find a named class member and a conjunction member.
             let named: Vec<&CE<_>> = eq.0.iter().filter(|c| matches!(c, CE::Class(_))).collect();
@@ -298,10 +307,21 @@ pub fn relax_with(mut model: crate::model::Model, opts: &RelaxOptions) -> crate:
                         if existing_plain.contains(&((*n).clone(), sup.clone())) {
                             continue;
                         }
-                        to_add.push(Component::SubClassOf(SubClassOf {
+                        let derived = Component::SubClassOf(SubClassOf {
                             sub: (*n).clone(),
                             sup,
-                        }));
+                        });
+                        if let Some(rec) = shared_rec {
+                            let sup_hash = crate::io::anon_sig_hash(&crate::io::genid::ce_sig(leaf));
+                            if rec.iter().any(|(s, _)| *s == sup_hash) {
+                                let ac = horned_owl::model::AnnotatedComponent {
+                                    component: derived.clone(),
+                                    ann: Default::default(),
+                                };
+                                derived_recs.push((crate::io::genid::axiom_identity(&ac), rec.clone()));
+                            }
+                        }
+                        to_add.push(derived);
                     }
                 }
             }
@@ -353,6 +373,9 @@ pub fn relax_with(mut model: crate::model::Model, opts: &RelaxOptions) -> crate:
         if model.ont.insert(c) {
             added += 1;
         }
+    }
+    for (id, rec) in derived_recs {
+        model.shared_occurrences.entry(id).or_insert(rec);
     }
     let shared_n = derived_shared.len();
     for (owner, sig) in derived_shared {
