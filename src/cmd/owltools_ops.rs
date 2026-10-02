@@ -187,8 +187,12 @@ fn owltools_run(args: &[String]) -> Result<i32> {
                             module = args.get(j + 1).cloned();
                             j += 1;
                         }
-                        "--assert-implied" | "--indirect" | "-e" | "--show-explanation"
-                        | "--trace-module-axioms" => {}
+                        // Each of these changes what the command prints or
+                        // writes, and none is implemented: refused by name.
+                        opt @ ("--assert-implied" | "--indirect" | "-e" | "--show-explanation"
+                        | "--trace-module-axioms") => {
+                            anyhow::bail!("owltools --run-reasoner {opt} is not supported");
+                        }
                         _ => break,
                     }
                     j += 1;
