@@ -1484,7 +1484,7 @@ impl OwlmakeSpec {
         }
 
         let emulate_odk_version = self.emulate_odk_version.as_deref().and_then(parse_version);
-        Plan {
+        let mut plan = Plan {
             default_targets: self.default_targets.unwrap_or_default(),
             phony: self.phony,
             transient_targets: self.transient_targets,
@@ -1519,7 +1519,12 @@ impl OwlmakeSpec {
             component_gaps: self.component_gaps,
             prerequisites,
             artefacts,
-        }
+        };
+        // The import modules a consumer of the edit file reads through its
+        // closure are its prerequisites; settled here, where every resolution
+        // of a plan ends.
+        crate::odk::planner::closure_module_needs(dir, &mut plan);
+        plan
     }
 
     /// Lay this file's statements over `plan`, the standard build resolved for

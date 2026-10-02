@@ -2119,6 +2119,21 @@ fn assumed_new(repo: &Repo, name: &str) -> bool {
 ///
 /// The release's import stages and a target's prerequisite walk both ask this
 /// one question, so both give the same answer for an absent module.
+/// Whether an import module on disk is older than one of its pipeline's
+/// inputs: the prerequisites its rule names, and the term files its steps
+/// read.
+fn import_module_is_stale(repo: &Repo, imp: &crate::plan::ImportPlan, name: &str) -> bool {
+    let Ok(out) = std::fs::metadata(repo.dir.join(name)).and_then(|m| m.modified()) else {
+        return true;
+    };
+    let mut inputs: Vec<String> = repo.target(name).map(|a| a.needs.clone()).unwrap_or_default();
+    inputs.extend(crate::plan::gaps::step_term_files(&imp.steps));
+    inputs.iter().any(|p| {
+        let p = repo.target_file(p).unwrap_or_else(|| repo.dir.join(p));
+        std::fs::metadata(&p).and_then(|m| m.modified()).is_ok_and(|t| t > out)
+    })
+}
+
 fn ensure_import_module(
     repo: &Repo,
     imp: &crate::plan::ImportPlan,
@@ -2131,6 +2146,12 @@ fn ensure_import_module(
     let Some(mut held) = claim(repo, name) else { return Ok(false) };
     let present = repo.dir.join(name).exists() || repo.root.join(&imp.output).exists();
     if present && !repo.refresh_imports {
+        return Ok(false);
+    }
+    // A module on disk is rebuilt when an input of its pipeline — its mirror,
+    // a seed — is newer than it, as any target is; only `-B` and `--rebuild
+    // imports` rebuild one that is current.
+    if present && !repo.always_make && !repo.rebuild_imports && !import_module_is_stale(repo, imp, name) {
         return Ok(false);
     }
     if !present && repo.imports_pinned {
@@ -2159,6 +2180,10 @@ fn run_target_recipe_inner(
     // Per-run, not per-entry-point: see `Repo::built`. `seen` still guards the
     // local recursion, but the run-wide set is what makes a target's recipe run
     // once however many callers reach it.
+    // An import module is built by its own pipeline, whichever path reaches it.
+    if let Some(imp) = import_module_for(repo.plan, target) {
+        return ensure_import_module(repo, imp, target, seen).map(|_| ());
+    }
     if !seen.insert(target.to_string()) {
         return Ok(());
     }
@@ -8160,7 +8185,7 @@ fn import_closure(
 }
 
 /// Extract import IRIs from OBO (`import:`) or OWL/OFN (`owl:imports`/`Import(...)`).
-fn import_iris(text: &str) -> Vec<String> {
+pub(crate) fn import_iris(text: &str) -> Vec<String> {
     let mut v = Vec::new();
     for line in text.lines() {
         let t = line.trim();
