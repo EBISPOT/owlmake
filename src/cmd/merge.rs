@@ -4,9 +4,11 @@
 use std::path::PathBuf;
 
 use clap::Args as ClapArgs;
+use std::collections::{BTreeSet, HashSet};
+
 use horned_owl::model::{
     Annotation, AnnotationAssertion, AnnotationSubject, AnnotationValue, AnnotatedComponent,
-    Component, MutableOntology,
+    Component, Literal, MutableOntology, RcStr,
 };
 
 use crate::io;
@@ -138,6 +140,12 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
         }
     };
     args.common.apply(&mut merged)?;
+    // The primary's entity index is settled now, before anything is merged into
+    // it: a functional write banners each entity with the label the primary
+    // carried as loaded, and a merged input's label only where it carried none.
+    if merged.banner_labels.is_empty() {
+        merged.banner_labels = crate::cmd::rdfs_labels(&merged);
+    }
 
     // Provenance for the primary ontology, when annotating defined-by/derived-from.
     if opts.annotate_defined_by || opts.annotate_derived_from {
@@ -247,8 +255,76 @@ fn collapse_inverse_pairs(model: &mut Model) {
 /// ontology's identity (the OFN writer rejects multiple ontology IRIs);
 /// ontology-level annotations from secondaries are dropped unless
 /// `include_annotations` is set.
+/// A literal typed `xsd:string` and the same text untyped are one literal, so
+/// two axioms that differ only there are one axiom. This is the form the
+/// comparison is made in: every `xsd:string` literal of an axiom untyped.
+fn untyped_strings(ac: &AnnotatedComponent<RcStr>) -> Option<AnnotatedComponent<RcStr>> {
+    const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+    let mut changed = false;
+    let mut av = |v: &AnnotationValue<RcStr>| -> AnnotationValue<RcStr> {
+        match v {
+            AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri })
+                if datatype_iri.as_ref() == XSD_STRING =>
+            {
+                changed = true;
+                AnnotationValue::Literal(Literal::Simple { literal: literal.clone() })
+            }
+            other => other.clone(),
+        }
+    };
+    let ann: BTreeSet<Annotation<RcStr>> =
+        ac.ann.iter().map(|a| Annotation { ap: a.ap.clone(), av: av(&a.av), ann: a.ann.clone() }).collect();
+    let component = match &ac.component {
+        Component::AnnotationAssertion(aa) => Component::AnnotationAssertion(AnnotationAssertion {
+            subject: aa.subject.clone(),
+            ann: Annotation { ap: aa.ann.ap.clone(), av: av(&aa.ann.av), ann: aa.ann.ann.clone() },
+        }),
+        Component::OntologyAnnotation(oa) => Component::OntologyAnnotation(
+            horned_owl::model::OntologyAnnotation(Annotation { ap: oa.0.ap.clone(), av: av(&oa.0.av), ann: oa.0.ann.clone() }),
+        ),
+        c => c.clone(),
+    };
+    changed.then_some(AnnotatedComponent { component, ann })
+}
+
+/// The axioms already in a merge result, in the form two axioms are compared
+/// in: an incoming axiom that is already there under either typing of its
+/// strings is not added again.
+pub(crate) struct MergedAxioms {
+    untyped: HashSet<AnnotatedComponent<RcStr>>,
+}
+
+impl MergedAxioms {
+    pub(crate) fn of(merged: &Model) -> Self {
+        MergedAxioms { untyped: merged.ont.iter().filter_map(untyped_strings).collect() }
+    }
+
+    /// Whether `ac` is already in `merged`, under any typing of its strings.
+    pub(crate) fn holds(&self, merged: &Model, ac: &AnnotatedComponent<RcStr>) -> bool {
+        match untyped_strings(ac) {
+            Some(u) => merged.ont.i().contains(&u) || self.untyped.contains(&u),
+            None => self.untyped.contains(ac),
+        }
+    }
+
+    /// `ac` has been added to `merged`.
+    pub(crate) fn added(&mut self, ac: &AnnotatedComponent<RcStr>) {
+        if let Some(u) = untyped_strings(ac) {
+            self.untyped.insert(u);
+        }
+    }
+}
+
 pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
     let source = ontology_iri(other);
+    // The primary's banner labels were settled when it was loaded; an entity
+    // the primary does not label takes the first merged input's label.
+    if !merged.banner_labels.is_empty() {
+        for (subject, label) in crate::cmd::rdfs_labels(other) {
+            merged.banner_labels.entry(subject).or_insert(label);
+        }
+    }
+    let mut present = MergedAxioms::of(merged);
 
     // A merge keeps the PRIMARY's identity — but where there is no primary
     // identity to keep, the first input merged in supplies it. `merge -i a -i b`
@@ -294,7 +370,11 @@ pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
                 continue;
             }
             _ => {
+                if present.holds(merged, component) {
+                    continue;
+                }
                 merged.ont.insert(component.clone());
+                present.added(component);
             }
         }
     }

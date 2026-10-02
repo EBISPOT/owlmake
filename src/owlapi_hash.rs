@@ -493,6 +493,23 @@ pub fn hashset_order(hashes: &[i32]) -> Vec<usize> {
     hashset_order_of(hashes, hashes.len())
 }
 
+/// The iteration order of one subject's annotation assertions. The subject's
+/// set is filled from the ontology's set of every annotation assertion, so
+/// two of its members in one bucket stand in the order that larger set holds
+/// them: `subject_total` sizes the subject's set, `ontology_total` the
+/// ontology's. Returns indices into `hashes`.
+pub fn subject_assertion_order(hashes: &[i32], subject_total: usize, ontology_total: usize) -> Vec<usize> {
+    let sub_cap = java_hashset_capacity(subject_total) as u32;
+    let all_cap = java_hashset_capacity(ontology_total) as u32;
+    let bucket = |h: i32, cap: u32| {
+        let h = h as u32;
+        (h ^ (h >> 16)) & (cap - 1)
+    };
+    let mut idx: Vec<usize> = (0..hashes.len()).collect();
+    idx.sort_by_key(|&i| (bucket(hashes[i], sub_cap), bucket(hashes[i], all_cap)));
+    idx
+}
+
 /// The hash of an ontology's identity: `17 + 37·present(iri) [+ 37·present(version)]`,
 /// where `present(x)` wraps an IRI hash the way an occupied optional does
 /// (`0x598df91c + hash`). A document with no ontology IRI contributes the bare
@@ -532,6 +549,11 @@ pub fn ontology_set_order(hashes: &[i32]) -> Vec<usize> {
 /// the members passed through on their way in. Verified against 170/170
 /// unambiguous real cliques; the residual tie (same bucket in BOTH tables)
 /// falls back to IRI order.
+/// The hash of a named class, as a set of classes keys it.
+pub fn class_hash(iri: &str) -> i32 {
+    tag(P_CLASS, &[iri_hash(iri)])
+}
+
 pub fn class_node_order(iris: &[String]) -> Vec<usize> {
     let mut cap = 1usize;
     let want = iris.len() * 4 / 3 + 1;

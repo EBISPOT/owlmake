@@ -229,7 +229,39 @@ fn subset_module(
     // `owl:Axiom` blocks wherever it crosses a digit-length boundary.
     let span_before = model.span_shared.clone();
     let cross_before = model.cross_shared.clone();
-    let materialized = crate::cmd::materialize::materialize(model, &relations);
+    let occurrences_before = model.shared_occurrences.clone();
+    // The relation graph: every axiom the input has, plus every entailed
+    // `C ⊑ R some D` over the chosen relations and every entailed `C ⊑ D`
+    // between named classes, redundant ones included — a restriction the
+    // property hierarchy or a chain entails is written out here, and the
+    // reduce below sees neither, so it stays.
+    let materialized = {
+        use horned_owl::model::{Build, ClassExpression as CE, Component, MutableOntology, ObjectPropertyExpression as OPE, SubClassOf};
+        const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+        const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+        let reasoner = crate::reason::el::Reasoner::classify(&model);
+        let mut m = model;
+        let b: Build<crate::model::Str> = Build::new();
+        for (c, r, d) in reasoner.materialize_all(&relations) {
+            m.ont.insert(Component::SubClassOf(SubClassOf {
+                sub: CE::Class(b.class(c)),
+                sup: CE::ObjectSomeValuesFrom {
+                    ope: OPE::ObjectProperty(b.object_property(r)),
+                    bce: Box::new(CE::Class(b.class(d))),
+                },
+            }));
+        }
+        for (sub, sup) in reasoner.all_subsumptions() {
+            if sub == OWL_THING || sup == OWL_THING || sub == OWL_NOTHING || sup == OWL_NOTHING {
+                continue;
+            }
+            m.ont.insert(Component::SubClassOf(SubClassOf {
+                sub: CE::Class(b.class(sub)),
+                sup: CE::Class(b.class(sup)),
+            }));
+        }
+        m
+    };
     let terms: Vec<String> = seed.iter().cloned().collect();
     let mut filtered =
         crate::cmd::filter::filter(materialized, &terms, &[], &["annotations".to_string()], Some(true))?;
@@ -256,6 +288,7 @@ fn subset_module(
     let mut out = crate::cmd::reduce::reduce(&filtered);
     out.span_shared = span_before;
     out.cross_shared = cross_before;
+    out.shared_occurrences = occurrences_before;
     // A materialized subset is a NEW ontology, so it takes no version from its
     // source. Its `<owl:Axiom>` blocks are ordered by the blank-node counter, not
     // by the source document: `reduce` builds its result from parts, which starts

@@ -409,6 +409,74 @@ fn explain_finds_justification() {
     let _ = std::fs::remove_file(&ont);
 }
 
+#[test]
+fn one_disjointness_axiom_however_its_members_are_ordered() {
+    // OWL makes DisjointClasses a SET: `DisjointClasses(A B)` in one source and
+    // `DisjointClasses(B A)` in another are ONE axiom, and any serialization
+    // must render it once. Keeping both rendered UBERON's
+    // `DisjointClasses(UBERON_0000001 GO_0110165)` twice — once under each
+    // member's RDF/XML frame.
+    let ont = tmp("disjoint-orders.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         Declaration(Class(:A))\n\
+         Declaration(Class(:B))\n\
+         DisjointClasses(:A :B)\n\
+         DisjointClasses(:B :A)\n\
+         )\n",
+    )
+    .unwrap();
+    let out_owl = tmp("disjoint-orders.owl");
+    let st = bin().args(["convert", "-i"]).arg(&ont).arg("-o").arg(&out_owl).status().unwrap();
+    assert!(st.success());
+    let text = std::fs::read_to_string(&out_owl).unwrap();
+    assert_eq!(
+        text.matches("disjointWith").count(),
+        1,
+        "one disjointness axiom must render exactly once:\n{text}"
+    );
+    let _ = std::fs::remove_file(&ont);
+    let _ = std::fs::remove_file(&out_owl);
+}
+
+#[test]
+fn explain_unsatisfiability_justification_is_minimal() {
+    // :A is unsatisfiable through exactly three axioms. The rest of the ontology
+    // is a decoy: a redundant second route to :C and axioms about unrelated
+    // classes. A justification that carries any of them is not minimal, and a
+    // search that cannot cut them away is the search that never terminates on a
+    // real merge.
+    let ont = tmp("unsat-minimal.ofn");
+    std::fs::write(
+        &ont,
+        "Prefix(:=<http://example.org/>)\n\
+         Ontology(\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:A :D)\n\
+         DisjointClasses(:B :D)\n\
+         SubClassOf(:B :C)\n\
+         SubClassOf(:A :C)\n\
+         SubClassOf(:E :F)\n\
+         SubClassOf(:F :G)\n\
+         )\n",
+    )
+    .unwrap();
+
+    let out = bin()
+        .args(["explain", "-i"])
+        .arg(&ont)
+        .args(["-M", "unsatisfiability", "--unsatisfiable", "http://example.org/A"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "explain failed: {}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Justification 1 (3 axioms)"), "expected a minimal 3-axiom justification:\n{text}");
+    assert!(!text.contains("example.org/E"), "unrelated axioms must not appear:\n{text}");
+    let _ = std::fs::remove_file(&ont);
+}
+
 /// A small ontology exercised by the command-integration test below.
 const PIPELINE_ONT: &str = "Prefix(:=<http://example.org/>)\n\
     Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\

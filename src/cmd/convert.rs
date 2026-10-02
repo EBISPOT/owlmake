@@ -77,6 +77,9 @@ pub fn step(
     // output is OBO, reporting issues to stderr. `--check false` skips them. The
     // OBO writer itself is lenient (it never errors), so this is the gate for
     // structural diagnostics.
+    if args.check == Some(false) {
+        model.obo_structure_check = false;
+    }
     if args.check.unwrap_or(true) {
         let writing_obo = match (args.format.as_deref(), args.output.as_deref()) {
             (Some(name), _) => {

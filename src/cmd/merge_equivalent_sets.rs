@@ -372,6 +372,7 @@ pub fn merge_equivalent_sets(
     out.shared_anon = renamed.shared_anon;
     out.span_shared = renamed.span_shared;
     out.cross_shared = renamed.cross_shared;
+    out.shared_occurrences = renamed.shared_occurrences;
     out.owl_shared_owners = renamed.owl_shared_owners;
     Ok(out)
 }

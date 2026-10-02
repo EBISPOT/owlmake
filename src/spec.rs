@@ -948,6 +948,10 @@ pub enum StepSpec {
         output: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         add_prefixes: Vec<String>,
+        /// `--check false`: an OBO document is written as it is, however many
+        /// times a frame repeats a single-valued tag.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        check: Option<bool>,
     },
     /// SPARQL `query`: `--update` files (model transforms) and/or
     /// `--query`/`--select`/`--construct FILE OUTPUT` result files.
@@ -1480,7 +1484,7 @@ impl OwlmakeSpec {
         }
 
         let emulate_odk_version = self.emulate_odk_version.as_deref().and_then(parse_version);
-        Plan {
+        let mut plan = Plan {
             default_targets: self.default_targets.unwrap_or_default(),
             phony: self.phony,
             transient_targets: self.transient_targets,
@@ -1515,7 +1519,12 @@ impl OwlmakeSpec {
             component_gaps: self.component_gaps,
             prerequisites,
             artefacts,
-        }
+        };
+        // The import modules a consumer of the edit file reads through its
+        // closure are its prerequisites; settled here, where every resolution
+        // of a plan ends.
+        crate::odk::planner::closure_module_needs(dir, &mut plan);
+        plan
     }
 
     /// Lay this file's statements over `plan`, the standard build resolved for
@@ -1919,11 +1928,12 @@ impl StepSpec {
                 link_annotations: s.link_annotations.iter().map(AnnotationSpec::from_pair).collect(),
                 remove_annotations: s.remove_annotations,
             },
-            Op::Convert { format, clean_obo, output, add_prefixes } => StepSpec::Convert {
+            Op::Convert { format, clean_obo, output, add_prefixes, check } => StepSpec::Convert {
                 format: format.clone(),
                 clean_obo: clean_obo.clone(),
                 output: output.clone(),
                 add_prefixes: add_prefixes.clone(),
+                check: *check,
             },
             Op::Template { templates, merge, prefixes } => StepSpec::Template {
                 templates: templates.clone(),
@@ -2145,8 +2155,8 @@ impl StepSpec {
                 link_annotations: link_annotations.into_iter().map(AnnotationSpec::into_pair).collect(),
                 remove_annotations,
             })),
-            StepSpec::Convert { format, clean_obo, output, add_prefixes } => {
-                Step::Op(Op::Convert { format, clean_obo, output, add_prefixes })
+            StepSpec::Convert { format, clean_obo, output, add_prefixes, check } => {
+                Step::Op(Op::Convert { format, clean_obo, output, add_prefixes, check })
             }
             StepSpec::Query { updates, selects, constructs, format, use_graphs, tdb } => Step::Op(Op::Query {
                 updates,
@@ -2713,6 +2723,8 @@ pub fn load(path: &Path) -> Result<OwlmakeSpec> {
         .with_context(|| format!("interpreting {}", path.display()))?;
     spec.check().with_context(|| format!("in {}", path.display()))?;
     check_version(&spec, path)?;
+    spec.check_emulation_versions()
+        .with_context(|| format!("in {}", path.display()))?;
     Ok(spec)
 }
 
@@ -3594,7 +3606,7 @@ mod format_floor_tests {
         // module. A 0.4.3 build reading `when: [mirrors]` would make a group of
         // that name beside the real one, so its `MIR=false` would not pin the
         // target: that is the silent case, so the floor moves to 0.4.4.
-        const PLAN_SCHEMA_DIGEST: &str = "7395bc366905aafa";
+        const PLAN_SCHEMA_DIGEST: &str = "f0c7120d757af956";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

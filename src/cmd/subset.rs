@@ -918,6 +918,7 @@ fn fill_gaps_subset(model: &Model, seed: &HashSet<String>, fill_gaps: bool) -> M
     out.owl_shared_owners = model.owl_shared_owners.clone();
     out.span_shared = model.span_shared.clone();
     out.cross_shared = model.cross_shared.clone();
+    out.shared_occurrences = model.shared_occurrences.clone();
     // A NEW ontology has a fresh document format: its `rdf:RDF` xmlns block is
     // rebuilt from the entities the subset actually carries, not inherited from
     // the input's declarations.

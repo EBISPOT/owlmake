@@ -171,35 +171,6 @@ fn source_import_order(input: Option<&std::path::Path>) -> Vec<String> {
     order
 }
 
-/// The signature of the import closure ALONE — the entities an imported
-/// ontology declares on the root's behalf, keyed as [`crate::build::closure_declared_entities`]
-/// keys them. Resolved from a scratch document carrying only the root's
-/// `Import(...)`s, so the root's own signature never leaks in: an entity the edit
-/// file references but nothing imports must still get its stub. Best-effort — an
-/// unresolvable closure yields an empty set, and every undeclared entity is then
-/// stubbed.
-fn closure_declared(
-    root: &Model,
-    input: Option<&std::path::Path>,
-    common: &crate::cmd::CommonArgs,
-) -> std::collections::HashSet<String> {
-    use horned_owl::model::{Component, MutableOntology};
-
-    let mut imports_only = Model::new();
-    for ac in root.ont.iter() {
-        if matches!(ac.component, Component::Import(_)) {
-            imports_only.ont.insert(ac.clone());
-        }
-    }
-    if !imports_only.ont.iter().any(|ac| matches!(ac.component, Component::Import(_))) {
-        return std::collections::HashSet::new();
-    }
-    match common.apply_catalog(&mut imports_only, input) {
-        Ok(()) => crate::build::closure_declared_entities(&imports_only),
-        Err(_) => std::collections::HashSet::new(),
-    }
-}
-
 /// Resolve `(low, high)` inclusive for the requested named range.
 fn range_bounds(args: &Args) -> Result<(i64, i64)> {
     let path = match &args.id_ranges {

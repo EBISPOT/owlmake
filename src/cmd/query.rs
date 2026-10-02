@@ -1229,8 +1229,10 @@ fn finish_table(
             } else if !grouped {
                 // A plain SELECT has no order of its own: the rows come out in the
                 // order the graph answers the pattern in.
-                if !apply_jena_scan_order(table, q, sparql) {
-                    apply_jena_path_distinct_order(table, q, sparql);
+                if !apply_jena_scan_order(table, q, sparql)
+                    && !apply_jena_path_distinct_order(table, q, sparql)
+                {
+                    apply_jena_union_path_distinct_order(table, q, sparql);
                 }
             }
         }
@@ -1335,6 +1337,185 @@ fn apply_jena_path_distinct_order(table: &mut QueryTable, q: &Queryable, sparql:
     idx.sort_by_key(|&i| {
         let val = table.rows[i].first().map(String::as_str).unwrap_or("");
         (rank.get(val).copied().unwrap_or(usize::MAX), i)
+    });
+    reorder_rows(table, &idx);
+    true
+}
+
+/// Order the rows of a `SELECT DISTINCT ?w` whose body is a union of walks to
+/// one variable — `{ ?v <p>* <A> } UNION { ?v <p>* <B> } … ?v <q> ?w` — by the
+/// order the graph answers it in: the branches in turn, each enumerating `?v`
+/// along the walk back from its root ([`Queryable::path_order`]), each
+/// binding's `?w` values in its subject bunch's slot order, and DISTINCT
+/// keeping each `?w` at its first appearance. A binding a filter removes
+/// establishes no appearance: the pairs come from a run of the same body that
+/// projects both variables.
+fn apply_jena_union_path_distinct_order(table: &mut QueryTable, q: &Queryable, sparql: &str) -> bool {
+    use crate::sparql::jena_order as jo;
+    if table.columns.len() != 1 || table.rows.len() < 2 {
+        if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 1"); } return false;
+    }
+    if !sparql.to_ascii_uppercase().contains("DISTINCT") {
+        if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 2"); } return false;
+    }
+    let prefixes = query_prefixes(sparql);
+    let expand = |t: &str| -> Option<String> {
+        if let Some(i) = t.strip_prefix('<').and_then(|x| x.strip_suffix('>')) {
+            return Some(i.to_string());
+        }
+        let (name, local) = t.split_once(':')?;
+        let (_, ns) = prefixes.iter().find(|(n, _)| n == name)?;
+        Some(format!("{ns}{local}"))
+    };
+    let var_of = |t: &str| t.strip_prefix('?').or_else(|| t.strip_prefix('$')).map(str::to_string);
+    let w = table.columns[0].clone();
+    let Some(block) = where_block(sparql) else { return false };
+    let inner = &block[1..block.len() - 1];
+    // The union's groups, then whatever follows the last of them.
+    let mut groups: Vec<&str> = Vec::new();
+    let mut rest = inner;
+    loop {
+        let trimmed = rest.trim_start();
+        if !trimmed.starts_with('{') {
+            break;
+        }
+        let bytes = trimmed.as_bytes();
+        let mut depth = 0usize;
+        let mut close = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else { return false };
+        groups.push(&trimmed[1..close]);
+        let after = trimmed[close + 1..].trim_start();
+        if after.to_ascii_uppercase().starts_with("UNION") {
+            rest = &after[5..];
+        } else {
+            rest = after;
+            break;
+        }
+    }
+    if groups.len() < 2 {
+        if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 3"); } return false;
+    }
+    // Each group is one walk `?v <p>* <root>`, all to the same variable over the
+    // same property.
+    let mut roots: Vec<String> = Vec::new();
+    let mut v: Option<String> = None;
+    let mut pred: Option<String> = None;
+    for g in &groups {
+        let pats = patterns_in(&format!("{g} ."));
+        let [(s, p, o)] = pats.as_slice() else { return false };
+        let (Some(sv), Some(p)) = (var_of(s), p.strip_suffix('*')) else { return false };
+        if o.starts_with('?') || o.starts_with('$') {
+            if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 4"); } return false;
+        }
+        let (Some(p), Some(root)) = (expand(p), expand(o)) else { return false };
+        if v.as_ref().is_some_and(|x| *x != sv) || pred.as_ref().is_some_and(|x| *x != p) {
+            if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 5"); } return false;
+        }
+        v = Some(sv);
+        pred = Some(p);
+        roots.push(root);
+    }
+    let (Some(v), Some(pred)) = (v, pred) else { return false };
+    // What follows reaches `?w` from `?v` by one property.
+    let after = patterns_in(&format!("{rest} ."));
+    let Some(qpred) = after.iter().find_map(|(s, p, o)| {
+        if var_of(s)? != v || var_of(o)? != w || p.ends_with('*') || p.starts_with('?') {
+            return None;
+        }
+        expand(p)
+    }) else {
+        if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 6"); } return false;
+    };
+    // The (?v, ?w) pairs the body yields.
+    let pairs: Vec<(String, String)> = {
+        let prologue = {
+            let up = sparql.to_ascii_uppercase();
+            match up.find("SELECT") {
+                Some(at) => &sparql[..at],
+                None => return false,
+            }
+        };
+        let aux = format!("{prologue}SELECT DISTINCT ?{v} ?{w} WHERE {block}");
+        let Ok(t) = q.query_table(&aux) else { return false };
+        let (Some(vc), Some(wc)) =
+            (t.columns.iter().position(|c| *c == v), t.columns.iter().position(|c| *c == w))
+        else {
+            if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 7"); } return false;
+        };
+        t.rows.iter().filter_map(|r| Some((r.get(vc)?.clone(), r.get(wc)?.clone()))).collect()
+    };
+    let mut v_rank: std::collections::HashMap<String, usize> = Default::default();
+    let mut k = 0usize;
+    for root in &roots {
+        for node in q.path_order(root, &pred) {
+            v_rank.entry(node).or_insert_with(|| {
+                let r = k;
+                k += 1;
+                r
+            });
+        }
+    }
+    if v_rank.is_empty() {
+        if std::env::var_os("OM_SCAN_DEBUG").is_some() { eprintln!("[union-scan] bail 8"); } return false;
+    }
+    // Each binding's values, in its bunch's slot order.
+    let mut w_rank: std::collections::HashMap<(String, String), usize> = Default::default();
+    let mut seen_subject: std::collections::HashSet<&str> = Default::default();
+    for (sub, _) in &pairs {
+        if !seen_subject.insert(sub.as_str()) {
+            continue;
+        }
+        let Some(bunch) = q.subject_bunch(sub) else { continue };
+        let s = jo::node_hash(sub);
+        let hashes: Vec<Option<i32>> = bunch
+            .iter()
+            .map(|(p, _, oh)| oh.map(|oh| jo::triple_hash(s, jo::node_hash(p), oh)))
+            .collect();
+        for (slot, &i) in jo::bunch_order(&hashes).iter().enumerate() {
+            let (p, lex, _) = &bunch[i];
+            if *p == qpred {
+                w_rank.entry((sub.clone(), lex.clone())).or_insert(slot);
+            }
+        }
+    }
+    let mut ordered: Vec<&(String, String)> = pairs.iter().collect();
+    ordered.sort_by_key(|(sub, val)| {
+        (
+            v_rank.get(sub).copied().unwrap_or(usize::MAX),
+            w_rank.get(&(sub.clone(), val.clone())).copied().unwrap_or(usize::MAX),
+        )
+    });
+    let mut first: std::collections::HashMap<&str, usize> = Default::default();
+    for (_, val) in ordered {
+        let n = first.len();
+        first.entry(val.as_str()).or_insert(n);
+    }
+    if std::env::var_os("OM_SCAN_DEBUG").is_some() {
+        eprintln!("[union-scan] roots={roots:?} pairs={} v_rank={} w_rank={} first={}", pairs.len(), v_rank.len(), w_rank.len(), first.len());
+        let mut by_rank: Vec<(&String, &usize)> = v_rank.iter().collect();
+        by_rank.sort_by_key(|(_, r)| **r);
+        eprintln!("[union-scan] first subjects: {:?}", by_rank.iter().take(6).map(|(s, _)| s.rsplit('/').next().unwrap_or(s)).collect::<Vec<_>>());
+        let mut ord: Vec<&(String, String)> = pairs.iter().collect();
+        ord.sort_by_key(|(sub, val)| (v_rank.get(sub).copied().unwrap_or(usize::MAX), w_rank.get(&(sub.clone(), val.clone())).copied().unwrap_or(usize::MAX)));
+        eprintln!("[union-scan] first pairs: {:?}", ord.iter().take(8).map(|(s, v)| format!("{} {}", s.rsplit('/').next().unwrap_or(s), v)).collect::<Vec<_>>());
+    }
+    let mut idx: Vec<usize> = (0..table.rows.len()).collect();
+    idx.sort_by_key(|&i| {
+        let val = table.rows[i].first().map(String::as_str).unwrap_or("");
+        (first.get(val).copied().unwrap_or(usize::MAX), i)
     });
     reorder_rows(table, &idx);
     true

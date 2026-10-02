@@ -137,6 +137,7 @@ pub fn step(
     // Every `rdfs:label` an entity carries, and how many annotation assertions
     // it has in total — together these decide which label the entity exports as.
     let mut label_candidates: BTreeMap<String, Vec<(i32, String)>> = BTreeMap::new();
+    let mut assertions = 0usize;
     let mut subject_ann_count: BTreeMap<String, usize> = BTreeMap::new();
     let mut classes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut properties: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -172,6 +173,7 @@ pub fn step(
                         AnnotationValue::AnonymousIndividual(a) => a.0.as_ref().to_string(),
                     };
                     *subject_ann_count.entry(s.as_ref().to_string()).or_insert(0) += 1;
+                    assertions += 1;
                     if prop == RDFS_LABEL {
                         // An entity may carry several labels; the exported one is
                         // decided below, once the whole set is known.
@@ -246,7 +248,7 @@ pub fn step(
         } else {
             let hashes: Vec<i32> = cands.iter().map(|(h, _)| *h).collect();
             let total = subject_ann_count.get(subject).copied().unwrap_or(cands.len());
-            let order = crate::owlapi_hash::hashset_order_of(&hashes, total);
+            let order = crate::owlapi_hash::subject_assertion_order(&hashes, total, assertions);
             &cands[order[0]].1
         };
         labels.insert(subject.clone(), chosen.clone());

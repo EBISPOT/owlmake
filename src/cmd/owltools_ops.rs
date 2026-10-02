@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Args as ClapArgs;
 use horned_owl::model::{
-    AnnotatedComponent, AnnotationSubject, AnnotationValue, ClassExpression as CE, Component,
+    AnnotatedComponent, AnnotationSubject, AnnotationValue, ClassExpression as CE, Component, Literal,
     ObjectPropertyExpression as OPE,
 };
 
@@ -90,6 +90,9 @@ enum OwltoolsAct {
     RemoveDangling,
     /// `--list-cycles [-f|--fail-on-cycle]`.
     ListCycles { fail: bool },
+    /// `--export-parents [-p LIST] [-o FILE]`: a table of every class's direct
+    /// inferred parents over each listed property.
+    ExportParents { props: Vec<String>, output: Option<String> },
 }
 
 fn owltools_run(args: &[String]) -> Result<i32> {
@@ -123,6 +126,33 @@ fn owltools_run(args: &[String]) -> Result<i32> {
                 }
             }
             "--remove-dangling" => acts.push(OwltoolsAct::RemoveDangling),
+            "--export-parents" => {
+                let mut props: Vec<String> = Vec::new();
+                let mut out: Option<String> = None;
+                let mut j = i + 1;
+                while j < args.len() {
+                    match args[j].as_str() {
+                        "-p" | "--plist" => {
+                            // The list runs to the next option.
+                            j += 1;
+                            while j < args.len() && !args[j].starts_with('-') {
+                                props.push(args[j].clone());
+                                j += 1;
+                            }
+                            continue;
+                        }
+                        "-o" | "--output" => {
+                            out = args.get(j + 1).cloned();
+                            j += 1;
+                        }
+                        _ => break,
+                    }
+                    j += 1;
+                }
+                acts.push(OwltoolsAct::ExportParents { props, output: out });
+                i = j;
+                continue;
+            }
             "--list-cycles" => {
                 let fail =
                     matches!(args.get(i + 1).map(String::as_str), Some("-f" | "--fail-on-cycle"));
@@ -287,6 +317,15 @@ fn owltools_run(args: &[String]) -> Result<i32> {
     let (first, rest) = inputs.split_first().context("owltools: no input ontology given")?;
     let mut model = crate::io::load(std::path::Path::new(first))
         .with_context(|| format!("owltools: loading {first}"))?;
+    // The source ontology's own classes, before its closure joins the model: a
+    // report over "the ontology" lists these and reasons over everything.
+    let source_classes: std::collections::BTreeSet<String> = model
+        .ont
+        .iter()
+        .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+        .filter(|(k, _)| *k == crate::sig::kind::CLASS)
+        .map(|(_, iri)| iri)
+        .collect();
     // The input's `owl:imports` closure is loaded too (resolved through a
     // sibling catalog when one exists): the reasoner and the module extractor
     // must see the closure's axioms, while a save still writes only the root
@@ -302,6 +341,10 @@ fn owltools_run(args: &[String]) -> Result<i32> {
     }
     for act in acts {
         model = match act {
+            OwltoolsAct::ExportParents { props, output } => {
+                export_parents(&model, &source_classes, &props, output.as_deref())?;
+                model
+            }
             OwltoolsAct::Mingraph => extract_mingraph(model),
             OwltoolsAct::RemoveAxiomAnnotations => remove_axiom_annotations(model),
             OwltoolsAct::MakeSubsetByProps(props) => make_subset_by_properties(model, &props),
@@ -1581,4 +1624,190 @@ pub(crate) fn list_cycles<'a>(models: impl Iterator<Item = &'a Model>) -> usize 
     }
     println!("Number of cycles: {cycles}");
     cycles
+}
+
+/// `--export-parents`: one row per class of the source ontology — its id and
+/// label, then for each property the ids and labels of its parents over that
+/// property, `|`-joined. A parent over `p` is a filler `D` with the class
+/// entailed under `p some D`, kept only where no other such filler is more
+/// specific; two fillers that are equivalent under `p` both stay. Rows are in
+/// IRI order; an obsolete or unsatisfiable class has no row, and neither have
+/// `owl:Thing` and `owl:Nothing`. A cell's fillers stand in hash-set order,
+/// seeded by the order the restriction classes were met in.
+fn export_parents(
+    model: &Model,
+    source_classes: &std::collections::BTreeSet<String>,
+    prop_tokens: &[String],
+    output: Option<&str>,
+) -> Result<()> {
+    use anyhow::Context;
+    use std::io::Write;
+    const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+    const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+    let props: Vec<String> = prop_tokens
+        .iter()
+        .map(|t| resolve_property(model, t).with_context(|| format!("owltools: unknown property `{t}`")))
+        .collect::<Result<_>>()?;
+    let all_classes: std::collections::BTreeSet<String> = model
+        .ont
+        .iter()
+        .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+        .filter(|(k, _)| *k == crate::sig::kind::CLASS)
+        .map(|(_, iri)| iri)
+        .collect();
+
+    // One named class per (property, filler), equivalent to the restriction,
+    // classified with the ontology: `C ⊑ p some D` is then a plain named
+    // subsumption.
+    let aux_iri = |p: &str, d: &str| format!("{d}__{}", p.replace([':', '/'], "_"));
+    let mut aux = model.clone();
+    let mut aux_map: HashMap<String, (usize, String)> = HashMap::new();
+    for (pi, p) in props.iter().enumerate() {
+        for d in &all_classes {
+            let iri = aux_iri(p, d);
+            aux.ont.insert(Component::EquivalentClasses(horned_owl::model::EquivalentClasses(vec![
+                CE::Class(aux.build.class(iri.clone())),
+                CE::ObjectSomeValuesFrom {
+                    ope: OPE::ObjectProperty(aux.build.object_property(p.clone())),
+                    bce: Box::new(CE::Class(aux.build.class(d.clone()))),
+                },
+            ])));
+            aux_map.insert(iri, (pi, d.clone()));
+        }
+    }
+    let reasoner = crate::reason::el::Reasoner::classify(&aux);
+    let unsat: HashSet<String> = reasoner.unsatisfiable().into_iter().collect();
+    let pairs = reasoner.all_subsumptions();
+    let entailed: HashSet<(&str, &str)> = pairs.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    // Strict superclasses: an equivalent is the class's own node, not above it.
+    let mut supers: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (a, b) in &pairs {
+        if !entailed.contains(&(b.as_str(), a.as_str())) {
+            supers.entry(a.as_str()).or_default().push(b.as_str());
+        }
+    }
+
+    let labels = owltools_labels(model);
+    let label = |iri: &str| labels.get(iri).cloned().unwrap_or_else(|| "null".to_string());
+    let ids = crate::io::obo::IdCtx::new(model);
+    let deprecated: HashSet<String> = model
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::AnnotationAssertion(aa)
+                if aa.ann.ap.0.as_ref() == "http://www.w3.org/2002/07/owl#deprecated" =>
+            {
+                let AnnotationSubject::IRI(s) = &aa.subject else { return None };
+                let is_true = match &aa.ann.av {
+                    AnnotationValue::Literal(Literal::Simple { literal })
+                    | AnnotationValue::Literal(Literal::Language { literal, .. })
+                    | AnnotationValue::Literal(Literal::Datatype { literal, .. }) => literal == "true",
+                    _ => false,
+                };
+                is_true.then(|| s.as_ref().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+
+    // A hash set's iteration order over `items`, which arrive in their
+    // insertion order.
+    fn in_set_order<'a>(items: Vec<&'a str>) -> Vec<&'a str> {
+        let hashes: Vec<i32> = items.iter().map(|i| crate::owlapi_hash::class_hash(i)).collect();
+        crate::owlapi_hash::hashset_order(&hashes).into_iter().map(|i| items[i]).collect()
+    }
+
+    let mut text = String::new();
+    text.push_str("ClassID\tClassLabel");
+    for p in &props {
+        let frag = crate::owlapi_hash::iri_split(p).1;
+        let cn = format!("{frag} {}", label(p));
+        text.push_str(&format!("\t{cn} ID\t{cn} Label"));
+    }
+    text.push('\n');
+    let mut classes: Vec<&String> = source_classes.iter().collect();
+    classes.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
+    for c in classes {
+        if c == OWL_THING || c == OWL_NOTHING || deprecated.contains(c.as_str()) || unsat.contains(c.as_str()) {
+            continue;
+        }
+        text.push_str(&ids.id(c));
+        text.push('\t');
+        text.push_str(&label(c));
+        // Every superclass, as the reasoner's flattened node set hands them over.
+        let mut flat: Vec<&str> = supers.get(c.as_str()).cloned().unwrap_or_default();
+        flat.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
+        let flat = in_set_order(flat);
+        for (pi, _) in props.iter().enumerate() {
+            let over_p: Vec<&str> =
+                flat.iter().copied().filter(|x| aux_map.get(*x).is_some_and(|(q, _)| *q == pi)).collect();
+            let over_p = in_set_order(over_p);
+            let direct: Vec<&str> = over_p
+                .iter()
+                .copied()
+                .filter(|x| {
+                    !over_p.iter().any(|y| y != x && supers.get(y).is_some_and(|s| s.contains(x)))
+                })
+                .collect();
+            let fillers: Vec<&str> = direct.iter().map(|x| aux_map[*x].1.as_str()).collect();
+            let ordered = in_set_order(fillers);
+            let l1: Vec<String> = ordered.iter().map(|d| ids.id(d)).collect();
+            let l2: Vec<String> = ordered.iter().map(|d| label(d)).collect();
+            text.push('\t');
+            text.push_str(&l1.join("|"));
+            text.push('\t');
+            text.push_str(&l2.join("|"));
+        }
+        text.push('\n');
+    }
+    match output {
+        Some(path) => std::fs::write(path, text).with_context(|| format!("owltools: writing {path}"))?,
+        None => std::io::stdout().write_all(text.as_bytes())?,
+    }
+    Ok(())
+}
+
+/// The label owltools reports for each entity: the first literal `rdfs:label`
+/// in a hash set of the entity's label annotations — bucket order by the
+/// annotation's hash, and within a bucket the order the ontology hands the
+/// entity's annotation assertions over, which is bucket order by axiom hash
+/// over every annotation of that subject.
+fn owltools_labels(model: &Model) -> HashMap<String, String> {
+    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+    let mut cands: HashMap<String, Vec<(i32, i32, Option<String>)>> = HashMap::new();
+    let mut subject_ann_count: HashMap<String, usize> = HashMap::new();
+    let mut assertions = 0usize;
+    for ac in model.ont.iter() {
+        let Component::AnnotationAssertion(aa) = &ac.component else { continue };
+        assertions += 1;
+        let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
+        let subj = subj.as_ref().to_string();
+        *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
+        if aa.ann.ap.0.as_ref() != RDFS_LABEL {
+            continue;
+        }
+        let (val, dt, lang, is_iri) = crate::io::obo::av_lit_parts(&aa.ann.av);
+        let axiom_hash =
+            crate::owlapi_hash::annotation_assertion_hash(&subj, RDFS_LABEL, &aa.ann.av, &ac.ann);
+        let ann_hash =
+            crate::io::obo::owlapi_annotation_hash_full(RDFS_LABEL, &val, dt.as_deref(), lang.as_deref(), is_iri);
+        cands.entry(subj).or_default().push((axiom_hash, ann_hash, (!is_iri).then_some(val)));
+    }
+    cands
+        .into_iter()
+        .filter_map(|(subj, c)| {
+            let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
+            let by_axiom: Vec<i32> = c.iter().map(|(h, _, _)| *h).collect();
+            let handed: Vec<&(i32, i32, Option<String>)> =
+                crate::owlapi_hash::subject_assertion_order(&by_axiom, total, assertions)
+                    .into_iter()
+                    .map(|i| &c[i])
+                    .collect();
+            let by_ann: Vec<i32> = handed.iter().map(|(_, h, _)| *h).collect();
+            crate::owlapi_hash::hashset_order(&by_ann)
+                .into_iter()
+                .find_map(|i| handed[i].2.clone())
+                .map(|text| (subj, text))
+        })
+        .collect()
 }

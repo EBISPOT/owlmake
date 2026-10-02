@@ -61,6 +61,11 @@ pub struct Repo<'a> {
     /// into rebuilding `mirror/merged.owl` from mirrors a release build never
     /// downloads.
     pub refresh_imports: bool,
+    /// Whether the caller asked for the imports group to be REBUILT
+    /// (`--rebuild imports`): its recipes then run even where their outputs are
+    /// present. `IMP=true` alone only makes the group's rules exist, and a
+    /// target of theirs runs when a prerequisite is newer, as any target does.
+    pub rebuild_imports: bool,
     /// The mirrors / imports group was pinned EXPLICITLY this run (`MIR=false`,
     /// `IMP=false`, `--keep`). See [`ExecOpts::mirrors_pinned`]: it decides what
     /// a pin means for a file that is absent.
@@ -123,6 +128,7 @@ impl<'a> Repo<'a> {
             always_make: false,
             refresh_mirrors: true,
             refresh_imports: true,
+            rebuild_imports: false,
             mirrors_pinned: false,
             imports_pinned: false,
             regenerate_patterns: true,
@@ -147,6 +153,7 @@ impl<'a> Repo<'a> {
             always_make: opts.always_make,
             refresh_mirrors: opts.refresh_mirrors,
             refresh_imports: matches!(opts.imports_mode, ImportsMode::Fresh),
+            rebuild_imports: opts.rebuild_imports,
             mirrors_pinned: opts.mirrors_pinned,
             imports_pinned: opts.imports_pinned,
             regenerate_patterns: opts.patterns_mode == PatternsMode::Regenerate,
@@ -526,6 +533,7 @@ pub enum PatternsMode {
     Cached,
 }
 
+#[derive(Clone)]
 pub struct ExecOpts {
     pub imports_mode: ImportsMode,
     pub patterns_mode: PatternsMode,
@@ -573,6 +581,48 @@ pub struct ExecOpts {
     pub assume_new: Vec<String>,
     /// `-j`/`--jobs`: how many targets to build at once.
     pub jobs: usize,
+    /// `--rebuild imports`: the imports group's recipes run even where their
+    /// outputs are present. Not implied by `IMP=true`, which only makes the
+    /// group's rules exist.
+    pub rebuild_imports: bool,
+    /// The artefacts this run was asked for, in the order asked. They are built
+    /// in that order, each after what it needs; what the plan holds beyond them
+    /// follows in the plan's own order.
+    pub goals: Vec<String>,
+}
+
+thread_local! {
+    /// Where a step's console output goes while a target redirects it: the file
+    /// the recipe's `> $@` names. Unset, it goes to standard output.
+    static CONSOLE_FILE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Print one line of a step's console output — to the file the target
+/// redirects to, or to standard output.
+pub fn console_line(line: &str) {
+    use std::io::Write;
+    CONSOLE_FILE.with(|c| match &*c.borrow() {
+        Some(path) => {
+            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(path) {
+                let _ = writeln!(f, "{line}");
+            }
+        }
+        None => println!("{line}"),
+    });
+}
+
+/// Redirects console output to `path` for as long as it lives.
+struct ConsoleRedirect;
+
+impl Drop for ConsoleRedirect {
+    fn drop(&mut self) {
+        CONSOLE_FILE.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+fn redirect_console(path: PathBuf) -> ConsoleRedirect {
+    CONSOLE_FILE.with(|c| *c.borrow_mut() = Some(path));
+    ConsoleRedirect
 }
 
 /// The targets being built at this moment.
@@ -878,7 +928,7 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
     // Build artefacts source-fed first, then those fed by another artefact (e.g.
     // `<id>.owl` ⟵ `<id>-full.owl`), so inputs exist when needed.
     set_planned_targets(plan);
-    let order = artefact_order(plan);
+    let order = artefact_order(plan, &opts.goals);
     let buildable: Vec<usize> = order
         .iter()
         .copied()
@@ -1081,6 +1131,20 @@ fn execute_plan(repo: &Repo, plan: &Plan, opts: &ExecOpts) -> Result<()> {
             stage.finish_err();
             bail!("not remade because of errors: prerequisite `{bad}` failed in this run");
         }
+        // A prerequisite that FAILED is not a prerequisite that is merely absent.
+        // Both look identical to the staleness test below — no file to stat — and
+        // reading the failure as "not newer" declares the target up to date, so
+        // whatever bytes happen to be on disk are published as this run's output.
+        // EFO's `components/legal_diseases.txt` is the case: its input
+        // `disease_to_phenotype_merged.owl` cannot be built (its own upstream
+        // serves a 404 page where an ontology should be), and om reported the
+        // target up to date and kept a file from a previous run. GNU make says
+        // `Target 'x' not remade because of errors`, and P5 says the same: a
+        // declared file that is missing is an error, not a filter.
+        if let Some(bad) = a.needs.iter().find(|n| repo.failed.lock().unwrap().contains(*n)) {
+            stage.finish_err();
+            bail!("not remade because of errors: prerequisite `{bad}` failed in this run");
+        }
         // A phony target names no file, so it is out of date however old the file
         // that happens to share its name is. `-B`/`--always-make` runs the
         // recipe regardless, here as on the target-recipe path.
@@ -1216,7 +1280,7 @@ fn artefact_graph(plan: &Plan, buildable: &[usize]) -> schedule::Graph {
 /// `reports/mondo_obsoletioncandidates.tsv` — an artefact in its own right —
 /// only as a further prerequisite, so following `input` alone leaves the python
 /// script reading a file that does not exist yet.
-fn artefact_order(plan: &Plan) -> Vec<usize> {
+fn artefact_order(plan: &Plan, goals: &[String]) -> Vec<usize> {
     let n = plan.artefacts.len();
     // A prerequisite names an artefact when it IS that target, or ends with it
     // after a path separator — never on a bare suffix, which would tie
@@ -1244,9 +1308,17 @@ fn artefact_order(plan: &Plan) -> Vec<usize> {
         })
         .collect();
 
+    // The goals come first, in the order they were asked for: a target that
+    // reads a file the plan builds without declaring it — an import module
+    // reached through an edit file's closure — sees what an earlier goal
+    // produced, exactly as a sequence of goals does.
+    let goal_positions: Vec<usize> = goals
+        .iter()
+        .filter_map(|g| plan.artefacts.iter().position(|a| &a.target == g))
+        .collect();
     let mut state = vec![0u8; n]; // 0=unvisited, 1=on-stack, 2=done
     let mut order = Vec::with_capacity(n);
-    for s in 0..n {
+    for s in goal_positions.into_iter().chain(0..n) {
         if state[s] == 2 {
             continue;
         }
@@ -1547,7 +1619,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
     let edit = find_edit_ontology(repo, plan)?;
     let catalog = load_catalog_planned(repo);
     let edit_model = crate::io::load(&edit)?;
-    let closure = load_closure(&edit_model, &repo.dir, &catalog)?;
+    let closure = load_closure(repo, &edit_model, &catalog)?;
     let mut sources: Vec<&crate::model::Model> = vec![&edit_model];
     if let Some(c) = &closure {
         sources.push(c);
@@ -2047,6 +2119,21 @@ fn assumed_new(repo: &Repo, name: &str) -> bool {
 ///
 /// The release's import stages and a target's prerequisite walk both ask this
 /// one question, so both give the same answer for an absent module.
+/// Whether an import module on disk is older than one of its pipeline's
+/// inputs — the prerequisites its rule names, and the term files its steps
+/// read — or an input is not there yet, which the module's own build makes.
+fn import_module_is_stale(repo: &Repo, imp: &crate::plan::ImportPlan, name: &str) -> bool {
+    let Ok(out) = std::fs::metadata(repo.dir.join(name)).and_then(|m| m.modified()) else {
+        return true;
+    };
+    let mut inputs: Vec<String> = repo.target(name).map(|a| a.needs.clone()).unwrap_or_default();
+    inputs.extend(crate::plan::gaps::step_term_files(&imp.steps));
+    inputs.iter().any(|p| {
+        let p = repo.target_file(p).unwrap_or_else(|| repo.dir.join(p));
+        std::fs::metadata(&p).and_then(|m| m.modified()).map_or(true, |t| t > out)
+    })
+}
+
 fn ensure_import_module(
     repo: &Repo,
     imp: &crate::plan::ImportPlan,
@@ -2059,6 +2146,12 @@ fn ensure_import_module(
     let Some(mut held) = claim(repo, name) else { return Ok(false) };
     let present = repo.dir.join(name).exists() || repo.root.join(&imp.output).exists();
     if present && !repo.refresh_imports {
+        return Ok(false);
+    }
+    // A module on disk is rebuilt when an input of its pipeline — its mirror,
+    // a seed — is newer than it, as any target is; only `-B` and `--rebuild
+    // imports` rebuild one that is current.
+    if present && !repo.always_make && !repo.rebuild_imports && !import_module_is_stale(repo, imp, name) {
         return Ok(false);
     }
     if !present && repo.imports_pinned {
@@ -2087,6 +2180,10 @@ fn run_target_recipe_inner(
     // Per-run, not per-entry-point: see `Repo::built`. `seen` still guards the
     // local recursion, but the run-wide set is what makes a target's recipe run
     // once however many callers reach it.
+    // An import module is built by its own pipeline, whichever path reaches it.
+    if let Some(imp) = import_module_for(repo.plan, target) {
+        return ensure_import_module(repo, imp, target, seen).map(|_| ());
+    }
     if !seen.insert(target.to_string()) {
         return Ok(());
     }
@@ -2345,7 +2442,7 @@ fn run_target_recipe_inner(
     // them to be considered: `--rebuild imports` says "even where their outputs
     // are present", so a module already on disk is no answer.
     let forced = repo.always_make
-        || (repo.refresh_imports && is_import_target(repo, target))
+        || (repo.rebuild_imports && is_import_target(repo, target))
         || (repo.refresh_mirrors && is_mirror_target(repo, target));
     if !a.steps.is_empty() && !forced && !repo.plan.is_phony(target) {
         if let Some(out) = repo.target_file(target).filter(|p| p.is_file()) {
@@ -3650,6 +3747,9 @@ fn run_steps(
         );
     }
     let mut model = model;
+    if let Some(t) = target {
+        prime_banner_docs(repo, &mut model, catalog, t, steps);
+    }
     let mut model_on_disk = false;
     let mut staged_by_shell = false;
     // The file the CURRENT invocation's model was loaded from. It changes at every
@@ -3693,9 +3793,20 @@ fn run_steps(
                 }
                 model_on_disk = false;
                 staged_by_shell = false;
+                if let Some(t) = target {
+                    prime_banner_docs(repo, &mut model, catalog, t, steps);
+                }
             }
             Step::Op(op) | Step::Partial { op, .. } => {
+                // The documents the banners draw on survive a step that builds
+                // its result afresh.
+                let docs = model.banner_docs.clone();
+                let merged_labels = model.merged_input_labels.clone();
                 model = apply_op(repo, op, model, catalog, work, None, pipe.as_deref())?;
+                if model.banner_docs.is_empty() {
+                    model.banner_docs = docs;
+                    model.merged_input_labels = merged_labels;
+                }
                 if let Some(t) = target {
                     dump_step(t, &model);
                 }
@@ -4680,14 +4791,18 @@ fn run_artefact(
     // nothing is printed, which is the ordinary outcome of a check that passes.
     // owlmake's ops report on stderr, so the file records the same thing the
     // redirect does: that the recipe ran to the end.
-    if let Some(dst) = a.stdout_file.as_deref() {
-        let dst = repo.dir.join(dst);
-        if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent).ok();
+    let _console = match a.stdout_file.as_deref() {
+        Some(dst) => {
+            let dst = repo.dir.join(dst);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(&dst, b"")
+                .with_context(|| format!("creating {} for `{}`", dst.display(), a.target))?;
+            Some(redirect_console(dst))
         }
-        std::fs::write(&dst, b"")
-            .with_context(|| format!("creating {} for `{}`", dst.display(), a.target))?;
-    }
+        None => None,
+    };
     let input_path =
         a.input.as_deref().and_then(|i| resolve_input(repo, Some(i), out_dir, work, &a.target).ok());
     // …but an input the plan can BUILD and that is still missing is a failed
@@ -4784,7 +4899,7 @@ fn run_artefact(
         // (`normalize_src` re-serialises the edit file, whose pattern classes
         // are labelled only by the imported definitions module). The read spends
         // no blank-node ids — see the artefact path.
-        if model.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+        if model.banner_labels.is_empty() && writes_functional_syntax(&a.target, &a.steps) {
             let mark = crate::io::anon_counter();
             // The document's identity at write time: the last version IRI a step
             // of this pipeline sets, if any.
@@ -4793,8 +4908,15 @@ fn run_artefact(
                 | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
                 _ => None,
             });
-            model.banner_labels =
-                closure_banner_labels(&model, &repo.dir, catalog, write_version.as_deref());
+            model.banner_docs = closure_banner_docs(&model, &repo.dir, catalog);
+            let root_iri = model_ontology_id(&model).0;
+            model.banner_labels = crate::cmd::fold_banner_docs(
+                &model.banner_docs,
+                root_iri.as_deref(),
+                write_version.as_deref().or(model_ontology_id(&model).1.as_deref()),
+                &model.merged_input_labels,
+                &crate::cmd::rdfs_labels(&model),
+            );
             crate::io::set_anon_counter(mark);
         }
         // Named the way `Op::Merge` will name it, so `merge -i $<` recognises the
@@ -4885,7 +5007,7 @@ fn run_artefact(
         // Only for a rule that writes functional syntax: reading the closure costs
         // a load of every imported document, and no other serialization has these
         // banners to fill in.
-        if m.banner_labels.is_empty() && writes_functional_syntax(&a.steps) {
+        if m.banner_labels.is_empty() && writes_functional_syntax(&a.target, &a.steps) {
             // …and it spends no blank-node ids either. The documents are read for
             // their labels and dropped, so the ids their anonymous individuals
             // would take are ids this artefact never writes; leaving the count
@@ -4899,8 +5021,15 @@ fn run_artefact(
                 | Step::Partial { op: Op::Annotate(sp), .. } => sp.version_iri.clone(),
                 _ => None,
             });
-            m.banner_labels =
-                closure_banner_labels(&m, &repo.dir, catalog, write_version.as_deref());
+            m.banner_docs = closure_banner_docs(&m, &repo.dir, catalog);
+            let root_iri = model_ontology_id(&m).0;
+            m.banner_labels = crate::cmd::fold_banner_docs(
+                &m.banner_docs,
+                root_iri.as_deref(),
+                write_version.as_deref().or(model_ontology_id(&m).1.as_deref()),
+                &m.merged_input_labels,
+                &crate::cmd::rdfs_labels(&m),
+            );
             crate::io::set_anon_counter(mark);
         }
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
@@ -5084,11 +5213,17 @@ fn run_artefact(
         // import declarations at a reason/reduce step.
         let use_closure = matches!(op, Op::Reason { .. } | Op::Reduce { .. }) && model_has_imports(&model);
         if use_closure && !closure_loaded {
-            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         let cl = if use_closure { closure.as_ref() } else { None };
+        let docs = model.banner_docs.clone();
+        let merged_labels = model.merged_input_labels.clone();
         model = apply_op(repo, op, model, catalog, work, cl, threaded_from.as_deref())?;
+        if model.banner_docs.is_empty() {
+            model.banner_docs = docs;
+            model.merged_input_labels = merged_labels;
+        }
         dump_step(&a.target, &model);
         write_step_output(repo, op, &mut model, Some(&a.target))?;
         model_on_disk = false;
@@ -5104,7 +5239,7 @@ fn run_artefact(
     let write_owlrdf = a.target.ends_with(".owl");
     if write_owlrdf && model_has_imports(&model) {
         if !closure_loaded {
-            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         if let Some(cl) = &closure {
@@ -5126,7 +5261,7 @@ fn run_artefact(
     // comments come from the closure.
     if a.target.ends_with(".obo") && model_has_imports(&model) {
         if !closure_loaded {
-            closure = load_closure(&model, &repo.dir, catalog)?;
+            closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         if let Some(cl) = &closure {
@@ -5138,15 +5273,9 @@ fn run_artefact(
     // file introduced (skos:exactMatch …) must get a Declaration.
     declare_used_annotation_properties(&mut model);
 
-    // horned-owl keeps set-valued operands (`ObjectIntersectionOf`,
-    // `EquivalentClasses`, …) in a Vec, so two axioms that differ only in the
-    // ORDER of a set operand — one axiom in OWL — can both survive as distinct
-    // values here. Canonicalise the order and let
-    // `SetOntology` collapse them — otherwise the equivalence, its blank node and
-    // its `owl:Axiom` reification are each rendered twice.
-    crate::io::normalize_set_operands(&mut model);
-
     // Write the final result in the artefact's format (from its extension).
+    // (Set-valued operand lists are canonicalised by `save_as` itself, the one
+    // boundary every serialization passes through.)
     // Targets can name a subdirectory (e.g. `tmp/<id>-preprocess.owl`); ensure it
     // exists under the output directory.
     if let Some(parent) = out.parent() {
@@ -6011,10 +6140,11 @@ fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
 }
 
 pub(crate) fn load_closure(
+    repo: &Repo,
     model: &crate::model::Model,
-    dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
 ) -> Result<Option<crate::model::Model>> {
+    let dir = &repo.dir;
     // The build reaches the closure here rather than through
     // `resolve_import_closure`, so it reports itself here too — otherwise
     // `OM_IMPORT_DEBUG` is silent on this path while the closure IS loaded, and
@@ -6268,15 +6398,26 @@ fn steps_format(target: &str, steps: &[Step]) -> Option<crate::io::Format> {
             built.extend(src.iter().map(|p| name_of(p)));
         }
     }
-    steps.iter().rev().find_map(|s| match s {
-        Step::Op(Op::Convert { format: Some(f), output, .. })
-            if output.is_none()
-                || built.contains(&output.as_deref().and_then(|o| name_of(o))) =>
-        {
-            crate::io::Format::from_name(f).ok()
-        }
-        _ => None,
-    })
+    steps
+        .iter()
+        .rev()
+        .find_map(|s| match s {
+            Step::Op(Op::Convert { format: Some(f), output, .. })
+                if output.is_none()
+                    || built.contains(&output.as_deref().and_then(|o| name_of(o))) =>
+            {
+                crate::io::Format::from_name(f).ok()
+            }
+            _ => None,
+        })
+        // No conversion names the format, so the file a `mv` brought to the
+        // target is in the format its own name says: `reason -o $@.owl && mv
+        // $@.owl $@` leaves RDF/XML under a `.obo` name.
+        .or_else(|| {
+            built.iter().skip(1).last().and_then(|name| {
+                crate::io::Format::from_path(Path::new(name.as_ref()?)).ok()
+            })
+        })
 }
 
 /// Delete the staging file a closing `mv $@.tmp $@` would have consumed.
@@ -6408,7 +6549,7 @@ fn write_step_output(
     // every one of them belongs to the import rather than to this document.
     if matches!(fmt, Some(crate::io::Format::RdfXml) | None) && model_has_imports(model) {
         let catalog = load_catalog_planned(repo);
-        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+        if let Some(cl) = load_closure(repo, model, &catalog)? {
             model.closure_ann_ns = annotation_property_namespaces(&cl);
             model.closure_declared = closure_declared_entities(&cl);
         }
@@ -6420,7 +6561,7 @@ fn write_step_output(
     // closing write.
     if matches!(fmt, Some(crate::io::Format::Obo)) && model_has_imports(model) {
         let catalog = load_catalog_planned(repo);
-        if let Some(cl) = load_closure(model, &repo.dir, &catalog)? {
+        if let Some(cl) = load_closure(repo, model, &catalog)? {
             model.banner_labels = closure_labels(&cl);
         }
     }
@@ -6782,7 +6923,12 @@ fn apply_op(
                 output_iri: None,
                 common: Default::default(),
             };
-            cmd::extract::step(Some(model), &eargs)?.unwrap_or_else(crate::model::Model::new)
+            let mut out = cmd::extract::step(Some(model), &eargs)?.unwrap_or_else(crate::model::Model::new);
+            // The extracted module is a new document, on its own: a functional
+            // write of it banners each entity from the module's own labels.
+            out.banner_docs = vec![crate::cmd::banner_doc_of(&out, true)];
+            out.banner_labels.clear();
+            out
         }
         Op::ExtractUphenoRelations { relations, terms, term_files, roots, root_files } => {
             crate::cmd::extract_upheno_relations::apply(
@@ -6803,7 +6949,7 @@ fn apply_op(
             // model does not have.
             if let Some(cl) = closure {
                 model.closure_declared = closure_declared_entities(cl);
-            } else if let Some(cl) = load_closure(&model, &repo.dir, catalog)? {
+            } else if let Some(cl) = load_closure(repo, &model, catalog)? {
                 model.closure_declared = closure_declared_entities(&cl);
             }
             // The plan NAMES the ID-ranges file; execution never globs the ontology
@@ -7051,7 +7197,7 @@ fn apply_op(
             // closure. The pipeline hands over the root ontology alone; union it
             // in here, over the catalog the plan names.
             if *use_graphs {
-                if let Some(cl) = load_closure(&m, &repo.dir, catalog)? {
+                if let Some(cl) = load_closure(repo, &m, catalog)? {
                     m = union_with_closure(&m, &cl);
                 }
             }
@@ -7160,8 +7306,13 @@ fn apply_op(
             back.carry_meta_from(&model);
             back
         }
-        Op::Convert { clean_obo, format, add_prefixes, .. } => {
+        Op::Convert { clean_obo, format, add_prefixes, check, .. } => {
             let mut model = model;
+            // `--check false` writes the OBO document however its frames repeat
+            // a single-valued tag; by default such a document is refused.
+            if *check == Some(false) {
+                model.obo_structure_check = false;
+            }
             // `--add-prefixes FILE`: fold each JSON-LD context's prefixes into
             // the model's map so the OFN/OBO output declares AND abbreviates with
             // them (and a cached-OFN re-read round-trips, e.g. `Orphanet:377788`).
@@ -7256,15 +7407,27 @@ fn fetch_import_iri(iri: &str, dir: &Path) -> Result<PathBuf> {
 /// Files imported (`owl:imports`) by the current model, resolved via the catalog.
 /// Does this recipe write OWL functional syntax — the one serialization whose
 /// per-entity banners carry labels?
-fn writes_functional_syntax(steps: &[Step]) -> bool {
-    steps.iter().any(|s| {
-        matches!(
-            s,
-            Step::Op(Op::Convert { format: Some(f), .. })
-                | Step::Partial { op: Op::Convert { format: Some(f), .. }, .. }
-            if matches!(crate::io::Format::from_name(f), Ok(crate::io::Format::Functional))
-        )
-    })
+fn writes_functional_syntax(target: &str, steps: &[Step]) -> bool {
+    let format = steps_format(target, steps)
+        .or_else(|| crate::io::Format::from_path(Path::new(target)).ok());
+    matches!(format, Some(crate::io::Format::Functional))
+}
+
+/// Give a model the documents its banners draw on — itself and its import
+/// closure — when the target it is bound for is written in functional syntax
+/// and it does not have them yet.
+fn prime_banner_docs(
+    repo: &Repo,
+    model: &mut crate::model::Model,
+    catalog: &BTreeMap<String, PathBuf>,
+    target: &str,
+    steps: &[Step],
+) {
+    if model.banner_docs.is_empty() && writes_functional_syntax(target, steps) {
+        let mark = crate::io::anon_counter();
+        model.banner_docs = closure_banner_docs(model, &repo.dir, catalog);
+        crate::io::set_anon_counter(mark);
+    }
 }
 
 /// The banner label set for a document with an import closure. Each document —
@@ -7276,47 +7439,29 @@ fn writes_functional_syntax(steps: &[Step]) -> bool {
 /// pipeline sets) overrides the version it was read with, so a banner pick
 /// tracks the run's release date. Best-effort — a closure file that cannot be
 /// read contributes nothing, and banners fall back to the entity IRI.
-fn closure_banner_labels(
+/// The documents a functional write's banners are drawn from, as the pipeline
+/// opens: the document itself and every document its import closure names. A
+/// secondary input the pipeline merges in later was opened on its own, so it
+/// joins no list: only its axioms arrive, and the document being written
+/// labels them as its own.
+fn closure_banner_docs(
     model: &crate::model::Model,
     dir: &Path,
     catalog: &BTreeMap<String, PathBuf>,
-    write_version_iri: Option<&str>,
-) -> std::collections::HashMap<String, String> {
-    let main_id = model_ontology_id(model);
-    let main_version = write_version_iri.map(str::to_string).or(main_id.1);
-    if std::env::var("OM_BANNER_DEBUG").is_ok() {
-        eprintln!("[banner] input document id={:?} write version={:?}", main_id.0, main_version);
-    }
-    let mut docs: Vec<(i32, std::collections::HashMap<String, String>)> = vec![(
-        crate::owlapi_hash::ontology_id_hash(main_id.0.as_deref(), main_version.as_deref()),
-        crate::cmd::rdfs_labels(model),
-    )];
+) -> Vec<crate::model::BannerDoc> {
+    let mut docs = vec![crate::cmd::banner_doc_of(model, true)];
     let mut seen = std::collections::HashSet::new();
     if let Ok(files) = import_closure_of_model(model, dir, catalog, &mut seen) {
         for f in &files {
             let Ok(m) = crate::io::load(f) else { continue };
-            let (iri, ver) = model_ontology_id(&m);
-            docs.push((
-                crate::owlapi_hash::ontology_id_hash(iri.as_deref(), ver.as_deref()),
-                crate::cmd::rdfs_labels(&m),
-            ));
+            docs.push(crate::cmd::banner_doc_of(&m, false));
         }
     }
-    let hashes: Vec<i32> = docs.iter().map(|(h, _)| *h).collect();
-    let mut out = std::collections::HashMap::new();
-    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
-        if std::env::var("OM_BANNER_DEBUG").is_ok() {
-            eprintln!("[banner] doc#{i} id-hash={} labels={}", hashes[i], docs[i].1.len());
-        }
-        for (subj, label) in &docs[i].1 {
-            out.entry(subj.clone()).or_insert_with(|| label.clone());
-        }
-    }
-    out
+    docs
 }
 
 /// The ontology IRI and version IRI a model's document identifies itself by.
-fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+pub(crate) fn model_ontology_id(model: &crate::model::Model) -> (Option<String>, Option<String>) {
     use horned_owl::model::Component;
     for ac in model.ont.iter() {
         if let Component::OntologyID(id) = &ac.component {
@@ -7450,6 +7595,16 @@ pub(crate) fn merge_loaded_into_as(
     role: MergeRole,
 ) -> Result<()> {
     use horned_owl::model::{Component, MutableOntology};
+    // A member of the import closure was opened with the document and is one
+    // more the banners draw from. A secondary input was opened on its own and
+    // only its axioms arrive: it labels nothing by itself.
+    if matches!(role, MergeRole::Import) && !model.banner_docs.is_empty() {
+        model.banner_docs.push(crate::cmd::banner_doc_of(other, false));
+    }
+    if matches!(role, MergeRole::Input) && !model.banner_docs.is_empty() {
+        model.merged_input_labels.push(std::sync::Arc::new(crate::cmd::rdfs_labels(other)));
+    }
+    let mut present = crate::cmd::merge::MergedAxioms::of(model);
     for ac in other.ont.iter() {
         if matches!(
             ac.component,
@@ -7457,7 +7612,11 @@ pub(crate) fn merge_loaded_into_as(
         ) {
             continue;
         }
+        if present.holds(model, ac) {
+            continue;
+        }
         model.ont.insert(ac.clone());
+        present.added(ac);
     }
     for (prefix, value) in other.prefixes.mappings() {
         let _ = model.prefixes.add_prefix(prefix, value);
@@ -8040,7 +8199,7 @@ fn import_closure(
 }
 
 /// Extract import IRIs from OBO (`import:`) or OWL/OFN (`owl:imports`/`Import(...)`).
-fn import_iris(text: &str) -> Vec<String> {
+pub(crate) fn import_iris(text: &str) -> Vec<String> {
     let mut v = Vec::new();
     for line in text.lines() {
         let t = line.trim();

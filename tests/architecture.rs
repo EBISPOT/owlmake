@@ -129,6 +129,12 @@ fn no_new_environment_variables_decide_output() {
         // Traces which classes each subset closure round pulls in, and the
         // axiom that pulled them, to stderr. The closure itself is unchanged.
         "OM_DEBUG_SUBSET",
+        // Prints which import modules an edit-file consumer is given as
+        // prerequisites, and why one is left out; changes nothing.
+        "OM_CLOSURE_DEBUG",
+        // Prints each shared-occurrence node event of the blank-node numbering
+        // pass (first allocation, reuse) to stderr; the numbering is unchanged.
+        "OM_SUBTREE_DEBUG",
         // Prints the evaluation plan a SPARQL query compiles to, then drops the
         // solutions unread. It reports how a query WILL be run, and changes
         // neither the query nor its results.

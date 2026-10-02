@@ -558,6 +558,39 @@ fn leading_iri_term(trimmed: &str) -> bool {
 ///
 /// A declared prefix earns an idspace even when no id is ever shortened with it —
 /// UBERON writes its `foaf`/`doap` IRIs out in full yet still declares both.
+/// Whether a namespace can stand behind an OBO `idspace:`. The OWL, RDF, RDFS,
+/// XSD and XML namespaces cannot; nor can the OBO PURL space, whose ids the
+/// OBO id rules already shorten, or any namespace that encloses it.
+pub(crate) fn idspace_namespace(ns: &str) -> bool {
+    const OBO: &str = "http://purl.obolibrary.org/obo/";
+    !(ns.starts_with(OBO)
+        || OBO.starts_with(ns)
+        || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
+        || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
+        || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
+        || ns.starts_with("http://www.w3.org/2002/07/owl#")
+        || ns.starts_with("http://www.w3.org/XML/1998/namespace"))
+}
+
+/// The `idspace:` declarations an OBO rendering of `model` carries: the prefixes
+/// the source document bound, less the namespaces no idspace may name. An
+/// RDF/XML source binds them as `xmlns:` attributes, which `idspaces` holds
+/// already; a functional-syntax source binds them with its `Prefix(…)` lines,
+/// which reach here as `rdf_prefixes`.
+pub(crate) fn declared_idspaces(model: &Model) -> Vec<(String, String)> {
+    if !model.idspaces.is_empty() {
+        return model.idspaces.clone();
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (prefix, ns) in &model.rdf_prefixes {
+        if prefix.is_empty() || !idspace_namespace(ns) || out.iter().any(|(p, _)| p == prefix) {
+            continue;
+        }
+        out.push((prefix.clone(), ns.clone()));
+    }
+    out
+}
+
 fn scan_owl_idspaces(bytes: &[u8]) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(bytes);
     let mut out: Vec<(String, String)> = Vec::new();
@@ -569,14 +602,7 @@ fn scan_owl_idspaces(bytes: &[u8]) -> Vec<(String, String)> {
     // shortens nothing; ids under it fall to the mechanical local-name rule instead.
     // So scan only the `xmlns:PREFIX="NS"` declarations below; do not pre-seed
     // well-known namespaces.
-    let is_builtin = |ns: &str| {
-        ns.starts_with("http://purl.obolibrary.org/obo/")
-            || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-            || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-            || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
-            || ns.starts_with("http://www.w3.org/2002/07/owl#")
-            || ns.starts_with("http://www.w3.org/XML/1998/namespace")
-    };
+    let is_builtin = |ns: &str| !idspace_namespace(ns);
     // Parse `xmlns:PREFIX="NS"` declarations by hand (RDF/XML, no dependency on a
     // full XML parse). The default `xmlns=` (no prefix) never becomes an idspace.
     for decl in text.split("xmlns:").skip(1) {
@@ -2245,6 +2271,14 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating directory {}", parent.display()))?;
     }
+    // Set-valued operand lists are canonicalised at the one boundary every
+    // serialization passes through, so two spellings of one OWL axiom —
+    // `DisjointClasses(A B)` in one source and `DisjointClasses(B A)` in
+    // another — leave as the single axiom they are. Doing this on one build
+    // route and not the others rendered UBERON's
+    // `DisjointClasses(UBERON_0000001 GO_0110165)` twice, once per member's
+    // frame, in every artefact of the recipe route.
+    normalize_set_operands(model);
     // The `#…` marker lines the Functional writer uses to carry source state
     // (xmlns block, shared blank nodes, cleared prefixes) belong to owlmake's
     // own `*.ofn` cache files, never to a released artefact: MONDO's
@@ -2343,6 +2377,7 @@ fn restore_cm(_model: &mut Model, _cm: CmOnto) {}
 /// RDF/XML writer instead.
 pub fn write_to_ref<W: Write>(model: &Model, writer: W, fmt: Format) -> Result<()> {
     let mut tmp = Model::from_parts(model.ont.clone(), crate::model::clone_prefixes(&model.prefixes));
+    tmp.obo_structure_check = model.obo_structure_check;
     write_to_with(&mut tmp, writer, fmt, RdfXmlWriter::Horned)
 }
 
@@ -2486,7 +2521,30 @@ fn write_to_with<W: Write>(
             // line.
             let default_ns = prefixes_default_ns(model, &document);
             let prefixes = ofn_prefix_block(&document, default_ns.as_deref());
-            let labels = model.banner_labels.clone();
+            // A document merged in after the pipeline opened is one more the
+            // banners draw from, so the labels are settled now, under the
+            // identity the document is written with.
+            let labels = if !model.banner_docs.is_empty() {
+                let (iri, version) = crate::build::model_ontology_id(model);
+                let own = crate::cmd::rdfs_labels(model);
+                crate::cmd::fold_banner_docs(
+                    &model.banner_docs,
+                    iri.as_deref(),
+                    version.as_deref(),
+                    &model.merged_input_labels,
+                    &own,
+                )
+            } else {
+                model.banner_labels.clone()
+            };
+            if let Ok(dbg) = std::env::var("OM_BANNER_DEBUG") {
+                eprintln!(
+                    "[banner-write] docs={} labels={} {dbg}={:?}",
+                    model.banner_docs.len(),
+                    labels.len(),
+                    labels.get(&dbg)
+                );
+            }
             let labels_opt = if labels.is_empty() { None } else { Some(&labels) };
             let order = model.import_order.clone();
             let order_opt = if order.is_empty() { None } else { Some(order.as_slice()) };

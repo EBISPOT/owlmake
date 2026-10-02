@@ -124,7 +124,9 @@ fn obo_label_comments_use_the_last_colliding_rdfxml_label() {
     </owl:Class>
 </rdf:RDF>
 "#;
-    let model = io::load_from(std::io::Cursor::new(rdfxml.as_bytes()), Format::RdfXml).unwrap();
+    let mut model = io::load_from(std::io::Cursor::new(rdfxml.as_bytes()), Format::RdfXml).unwrap();
+    // Two labels on one property is a frame the writer refuses by default.
+    model.obo_structure_check = false;
     let mut out = Vec::new();
     io::write_to_ref(&model, &mut out, Format::Obo).unwrap();
     let obo = String::from_utf8(out).unwrap();
@@ -175,6 +177,31 @@ fn to_obo(ofn: &str) -> String {
     let mut out = Vec::new();
     io::write_to_ref(&m, &mut out, Format::Obo).unwrap();
     String::from_utf8(out).unwrap()
+}
+
+/// A functional-syntax document's `Prefix(…)` lines are its prefix map, and the
+/// OBO rendering declares each as an `idspace:` and shortens ids with it —
+/// except the built-in namespaces and anything in or around the OBO PURL space,
+/// which never become idspaces.
+#[test]
+fn functional_prefixes_become_idspaces() {
+    let ofn = format!(
+        "{PREAMBLE}Prefix(foaf:=<http://xmlns.com/foaf/0.1/>)\n\
+         Prefix(sssom:=<https://w3id.org/sssom/>)\n\
+         Prefix(cl:=<http://purl.obolibrary.org/obo/cl#>)\n\
+         Prefix(purl:=<http://purl.obolibrary.org/>)\n\
+         Ontology(<http://purl.obolibrary.org/obo/t.owl>\n\
+         Declaration(Class(obo:T_0000001))\n\
+         Declaration(AnnotationProperty(foaf:depiction))\n\
+         AnnotationAssertion(rdfs:label obo:T_0000001 \"one\")\n\
+         AnnotationAssertion(foaf:depiction obo:T_0000001 <http://example.org/t.png>)\n\
+         )\n"
+    );
+    let obo = to_obo(&ofn);
+    assert!(obo.contains("idspace: foaf http://xmlns.com/foaf/0.1/ \n"), "{obo}");
+    assert!(obo.contains("idspace: sssom https://w3id.org/sssom/ \n"), "{obo}");
+    assert!(!obo.contains("idspace: cl ") && !obo.contains("idspace: purl "), "{obo}");
+    assert!(stanza(&obo, "T:0000001").contains("foaf:depiction"), "{obo}");
 }
 
 /// The `[Term]`/`[Typedef]` stanza for `id`, without the leading stanza marker.
@@ -431,7 +458,13 @@ comment: first note
 comment: second note
 xref: Y:2 {sssom:mapping_justification="semapv:ManualMappingCuration"}
 "#;
-    let m = load_obo(SRC);
+    let mut m = load_obo(SRC);
+    // A frame with two `comment:` clauses is not a valid OBO document, and the
+    // writer refuses it by default; `convert --check false` writes it anyway.
+    let mut out = Vec::new();
+    let refused = io::write_to_ref(&m, &mut out, Format::Obo).unwrap_err();
+    assert!(refused.to_string().contains("multiple comment tags not allowed"), "{refused:#}");
+    m.obo_structure_check = false;
     let mut out = Vec::new();
     io::write_to_ref(&m, &mut out, Format::Obo).unwrap();
     let obo = String::from_utf8(out).unwrap();

@@ -89,10 +89,33 @@ fn document_iri(path: Option<&std::path::Path>, iri: Option<&str>) -> String {
     match (path, iri) {
         (Some(p), _) => {
             let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-            format!("file:{}", abs.display())
+            match odk_work_path(&abs) {
+                Some(w) => format!("file:{w}"),
+                None => format!("file:{}", abs.display()),
+            }
         }
         (None, Some(i)) => i.to_string(),
         (None, None) => String::new(),
+    }
+}
+
+/// The path a document has inside the ODK container, where the repository is
+/// mounted at `/work`: for a file under a repository whose plan emulates an
+/// ODK release, `/work/<path from the repository root>`.
+fn odk_work_path(abs: &std::path::Path) -> Option<String> {
+    let mut dir = abs.parent()?;
+    loop {
+        let plan = dir.join("owlmake.yaml");
+        if plan.is_file() {
+            let text = std::fs::read_to_string(&plan).ok()?;
+            let emulates = text.lines().any(|l| l.starts_with("emulate_odk_version:"));
+            if !emulates {
+                return None;
+            }
+            let rel = abs.strip_prefix(dir).ok()?;
+            return Some(format!("/work/{}", rel.display()));
+        }
+        dir = dir.parent()?;
     }
 }
 
@@ -426,9 +449,18 @@ fn sort_key(ac: &AnnotatedComponent<RcStr>) -> String {
 /// bullet in the committed reports.
 fn markdown_for_axiom(ac: &AnnotatedComponent<RcStr>, labels: &HashMap<String, String>) -> String {
     let body = render_axiom_md(&ac.component, labels);
-    let inner: Vec<String> = ac
-        .ann
-        .iter()
+    // An axiom's annotations are listed by property, then by value — a literal
+    // on its datatype first, so a plain literal precedes an `xsd:string` one
+    // whatever their text — the order the axiom holds them in.
+    let mut anns: Vec<&horned_owl::model::Annotation<RcStr>> = ac.ann.iter().collect();
+    anns.sort_by(|a, b| {
+        a.ap.0
+            .as_ref()
+            .cmp(b.ap.0.as_ref())
+            .then_with(|| crate::io::owlfunc::cmp_annotation_value(&a.av, &b.av))
+    });
+    let inner: Vec<String> = anns
+        .into_iter()
         .map(|a| {
             format!(
                 "  - {} {} \n",
@@ -652,11 +684,19 @@ fn render_axiom_md(c: &Component<RcStr>, labels: &HashMap<String, String>) -> St
         DeclareNamedIndividual(d) => format!("Individual: {}", md_iri(d.0 .0.as_ref(), labels)),
         DeclareDatatype(d) => format!("Datatype: {}", md_iri(d.0 .0.as_ref(), labels)),
         SubClassOf(a) => format!("{} SubClassOf {}", ce(&a.sub), ce(&a.sup)),
-        EquivalentClasses(a) => {
+        // A set of two class expressions is written as the pair, infix; a
+        // larger one as the list it is.
+        EquivalentClasses(a) if a.0.len() == 2 => {
             a.0.iter().map(ce).collect::<Vec<_>>().join(" EquivalentTo ")
         }
+        EquivalentClasses(a) => {
+            format!(" EquivalentClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
+        }
+        DisjointClasses(a) if a.0.len() == 2 => {
+            a.0.iter().map(ce).collect::<Vec<_>>().join(" DisjointWith ")
+        }
         DisjointClasses(a) => {
-            format!("DisjointClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
+            format!(" DisjointClasses: {}", a.0.iter().map(ce).collect::<Vec<_>>().join(", "))
         }
         AnnotationAssertion(a) => format!(
             "{} {} {}",
@@ -763,12 +803,14 @@ fn render_ce_md(
         CE::ObjectUnionOf(v) => {
             v.iter().map(|x| bracket_operand_md(x, labels)).collect::<Vec<_>>().join(" or ")
         }
-        CE::ObjectComplementOf(b) => format!("not {}", rec(b)),
+        // A complement's operand is always bracketed, a named class included;
+        // a restriction's filler only when it is itself complex.
+        CE::ObjectComplementOf(b) => format!("not ({})", rec(b)),
         CE::ObjectSomeValuesFrom { ope, bce } => {
-            format!("{} some {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} some {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectAllValuesFrom { ope, bce } => {
-            format!("{} only {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} only {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectHasValue { ope, i } => format!(
             "{} value {}",
@@ -776,13 +818,13 @@ fn render_ce_md(
             render_individual_md(i, labels)
         ),
         CE::ObjectMinCardinality { n, ope, bce } => {
-            format!("{} min {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} min {n} {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectMaxCardinality { n, ope, bce } => {
-            format!("{} max {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} max {n} {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectExactCardinality { n, ope, bce } => {
-            format!("{} exactly {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} exactly {n} {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectHasSelf(ope) => format!("{} Self", render_ope_md(ope, labels)),
         CE::ObjectOneOf(v) => format!(

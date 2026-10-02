@@ -1139,6 +1139,10 @@ fn option_arity(cmd: &str, opt: &str, next: Option<&String>) -> usize {
     if opt == "-O" {
         return 1;
     }
+    // `extract --method subset` names a method, not the `subset` subcommand.
+    if cmd == "extract" && matches!(opt, "--method" | "-m") {
+        return 1;
+    }
     match opt {
         "--annotation" | "--link-annotation" | "--typed-annotation" => 2,
         "--remove-annotations" => 0,
@@ -1425,6 +1429,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             clean_obo: val("--clean-obo"),
             output: val2("--output", "-o"),
             add_prefixes: all("--add-prefixes"),
+            check: val("--check").map(|v| crate::plan::is_on(&v)),
         }),
         "query" => {
             let pairs = |keys: &[&str]| -> Vec<(String, String)> {

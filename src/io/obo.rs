@@ -41,7 +41,8 @@ const IAO_TERM_REPLACED_BY: &str = "http://purl.obolibrary.org/obo/IAO_0100001";
 const IAO_OBSOLESCENCE_REASON: &str = "http://purl.obolibrary.org/obo/IAO_0000231";
 const IAO_TERMS_MERGED: &str = "http://purl.obolibrary.org/obo/IAO_0000227";
 
-/// Expand an OBO id to a full IRI string.
+/// Expand a CURIE to a full IRI string: a declared OBO-style prefix is
+/// `http://purl.obolibrary.org/obo/<prefix>_<local>`, and a full IRI stands.
 pub fn expand_id(id: &str) -> String {
     let id = id.trim();
     if id.starts_with("http://") || id.starts_with("https://") {
@@ -51,6 +52,60 @@ pub fn expand_id(id: &str) -> String {
         Some((pre, local)) => format!("{OBO_BASE}{pre}_{local}"),
         None => format!("{OBO_BASE}{id}"),
     }
+}
+
+/// Expand an id read from an OBO document to its IRI. A prefixed id whose
+/// local part is not canonical — it carries an underscore, a space or a
+/// character outside the id alphabet — keeps prefix and local part apart with
+/// `#` and escapes the local part.
+pub fn expand_obo_id(id: &str) -> String {
+    let id = id.trim();
+    if id.starts_with("http://") || id.starts_with("https://") {
+        return id.to_string();
+    }
+    match id.split_once(':') {
+        // `ncithesaurus:Nuclear_Structure` is `…/obo/ncithesaurus_#Nuclear_Structure`.
+        Some((pre, local)) if local.contains('_') => {
+            format!("{OBO_BASE}{pre}_#{}", url_encode_local(local))
+        }
+        Some((pre, local)) => format!("{OBO_BASE}{pre}_{}", url_encode_local(local)),
+        None => format!("{OBO_BASE}{id}"),
+    }
+}
+
+/// The local part of an id as its IRI carries it: letters, digits and `.-*_`
+/// stand, a space becomes `_`, and any other character is `%XX`-escaped — a
+/// character outside ASCII as the escape of `?`.
+fn url_encode_local(local: &str) -> String {
+    let mut out = String::with_capacity(local.len());
+    for c in local.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '-' | '*' | '_' => out.push(c),
+            ' ' => out.push('_'),
+            c if c.is_ascii() => out.push_str(&format!("%{:02X}", c as u32)),
+            _ => out.push_str("%3F"),
+        }
+    }
+    out
+}
+
+/// Undo [`url_encode_local`] on a canonical id's local part.
+fn url_decode_local(local: &str) -> String {
+    let bytes = local.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 3 <= bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&local[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| local.to_string())
 }
 
 thread_local! {
@@ -81,7 +136,7 @@ fn expand_curie(id: &str) -> String {
             return format!("{ns}{local}");
         }
     }
-    expand_id(id)
+    expand_obo_id(id)
 }
 
 /// Compress a full IRI to an OBO id where possible (inverse of [`expand_id`]).
@@ -100,7 +155,7 @@ pub fn compress_iri(iri: &str) -> String {
             let (pre, local) = rest.split_at(idx);
             let local = &local[1..];
             if !pre.is_empty() && !local.is_empty() && !local.contains('_') {
-                return format!("{pre}:{local}");
+                return format!("{pre}:{}", url_decode_local(local));
             }
         }
         return rest.to_string();
@@ -208,10 +263,16 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         }
     });
 
-    // Header → ontology id + annotations.
-    if let Some(ont_id) = header.get("ontology") {
+    // Header → ontology id + annotations. A document with no `ontology:` line
+    // is the ontology `TEMP`, and `TEMP` is the idspace its bare local names
+    // resolve in.
+    let ontology_id: &str = header.get("ontology").unwrap_or("TEMP");
+    {
+        let ont_id = ontology_id;
         let iri = if ont_id.starts_with("http") {
             ont_id.to_string()
+        } else if ont_id == "TEMP" && header.get("ontology").is_none() {
+            format!("{OBO_BASE}TEMP")
         } else {
             format!("{OBO_BASE}{ont_id}.owl")
         };
@@ -252,9 +313,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         )));
     }
 
-    let onto_ns_for_defs = header.get("ontology").and_then(|o| {
-        if o.starts_with("http") { None } else { Some(format!("{OBO_BASE}{o}#")) }
-    });
+    let onto_ns_for_defs = Some(ontology_id)
+        .filter(|o| !o.starts_with("http"))
+        .map(|o| format!("{OBO_BASE}{o}#"));
     // `synonymtypedef:`/`subsetdef:` header lines declare an annotation property
     // that is a sub-property of oboInOwl:SynonymTypeProperty / :SubsetProperty.
     // The quoted description is carried as `rdfs:label` for a synonymtypedef but
@@ -280,9 +341,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
             } else {
                 resolve_local(id, onto_ns_for_defs.as_deref())
             };
-            ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
-                b.annotation_property(iri.as_str()),
-            )));
+            // The property itself is declared as every referenced property is
+            // — by `declare_referenced_entities`, so that an import closure
+            // that already types it can withdraw the declaration.
             ont.insert(Component::SubAnnotationPropertyOf(SubAnnotationPropertyOf {
                 sub: b.annotation_property(iri.as_str()),
                 sup: b.annotation_property(format!("{OIO}{parent}").as_str()),
@@ -299,13 +360,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // namespace, `http://purl.obolibrary.org/obo/<ontology>#<name>` — e.g.
     // `ontology: uberon/core` ⇒ `obo/uberon/core#efo_slim`. That is the OBO→OWL
     // mapping for a bare local name.
-    let onto_ns = header.get("ontology").and_then(|o| {
-        if o.starts_with("http") {
-            None
-        } else {
-            Some(format!("{OBO_BASE}{o}#"))
-        }
-    });
+    let onto_ns = Some(ontology_id)
+        .filter(|o| !o.starts_with("http"))
+        .map(|o| format!("{OBO_BASE}{o}#"));
 
     // Relation shorthands: a `[Typedef]` whose `id` is a bare name and which has
     // a single `xref` to an ontology term (e.g. `id: disease_has_basis_in_…` +
@@ -481,10 +538,15 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // declaration lost on read never comes back.
     let declared: Vec<(String, String)> =
         IDSPACES.with(|m| m.borrow().iter().map(|(p, n)| (p.clone(), n.clone())).collect());
+    // They are what this document's own construction bound, so a functional
+    // or RDF/XML write of it declares them too.
     for (prefix, ns) in declared {
         let _ = m.prefixes.add_prefix(&prefix, &ns);
         if !m.explicit_prefixes.iter().any(|(p, _)| *p == prefix) {
-            m.explicit_prefixes.push((prefix, ns));
+            m.explicit_prefixes.push((prefix.clone(), ns.clone()));
+        }
+        if !m.built_prefixes.iter().any(|(p, _)| *p == prefix) {
+            m.built_prefixes.push((prefix, ns));
         }
     }
     Ok(m)
@@ -686,6 +748,12 @@ fn declare_referenced_entities(
                     obj_props.insert(p.0.to_string());
                 }
             }
+            // Both ends of a property hierarchy are properties the document
+            // names: a synonym type or subset is declared by its line alone.
+            Component::SubAnnotationPropertyOf(ax) => {
+                ann_props.insert(ax.sub.0.to_string());
+                ann_props.insert(ax.sup.0.to_string());
+            }
             Component::AnnotationAssertion(ax) => {
                 ann_props.insert(ax.ann.ap.0.to_string());
             }
@@ -720,13 +788,16 @@ fn declare_referenced_entities(
     // declaration is the document's own and no import can stand in for it; one
     // named as a `property_value:` predicate is ours to withdraw once the closure
     // is known to type it.
+    // Every property the OBO vocabulary itself names — a tag's property, a
+    // qualifier's — is introduced by the line that used it, so its declaration
+    // is the document's own whatever an import declares.
     let builtin: BTreeSet<String> =
         obo_builtin_annotation_properties().into_iter().map(|(iri, _)| iri).collect();
     for p in ann_props.difference(&declared_a) {
         ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
             b.annotation_property(p.as_str()),
         )));
-        if !builtin.contains(p) {
+        if !builtin.contains(p) && !p.starts_with(OIO) {
             materialised.insert(format!("ap\u{0}{p}"));
         }
     }
@@ -1304,7 +1375,7 @@ fn resolve_local(name: &str, onto_ns: Option<&str>) -> String {
     } else if let Some(ns) = onto_ns {
         format!("{ns}{name}")
     } else {
-        expand_id(name)
+        expand_obo_id(name)
     }
 }
 
@@ -2118,6 +2189,20 @@ struct Ctx {
     owlapi_456: bool,
 }
 
+/// The OBO identifier of an entity, as the writer spells it: a CURIE in the
+/// document's own prefixes, or the full IRI.
+pub struct IdCtx(Ctx);
+
+impl IdCtx {
+    pub fn new(model: &Model) -> IdCtx {
+        IdCtx(Ctx::new(model))
+    }
+
+    pub fn id(&self, iri: &str) -> String {
+        self.0.id(iri)
+    }
+}
+
 impl Ctx {
     fn new(model: &Model) -> Ctx {
         // The prefixes usable for CURIE shortening are the document's own declared
@@ -2137,7 +2222,7 @@ impl Ctx {
         let scanned = !model.idspaces.is_empty() || !model.rdf_prefixes.is_empty();
         let mut idspaces: Vec<(String, String)> =
             if scanned && model.explicit_prefixes.is_empty() {
-                model.idspaces.clone()
+                crate::io::declared_idspaces(model)
         } else if model.obo_source && model.explicit_prefixes.is_empty() {
             // An OBO document's only prefix declarations are its `idspace:`
             // lines. With none declared (and none added on the command line),
@@ -2160,14 +2245,7 @@ impl Ctx {
             // rule (a bare local name, or the full IRI).
             let mut v: Vec<(String, String)> = Vec::new();
             for (prefix, ns) in model.prefixes.mappings() {
-                if prefix.is_empty()
-                    || ns.starts_with(OBO_BASE)
-                    || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-                    || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-                    || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
-                    || ns.starts_with(OWL_NS)
-                    || ns.starts_with("http://www.w3.org/XML/1998/namespace")
-                {
+                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
                     continue;
                 }
                 if v.iter().any(|(p, _)| p == prefix) {
@@ -2180,14 +2258,7 @@ impl Ctx {
             // `its`/`swrl`, which mondo declares but which the CURIE prefix map does
             // not carry. Same builtin/PURL skips as above.
             for (prefix, ns) in &model.rdf_prefixes {
-                if prefix.is_empty()
-                    || ns.starts_with(OBO_BASE)
-                    || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-                    || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-                    || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
-                    || ns.starts_with(OWL_NS)
-                    || ns.starts_with("http://www.w3.org/XML/1998/namespace")
-                {
+                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
                     continue;
                 }
                 if v.iter().any(|(p, _)| p == prefix) {
@@ -2290,9 +2361,9 @@ impl Ctx {
             match id.split_once(':') {
                 Some((prefix, local)) => match self.idspaces.iter().find(|(p, _)| p == prefix) {
                     Some((_, ns)) => format!("{ns}{local}") == iri,
-                    None => expand_id(&id) == iri,
+                    None => expand_obo_id(&id) == iri,
                 },
-                None => expand_id(&id) == iri,
+                None => expand_obo_id(&id) == iri,
             }
         };
         if expands_back {
@@ -3008,6 +3079,33 @@ fn pv_literal_token(val: &str, owlapi_456: bool) -> String {
     }
 }
 
+/// A frame may carry at most one of its single-valued tags: a term with two
+/// definitions cannot be written as OBO. The document is refused before a line
+/// of it is written, so what the caller finds at the output path is empty.
+fn check_frame_structure<'a>(
+    data: &BTreeMap<String, SubjData>,
+    frames: impl Iterator<Item = &'a String>,
+) -> Result<()> {
+    for subj in frames {
+        let Some(sd) = data.get(subj) else { continue };
+        let counts = [
+            ("name", sd.name.iter().count() + sd.extra_names.len()),
+            ("def", sd.def.iter().count() + sd.extra_defs.len()),
+            ("comment", sd.comments.len()),
+            ("created_by", sd.created_by.len()),
+            ("creation_date", sd.creation_date.len()),
+        ];
+        if let Some((tag, _)) = counts.iter().find(|(_, n)| *n > 1) {
+            anyhow::bail!(
+                "OBO STRUCTURE ERROR Ontology does not conform to OBO structure rules:\n\
+                 multiple {tag} tags not allowed. in frame: {}",
+                sd.id.as_deref().unwrap_or(subj)
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     let ctx = Ctx::new(model);
     let mut classes: BTreeSet<String> = BTreeSet::new();
@@ -3094,6 +3192,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         }
     }
     let subclass_cap = owlapi_set_cap(subclass_count);
+    AA_ALL_CAP.with(|c| c.set(owlapi_set_cap(aa_counts.values().sum())));
     // Header-directive values are written case-insensitively sorted, like the
     // other multi-valued header tags (`subsetdef:`, the treat-xrefs lists).
     for vals in directives.values_mut() {
@@ -3357,6 +3456,12 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         };
     }
 
+    if model.obo_structure_check {
+        check_frame_structure(
+            &data,
+            classes.iter().chain(obj_props.iter()).chain(ann_props.iter()).chain(individuals.iter()),
+        )?;
+    }
     writeln!(writer, "format-version: {}", format_version.as_deref().unwrap_or("1.2"))?;
     if let Some(dv) = data_version(ont_iri.as_deref(), ont_version_iri.as_deref()) {
         writeln!(writer, "data-version: {dv}")?;
@@ -3439,8 +3544,8 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .map(|(p, n)| (p.clone(), n.clone()))
             .collect()
     } else {
-        // An OWL source: emit the exact prefix set the document declares or uses.
-        model.idspaces.clone()
+        // An OWL source: emit the exact prefix set the document declares.
+        crate::io::declared_idspaces(model)
     };
     // Header order: case-insensitive by prefix, ties broken by the prefix ASCENDING
     // (so a same-fold pair like `ICD10CM`/`icd10cm` lists uppercase first — the
@@ -3590,7 +3695,7 @@ fn fold_alt_ids(
             && sd.obsolescence_reason.as_deref() == Some("IAO:0000227")
             && sd.replaced_by.len() == 1
         {
-            merged.push((expand_id(&sd.replaced_by[0]), ctx.id(iri)));
+            merged.push((expand_obo_id(&sd.replaced_by[0]), ctx.id(iri)));
             if sd.is_a.is_empty()
                 && sd.relationships.is_empty()
                 && sd.intersection_of.is_empty()
@@ -3636,7 +3741,7 @@ fn fold_alt_ids(
     // `intersection_of` and a `relationship`, and it is still a term.
     let alt_targets: Vec<String> = data
         .values()
-        .flat_map(|sd| sd.alt_ids.iter().map(|a| expand_id(a)))
+        .flat_map(|sd| sd.alt_ids.iter().map(|a| expand_obo_id(a)))
         .collect();
     for a in alt_targets {
         let is_real = data.get(&a).is_some_and(has_content);
@@ -4802,7 +4907,7 @@ fn owlapi_lit_hash(value: &str, datatype: Option<&str>, lang: Option<&str>) -> i
 
 /// The `(value, datatype, language)` the literal hash needs from an annotation
 /// value; an IRI value returns its IRI in `value` with `is_iri` true.
-fn av_lit_parts(av: &AnnotationValue<RcStr>) -> (String, Option<String>, Option<String>, bool) {
+pub(crate) fn av_lit_parts(av: &AnnotationValue<RcStr>) -> (String, Option<String>, Option<String>, bool) {
     match av {
         AnnotationValue::IRI(i) => (i.as_ref().to_string(), None, None, true),
         AnnotationValue::Literal(Literal::Simple { literal }) => (literal.clone(), None, None, false),
@@ -4823,7 +4928,7 @@ fn owlapi_annotation_hash(prop_iri: &str, value: &str, is_iri: bool) -> i32 {
 
 /// [`owlapi_annotation_hash`] with the value's datatype/language, so typed and
 /// language-tagged qualifier values hash exactly.
-fn owlapi_annotation_hash_full(
+pub(crate) fn owlapi_annotation_hash_full(
     prop_iri: &str,
     value: &str,
     datatype: Option<&str>,
@@ -5005,6 +5110,25 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
                 rows.join("\u{2}")
             );
         }
+        // The subject's set is filled from the document-wide set of every
+        // annotation assertion, so two labels in one bucket of the subject's
+        // table stand in that larger table's order.
+        let all = AA_ALL_CAP.with(|c| c.get()).max(16);
+        let keys: Vec<(usize, usize)> = sd
+            .label_axioms
+            .iter()
+            .zip(buckets.iter())
+            .map(|((v, lang, anns), b)| {
+                let h = owlapi_label_axiom_hash(subj_iri, v, lang.as_deref(), owlapi_aa_collection_hash(ctx, anns));
+                (*b, owlapi_aa_bucket(h, all))
+            })
+            .collect();
+        if let Some(min) = keys.iter().min() {
+            if keys.iter().filter(|k| *k == min).count() == 1 {
+                let i = keys.iter().position(|k| k == min).unwrap();
+                return Some(sd.label_axioms[i].0.clone());
+            }
+        }
         let mut sorted = buckets.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -5100,6 +5224,20 @@ fn owlapi_aa_bucket(hash: i32, cap: usize) -> usize {
     let h = hash as u32;
     let spread = h ^ (h >> 16);
     (spread as usize) & (cap - 1)
+}
+
+thread_local! {
+    /// The table size of the set holding EVERY annotation assertion of the
+    /// document being written; a subject's own set is filled from it.
+    static AA_ALL_CAP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Where an annotation assertion stands among its subject's: its bucket in
+/// the subject's set, and within that bucket its place in the document-wide
+/// set the subject's was filled from.
+fn aa_set_key(hash: i32, cap: usize) -> u64 {
+    let all = AA_ALL_CAP.with(|c| c.get()).max(16);
+    ((owlapi_aa_bucket(hash, cap) as u64) << 32) | owlapi_aa_bucket(hash, all) as u64
 }
 
 /// Table size of the hash set after `n` incremental adds: start
@@ -5598,13 +5736,11 @@ fn write_stanza<W: Write>(
                 .iter()
                 .find(|(v, _, a)| v == text && a == anns)
                 .and_then(|(_, l, _)| l.clone());
-            let bucket = owlapi_aa_bucket(
-                owlapi_label_axiom_hash(iri, text, lang.as_deref(), coll),
-                aa_cap,
-            );
+            let bucket = aa_set_key(
+                owlapi_label_axiom_hash(iri, text, lang.as_deref(), coll), aa_cap);
             let quals = quals_with_xrefs_hashset(&dbxrefs, &quals);
             (
-                format!("{}\u{0}{}\u{1}{bucket:010}", fold(text), text),
+                format!("{}\u{0}{}\u{1}{bucket:020}", fold(text), text),
                 format!("{}{}", escape_name(text), render_quals(&quals)),
             )
         }).collect())?;
@@ -5643,9 +5779,9 @@ fn write_stanza<W: Write>(
         write_sorted(writer, "def", ditems.into_iter().map(|(text, anns)| {
             let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
             let coll = owlapi_aa_collection_hash(ctx, anns);
-            let bucket = owlapi_aa_bucket(owlapi_aa_axiom_hash(iri, IAO_DEF, text, false, coll), aa_cap);
+            let bucket = aa_set_key(owlapi_aa_axiom_hash(iri, IAO_DEF, text, false, coll), aa_cap);
             (
-                format!("{}\u{0}{}\u{1}{bucket:010}", fold(text), text),
+                format!("{}\u{0}{}\u{1}{bucket:020}", fold(text), text),
                 format!("\"{}\" {}{}", escape(text), render_bracket(&dbxrefs), render_quals(&plain(&owlapi_hashset_order(quals)))),
             )
         }).collect())?;
@@ -5673,12 +5809,10 @@ fn write_stanza<W: Write>(
         // already use. EFO:0000218 carries `gard_rare` twice, with different
         // `{source=…}` qualifiers, and sorting on the name alone reverses them.
         let coll = owlapi_aa_collection_hash(ctx, anns);
-        let bucket = owlapi_aa_bucket(
-            owlapi_aa_axiom_hash(iri, &format!("{OIO}inSubset"), raw, *is_iri, coll),
-            aa_cap,
-        );
+        let bucket = aa_set_key(
+            owlapi_aa_axiom_hash(iri, &format!("{OIO}inSubset"), raw, *is_iri, coll), aa_cap);
         (
-            format!("{}\u{1}{bucket:010}", fold(s)),
+            format!("{}\u{1}{bucket:020}", fold(s)),
             format!("{s}{}", render_quals(&quals_with_xrefs_hashset(&dbxrefs, &quals))),
         )
     }).collect())?;
@@ -5702,12 +5836,10 @@ fn write_stanza<W: Write>(
             _ => format!("{OIO}hasRelatedSynonym"),
         };
         let coll = owlapi_aa_collection_hash(ctx, anns);
-        let bucket = owlapi_aa_bucket(
-            owlapi_aa_axiom_hash_full(iri, &syn_prop, text, None, lang.as_deref(), false, coll),
-            aa_cap,
-        );
+        let bucket = aa_set_key(
+            owlapi_aa_axiom_hash_full(iri, &syn_prop, text, None, lang.as_deref(), false, coll), aa_cap);
         (
-            format!("{}\u{0}{}\u{0}{}\u{1}{bucket:010}", fold(text), text, scope),
+            format!("{}\u{0}{}\u{0}{}\u{1}{bucket:020}", fold(text), text, scope),
             format!("\"{}\" {} {}{}{}", escape(text), scope, type_tok, render_bracket(&dbxrefs), render_quals(&plain(&owlapi_hashset_order(quals)))),
         )
     }).collect())?;
@@ -5724,7 +5856,7 @@ fn write_stanza<W: Write>(
     in_owlapi_order.sort_by_key(|(x, anns)| {
         let coll = owlapi_aa_collection_hash(ctx, anns);
         let h = owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x.trim(), false, coll);
-        owlapi_aa_bucket(h, aa_cap)
+        aa_set_key(h, aa_cap)
     });
     let mut merged_xrefs: Vec<(String, BTreeSet<Annotation<RcStr>>)> = Vec::new();
     for (x, anns) in in_owlapi_order {
@@ -5753,7 +5885,7 @@ fn write_stanza<W: Write>(
     }
     write_sorted(writer, "xref", merged_xrefs.iter().map(|(x, anns)| {
         let coll = owlapi_aa_collection_hash(ctx, anns);
-        let bucket = owlapi_aa_bucket(owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x, false, coll), aa_cap);
+        let bucket = aa_set_key(owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x, false, coll), aa_cap);
         let (dbxrefs, _, mut quals) = ax_ann_pieces(ctx, anns);
         // An xref value may carry a trailing quoted description in the OBO
         // `IDSPACE:LOCAL "description"` form — CHEBI stores the whole thing in one
@@ -5797,7 +5929,7 @@ fn write_stanza<W: Write>(
         };
         let cmp = format!("{id_part} {}", label_raw.as_deref().unwrap_or("null"));
         (
-            format!("{}\u{0}{}\u{1}{bucket:010}", fold(&cmp), cmp),
+            format!("{}\u{0}{}\u{1}{bucket:020}", fold(&cmp), cmp),
             format!("{}{desc_tok}{}", escape_xref(xid), render_quals(&quals)),
         )
     }).collect())?;
@@ -5845,7 +5977,7 @@ fn write_stanza<W: Write>(
         // An IRI value hashes as its FULL IRI; `val` is only the CURIE the clause
         // prints, and hashing that puts every IRI-valued clause in the wrong bucket.
         let hash_val = if is_iri { val_iri } else { val.as_str() };
-        let bucket = owlapi_aa_bucket(
+        let bucket = aa_set_key(
             owlapi_aa_axiom_hash_full(
                 iri,
                 prop_iri,
@@ -5854,9 +5986,7 @@ fn write_stanza<W: Write>(
                 None,
                 is_iri,
                 coll,
-            ),
-            aa_cap,
-        );
+            ), aa_cap);
         if std::env::var_os("OM_PV_DEBUG").is_some() {
             eprintln!(
                 "[pv]\t{iri}\tcap={aa_cap}\tbucket={bucket}\thash={}\tcoll={coll}\tdt={:?}\t{line}",
@@ -5869,7 +5999,7 @@ fn write_stanza<W: Write>(
         // that tie on BOTH fall through to the axiom-set bucket.
         (
             format!(
-                "{}\u{0}{pred}\u{0}{}\u{0}{val}\u{1}{bucket:010}",
+                "{}\u{0}{pred}\u{0}{}\u{0}{val}\u{1}{bucket:020}",
                 fold(pred),
                 fold(val)
             ),
@@ -5908,7 +6038,7 @@ fn write_stanza<W: Write>(
             // `{gci_*}` qualifiers do not enter it, so same-parent clauses — plain and
             // GCI alike — tie and fall to the SubClassOf axiom-set bucket order.
             let bucket = owlapi_aa_bucket(*hash, subclass_cap);
-            let key = format!("{}\u{0}{}\u{1}{bucket:010}", fold(p), p);
+            let key = format!("{}\u{0}{}\u{1}{bucket:020}", fold(p), p);
             (key, format!("{p}{}{}", render_quals(&quals), label_comment(labels, &[p])))
         }).collect())?;
         // A genus line (one token) always precedes the differentiae, which are then
@@ -5972,7 +6102,7 @@ fn write_stanza<W: Write>(
             // `{gci_*}`/`{all_only}` qualifiers do not enter it, so same rel+target
             // clauses tie and break in the SubClassOf axiom-set bucket order.
             let bucket = owlapi_aa_bucket(*hash, subclass_cap);
-            let key = format!("{}\u{0}{r} {t}\u{1}{bucket:010}", fold(&format!("{r} {t}")));
+            let key = format!("{}\u{0}{r} {t}\u{1}{bucket:020}", fold(&format!("{r} {t}")));
             (key, format!("{r} {t}{}{}", render_quals(&quals), label_comment_pred(labels, &declared_prefixes, &[r, t])))
         }).collect())?;
         write_sorted(writer, "property_value", property_values)?;

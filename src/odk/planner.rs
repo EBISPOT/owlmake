@@ -538,6 +538,138 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
     Ok(plan)
 }
 
+/// An artefact that opens the edit file as an ontology reads its import
+/// closure, so the plan-built modules that closure names are prerequisites
+/// of it: the artefact is built after them, as after anything else it
+/// needs. A module whose own pipeline is seeded from such an artefact — the
+/// merged module, drawn from the merged edit file — is left out, since
+/// neither could then be built first; it is read as it stands.
+pub(crate) fn closure_module_needs(dir: &Path, plan: &mut Plan) {
+    let dbg = std::env::var_os("OM_CLOSURE_DEBUG").is_some();
+    let Some(edit) = plan.edit_file.clone() else {
+        if dbg {
+            eprintln!("[closure-needs] no edit file");
+        }
+        return;
+    };
+    let edit_path = dir.join(&edit);
+    let Ok(text) = std::fs::read_to_string(&edit_path) else {
+        if dbg {
+            eprintln!("[closure-needs] cannot read {}", edit_path.display());
+        }
+        return;
+    };
+    let catalog = crate::build::load_catalog(dir);
+    // An import's output is spelled from the ontology directory, an artefact's
+    // prerequisite from the repository root.
+    let canon_dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let dir_rel = |p: &std::path::Path| -> Option<String> {
+        let p = p.canonicalize().ok()?;
+        p.strip_prefix(&canon_dir).ok().map(|r| r.to_string_lossy().into_owned())
+    };
+    // (the import's output, the prerequisite that names it)
+    let modules: Vec<(String, String)> = crate::build::import_iris(&text)
+        .iter()
+        .filter_map(|iri| crate::cmd::catalog_resolve(&catalog, iri))
+        .filter_map(|p| Some((dir_rel(&p)?, p.display().to_string())))
+        .filter(|(out, _)| plan.imports.iter().any(|i| !i.is_mirror_only() && i.output == *out))
+        .collect();
+    if modules.is_empty() {
+        if dbg {
+            eprintln!("[closure-needs] no plan-built module in the closure");
+        }
+        return;
+    }
+    // At this point every path of the plan is spelled from the ontology
+    // directory, as the import outputs are.
+    let same_file = |a: &str, b: &std::path::Path| {
+        let pa = dir.join(a);
+        pa.canonicalize().ok() == b.canonicalize().ok() || pa == b
+    };
+    let opens_closure = |a: &crate::plan::ArtefactPlan| {
+        let opens_edit = a.input.as_deref().is_some_and(|i| same_file(i, &edit_path))
+            || a.steps.iter().any(|s| match s {
+                Step::Op(Op::Merge { inputs, .. }) | Step::Partial { op: Op::Merge { inputs, .. }, .. } => {
+                    inputs.iter().any(|i| same_file(i, &edit_path))
+                }
+                Step::Boundary { input: Some(i) } => same_file(i, &edit_path),
+                _ => false,
+            });
+        // Reading the closure: an ontology step does; a query reads only the
+        // root unless it unions the graphs; a shell line reads text.
+        let reads_closure = |op: &Op| match op {
+            Op::Query { use_graphs, .. } => *use_graphs,
+            _ => true,
+        };
+        opens_edit
+            && a.steps.iter().any(|s| match s {
+                Step::Op(op) | Step::Partial { op, .. } => reads_closure(op),
+                Step::OwlmakeCli { name, .. } => !matches!(
+                    name.as_str(),
+                    "grep" | "egrep" | "sed" | "comm" | "sort" | "uniq" | "cat" | "jq" | "obo-grep" | "obo-grep.pl"
+                ),
+                _ => false,
+            })
+    };
+    // Whether a module's pipeline reaches, through the plan's targets, an
+    // artefact that opens the closure.
+    let seeded_from_closure = |imp: &crate::plan::ImportPlan| -> bool {
+        let mut queue: Vec<String> = crate::plan::gaps::step_term_files(&imp.steps);
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        while let Some(f) = queue.pop() {
+            if !seen.insert(f.clone()) {
+                continue;
+            }
+            let Some(a) = plan.artefacts.iter().chain(plan.prerequisites.iter()).find(|a| a.target == f)
+            else {
+                continue;
+            };
+            if opens_closure(a) {
+                if dbg {
+                    eprintln!("[closure-needs] {} is seeded through {} (input={:?})", imp.id, a.target, a.input);
+                }
+                return true;
+            }
+            queue.extend(a.needs.iter().cloned());
+            queue.extend(a.input.iter().cloned());
+        }
+        false
+    };
+    let needed: Vec<String> = modules
+        .iter()
+        .filter(|(out, _)| {
+            plan.imports.iter().find(|i| i.output == *out).is_some_and(|i| !seeded_from_closure(i))
+        })
+        .map(|(out, _)| out.clone())
+        .collect();
+    if dbg {
+        eprintln!("[closure-needs] modules of {edit}: {modules:?}; prerequisites: {needed:?}");
+    }
+    if needed.is_empty() {
+        return;
+    }
+    let targets: Vec<String> = plan
+        .artefacts
+        .iter()
+        .chain(plan.prerequisites.iter())
+        .filter(|a| opens_closure(a))
+        .map(|a| a.target.clone())
+        .collect();
+    for a in plan.artefacts.iter_mut().chain(plan.prerequisites.iter_mut()) {
+        if !targets.contains(&a.target) {
+            continue;
+        }
+        for m in &needed {
+            if !a.needs.contains(m) {
+                a.needs.push(m.clone());
+            }
+        }
+        if dbg {
+            eprintln!("[closure-needs] {} needs {:?}", a.target, a.needs);
+        }
+    }
+}
+
 /// The release products a build configuration names by convention, in the order
 /// they are planned: each release artefact `<id>-<art>.owl`, the primary
 /// `<id>.owl`, each in every export format, everything the configuration's own
@@ -932,10 +1064,14 @@ fn plan_rule(
         }
         // A line that opens over a REMOTE ontology is a boundary on ANY line,
         // including the first: an IRI cannot become the rule's `$<`, which is
-        // resolved to a path, so the boundary is how the plan names it.
+        // resolved to a path, so the boundary is how the plan names it. Only
+        // the input the line opens WITH counts: `merge -i a.owl -I <b>` opens
+        // over `a.owl`, and `<b>` is one more input merged into it.
         if !line_steps.is_empty() && is_robot_line(&expanded, robot_prefix) {
             if let Some(iri) = first_robot_iri_input(&expanded, robot_prefix) {
-                if !matches!(line_steps.first(), Some(Step::Boundary { .. })) {
+                let opens_with_iri = first_robot_input_of_any_kind(&expanded, robot_prefix)
+                    .is_some_and(|v| v == iri);
+                if opens_with_iri && !matches!(line_steps.first(), Some(Step::Boundary { .. })) {
                     line_steps.insert(0, Step::Boundary { input: Some(iri) });
                 }
             }
@@ -2692,7 +2828,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             input: Some(full_target.clone()),
         needs: vec![],
         order_only: vec![],
-        steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![] })],
+        steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![], check: None })],
             gaps: vec![],
             missing_rule: false,
         side_effect_only: false,
@@ -3017,6 +3153,34 @@ pub(super) fn first_robot_iri_input(cmd: &str, robot_prefix: &str) -> Option<Str
                 return Some(v);
             }
         }
+    }
+    None
+}
+
+/// The first input of any kind — a file or an IRI — the first `robot`
+/// invocation on this recipe line names, in command-line order.
+pub(super) fn first_robot_input_of_any_kind(cmd: &str, robot_prefix: &str) -> Option<String> {
+    for seg in cmd.split(['|', ';', '&']) {
+        let toks = robot::tokenize(seg);
+        if toks.is_empty() || !robot::is_robot(&toks, robot_prefix) {
+            continue;
+        }
+        let mut it = toks.iter();
+        while let Some(t) = it.next() {
+            let v = match t.as_str() {
+                "-i" | "--input" | "-I" | "--input-iri" => it.next().cloned(),
+                _ => t
+                    .strip_prefix("--input=")
+                    .or_else(|| t.strip_prefix("--input-iri="))
+                    .map(str::to_string),
+            };
+            if let Some(v) = v {
+                if !v.starts_with('-') {
+                    return Some(v);
+                }
+            }
+        }
+        return None;
     }
     None
 }
@@ -3583,8 +3747,25 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
             && matches!((staged, src.as_slice()), (Some(o), [only]) if o == only && !same_file(o, target));
         if folds {
             steps.pop();
+            // The staging file's extension chose the format the target is
+            // written in: `-o $@.owl && mv $@.owl $@` writes RDF/XML to a
+            // target whose own name says otherwise.
+            let staged_ext = |p: &str| {
+                std::path::Path::new(p).extension().and_then(|e| e.to_str()).map(str::to_lowercase)
+            };
+            let target_ext = staged_ext(target);
             match steps.last_mut() {
                 Some(Step::Op(robot::Op::Convert { output, .. })) => *output = None,
+                Some(Step::Op(robot::Op::RoundTrip { path })) if staged_ext(path) != target_ext => {
+                    let format = staged_ext(path);
+                    *steps.last_mut().unwrap() = Step::Op(robot::Op::Convert {
+                        format,
+                        clean_obo: None,
+                        output: None,
+                        add_prefixes: Vec::new(),
+                        check: None,
+                    });
+                }
                 _ => {
                     steps.pop();
                 }

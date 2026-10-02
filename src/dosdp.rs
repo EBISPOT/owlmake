@@ -130,6 +130,11 @@ pub struct GenerateOptions {
     /// 'cell'` this way, and the substituted text then parses under Manchester
     /// precedence exactly as it stands in the template.
     pub var_range_exprs: HashMap<String, String>,
+    /// Variables an `annotationProperty … var:` annotation is NOT written
+    /// for. `prototype` lists its class variables whose range names one of the
+    /// pattern's own classes or relations: a prototype carries such an
+    /// annotation only where the variable's range is an IRI of its own.
+    pub iri_annotation_skip: std::collections::HashSet<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -627,6 +632,7 @@ pub fn generate_with(
             labels,
             var_labels: &gopts.var_labels,
             var_range_exprs: &gopts.var_range_exprs,
+            iri_annotation_skip: &gopts.iri_annotation_skip,
             var_values: &var_values,
             is_declared: &is_declared,
             raw_values: &raw_values,
@@ -988,6 +994,9 @@ struct RowCtx<'a> {
     var_labels: &'a HashMap<String, String>,
     /// Per-variable range expression (see [`GenerateOptions::var_range_exprs`]).
     var_range_exprs: &'a HashMap<String, String>,
+    /// Variables whose IRI-valued annotations are not written (see
+    /// [`GenerateOptions::iri_annotation_skip`]).
+    iri_annotation_skip: &'a std::collections::HashSet<String>,
     var_values: &'a dyn Fn(&str) -> Vec<String>,
     /// Whether a variable name is declared by the pattern (see `is_declared`).
     is_declared: &'a dyn Fn(&str) -> bool,
@@ -1362,6 +1371,9 @@ impl RowCtx<'_> {
                     });
                 }
             } else if let Some(var) = a.var.as_ref().filter(|v| (self.is_declared)(v)) {
+                if self.iri_annotation_skip.contains(var) {
+                    continue;
+                }
                 if let Some(iri) = (self.var_values)(var).into_iter().next() {
                     set.insert(Annotation { ann: Default::default(),
                         ap: self.b.annotation_property(prop),
@@ -1509,6 +1521,9 @@ fn emit_annotation(ont: &mut SetOntology<RcStr>, ctx: &RowCtx, dc_iri: &str, ann
         }
     } else if let Some(var) = ann.var.as_ref().filter(|v| (ctx.is_declared)(v)) {
         // IRI-valued annotation (object is the filler IRI).
+        if ctx.iri_annotation_skip.contains(var) {
+            return;
+        }
         if let Some(iri) = (ctx.var_values)(var).into_iter().next() {
             ont.insert(AnnotatedComponent {
                 component: Component::AnnotationAssertion(AnnotationAssertion {
@@ -1827,6 +1842,13 @@ pub fn terms(pattern_yaml: &str, data_tsv: &str) -> Result<Vec<String>> {
     for la in &pattern.logical_axioms {
         logical.push(' ');
         logical.push_str(&la.text);
+        // A repeating clause names its relation in the clause, not in the
+        // axiom's own text: UBERON's vein pattern says `'tributary of' some %s`
+        // only under `multi_clause`, and the relation belongs in the seed as
+        // much as one a plain `text` names.
+        if let Some(mc) = &la.multi_clause {
+            clause_texts(mc, &mut logical);
+        }
     }
     // A dictionary KEY is what a template names (`'fractured'`, `part_of`); map
     // the ones that appear to their IRIs. What "appears" means is decided by the
@@ -1890,6 +1912,20 @@ pub fn terms(pattern_yaml: &str, data_tsv: &str) -> Result<Vec<String>> {
     Ok(crate::hash_trie::order(&items))
 }
 
+/// Every `text` under a repeating clause, sub-clauses included, appended to
+/// `out` as logical text.
+fn clause_texts(mc: &MultiClause, out: &mut String) {
+    for c in &mc.clauses {
+        if let Some(t) = &c.text {
+            out.push(' ');
+            out.push_str(t);
+        }
+        for sub in &c.sub_clauses {
+            clause_texts(sub, out);
+        }
+    }
+}
+
 /// Generate prototypical axioms from a pattern with no data: each variable is
 /// filled with its range class, and the defined class is the pattern IRI.
 pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result<Model> {
@@ -1913,8 +1949,18 @@ pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result
     // label still wins).
     let mut var_labels: HashMap<String, String> = HashMap::new();
     let mut var_range_exprs: HashMap<String, String> = HashMap::new();
+    let mut iri_annotation_skip: std::collections::HashSet<String> = Default::default();
     for (var, range) in pattern.vars.iter().chain(pattern.list_vars.iter()) {
         header.push(var.clone());
+        // A variable ranging over one of the pattern's own classes or relations
+        // fills the logical axioms and nothing else; only a range that is an
+        // IRI of its own is written as an annotation value.
+        let r = range.trim().trim_matches('\'').trim();
+        if [&pattern.classes, &pattern.relations, &pattern.object_properties].iter().any(|d| d.contains_key(r))
+            || !(r.contains(':') || r.starts_with("http"))
+        {
+            iri_annotation_skip.insert(var.clone());
+        }
         // …but only for a range that is not itself an identifier. A range written
         // as a CURIE (`cell: CL:0000000`) IS the filler, so the text shows the
         // IRI it expands to; a range written as a label (`'behavior'`) names
@@ -1939,7 +1985,7 @@ pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result
         row.push(range.trim().to_string());
     }
     let tsv = format!("{}\n{}\n", header.join("\t"), row.join("\t"));
-    let gopts = GenerateOptions { var_labels, var_range_exprs, ..Default::default() };
+    let gopts = GenerateOptions { var_labels, var_range_exprs, iri_annotation_skip, ..Default::default() };
     let mut model = generate_with(pattern_yaml, &tsv, labels, &gopts)?;
     // Each prototype is titled with the pattern's name — the one annotation
     // `prototype` adds that `generate` does not.
@@ -2869,6 +2915,7 @@ fn run_cli(args: &[String]) -> Result<i32> {
                 annotation_index,
                 extra_prefixes,
                 var_labels: HashMap::new(),
+                iri_annotation_skip: Default::default(),
                 var_range_exprs: HashMap::new(),
             };
             let read_data = |path: &str| -> Result<String> {
@@ -3333,4 +3380,26 @@ pub fn validate_data(data_tsv: &str) -> Result<()> {
         bail!("empty data table");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod multi_clause_terms_tests {
+    /// A relation named only inside a repeating clause is one of the pattern's
+    /// terms: UBERON's vein pattern says `'tributary of' some %s` under
+    /// `multi_clause` alone, and its seed must carry RO:0002376.
+    #[test]
+    fn a_relation_named_in_a_repeating_clause_is_a_term() {
+        let yaml = "pattern_name: vein\n\
+                    pattern_iri: http://example.org/vein\n\
+                    classes:\n  vessel: \"UBERON:0001981\"\n\
+                    relations:\n  part of: \"BFO:0000050\"\n  tributary of: \"RO:0002376\"\n\
+                    vars:\n  parent: \"'vessel'\"\n\
+                    list_vars:\n  tributary_of: \"'vessel'\"\n\
+                    logical_axioms:\n\
+                    \x20 - axiom_type: subClassOf\n    text: \"'part of' some %s\"\n    vars:\n      - parent\n\
+                    \x20 - axiom_type: subClassOf\n    multi_clause:\n      sep: \" and \"\n      clauses:\n        - text: \"'tributary of' some %s\"\n          vars:\n            - tributary_of\n";
+        let terms = super::terms(yaml, "defined_class\tparent\ttributary_of\n").unwrap();
+        assert!(terms.contains(&"http://purl.obolibrary.org/obo/RO_0002376".to_string()), "{terms:?}");
+        assert!(terms.contains(&"http://purl.obolibrary.org/obo/BFO_0000050".to_string()), "{terms:?}");
+    }
 }

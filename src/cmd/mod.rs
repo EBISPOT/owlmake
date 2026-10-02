@@ -493,6 +493,11 @@ pub(crate) fn resolve_import_closure(
         // materialises no stub for it. The save drops the borrowed axioms again,
         // which is exactly when this record is the only thing left that knows.
         let declared = crate::build::closure_declared_entities(&imported);
+        // A closure member was opened with the document, so a functional
+        // write's banners draw on its labels too.
+        if !model.banner_docs.is_empty() {
+            model.banner_docs.push(crate::cmd::banner_doc_of(&imported, false));
+        }
         crate::cmd::merge::merge_into(model, &imported, &opts);
         model.closure_declared.extend(declared);
         for c in borrowed {
@@ -584,8 +589,10 @@ pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, St
     // and the size of the set that axiom lives in.
     let mut cands: std::collections::HashMap<String, Vec<(i32, String)>> = Default::default();
     let mut subject_ann_count: std::collections::HashMap<String, usize> = Default::default();
+    let mut assertions = 0usize;
     for ac in model.ont.iter() {
         let Component::AnnotationAssertion(aa) = &ac.component else { continue };
+        assertions += 1;
         let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
         let subj = subj.as_ref().to_string();
         *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
@@ -608,17 +615,89 @@ pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, St
     }
     cands
         .into_iter()
-        .map(|(subj, c)| {
+        .map(|(subj, mut c)| {
+            // Two candidates that fall in one bucket at both levels stand in
+            // the order the document holds them, which the document does not
+            // record; the lexically smaller comes first, so the pick is the
+            // same from one run to the next.
+            c.sort_by(|a, b| a.1.cmp(&b.1));
             let text = if c.len() == 1 {
                 c[0].1.clone()
             } else {
                 let hashes: Vec<i32> = c.iter().map(|(h, _)| *h).collect();
                 let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
-                c[crate::owlapi_hash::hashset_order_of(&hashes, total)[0]].1.clone()
+                if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == subj) {
+                    eprintln!("[labels] {subj} subject_total={total} assertions={assertions} cands={:?}", c);
+                }
+                c[crate::owlapi_hash::subject_assertion_order(&hashes, total, assertions)[0]].1.clone()
             };
             (subj, text)
         })
         .collect()
+}
+
+/// The banner-label document for `model` as it stands.
+pub(crate) fn banner_doc_of(model: &Model, root: bool) -> crate::model::BannerDoc {
+    let (iri, version) = crate::build::model_ontology_id(model);
+    crate::model::BannerDoc { iri, version, labels: std::sync::Arc::new(rdfs_labels(model)), root }
+}
+
+/// The label a functional write banners each entity with, over every loaded
+/// document: the documents stand in the order a set of them is iterated in,
+/// keyed on each one's identity, and the first document with a label for an
+/// entity supplies it. The document being written is the root, under the
+/// identity it is written with (`root_iri`/`root_version`). Its labels are
+/// the ones it was loaded with (its entity index is settled when it is first
+/// consulted), then the labels of each input merged into it, in merge order,
+/// for entities it did not label itself, and finally its labels as it stands
+/// (`root_labels`) for anything a later step added. Every other document
+/// keeps the labels it was loaded with.
+pub(crate) fn fold_banner_docs(
+    docs: &[crate::model::BannerDoc],
+    root_iri: Option<&str>,
+    root_version: Option<&str>,
+    merged_input_labels: &[std::sync::Arc<std::collections::HashMap<String, String>>],
+    root_labels: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, String> {
+    let mut root_effective: std::collections::HashMap<String, String> = docs
+        .iter()
+        .find(|d| d.root)
+        .map(|d| (*d.labels).clone())
+        .unwrap_or_default();
+    for labels in merged_input_labels {
+        for (subject, label) in labels.iter() {
+            root_effective.entry(subject.clone()).or_insert_with(|| label.clone());
+        }
+    }
+    for (subject, label) in root_labels {
+        root_effective.entry(subject.clone()).or_insert_with(|| label.clone());
+    }
+    let root_labels = &root_effective;
+    let root_id = (root_iri.map(str::to_string), root_version.map(str::to_string));
+    let mut seen: std::collections::HashSet<(Option<String>, Option<String>)> = Default::default();
+    seen.insert(root_id.clone());
+    let others: Vec<&crate::model::BannerDoc> = docs
+        .iter()
+        .filter(|d| !d.root)
+        .filter(|d| d.iri.is_none() || seen.insert((d.iri.clone(), d.version.clone())))
+        .collect();
+    let mut hashes: Vec<i32> = vec![crate::owlapi_hash::ontology_id_hash(root_iri, root_version)];
+    hashes.extend(others.iter().map(|d| crate::owlapi_hash::ontology_id_hash(d.iri.as_deref(), d.version.as_deref())));
+    let mut out = std::collections::HashMap::new();
+    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
+        let labels: &std::collections::HashMap<String, String> =
+            if i == 0 { root_labels } else { &others[i - 1].labels };
+        if std::env::var("OM_BANNER_DEBUG").is_ok() {
+            eprintln!("[banner] doc#{i} id-hash={} labels={} root={}", hashes[i], labels.len(), i == 0);
+        }
+        for (subj, label) in labels.iter() {
+            if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == *subj) && !out.contains_key(subj) {
+                eprintln!("[banner] {subj} ← doc#{i}: {label}");
+            }
+            out.entry(subj.clone()).or_insert_with(|| label.clone());
+        }
+    }
+    out
 }
 
 /// Resolve the `owl:imports` closure with no catalog named on the command line.
@@ -732,7 +811,7 @@ pub(crate) fn cleanup_tdb(tdb: Option<Tdb>, keep: bool) {
 }
 
 /// Collect the `owl:imports` IRIs declared by `model`.
-fn imports_of(model: &Model) -> Vec<String> {
+pub(crate) fn imports_of(model: &Model) -> Vec<String> {
     model
         .ont
         .iter()

@@ -625,17 +625,21 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         bail!("ontology is inconsistent (owl:Thing is unsatisfiable)");
     }
     if !unsat.is_empty() {
-        // A count line followed by one `    unsatisfiable: <IRI>` line each; the
-        // wording is fixed because CI jobs grep the log for it. The cap is high
-        // because a short silent truncation hides the shape of a
-        // mass-unsatisfiability failure — the case where the list is the diagnosis.
-        const UNSAT_LIST_CAP: usize = 5000;
-        status!("There are {} unsatisfiable classes in the ontology.", unsat.len());
-        for u in unsat.iter().take(UNSAT_LIST_CAP) {
-            status!("    unsatisfiable: {u}");
-        }
-        if unsat.len() > UNSAT_LIST_CAP {
-            status!("    … and {} more", unsat.len() - UNSAT_LIST_CAP);
+        // A count line followed by one `    unsatisfiable: <IRI>` line each, on
+        // the console as a logged error, in the order the reasoner's bottom node
+        // lists its members: CI jobs grep the log for the wording, and a recipe
+        // that redirects the console (`reason … > report.txt`) keeps the whole
+        // list as its report.
+        let stamp = log_stamp();
+        let log = |msg: &str| {
+            crate::build::console_line(&format!(
+                "{stamp} ERROR org.obolibrary.robot.ReasonerHelper - {msg}"
+            ));
+        };
+        log(&format!("There are {} unsatisfiable classes in the ontology.", unsat.len()));
+        let names: Vec<String> = unsat.iter().map(|u| u.to_string()).collect();
+        for i in crate::owlapi_hash::class_node_order(&names) {
+            log(&format!("    unsatisfiable: {}", names[i]));
         }
         if let Some(path) = &opts.dump_unsatisfiable {
             dump_unsatisfiable_module(model.as_ref(), &unsat, path)?;
@@ -1703,4 +1707,15 @@ mod tests {
         assert!(text.contains(&format!("{NS}A")), "{text}");
         let _ = std::fs::remove_file(&path);
     }
+}
+
+/// The moment a logged error is stamped with, `YYYY-MM-DD HH:MM:SS,mmm`.
+fn log_stamp() -> String {
+    std::process::Command::new("date")
+        .arg("+%Y-%m-%d %H:%M:%S,%3N")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "0000-00-00 00:00:00,000".to_string())
 }

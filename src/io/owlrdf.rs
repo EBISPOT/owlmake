@@ -1990,7 +1990,16 @@ fn annotation_body(
         // (a plain one); they sort apart, on either side of `"definition"@en`, but
         // render the same triple. The LAST of a duplicated line keeps its
         // position — OBA's released `oba-full.owl` has `@en` first and the bare
-        // one after it, which is where the `xsd:string` copy sorts.
+        // one after it, which is where the `xsd:string` copy sorts — unless one
+        // of the copies is reified: an annotated axiom's triple stands where
+        // that axiom sorts, which for a plain literal is ahead of every
+        // `xsd:string` one. UBERON's mapping component asserts an xref the edit
+        // file also carries, with provenance on its copy, and the released
+        // artefact lists that xref ahead of the edit file's alphabetical run in
+        // 418 of 431 frames. The other 13 keep the alphabetical place: the
+        // reference sorts the two copies with a comparison that is not
+        // symmetric, so its answer depends on the order a hash set hands them
+        // over in, and that order is not reproduced here.
         //
         // Two lines are the same triple unless the value is an ANONYMOUS
         // individual: its node identity is not printed — every one renders as the
@@ -2006,11 +2015,19 @@ fn annotation_body(
                 _ => line.clone(),
             })
             .collect();
+        let reified: Vec<bool> = sorted.iter().map(|(_, _, nested)| !nested.is_empty()).collect();
         for (i, line) in lines.iter().enumerate() {
-            if keys[i + 1..].contains(&keys[i]) {
-                continue;
+            let twins = || (0..lines.len()).filter(|&j| j != i && keys[j] == keys[i]);
+            let keep = if reified[i] {
+                // The first reified copy speaks for all.
+                !twins().any(|j| j < i && reified[j])
+            } else {
+                // The last unreified copy, where no copy is reified.
+                !twins().any(|j| reified[j] || j > i)
+            };
+            if keep {
+                body.push_str(line);
             }
-            body.push_str(line);
         }
         for (p, av, nested) in &sorted {
             if !nested.is_empty() {

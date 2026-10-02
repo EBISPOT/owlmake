@@ -781,6 +781,15 @@ struct Redirects {
     stderr: Option<(String, bool)>, // (file, append); a file of "&1" inherits stdout
 }
 
+/// Serve a data asset the reference image carries out of owlmake's own bytes.
+///
+/// A recipe that wants one copies it — `cp /tools/obo.epm.json $@` — so there is
+/// no tool to reimplement and nothing to derive: owlmake ships the bytes or the
+/// target cannot be built at all, which is what "owlmake ships nothing" means
+/// when the thing shipped is data rather than code. The vendored copy for the
+/// version being emulated is materialised and the path rewritten, so the recipe
+/// itself runs unchanged.
+///
 /// The reference image's data assets, by the path a recipe names them at.
 pub const SERVED_IMAGE_ASSETS: [&str; 1] = ["/tools/obo.epm.json"];
 
@@ -823,14 +832,7 @@ pub fn materialise_served_asset(path: &str, dir: &Path) -> Option<std::path::Pat
     Some(dest)
 }
 
-/// Serve a data asset the reference image carries out of owlmake's own bytes.
-///
-/// A recipe that wants one copies it — `cp /tools/obo.epm.json $@` — so there is
-/// no tool to reimplement and nothing to derive: owlmake ships the bytes or the
-/// target cannot be built at all, which is what "owlmake ships nothing" means
-/// when the thing shipped is data rather than code. The vendored copy for the
-/// version being emulated is materialised and the path rewritten, so the recipe
-/// itself runs unchanged.
+/// Rewrite every served-asset path a recipe line names to the materialised copy.
 fn serve_image_assets(line: &str, dir: &Path) -> String {
     let mut out = line.to_string();
     for tok in line.split_whitespace() {

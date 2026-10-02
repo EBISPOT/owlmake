@@ -41,6 +41,17 @@ pub struct AnonBlock {
     pub text: String,
 }
 
+/// A loaded document as a functional write's banners see it.
+#[derive(Clone, Debug)]
+pub struct BannerDoc {
+    pub iri: Option<String>,
+    pub version: Option<String>,
+    pub labels: std::sync::Arc<std::collections::HashMap<String, String>>,
+    /// The document that opened the pipeline, whose identity is the one it
+    /// carries when written.
+    pub root: bool,
+}
+
 /// An ontology together with the prefix/namespace mapping used to render it.
 ///
 /// This is the value that flows between commands in a pipeline.
@@ -54,6 +65,17 @@ pub struct Model {
     /// edit file but resolves banner labels from its import closure). Empty for
     /// ordinary models.
     pub banner_labels: std::collections::HashMap<String, String>,
+    /// Every document this pipeline has loaded, as the banners of a functional
+    /// write see them: the document that opened the pipeline, each one merged
+    /// into it and each one its closure named, with the label each gives an
+    /// entity. A write banners an entity with the label of the first document
+    /// that has one, in the order the set of loaded documents is iterated in.
+    /// Empty until a pipeline that writes functional syntax starts.
+    pub banner_docs: Vec<BannerDoc>,
+    /// Whether an OBO write of this model refuses a frame that carries a
+    /// single-valued tag twice. On by default; `convert --check false` turns it
+    /// off for the document it writes.
+    pub obo_structure_check: bool,
     /// Per owning entity, the FNV-1a hashes of the anonymous class-expression
     /// signatures that shared ONE blank node in the RDF/XML this model came from.
     ///
@@ -301,6 +323,28 @@ pub struct Model {
     /// `owner\u{1}property\u{1}filler -> group` for blank nodes the SOURCE shared
     /// between several classes (see `io::scan_cross_owner_shared`).
     pub cross_shared: std::collections::HashMap<String, u64>,
+    /// Per axiom (`genid::axiom_identity`), the class expressions in it that
+    /// are ONE object with the other recorded occurrences of the same group:
+    /// `(signature hash, group)`, the hash being `io::anon_sig_hash` of
+    /// `genid::ce_sig`. The species merge substitutes a merged class's defining
+    /// expression itself — the object its own equivalence held — into every
+    /// axiom that named the class, so one anonymous node stands for it across
+    /// the whole document: a graph that reaches it again re-spends only its
+    /// list cells, and a graph that holds it twice spends nothing the second
+    /// time. The group is the merged class, because two merged classes can
+    /// define themselves by the same structure (two mouse ontologies, one
+    /// taxon) and still be two objects. An occurrence not recorded here is a
+    /// fresh object, however equal its structure: a later pass that rebuilds an
+    /// axiom copies it, and a rename rewrites it under a new identity that no
+    /// record names.
+    pub shared_occurrences: std::collections::HashMap<u64, Vec<(u64, u64)>>,
+    /// The labels of each secondary input merged into this document, in merge
+    /// order (`cmd::rdfs_labels` of each as it was loaded). A document's own
+    /// entity index is settled when the document is first consulted, before
+    /// anything is merged into it, and a merged input's assertions join it
+    /// after the document's own — so a banner looks in the document as loaded
+    /// first, then in each merged input in turn.
+    pub merged_input_labels: Vec<std::sync::Arc<std::collections::HashMap<String, String>>>,
     /// True when this model came out of a step that built a BRAND-NEW ontology,
     /// so its document format carries no prefixes at all.
     ///
@@ -340,6 +384,8 @@ impl Model {
             prefixes: default_prefixes(),
             build: Build::new(),
             banner_labels: std::collections::HashMap::new(),
+            banner_docs: Vec::new(),
+            obo_structure_check: true,
             shared_anon: std::collections::HashMap::new(),
             rdf_shared_anon: std::collections::HashMap::new(),
             inlined_imports: Vec::new(),
@@ -366,6 +412,8 @@ impl Model {
             materialised_declarations: std::collections::HashSet::new(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
+            shared_occurrences: std::collections::HashMap::new(),
+            merged_input_labels: Vec::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -378,6 +426,8 @@ impl Model {
             prefixes,
             build: Build::new(),
             banner_labels: std::collections::HashMap::new(),
+            banner_docs: Vec::new(),
+            obo_structure_check: true,
             shared_anon: std::collections::HashMap::new(),
             rdf_shared_anon: std::collections::HashMap::new(),
             inlined_imports: Vec::new(),
@@ -404,6 +454,8 @@ impl Model {
             materialised_declarations: std::collections::HashSet::new(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
+            shared_occurrences: std::collections::HashMap::new(),
+            merged_input_labels: Vec::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -419,6 +471,8 @@ impl Model {
     /// silently dropped mid-pipeline.
     pub fn carry_meta_from(&mut self, other: &Model) {
         self.banner_labels = other.banner_labels.clone();
+        self.banner_docs = other.banner_docs.clone();
+        self.obo_structure_check = other.obo_structure_check;
         self.shared_anon = other.shared_anon.clone();
         self.rdf_shared_anon = other.rdf_shared_anon.clone();
         self.inlined_imports = other.inlined_imports.clone();
@@ -445,6 +499,8 @@ impl Model {
         self.materialised_declarations = other.materialised_declarations.clone();
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
+        self.shared_occurrences = other.shared_occurrences.clone();
+        self.merged_input_labels = other.merged_input_labels.clone();
         self.format_prefixes_cleared = other.format_prefixes_cleared;
         self.obo_source = other.obo_source;
         self.obo_drop_untranslatable = other.obo_drop_untranslatable;
@@ -495,6 +551,8 @@ impl Clone for Model {
     fn clone(&self) -> Self {
         let mut m = Model::from_parts(self.ont.clone(), clone_prefixes(&self.prefixes));
         m.banner_labels = self.banner_labels.clone();
+        m.banner_docs = self.banner_docs.clone();
+        m.obo_structure_check = self.obo_structure_check;
         m.shared_anon = self.shared_anon.clone();
         m.rdf_shared_anon = self.rdf_shared_anon.clone();
         m.inlined_imports = self.inlined_imports.clone();
@@ -520,6 +578,8 @@ impl Clone for Model {
         m.materialised_declarations = self.materialised_declarations.clone();
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
+        m.shared_occurrences = self.shared_occurrences.clone();
+        m.merged_input_labels = self.merged_input_labels.clone();
         m.format_prefixes_cleared = self.format_prefixes_cleared;
         m.obo_drop_untranslatable = self.obo_drop_untranslatable;
         m
