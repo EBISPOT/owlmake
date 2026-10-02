@@ -7434,8 +7434,10 @@ fn prime_banner_docs(
 /// tracks the run's release date. Best-effort — a closure file that cannot be
 /// read contributes nothing, and banners fall back to the entity IRI.
 /// The documents a functional write's banners are drawn from, as the pipeline
-/// opens: the document itself and every document its import closure names.
-/// What the pipeline merges in later joins the list as it is merged.
+/// opens: the document itself and every document its import closure names. A
+/// secondary input the pipeline merges in later was opened on its own, so it
+/// joins no list: only its axioms arrive, and the document being written
+/// labels them as its own.
 fn closure_banner_docs(
     model: &crate::model::Model,
     dir: &Path,
@@ -7587,7 +7589,10 @@ pub(crate) fn merge_loaded_into_as(
     role: MergeRole,
 ) -> Result<()> {
     use horned_owl::model::{Component, MutableOntology};
-    if !model.banner_docs.is_empty() {
+    // A member of the import closure was opened with the document and is one
+    // more the banners draw from. A secondary input was opened on its own and
+    // only its axioms arrive: it labels nothing by itself.
+    if matches!(role, MergeRole::Import) && !model.banner_docs.is_empty() {
         model.banner_docs.push(crate::cmd::banner_doc_of(other, false));
     }
     let mut present = crate::cmd::merge::MergedAxioms::of(model);

@@ -493,6 +493,11 @@ pub(crate) fn resolve_import_closure(
         // materialises no stub for it. The save drops the borrowed axioms again,
         // which is exactly when this record is the only thing left that knows.
         let declared = crate::build::closure_declared_entities(&imported);
+        // A closure member was opened with the document, so a functional
+        // write's banners draw on its labels too.
+        if !model.banner_docs.is_empty() {
+            model.banner_docs.push(crate::cmd::banner_doc_of(&imported, false));
+        }
         crate::cmd::merge::merge_into(model, &imported, &opts);
         model.closure_declared.extend(declared);
         for c in borrowed {
