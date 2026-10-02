@@ -558,6 +558,39 @@ fn leading_iri_term(trimmed: &str) -> bool {
 ///
 /// A declared prefix earns an idspace even when no id is ever shortened with it —
 /// UBERON writes its `foaf`/`doap` IRIs out in full yet still declares both.
+/// Whether a namespace can stand behind an OBO `idspace:`. The OWL, RDF, RDFS,
+/// XSD and XML namespaces cannot; nor can the OBO PURL space, whose ids the
+/// OBO id rules already shorten, or any namespace that encloses it.
+pub(crate) fn idspace_namespace(ns: &str) -> bool {
+    const OBO: &str = "http://purl.obolibrary.org/obo/";
+    !(ns.starts_with(OBO)
+        || OBO.starts_with(ns)
+        || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
+        || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
+        || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
+        || ns.starts_with("http://www.w3.org/2002/07/owl#")
+        || ns.starts_with("http://www.w3.org/XML/1998/namespace"))
+}
+
+/// The `idspace:` declarations an OBO rendering of `model` carries: the prefixes
+/// the source document bound, less the namespaces no idspace may name. An
+/// RDF/XML source binds them as `xmlns:` attributes, which `idspaces` holds
+/// already; a functional-syntax source binds them with its `Prefix(…)` lines,
+/// which reach here as `rdf_prefixes`.
+pub(crate) fn declared_idspaces(model: &Model) -> Vec<(String, String)> {
+    if !model.idspaces.is_empty() {
+        return model.idspaces.clone();
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (prefix, ns) in &model.rdf_prefixes {
+        if prefix.is_empty() || !idspace_namespace(ns) || out.iter().any(|(p, _)| p == prefix) {
+            continue;
+        }
+        out.push((prefix.clone(), ns.clone()));
+    }
+    out
+}
+
 fn scan_owl_idspaces(bytes: &[u8]) -> Vec<(String, String)> {
     let text = String::from_utf8_lossy(bytes);
     let mut out: Vec<(String, String)> = Vec::new();
@@ -569,14 +602,7 @@ fn scan_owl_idspaces(bytes: &[u8]) -> Vec<(String, String)> {
     // shortens nothing; ids under it fall to the mechanical local-name rule instead.
     // So scan only the `xmlns:PREFIX="NS"` declarations below; do not pre-seed
     // well-known namespaces.
-    let is_builtin = |ns: &str| {
-        ns.starts_with("http://purl.obolibrary.org/obo/")
-            || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-            || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-            || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
-            || ns.starts_with("http://www.w3.org/2002/07/owl#")
-            || ns.starts_with("http://www.w3.org/XML/1998/namespace")
-    };
+    let is_builtin = |ns: &str| !idspace_namespace(ns);
     // Parse `xmlns:PREFIX="NS"` declarations by hand (RDF/XML, no dependency on a
     // full XML parse). The default `xmlns=` (no prefix) never becomes an idspace.
     for decl in text.split("xmlns:").skip(1) {

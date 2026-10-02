@@ -2208,7 +2208,7 @@ impl Ctx {
         let scanned = !model.idspaces.is_empty() || !model.rdf_prefixes.is_empty();
         let mut idspaces: Vec<(String, String)> =
             if scanned && model.explicit_prefixes.is_empty() {
-                model.idspaces.clone()
+                crate::io::declared_idspaces(model)
         } else if model.obo_source && model.explicit_prefixes.is_empty() {
             // An OBO document's only prefix declarations are its `idspace:`
             // lines. With none declared (and none added on the command line),
@@ -2231,14 +2231,7 @@ impl Ctx {
             // rule (a bare local name, or the full IRI).
             let mut v: Vec<(String, String)> = Vec::new();
             for (prefix, ns) in model.prefixes.mappings() {
-                if prefix.is_empty()
-                    || ns.starts_with(OBO_BASE)
-                    || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-                    || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-                    || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
-                    || ns.starts_with(OWL_NS)
-                    || ns.starts_with("http://www.w3.org/XML/1998/namespace")
-                {
+                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
                     continue;
                 }
                 if v.iter().any(|(p, _)| p == prefix) {
@@ -2251,14 +2244,7 @@ impl Ctx {
             // `its`/`swrl`, which mondo declares but which the CURIE prefix map does
             // not carry. Same builtin/PURL skips as above.
             for (prefix, ns) in &model.rdf_prefixes {
-                if prefix.is_empty()
-                    || ns.starts_with(OBO_BASE)
-                    || ns.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-                    || ns.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-                    || ns.starts_with("http://www.w3.org/2001/XMLSchema#")
-                    || ns.starts_with(OWL_NS)
-                    || ns.starts_with("http://www.w3.org/XML/1998/namespace")
-                {
+                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
                     continue;
                 }
                 if v.iter().any(|(p, _)| p == prefix) {
@@ -3544,8 +3530,8 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .map(|(p, n)| (p.clone(), n.clone()))
             .collect()
     } else {
-        // An OWL source: emit the exact prefix set the document declares or uses.
-        model.idspaces.clone()
+        // An OWL source: emit the exact prefix set the document declares.
+        crate::io::declared_idspaces(model)
     };
     // Header order: case-insensitive by prefix, ties broken by the prefix ASCENDING
     // (so a same-fold pair like `ICD10CM`/`icd10cm` lists uppercase first — the
