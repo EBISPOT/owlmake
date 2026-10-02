@@ -3801,9 +3801,11 @@ fn run_steps(
                 // The documents the banners draw on survive a step that builds
                 // its result afresh.
                 let docs = model.banner_docs.clone();
+                let merged_labels = model.merged_input_labels.clone();
                 model = apply_op(repo, op, model, catalog, work, None, pipe.as_deref())?;
                 if model.banner_docs.is_empty() {
                     model.banner_docs = docs;
+                    model.merged_input_labels = merged_labels;
                 }
                 if let Some(t) = target {
                     dump_step(t, &model);
@@ -4912,6 +4914,7 @@ fn run_artefact(
                 &model.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&model).1.as_deref()),
+                &model.merged_input_labels,
                 &crate::cmd::rdfs_labels(&model),
             );
             crate::io::set_anon_counter(mark);
@@ -5024,6 +5027,7 @@ fn run_artefact(
                 &m.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&m).1.as_deref()),
+                &m.merged_input_labels,
                 &crate::cmd::rdfs_labels(&m),
             );
             crate::io::set_anon_counter(mark);
@@ -5214,9 +5218,11 @@ fn run_artefact(
         }
         let cl = if use_closure { closure.as_ref() } else { None };
         let docs = model.banner_docs.clone();
+        let merged_labels = model.merged_input_labels.clone();
         model = apply_op(repo, op, model, catalog, work, cl, threaded_from.as_deref())?;
         if model.banner_docs.is_empty() {
             model.banner_docs = docs;
+            model.merged_input_labels = merged_labels;
         }
         dump_step(&a.target, &model);
         write_step_output(repo, op, &mut model, Some(&a.target))?;
@@ -7594,6 +7600,9 @@ pub(crate) fn merge_loaded_into_as(
     // only its axioms arrive: it labels nothing by itself.
     if matches!(role, MergeRole::Import) && !model.banner_docs.is_empty() {
         model.banner_docs.push(crate::cmd::banner_doc_of(other, false));
+    }
+    if matches!(role, MergeRole::Input) && !model.banner_docs.is_empty() {
+        model.merged_input_labels.push(std::sync::Arc::new(crate::cmd::rdfs_labels(other)));
     }
     let mut present = crate::cmd::merge::MergedAxioms::of(model);
     for ac in other.ont.iter() {

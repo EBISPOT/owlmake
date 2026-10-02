@@ -615,12 +615,20 @@ pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, St
     }
     cands
         .into_iter()
-        .map(|(subj, c)| {
+        .map(|(subj, mut c)| {
+            // Two candidates that fall in one bucket at both levels stand in
+            // the order the document holds them, which the document does not
+            // record; the lexically smaller comes first, so the pick is the
+            // same from one run to the next.
+            c.sort_by(|a, b| a.1.cmp(&b.1));
             let text = if c.len() == 1 {
                 c[0].1.clone()
             } else {
                 let hashes: Vec<i32> = c.iter().map(|(h, _)| *h).collect();
                 let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
+                if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == subj) {
+                    eprintln!("[labels] {subj} subject_total={total} assertions={assertions} cands={:?}", c);
+                }
                 c[crate::owlapi_hash::subject_assertion_order(&hashes, total, assertions)[0]].1.clone()
             };
             (subj, text)
@@ -637,17 +645,34 @@ pub(crate) fn banner_doc_of(model: &Model, root: bool) -> crate::model::BannerDo
 /// The label a functional write banners each entity with, over every loaded
 /// document: the documents stand in the order a set of them is iterated in,
 /// keyed on each one's identity, and the first document with a label for an
-/// entity supplies it. The document being written is the root: it absorbed
-/// whatever was merged into it, so its labels are the model's own as it
-/// stands (`root_labels`), under the identity it is written with
-/// (`root_iri`/`root_version`); every other document keeps the labels it
-/// was loaded with.
+/// entity supplies it. The document being written is the root, under the
+/// identity it is written with (`root_iri`/`root_version`). Its labels are
+/// the ones it was loaded with (its entity index is settled when it is first
+/// consulted), then the labels of each input merged into it, in merge order,
+/// for entities it did not label itself, and finally its labels as it stands
+/// (`root_labels`) for anything a later step added. Every other document
+/// keeps the labels it was loaded with.
 pub(crate) fn fold_banner_docs(
     docs: &[crate::model::BannerDoc],
     root_iri: Option<&str>,
     root_version: Option<&str>,
+    merged_input_labels: &[std::sync::Arc<std::collections::HashMap<String, String>>],
     root_labels: &std::collections::HashMap<String, String>,
 ) -> std::collections::HashMap<String, String> {
+    let mut root_effective: std::collections::HashMap<String, String> = docs
+        .iter()
+        .find(|d| d.root)
+        .map(|d| (*d.labels).clone())
+        .unwrap_or_default();
+    for labels in merged_input_labels {
+        for (subject, label) in labels.iter() {
+            root_effective.entry(subject.clone()).or_insert_with(|| label.clone());
+        }
+    }
+    for (subject, label) in root_labels {
+        root_effective.entry(subject.clone()).or_insert_with(|| label.clone());
+    }
+    let root_labels = &root_effective;
     let root_id = (root_iri.map(str::to_string), root_version.map(str::to_string));
     let mut seen: std::collections::HashSet<(Option<String>, Option<String>)> = Default::default();
     seen.insert(root_id.clone());

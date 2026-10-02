@@ -449,9 +449,18 @@ fn sort_key(ac: &AnnotatedComponent<RcStr>) -> String {
 /// bullet in the committed reports.
 fn markdown_for_axiom(ac: &AnnotatedComponent<RcStr>, labels: &HashMap<String, String>) -> String {
     let body = render_axiom_md(&ac.component, labels);
-    let inner: Vec<String> = ac
-        .ann
-        .iter()
+    // An axiom's annotations are listed by property, then by value — a literal
+    // on its datatype first, so a plain literal precedes an `xsd:string` one
+    // whatever their text — the order the axiom holds them in.
+    let mut anns: Vec<&horned_owl::model::Annotation<RcStr>> = ac.ann.iter().collect();
+    anns.sort_by(|a, b| {
+        a.ap.0
+            .as_ref()
+            .cmp(b.ap.0.as_ref())
+            .then_with(|| crate::io::owlfunc::cmp_annotation_value(&a.av, &b.av))
+    });
+    let inner: Vec<String> = anns
+        .into_iter()
         .map(|a| {
             format!(
                 "  - {} {} \n",
@@ -794,12 +803,14 @@ fn render_ce_md(
         CE::ObjectUnionOf(v) => {
             v.iter().map(|x| bracket_operand_md(x, labels)).collect::<Vec<_>>().join(" or ")
         }
-        CE::ObjectComplementOf(b) => format!("not {}", rec(b)),
+        // A complement's operand is always bracketed, a named class included;
+        // a restriction's filler only when it is itself complex.
+        CE::ObjectComplementOf(b) => format!("not ({})", rec(b)),
         CE::ObjectSomeValuesFrom { ope, bce } => {
-            format!("{} some {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} some {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectAllValuesFrom { ope, bce } => {
-            format!("{} only {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} only {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectHasValue { ope, i } => format!(
             "{} value {}",
@@ -807,13 +818,13 @@ fn render_ce_md(
             render_individual_md(i, labels)
         ),
         CE::ObjectMinCardinality { n, ope, bce } => {
-            format!("{} min {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} min {n} {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectMaxCardinality { n, ope, bce } => {
-            format!("{} max {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} max {n} {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectExactCardinality { n, ope, bce } => {
-            format!("{} exactly {n} {}", render_ope_md(ope, labels), rec(bce))
+            format!("{} exactly {n} {}", render_ope_md(ope, labels), bracket_operand_md(bce, labels))
         }
         CE::ObjectHasSelf(ope) => format!("{} Self", render_ope_md(ope, labels)),
         CE::ObjectOneOf(v) => format!(

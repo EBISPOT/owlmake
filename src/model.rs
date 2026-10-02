@@ -338,6 +338,13 @@ pub struct Model {
     /// axiom copies it, and a rename rewrites it under a new identity that no
     /// record names.
     pub shared_occurrences: std::collections::HashMap<u64, Vec<(u64, u64)>>,
+    /// The labels of each secondary input merged into this document, in merge
+    /// order (`cmd::rdfs_labels` of each as it was loaded). A document's own
+    /// entity index is settled when the document is first consulted, before
+    /// anything is merged into it, and a merged input's assertions join it
+    /// after the document's own — so a banner looks in the document as loaded
+    /// first, then in each merged input in turn.
+    pub merged_input_labels: Vec<std::sync::Arc<std::collections::HashMap<String, String>>>,
     /// True when this model came out of a step that built a BRAND-NEW ontology,
     /// so its document format carries no prefixes at all.
     ///
@@ -406,6 +413,7 @@ impl Model {
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
+            merged_input_labels: Vec::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -447,6 +455,7 @@ impl Model {
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
+            merged_input_labels: Vec::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -491,6 +500,7 @@ impl Model {
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
         self.shared_occurrences = other.shared_occurrences.clone();
+        self.merged_input_labels = other.merged_input_labels.clone();
         self.format_prefixes_cleared = other.format_prefixes_cleared;
         self.obo_source = other.obo_source;
         self.obo_drop_untranslatable = other.obo_drop_untranslatable;
@@ -569,6 +579,7 @@ impl Clone for Model {
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
         m.shared_occurrences = self.shared_occurrences.clone();
+        m.merged_input_labels = self.merged_input_labels.clone();
         m.format_prefixes_cleared = self.format_prefixes_cleared;
         m.obo_drop_untranslatable = self.obo_drop_untranslatable;
         m
