@@ -323,6 +323,128 @@ fn xref_extract_without_a_prefix_map_extracts_nothing() {
     assert!(written.contains("hasDbXref"), "{written}");
 }
 
+/// An ontology whose cross-references collide: `FMA:1`, `FMA:3`, `MA:10`,
+/// `ZFA:7` and `XAO:2` are each claimed by more than one class.
+const COLLIDING_XREFS: &str = r#"Prefix(:=<http://purl.obolibrary.org/obo/>)
+Prefix(o:=<http://www.geneontology.org/formats/oboInOwl#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://purl.obolibrary.org/obo/uberon.owl>
+Annotation(o:treat-xrefs-as-equivalent "FMA")
+Annotation(o:treat-xrefs-as-equivalent "MA")
+Annotation(o:treat-xrefs-as-is_a "ZFA")
+Annotation(o:treat-xrefs-as-has-subclass "XAO")
+Declaration(Class(:UBERON_0000001))
+Declaration(Class(:UBERON_0000002))
+Declaration(Class(:UBERON_0000003))
+Declaration(Class(:UBERON_0000004))
+Declaration(Class(:UBERON_0000005))
+Declaration(Class(:UBERON_0000006))
+AnnotationAssertion(rdfs:label :UBERON_0000001 "one")
+AnnotationAssertion(rdfs:label :UBERON_0000002 "two")
+AnnotationAssertion(rdfs:label :UBERON_0000003 "three")
+AnnotationAssertion(rdfs:label :UBERON_0000004 "four")
+AnnotationAssertion(rdfs:label :UBERON_0000005 "five")
+AnnotationAssertion(o:hasDbXref :UBERON_0000001 "FMA:1")
+AnnotationAssertion(o:hasDbXref :UBERON_0000002 "FMA:1")
+AnnotationAssertion(o:hasDbXref :UBERON_0000003 "FMA:1")
+AnnotationAssertion(o:hasDbXref :UBERON_0000003 "FMA:3")
+AnnotationAssertion(o:hasDbXref :UBERON_0000004 "FMA:3")
+AnnotationAssertion(o:hasDbXref :UBERON_0000004 "FMA:4")
+AnnotationAssertion(o:hasDbXref :UBERON_0000001 "MA:10")
+AnnotationAssertion(o:hasDbXref :UBERON_0000005 "MA:10")
+AnnotationAssertion(o:hasDbXref :UBERON_0000005 "MA:11")
+AnnotationAssertion(o:hasDbXref :UBERON_0000002 "ZFA:7")
+AnnotationAssertion(o:hasDbXref :UBERON_0000006 "ZFA:7")
+AnnotationAssertion(o:hasDbXref :UBERON_0000006 "XAO:2")
+AnnotationAssertion(o:hasDbXref :UBERON_0000003 "XAO:2")
+AnnotationAssertion(o:hasDbXref :UBERON_0000004 "XAO:9")
+)
+"#;
+
+#[test]
+fn xref_extract_drops_duplicates_and_reports_them_under_verbose() {
+    // Expected output is ROBOT 1.9.10's with the sssom 1.10.0 plugin (ODK
+    // v1.6.1), the same three times over.
+    let of = tmp("colliding.ofn", COLLIDING_XREFS);
+    let out = tmp("colliding.sssom.tsv", "");
+    let (log, err, rc) = run(
+        &[
+            "merge",
+            "-i",
+            of.to_str().unwrap(),
+            "--collapse-import-closure",
+            "false",
+            "sssom:xref-extract",
+            "--mapping-file",
+            out.to_str().unwrap(),
+            "-v",
+            "--drop-duplicates",
+            "--prefix",
+            "FMA:   http://purl.org/sig/ont/fma/fma",
+        ],
+        None,
+    );
+    assert_eq!(rc, 0, "stderr: {err}");
+    // `ZFA` is declared by no row: its one cross-reference was a duplicate.
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "#curie_map:\n\
+         #  FMA: http://purl.org/sig/ont/fma/fma\n\
+         #  MA: http://purl.obolibrary.org/obo/MA_\n\
+         #  UBERON: http://purl.obolibrary.org/obo/UBERON_\n\
+         #  XAO: http://purl.obolibrary.org/obo/XAO_\n\
+         #mapping_set_id: http://purl.obolibrary.org/obo/uberon/mappings.sssom.tsv\n\
+         #license: https://w3id.org/sssom/license/all-rights-reserved\n\
+         #subject_source: http://purl.obolibrary.org/obo/uberon.owl\n\
+         subject_id\tsubject_label\tpredicate_id\tobject_id\tmapping_justification\tmapping_cardinality\n\
+         UBERON:0000004\tfour\tskos:exactMatch\tFMA:4\tsemapv:UnspecifiedMatching\t1:n\n\
+         UBERON:0000004\tfour\tskos:narrowMatch\tXAO:9\tsemapv:UnspecifiedMatching\t1:n\n\
+         UBERON:0000005\tfive\tskos:exactMatch\tMA:11\tsemapv:UnspecifiedMatching\t1:n\n"
+    );
+    // Each line is `<date> <time> WARN  <logger> - <message>`; the clock and the
+    // duration are all that may differ.
+    let lines: Vec<String> = log
+        .lines()
+        .map(|l| {
+            let rest = l.splitn(3, ' ').nth(2).unwrap_or(l);
+            match rest.find(" took ") {
+                Some(i) => format!("{} took N seconds", &rest[..i]),
+                None => rest.to_string(),
+            }
+        })
+        .collect();
+    let ignored = "WARN  org.incenp.obofoundry.sssom.robot.XrefExtractCommand - Cross-reference ignored:";
+    assert_eq!(
+        lines,
+        [
+            format!("{ignored} ZFA:7 mapped to UBERON:0000002, UBERON:0000006"),
+            format!("{ignored} XAO:2 mapped to UBERON:0000003, UBERON:0000006"),
+            format!("{ignored} FMA:3 mapped to UBERON:0000004, UBERON:0000003"),
+            format!("{ignored} MA:10 mapped to UBERON:0000001, UBERON:0000005"),
+            format!("{ignored} FMA:1 mapped to UBERON:0000002, UBERON:0000003, UBERON:0000001"),
+            "WARN  org.obolibrary.robot.CommandManager - Subcommand Timing: sssom:xref-extract took N seconds"
+                .to_string(),
+        ]
+    );
+
+    // With no `treat-xrefs-as-*` declaration nothing is extracted, and the set
+    // still states a licence and the four required columns, but no source.
+    let bare: String = COLLIDING_XREFS.lines().filter(|l| !l.starts_with("Annotation(")).map(|l| format!("{l}\n")).collect();
+    let of = tmp("bare.ofn", &bare);
+    let out = tmp("bare.sssom.tsv", "");
+    let (_log, err, rc) = run(
+        &["merge", "-i", of.to_str().unwrap(), "sssom:xref-extract", "--mapping-file", out.to_str().unwrap()],
+        None,
+    );
+    assert_eq!(rc, 0, "stderr: {err}");
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "#mapping_set_id: http://purl.obolibrary.org/obo/uberon/mappings.sssom.tsv\n\
+         #license: https://w3id.org/sssom/license/all-rights-reserved\n\
+         subject_id\tpredicate_id\tobject_id\tmapping_justification\n"
+    );
+}
+
 #[test]
 fn parse_predicate_filter() {
     let f = tmp("p1.sssom.tsv", SAMPLE);

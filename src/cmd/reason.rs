@@ -1710,7 +1710,7 @@ mod tests {
 }
 
 /// The moment a logged error is stamped with, `YYYY-MM-DD HH:MM:SS,mmm`.
-fn log_stamp() -> String {
+pub(crate) fn log_stamp() -> String {
     std::process::Command::new("date")
         .arg("+%Y-%m-%d %H:%M:%S,%3N")
         .output()
