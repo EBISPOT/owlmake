@@ -3669,6 +3669,82 @@ fn banner_labels_follow_the_document_as_written() {
     );
 }
 
+/// `explain --output` saves the ontology the command was given; what it hands
+/// the next command is the ontology of its justifications. The expected
+/// document is ROBOT 1.9.10's (ODK v1.6.1) for the same command line: `D ⊑ E`
+/// explains nothing and is saved all the same.
+#[test]
+fn explain_output_saves_the_ontology_it_was_given() {
+    let inp = tmp("explain-output-in.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://example.org/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/inc.owl>\n\
+         Declaration(Class(:A))\n\
+         Declaration(Class(:B))\n\
+         Declaration(Class(:C))\n\
+         Declaration(Class(:D))\n\
+         Declaration(Class(:E))\n\
+         AnnotationAssertion(rdfs:label :A \"a\")\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:A :C)\n\
+         DisjointClasses(:B :C)\n\
+         SubClassOf(:D :E)\n\
+         )\n",
+    )
+    .unwrap();
+    let out = tmp("explain-output-out.ofn");
+    let run = bin()
+        .args(["explain", "-i"])
+        .arg(&inp)
+        .args(["-M", "unsatisfiability", "-u", "all", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "Prefix(:=<http://example.org/inc.owl#>)\n\
+         Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n\
+         Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\n\
+         Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)\n\
+         Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         \n\
+         \n\
+         Ontology(<http://example.org/inc.owl>\n\
+         \n\
+         Declaration(Class(<http://example.org/A>))\n\
+         Declaration(Class(<http://example.org/B>))\n\
+         Declaration(Class(<http://example.org/C>))\n\
+         Declaration(Class(<http://example.org/D>))\n\
+         Declaration(Class(<http://example.org/E>))\n\
+         \n\
+         \n\
+         ############################\n\
+         #   Classes\n\
+         ############################\n\
+         \n\
+         # Class: <http://example.org/A> (a)\n\
+         \n\
+         AnnotationAssertion(rdfs:label <http://example.org/A> \"a\")\n\
+         SubClassOf(<http://example.org/A> <http://example.org/B>)\n\
+         SubClassOf(<http://example.org/A> <http://example.org/C>)\n\
+         \n\
+         # Class: <http://example.org/B> (<http://example.org/B>)\n\
+         \n\
+         DisjointClasses(<http://example.org/B> <http://example.org/C>)\n\
+         \n\
+         # Class: <http://example.org/D> (<http://example.org/D>)\n\
+         \n\
+         SubClassOf(<http://example.org/D> <http://example.org/E>)\n\
+         \n\
+         \n\
+         )"
+    );
+}
+
 /// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
 /// the catalog maps is read from the file it maps it to — `robot --catalog
 /// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own

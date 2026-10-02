@@ -3402,8 +3402,11 @@ fn run_cli_robot_step(
         // and takes no `--input`/`--output` of its own.
         "make",
     ];
+    // `explain` is never terminal, whatever it names: its own `--output` saves
+    // the ontology it was given, and the next command still receives its
+    // justifications.
     let terminal = TERMINAL_COMMANDS.contains(&name)
-        || args.iter().any(|a| a == "-o" || a == "--output");
+        || (name != "explain" && args.iter().any(|a| a == "-o" || a == "--output"));
 
     let piped_in = work.join(format!("{name}-chain-in.ofn"));
     crate::io::save_as(&mut model, &piped_in, crate::io::Format::Functional)?;
@@ -3478,8 +3481,6 @@ fn run_cli_robot_step(
     let piped_out = work.join(format!("{name}-chain-out.ofn"));
     if !terminal {
         let _ = std::fs::remove_file(&piped_out);
-        argv.push("--output".to_string());
-        argv.push(arg_path(&piped_out));
     }
 
     // The handed-over model is written as the root document alone: its
@@ -3495,6 +3496,17 @@ fn run_cli_robot_step(
                 argv.push(arg_path(&p));
             }
         }
+    }
+
+    // The model the command hands on is captured as its `--output` — except
+    // `explain`'s, which saves the ontology it was given: a `convert` after it
+    // writes what it hands on instead.
+    if !terminal {
+        if name == "explain" {
+            argv.push("convert".to_string());
+        }
+        argv.push("--output".to_string());
+        argv.push(arg_path(&piped_out));
     }
 
     recipe::run_owlmake_args(&argv, &repo.dir)

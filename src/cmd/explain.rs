@@ -66,19 +66,17 @@ pub struct Args {
     /// retrieve. Default 1.
     #[arg(short = 'm', long, default_value_t = 1)]
     pub max: usize,
-    /// Write the justification(s) to this file. Same content as --output;
-    /// provided for compatibility with existing invocations.
+    /// Write the markdown report of the explanations to this file.
     #[arg(short = 'e', long)]
     pub explanation: Option<PathBuf>,
-    /// Output file for the justification. With `--format` (or an ontology file
-    /// extension) this is an ontology of the union of justification axioms, as in
-    /// `robot explain`; otherwise the human-readable report is written. Defaults
-    /// to stdout (the report).
+    /// Save the ontology this command was given, as it was given. The ontology
+    /// of the justifications is what the next command in a chain receives.
+    /// With neither this nor `--explanation`, the human-readable report goes
+    /// to stdout.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
-    /// Serialization format for the `--output` ontology of justification
-    /// axioms: owl/owx/ofn/obo/omn/ttl/json. When omitted the format is
-    /// inferred from the `--output` extension.
+    /// Serialization format for `--output`; inferred from its extension when
+    /// omitted.
     #[arg(short = 'f', long)]
     pub format: Option<String>,
     #[command(flatten)]
@@ -99,6 +97,9 @@ pub fn step(
 ) -> anyhow::Result<Option<crate::model::Model>> {
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
+    if args.output.is_some() {
+        crate::cmd::maybe_save(&mut model.clone(), args.output.as_deref(), args.format.as_deref())?;
+    }
 
     // `--reasoner` is validated up front, exactly as `reason` validates it: a
     // misspelt backend is an error, never a quiet fall-back to the EL engine
@@ -188,9 +189,8 @@ pub fn step(
 
     let mut report = String::new();
     let mut explained: Vec<crate::cmd::explain_markdown::Explained> = Vec::new();
-    // The union of all justification axioms across targets — used when `--output`
-    // (with `--format` or an ontology extension) asks for an ontology rather than
-    // the human-readable report.
+    // The union of all justification axioms across targets: the ontology the
+    // next command in a chain receives.
     let mut justification_axioms: Vec<AnnotatedComponent<RcStr>> = Vec::new();
 
     // One ⊥-module for the signature of EVERY target, extracted from the input
@@ -253,17 +253,7 @@ pub fn step(
         report.push_str("No explanations found.");
     }
 
-    // `--output`: when a format is given or the path extension names an ontology
-    // serialization, write an ontology of the justification axioms; otherwise fall
-    // back to writing the human-readable report.
-    if let Some(p) = &args.output {
-        match resolve_ontology_format(args.format.as_deref(), p) {
-            Some(fmt) => write_justification_ontology(&justification_axioms, p, fmt)?,
-            None => std::fs::write(p, &report)?,
-        }
-    }
-    // `--explanation` carries the markdown report, whatever form `--output` was
-    // asked for.
+    // `--explanation` carries the markdown report.
     if let Some(p) = &args.explanation {
         std::fs::write(p, crate::cmd::explain_markdown::report(&explained, &md_labels, &provenance))?;
     }
@@ -292,33 +282,6 @@ pub fn step(
     let mut out = Model::from_parts(just, horned_owl::curie::PrefixMapping::default());
     out.banner_labels = crate::cmd::rdfs_labels(&out);
     Ok(Some(out))
-}
-
-/// Resolve the ontology serialization for `--output`: an explicit `--format`
-/// wins (erroring on an unknown name), otherwise infer from the path extension.
-/// Returns `None` when neither names a known ontology format, signalling that the
-/// human-readable report should be written instead.
-fn resolve_ontology_format(format: Option<&str>, output: &std::path::Path) -> Option<crate::io::Format> {
-    match format {
-        Some(name) => crate::io::Format::from_name(name).ok(),
-        None => crate::io::Format::from_path(output).ok(),
-    }
-}
-
-/// Write the union of justification axioms to `path` in `fmt`. The
-/// justification ontology is a NEW ontology: it carries the default prefix set,
-/// not the examined document's.
-fn write_justification_ontology(
-    axioms: &[AnnotatedComponent<RcStr>],
-    path: &std::path::Path,
-    fmt: crate::io::Format,
-) -> anyhow::Result<()> {
-    let mut ont = SetOntology::new();
-    for ac in axioms {
-        ont.insert(ac.clone());
-    }
-    let mut out = Model::from_parts(ont, horned_owl::curie::PrefixMapping::default());
-    crate::io::save_as(&mut out, path, fmt)
 }
 
 /// The reasoner that answers every question this command asks: which classes are
