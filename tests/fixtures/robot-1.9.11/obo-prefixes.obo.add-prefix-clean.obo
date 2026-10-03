@@ -1,0 +1,26 @@
+format-version: 1.2
+idspace: baz http://example.org/baz/ 
+idspace: dce http://purl.org/dc/elements/1.1/ 
+idspace: foo http://example.org/foo/ 
+ontology: ex
+property_value: dce:title "t" xsd:string
+property_value: http://purl.org/dc/terms/license http://creativecommons.org/licenses/by/4.0/
+
+[Term]
+id: EX:0000001
+name: one
+xref: baz:1
+is_a: GO:0000001
+property_value: baz:p "v" xsd:string
+property_value: seeAlso baz:x
+
+[Term]
+id: baz:B
+name: b
+is_a: foo:A ! a
+
+[Term]
+id: foo:A
+name: a
+is_a: EX:0000001 ! one
+

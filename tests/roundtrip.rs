@@ -209,6 +209,134 @@ fn functional_matches_rdfxml() {
     );
 }
 
+/// Cross-format agreement: functional syntax vs Turtle, the ontology's IRI and
+/// version IRI included. A rule's atoms keep the order of the document they were
+/// read from, which is not the same in the two serializations of
+/// `swrl_two_variables`.
+#[test]
+fn functional_matches_turtle() {
+    let mut rep = Report::new();
+    for name in base_names() {
+        let result = (|| {
+            let a = try_load(&path_for(&name, "owl-functional", "ofn"))?;
+            let b = try_load(&path_for(&name, "owl-ttl", "ttl"))?;
+            if diff::ontology_id(&a) != diff::ontology_id(&b) {
+                return Err(format!("ontology id {:?} vs {:?}", diff::ontology_id(&a), diff::ontology_id(&b)));
+            }
+            semantic_eq(&a, &b)
+        })();
+        rep.record(&name, result);
+    }
+    rep.print("Functional vs Turtle");
+    assert!(
+        rep.pass * 100 >= rep.total * 98,
+        "Functional/Turtle cross-format parity regressed below 98%"
+    );
+}
+
+/// Each corpus ontology written as OWL/XML, Manchester syntax and Turtle is
+/// what ROBOT 1.9.11 writes converting the same functional-syntax document, byte
+/// for byte: `tests/corpus/robot-1.9.11/` holds ROBOT's output for every document
+/// it converts (it cannot load `import`, `happy_person` and `swrl_individual`).
+#[test]
+fn owlxml_manchester_and_turtle_are_written_as_robot_writes_them() {
+    let dir = Path::new(CORPUS).join("robot-1.9.11");
+    let mut expected: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    expected.sort();
+    let mut fails = Vec::new();
+    let mut compared = 0;
+    for path in &expected {
+        let fmt = match path.extension().and_then(|x| x.to_str()) {
+            Some("owx") => Format::OwlXml,
+            Some("omn") => Format::Manchester,
+            Some("ttl") => Format::Turtle,
+            _ => continue,
+        };
+        let name = path.file_stem().unwrap().to_string_lossy().to_string();
+        let mut model = try_load(&path_for(&name, "owl-functional", "ofn"))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let mut written = Vec::new();
+        io::write_to(&mut model, &mut written, fmt).unwrap();
+        compared += 1;
+        if written != std::fs::read(path).unwrap() {
+            fails.push(path.file_name().unwrap().to_string_lossy().to_string());
+        }
+    }
+    assert_eq!(compared, 357, "the reference set is ROBOT's OWL/XML, Manchester and Turtle for 119 documents");
+    assert!(fails.is_empty(), "{} of {compared} differ from ROBOT 1.9.11: {}", fails.len(), fails.join(" "));
+}
+
+/// Manchester syntax keeps every axiom of an ontology but two kinds it has no
+/// place for — an annotation assertion on an IRI that names no entity, and an
+/// equivalence or disjointness between anonymous classes only — together with
+/// every axiom's annotations, every entity's annotation assertions and the
+/// ontology's IRI. Reading it back adds only declarations: each frame declares
+/// its entity.
+#[test]
+fn manchester_keeps_every_axiom_it_can_hold() {
+    use horned_owl::model::{AnnotationSubject, ClassExpression, Component};
+
+    let mut fails = Vec::new();
+    for name in base_names() {
+        let src = match try_load(&path_for(&name, "owl-functional", "ofn")) {
+            Ok(m) => m,
+            Err(e) => {
+                fails.push(format!("{name}: load: {e}"));
+                continue;
+            }
+        };
+        let mut omn = Vec::new();
+        io::write_to_ref(&src, &mut omn, Format::Manchester).unwrap();
+        io::reset_anon_counter();
+        let back = match io::load_from(std::io::Cursor::new(omn), Format::Manchester) {
+            Ok(m) => m,
+            Err(e) => {
+                fails.push(format!("{name}: reload: {e:#}"));
+                continue;
+            }
+        };
+        let entities: BTreeSet<String> =
+            io::entities::signature(&src).into_iter().map(|(_, iri)| iri).collect();
+        let unwritable = |c: &Component<horned_owl::model::RcStr>| match c {
+            Component::AnnotationAssertion(a) => {
+                matches!(&a.subject, AnnotationSubject::IRI(i) if !entities.contains(&i.to_string()))
+            }
+            Component::EquivalentClasses(x) => x.0.iter().all(|c| !matches!(c, ClassExpression::Class(_))),
+            Component::DisjointClasses(x) => x.0.iter().all(|c| !matches!(c, ClassExpression::Class(_))),
+            _ => false,
+        };
+        let declaration = |c: &Component<horned_owl::model::RcStr>| {
+            matches!(
+                c,
+                Component::DeclareClass(_)
+                    | Component::DeclareObjectProperty(_)
+                    | Component::DeclareDataProperty(_)
+                    | Component::DeclareAnnotationProperty(_)
+                    | Component::DeclareNamedIndividual(_)
+                    | Component::DeclareDatatype(_)
+            )
+        };
+        let d = diff::diff(&src, &back);
+        for ac in d.only_left.iter().filter(|ac| !unwritable(&ac.component)) {
+            fails.push(format!("{name}: lost {}", diff::describe(ac)));
+        }
+        for ac in d.only_right.iter().filter(|ac| !declaration(&ac.component)) {
+            fails.push(format!("{name}: gained {}", diff::describe(ac)));
+        }
+        if diff::ontology_id(&src) != diff::ontology_id(&back) {
+            fails.push(format!(
+                "{name}: ontology id {:?} read back as {:?}",
+                diff::ontology_id(&src),
+                diff::ontology_id(&back)
+            ));
+        }
+    }
+    assert!(fails.is_empty(), "Manchester round trip:\n{}", fails.join("\n"));
+}
+
 // ---------------------------------------------------------------------------
 // Undeclared entities in RDF/XML
 // ---------------------------------------------------------------------------

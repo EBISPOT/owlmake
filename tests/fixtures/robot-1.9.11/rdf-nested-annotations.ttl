@@ -1,0 +1,371 @@
+@prefix : <http://example.org/a#> .
+@prefix a: <http://example.org/a#> .
+@prefix dc: <http://purl.org/dc/elements/1.1/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/a> .
+
+<http://example.org/a> rdf:type owl:Ontology ;
+                        dc:creator "someone" ;
+                        rdfs:comment "about" ;
+                        rdfs:label "a"@en .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource <http://example.org/a> ;
+   owl:annotatedProperty rdfs:label ;
+   owl:annotatedTarget "a"@en ;
+   rdfs:comment "translated"
+ ] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource <http://example.org/a> ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "about" ;
+   rdfs:comment "reviewed"
+ ] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource <http://example.org/a> ;
+   owl:annotatedProperty dc:creator ;
+   owl:annotatedTarget "someone" ;
+   rdfs:comment "by whom"
+ ] .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/a#ap
+a:ap rdf:type owl:AnnotationProperty .
+
+
+###  http://purl.org/dc/elements/1.1/creator
+dc:creator rdf:type owl:AnnotationProperty .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/a#p
+a:p rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/a#d
+a:d rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/a#A
+a:A rdf:type owl:Class ;
+    rdfs:subClassOf a:B ,
+                    a:C ;
+    a:ap "value" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource _:genid7 ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "branch" ;
+                         rdfs:comment "n1" ;
+                         rdfs:label "n2"
+                       ] ;
+   owl:annotatedProperty rdfs:label ;
+   owl:annotatedTarget "n2" ;
+   rdfs:comment "m2"
+ ] .
+
+_:genid7 rdf:type owl:Axiom ;
+          owl:annotatedSource a:A ;
+          owl:annotatedProperty rdfs:subClassOf ;
+          owl:annotatedTarget a:C ;
+          rdfs:comment "branch" ;
+          rdfs:label "plain" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid11 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "source" ;
+   rdfs:comment "checked"
+ ] .
+
+_:genid11 rdf:type owl:Axiom ;
+           owl:annotatedSource a:A ;
+           owl:annotatedProperty a:ap ;
+           owl:annotatedTarget "value" ;
+           rdfs:comment "source" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource _:genid4 ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "deep" ;
+                         rdfs:comment "deeper"
+                       ] ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "deeper" ;
+   rdfs:comment "deepest"
+ ] .
+
+_:genid4 rdf:type owl:Axiom ;
+          owl:annotatedSource a:A ;
+          owl:annotatedProperty rdfs:subClassOf ;
+          owl:annotatedTarget a:B ;
+          rdfs:comment "deep" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource _:genid7 ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "branch" ;
+                         rdfs:comment "n1" ;
+                         rdfs:label "n2"
+                       ] ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "n1" ;
+   rdfs:comment "m1"
+ ] .
+
+
+###  http://example.org/a#B
+a:B rdf:type owl:Class ;
+    owl:equivalentClass _:genid13 .
+
+_:genid13 rdf:type owl:Restriction ;
+           owl:onProperty a:p ;
+           owl:someValuesFrom a:C .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid14 ;
+   owl:annotatedProperty rdfs:seeAlso ;
+   owl:annotatedTarget <http://example.org/where> ;
+   rdfs:seeAlso <http://example.org/why>
+ ] .
+
+_:genid14 rdf:type owl:Axiom ;
+           owl:annotatedSource a:B ;
+           owl:annotatedProperty owl:equivalentClass ;
+           owl:annotatedTarget _:genid13 ;
+           rdfs:seeAlso <http://example.org/where> .
+
+
+###  http://example.org/a#C
+a:C rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/a#i
+a:i rdf:type owl:NamedIndividual ;
+    owl:sameAs a:j .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid16 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "same" ;
+   rdfs:comment "shared" ;
+   owl:annotatedSource _:genid18
+ ] .
+
+_:genid16 rdf:type owl:Axiom ;
+           owl:annotatedSource a:i ;
+           owl:annotatedProperty owl:sameAs ;
+           owl:annotatedTarget a:j ;
+           rdfs:comment "same" .
+
+_:genid18 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty owl:sameAs ;
+           owl:annotatedTarget a:k ;
+           rdfs:comment "same" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid19 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "negative" ;
+   rdfs:comment "not"
+ ] .
+
+_:genid19 rdf:type owl:NegativePropertyAssertion ;
+           owl:sourceIndividual a:i ;
+           owl:assertionProperty a:p ;
+           owl:targetIndividual a:k ;
+           rdfs:comment "negative" .
+
+
+###  http://example.org/a#j
+a:j owl:sameAs a:k .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid16 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "same" ;
+   rdfs:comment "shared" ;
+   owl:annotatedSource _:genid18
+ ] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid19 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "negative" ;
+   rdfs:comment "not"
+ ] .
+
+
+###  http://example.org/a#k
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid16 ;
+  owl:annotatedProperty rdfs:comment ;
+  owl:annotatedTarget "same" ;
+  rdfs:comment "shared" ;
+  owl:annotatedSource _:genid18
+] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid19 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "negative" ;
+   rdfs:comment "not"
+ ] .
+
+
+###  http://example.org/a#j
+a:j rdf:type owl:NamedIndividual ;
+    a:p a:i ;
+    a:d "1" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid21 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "a" ;
+   rdfs:comment "first"
+ ] .
+
+_:genid21 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty a:p ;
+           owl:annotatedTarget a:i ;
+           rdfs:comment "a" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid23 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "b" ;
+   rdfs:comment "second"
+ ] .
+
+_:genid23 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty a:p ;
+           owl:annotatedTarget a:i ;
+           rdfs:comment "b" .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource a:j ;
+   owl:annotatedProperty a:p ;
+   owl:annotatedTarget a:i ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource a:j ;
+   owl:annotatedProperty a:d ;
+   owl:annotatedTarget "1" ;
+   rdfs:comment "w"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource a:j ;
+   owl:annotatedProperty a:d ;
+   owl:annotatedTarget "1" ;
+   rdfs:comment "x"
+ ] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid28 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "y" ;
+   rdfs:comment "later"
+ ] .
+
+_:genid28 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty a:d ;
+           owl:annotatedTarget "1" ;
+           rdfs:comment "y" .
+
+
+###  http://example.org/a#k
+a:k rdf:type owl:NamedIndividual .
+
+
+#################################################################
+#    Annotations
+#################################################################
+
+a:undeclared rdfs:label "u" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid30 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "label" ;
+   rdfs:comment "untyped"
+ ] .
+
+_:genid30 rdf:type owl:Axiom ;
+           owl:annotatedSource a:undeclared ;
+           owl:annotatedProperty rdfs:label ;
+           owl:annotatedTarget "u" ;
+           rdfs:comment "label" .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid33 ;
+  owl:annotatedProperty rdfs:comment ;
+  owl:annotatedTarget "gci" ;
+  rdfs:comment "general"
+] .
+
+_:genid33 rdf:type owl:Axiom ;
+           owl:annotatedSource [ rdf:type owl:Restriction ;
+                                 owl:onProperty a:p ;
+                                 owl:someValuesFrom a:A ;
+                                 rdfs:subClassOf a:B
+                               ] ;
+           owl:annotatedProperty rdfs:subClassOf ;
+           owl:annotatedTarget a:B ;
+           rdfs:comment "gci" .
+
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid35 ;
+  owl:annotatedProperty rdfs:comment ;
+  owl:annotatedTarget "disjoint" ;
+  rdfs:comment "all"
+] .
+
+_:genid35 rdf:type owl:AllDisjointClasses ;
+           owl:members ( a:A
+                         a:B
+                         a:C
+                       ) ;
+           rdfs:comment "disjoint" .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

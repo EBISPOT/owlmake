@@ -380,7 +380,7 @@ pub fn step(
     // renderer needs it for each cell's link.
     let labels = if args.labels.unwrap_or(false) { Some(label_map(&model)?) } else { None };
     let given: Vec<(String, String)> =
-        args.common.given_prefixes()?.into_iter().map(|(p, ns, _)| (p, ns)).collect();
+        args.common.given_prefixes()?;
     let short = ShortForm::new(&model, given, labels);
     let mut links: Vec<[Option<String>; 3]> = Vec::with_capacity(result.rows.len());
     for row in &mut result.rows {

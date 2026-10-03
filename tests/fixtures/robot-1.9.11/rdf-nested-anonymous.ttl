@@ -1,0 +1,346 @@
+@prefix : <http://example.org/nest#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix nest: <http://example.org/nest#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/nest> .
+
+<http://example.org/nest> rdf:type owl:Ontology ;
+                           nest:see _:genid1 ;
+                           rdfs:comment "header" .
+
+_:genid1 rdf:type nest:B .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource <http://example.org/nest> ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "header value"
+ ] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource <http://example.org/nest> ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "header" ;
+   nest:see [ rdf:type nest:A
+            ]
+ ] .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/nest#see
+nest:see rdf:type owl:AnnotationProperty .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/nest#p
+nest:p rdf:type owl:ObjectProperty ;
+       rdfs:subPropertyOf nest:q .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource _:genid5 ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "subproperty" ;
+                         rdfs:comment "nn"
+                       ] ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "nn" ;
+   nest:see [ ]
+] .
+
+_:genid5 rdf:type owl:Axiom ;
+          owl:annotatedSource nest:p ;
+          owl:annotatedProperty rdfs:subPropertyOf ;
+          owl:annotatedTarget nest:q ;
+          rdfs:comment "subproperty" .
+
+
+###  http://example.org/nest#q
+nest:q rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/nest#r
+nest:r rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/nest#d
+nest:d rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/nest#A
+nest:A rdf:type owl:Class ;
+       rdfs:subClassOf nest:B ;
+       rdfs:label "a" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid9 ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid10 ;
+   rdfs:comment "subclass value"
+ ] .
+
+_:genid9 rdf:type owl:Axiom ;
+          owl:annotatedSource nest:A ;
+          owl:annotatedProperty rdfs:subClassOf ;
+          owl:annotatedTarget nest:B ;
+          nest:see _:genid10 .
+
+_:genid10 rdf:type nest:C .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource _:genid12 ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "label" ;
+                         rdfs:comment "nn"
+                       ] ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "nn" ;
+   nest:see [ ]
+] .
+
+_:genid12 rdf:type owl:Axiom ;
+           owl:annotatedSource nest:A ;
+           owl:annotatedProperty rdfs:label ;
+           owl:annotatedTarget "a" ;
+           rdfs:comment "label" .
+
+
+###  http://example.org/nest#B
+nest:B rdf:type owl:Class ;
+       owl:equivalentClass nest:C .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid16 ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid17 ;
+   rdfs:comment "equivalent value" ;
+   owl:annotatedSource _:genid19
+ ] .
+
+_:genid16 rdf:type owl:Axiom ;
+           owl:annotatedSource nest:B ;
+           owl:annotatedProperty owl:equivalentClass ;
+           owl:annotatedTarget nest:C ;
+           nest:see _:genid17 .
+
+_:genid19 rdf:type owl:Axiom ;
+           owl:annotatedSource nest:C ;
+           owl:annotatedProperty owl:equivalentClass ;
+           owl:annotatedTarget nest:D ;
+           nest:see _:genid17 .
+
+
+###  http://example.org/nest#C
+nest:C owl:equivalentClass nest:D .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid16 ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid17 ;
+   rdfs:comment "equivalent value" ;
+   owl:annotatedSource _:genid19
+ ] .
+
+
+###  http://example.org/nest#D
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid16 ;
+  owl:annotatedProperty nest:see ;
+  owl:annotatedTarget _:genid17 ;
+  rdfs:comment "equivalent value" ;
+  owl:annotatedSource _:genid19
+] .
+
+
+###  http://example.org/nest#C
+nest:C rdf:type owl:Class .
+
+
+###  http://example.org/nest#D
+nest:D rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/nest#i
+nest:i rdf:type owl:NamedIndividual .
+
+
+###  http://example.org/nest#j
+nest:j rdf:type owl:NamedIndividual ;
+       nest:p nest:i ;
+       nest:d "1" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid20 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "assertion" ;
+   nest:see [ rdf:type nest:A
+            ]
+ ] .
+
+_:genid20 rdf:type owl:Axiom ;
+           owl:annotatedSource nest:j ;
+           owl:annotatedProperty nest:p ;
+           owl:annotatedTarget nest:i ;
+           rdfs:comment "assertion" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid23 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "negative" ;
+   nest:see [ rdf:type nest:A
+            ]
+ ] .
+
+_:genid23 rdf:type owl:NegativePropertyAssertion ;
+           owl:sourceIndividual nest:j ;
+           owl:assertionProperty nest:p ;
+           owl:targetIndividual nest:k ;
+           rdfs:comment "negative" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid26 ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid27 ;
+   rdfs:comment "data value"
+ ] .
+
+_:genid26 rdf:type owl:Axiom ;
+           owl:annotatedSource nest:j ;
+           owl:annotatedProperty nest:d ;
+           owl:annotatedTarget "1" ;
+           nest:see _:genid27 .
+
+_:genid27 nest:q nest:k ;
+           nest:d "2" .
+
+
+###  http://example.org/nest#k
+nest:k rdf:type owl:NamedIndividual ;
+       nest:q _:genid10 .
+
+
+###  http://example.org/nest#m
+nest:m rdf:type owl:NamedIndividual ,
+                nest:A ;
+       nest:r _:genid30 .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid29 ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid30 ;
+   rdfs:comment "type value"
+ ] .
+
+_:genid29 rdf:type owl:Axiom ;
+           owl:annotatedSource nest:m ;
+           owl:annotatedProperty rdf:type ;
+           owl:annotatedTarget nest:A ;
+           nest:see _:genid30 .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid33 ;
+  owl:annotatedProperty nest:see ;
+  owl:annotatedTarget _:genid34 ;
+  rdfs:comment "gci value"
+] .
+
+_:genid33 rdf:type owl:Axiom ;
+           owl:annotatedSource [ rdf:type owl:Restriction ;
+                                 owl:onProperty nest:p ;
+                                 owl:someValuesFrom nest:A ;
+                                 rdfs:subClassOf nest:B
+                               ] ;
+           owl:annotatedProperty rdfs:subClassOf ;
+           owl:annotatedTarget nest:B ;
+           nest:see _:genid34 .
+
+_:genid34 rdf:type nest:D .
+
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid36 ;
+  owl:annotatedProperty rdfs:comment ;
+  owl:annotatedTarget "disjoint" ;
+  nest:see [ ]
+] .
+
+_:genid36 rdf:type owl:AllDisjointClasses ;
+           owl:members ( nest:A
+                         nest:C
+                         nest:D
+                       ) ;
+           rdfs:comment "disjoint" .
+
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid42 ;
+  owl:annotatedProperty nest:see ;
+  owl:annotatedTarget _:genid46 ;
+  rdfs:comment "different value"
+] .
+
+_:genid42 rdf:type owl:AllDifferent ;
+           owl:distinctMembers ( nest:i
+                                 nest:j
+                                 nest:k
+                               ) ;
+           nest:see _:genid46 .
+
+
+#################################################################
+#    Rules
+#################################################################
+
+<urn:swrl:var#x> rdf:type <http://www.w3.org/2003/11/swrl#Variable> .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid48 ;
+   owl:annotatedProperty nest:see ;
+   owl:annotatedTarget _:genid49 ;
+   rdfs:comment "rule value"
+ ] .
+
+_:genid48 nest:see _:genid49 ;
+           rdf:type <http://www.w3.org/2003/11/swrl#Imp> ;
+           <http://www.w3.org/2003/11/swrl#body> [ rdf:type <http://www.w3.org/2003/11/swrl#AtomList> ;
+                                                   rdf:first [ rdf:type <http://www.w3.org/2003/11/swrl#ClassAtom> ;
+                                                               <http://www.w3.org/2003/11/swrl#classPredicate> nest:A ;
+                                                               <http://www.w3.org/2003/11/swrl#argument1> <urn:swrl:var#x>
+                                                             ] ;
+                                                   rdf:rest rdf:nil
+                                                 ] ;
+           <http://www.w3.org/2003/11/swrl#head> [ rdf:type <http://www.w3.org/2003/11/swrl#AtomList> ;
+                                                   rdf:first [ rdf:type <http://www.w3.org/2003/11/swrl#ClassAtom> ;
+                                                               <http://www.w3.org/2003/11/swrl#classPredicate> nest:B ;
+                                                               <http://www.w3.org/2003/11/swrl#argument1> <urn:swrl:var#x>
+                                                             ] ;
+                                                   rdf:rest rdf:nil
+                                                 ] .
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

@@ -1,0 +1,69 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix oboInOwl: <http://www.geneontology.org/formats/oboInOwl#> .
+@prefix obo: <http://purl.obolibrary.org/obo/> .
+@prefix EX: <http://example.org/EX_> .
+
+<http://example.org/test.owl> rdf:type owl:Ontology .
+
+obo:IAO_0000115 rdf:type owl:AnnotationProperty ; rdfs:label "definition" .
+obo:IAO_0000119 rdf:type owl:AnnotationProperty ; rdfs:label "definition source" .
+obo:IAO_0000112 rdf:type owl:AnnotationProperty ; rdfs:label "example of usage" .
+oboInOwl:hasExactSynonym rdf:type owl:AnnotationProperty .
+oboInOwl:hasRelatedSynonym rdf:type owl:AnnotationProperty .
+oboInOwl:hasSynonymType rdf:type owl:AnnotationProperty .
+oboInOwl:hasDbXref rdf:type owl:AnnotationProperty .
+dcterms:contributor rdf:type owl:AnnotationProperty .
+dcterms:source rdf:type owl:AnnotationProperty .
+rdfs:comment rdf:type owl:AnnotationProperty .
+
+EX:0000100 rdf:type owl:ObjectProperty ; rdfs:label "part of" .
+EX:0000900 rdf:type owl:AnnotationProperty ; rdfs:label "abbreviation" .
+
+EX:0000001 rdf:type owl:Class ;
+    rdfs:label "thing A" .
+
+EX:0000003 rdf:type owl:Class ;
+    rdfs:label "thing C" .
+
+EX:0000002 rdf:type owl:Class ;
+    rdfs:label "thing B" ;
+    obo:IAO_0000115 "A thing A that is part of a thing C." ;
+    oboInOwl:hasExactSynonym "B thing" ;
+    oboInOwl:hasRelatedSynonym "thing of type B" ;
+    oboInOwl:hasDbXref "EXT:123", "EXT:456" ;
+    rdfs:comment "A comment about thing B." ;
+    obo:IAO_0000112 "An example of thing B in use." ;
+    rdfs:subClassOf EX:0000001 ;
+    rdfs:subClassOf [ rdf:type owl:Restriction ;
+                      owl:onProperty EX:0000100 ;
+                      owl:someValuesFrom EX:0000003 ] .
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource EX:0000002 ;
+  owl:annotatedProperty obo:IAO_0000115 ;
+  owl:annotatedTarget "A thing A that is part of a thing C." ;
+  obo:IAO_0000119 "https://example.org/source/1"^^xsd:anyURI ] .
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource EX:0000002 ;
+  owl:annotatedProperty oboInOwl:hasExactSynonym ;
+  owl:annotatedTarget "B thing" ;
+  oboInOwl:hasSynonymType EX:0000900 ] .
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource EX:0000002 ;
+  owl:annotatedProperty oboInOwl:hasDbXref ;
+  owl:annotatedTarget "EXT:456" ;
+  rdfs:comment "Cross-reference note." ] .
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource EX:0000002 ;
+  owl:annotatedProperty obo:IAO_0000112 ;
+  owl:annotatedTarget "An example of thing B in use." ;
+  dcterms:contributor <https://orcid.org/0000-0000-0000-0000> ;
+  dcterms:source "https://example.org/source/2"^^xsd:anyURI ;
+  rdfs:comment "Example note." ] .

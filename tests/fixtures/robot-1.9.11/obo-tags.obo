@@ -1,0 +1,44 @@
+format-version: 1.4
+data-version: 2026-01-01
+date: 01:01:2026 12:00
+saved-by: someone
+auto-generated-by: something
+default-relationship-id-prefix: RO
+id-mapping: part_of BFO:0000050
+relax-unique-identifier-assumption-for-namespace: foo
+relax-unique-label-assumption-for-namespace: foo
+namespace-id-rule: * EX:$sequence(7,0,9999999)$
+treat-xrefs-as-equivalent: CL
+logical-definition-view-relation: part_of
+ontology: ex
+
+[Term]
+id: EX:0000001
+name: one
+is_obsolete: false
+builtin: false
+is_anonymous: false
+
+[Typedef]
+id: rel_a
+name: rel a
+is_transitive: false
+is_symmetric: false
+is_reflexive: false
+is_asymmetric: false
+is_functional: false
+is_inverse_functional: false
+is_metadata_tag: false
+is_class_level: false
+is_anti_symmetric: false
+is_cyclic: false
+is_obsolete: false
+builtin: false
+
+[Typedef]
+id: rel_b
+name: rel b
+is_transitive: true
+is_cyclic: true
+is_anti_symmetric: true
+builtin: true

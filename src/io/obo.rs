@@ -349,8 +349,23 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
                 sup: b.annotation_property(format!("{OIO}{parent}").as_str()),
             }));
             if let Some(rest) = s.strip_prefix(id) {
-                if let Some((name, _)) = parse_quoted(rest.trim()) {
+                if let Some((name, after)) = parse_quoted(rest.trim()) {
                     assert_ann(&b, &mut ont, &iri, descr_prop, &name);
+                    // A synonym type's scope is the synonym property its
+                    // synonyms take.
+                    let scope = match after.split_whitespace().next() {
+                        Some("EXACT") => Some("hasExactSynonym"),
+                        Some("RELATED") => Some("hasRelatedSynonym"),
+                        Some("NARROW") => Some("hasNarrowSynonym"),
+                        Some("BROAD") => Some("hasBroadSynonym"),
+                        _ => None,
+                    };
+                    if let (true, Some(scope)) = (tag == "synonymtypedef", scope) {
+                        ont.insert(Component::AnnotationAssertion(AnnotationAssertion {
+                            subject: AnnotationSubject::IRI(b.iri(iri.as_str())),
+                            ann: ann_iri(&b, &format!("{OIO}hasScope"), &format!("{OIO}{scope}")),
+                        }));
+                    }
                 }
             }
         }
@@ -464,6 +479,38 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
             )));
             assert_ann(&b, &mut ont, &format!("{OIO}{key}"), RDFS_LABEL, key);
         }
+    }
+    // Every other header tag is an ontology annotation in the oboInOwl
+    // namespace with the tag's value as written: `date:`, `saved-by:`,
+    // `auto-generated-by:`, `namespace-id-rule:` (as `oboInOwl:NamespaceIdRule`),
+    // and any tag this reader has no rule of its own for.
+    const HEADER_RULES: &[&str] = &[
+        "format-version",
+        "data-version",
+        "ontology",
+        "import",
+        "idspace",
+        "default-namespace",
+        "subsetdef",
+        "synonymtypedef",
+        "property_value",
+        "remark",
+        "owl-axioms",
+        "treat-xrefs-as-equivalent",
+        "treat-xrefs-as-genus-differentia",
+        "treat-xrefs-as-reverse-genus-differentia",
+        "treat-xrefs-as-relationship",
+        "treat-xrefs-as-is_a",
+        "treat-xrefs-as-has-subclass",
+    ];
+    for (key, value) in &header.tags {
+        if HEADER_RULES.contains(&key.as_str()) {
+            continue;
+        }
+        let local = if key == "namespace-id-rule" { "NamespaceIdRule" } else { key.as_str() };
+        ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
+            ann(&b, &format!("{OIO}{local}"), value),
+        )));
     }
     // The built-in oboInOwl annotation properties carry an `rdfs:label` whenever
     // they are used. The synonym/xref/etc. ones come labelled from imports; these
@@ -793,11 +840,14 @@ fn declare_referenced_entities(
     // is the document's own whatever an import declares.
     let builtin: BTreeSet<String> =
         obo_builtin_annotation_properties().into_iter().map(|(iri, _)| iri).collect();
+    // `name:`, `comment:` and `is_obsolete:` introduce `rdfs:label`,
+    // `rdfs:comment` and `owl:deprecated` the same way.
+    let tag_properties = [RDFS_LABEL, RDFS_COMMENT, OWL_DEPRECATED];
     for p in ann_props.difference(&declared_a) {
         ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
             b.annotation_property(p.as_str()),
         )));
-        if !builtin.contains(p) && !p.starts_with(OIO) {
+        if !builtin.contains(p) && !p.starts_with(OIO) && !tag_properties.contains(&p.as_str()) {
             materialised.insert(format!("ap\u{0}{p}"));
         }
     }
@@ -1179,6 +1229,36 @@ fn assert_ann_iri(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>, subj: &str, pr
     }));
 }
 
+const OIO_BUILTIN: &str = "http://www.geneontology.org/formats/oboInOwl#builtin";
+const OIO_IS_ANONYMOUS: &str = "http://www.geneontology.org/formats/oboInOwl#is_anonymous";
+const IAO_ANTISYMMETRIC: &str = "http://purl.obolibrary.org/obo/IAO_0000427";
+
+/// Each boolean `tag` of a stanza, `true` or `false`, as an `xsd:boolean`
+/// annotation of its property on `subj`; a trailing `{…}` qualifier block
+/// annotates the assertion.
+fn boolean_tags(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>, subj: &str, st: &Stanza, tags: &[(&str, &str)]) {
+    for (tag, prop) in tags {
+        for v in st.all(tag) {
+            let Some(value @ ("true" | "false")) = v.split_whitespace().next() else { continue };
+            insert_annotated(
+                ont,
+                Component::AnnotationAssertion(AnnotationAssertion {
+                    subject: AnnotationSubject::IRI(b.iri(subj)),
+                    ann: Annotation {
+                        ann: Default::default(),
+                        ap: b.annotation_property(*prop),
+                        av: AnnotationValue::Literal(Literal::Datatype {
+                            literal: value.to_string(),
+                            datatype_iri: b.iri(XSD_BOOLEAN),
+                        }),
+                    },
+                }),
+                qualifier_anns(b, v),
+            );
+        }
+    }
+}
+
 /// Assert an annotation whose value is a datatyped literal.
 fn assert_ann_typed(
     b: &Build<RcStr>,
@@ -1507,26 +1587,10 @@ fn frame_annotations_to_owl(
             qualifier_anns(b, s),
         );
     }
-    // `is_obsolete: true` (possibly with a trailing `{source=…}` qualifier, which
-    // becomes an axiom annotation on the owl:deprecated assertion).
-    if let Some(v) = st.get("is_obsolete") {
-        if v.split_whitespace().next() == Some("true") {
-            insert_annotated(
-                ont,
-                Component::AnnotationAssertion(AnnotationAssertion {
-                    subject: AnnotationSubject::IRI(b.iri(iri)),
-                    ann: Annotation { ann: Default::default(),
-                        ap: b.annotation_property(OWL_DEPRECATED),
-                        av: AnnotationValue::Literal(Literal::Datatype {
-                            literal: "true".to_string(),
-                            datatype_iri: b.iri(XSD_BOOLEAN),
-                        }),
-                    },
-                }),
-                qualifier_anns(b, v),
-            );
-        }
-    }
+    // `is_obsolete:` (possibly with a trailing `{source=…}` qualifier, which
+    // becomes an axiom annotation on the owl:deprecated assertion), and the other
+    // boolean tags a term can carry.
+    boolean_tags(b, ont, iri, st, &[("is_obsolete", OWL_DEPRECATED), ("builtin", OIO_BUILTIN), ("is_anonymous", OIO_IS_ANONYMOUS)]);
     // Obsolescence pointers: a frame's own `replaced_by:`/`consider:` tags point
     // at other entities, and that pointer is an **IRI** (e.g.
     // `<obo/UBERON_0000965>`), not a literal id string.
@@ -1864,11 +1928,25 @@ fn typedef_to_owl(
             assert_ann_with(b, ont, &iri, &format!("{OIO}hasDbXref"), &id, anns);
         }
     }
-    if st.get("is_metadata_tag") == Some("true") {
-        assert_ann_typed(b, ont, &iri, &format!("{OIO}is_metadata_tag"), "true", XSD_BOOLEAN);
-    }
-    if st.get("is_class_level") == Some("true") {
-        assert_ann_typed(b, ont, &iri, &format!("{OIO}is_class_level"), "true", XSD_BOOLEAN);
+    boolean_tags(
+        b,
+        ont,
+        &iri,
+        st,
+        &[
+            ("is_metadata_tag", &format!("{OIO}is_metadata_tag")),
+            ("is_class_level", &format!("{OIO}is_class_level")),
+            ("is_anti_symmetric", IAO_ANTISYMMETRIC),
+            ("is_cyclic", &format!("{OIO}is_cyclic")),
+        ],
+    );
+    // A characteristic is an axiom when it holds; stated not to hold, it is
+    // kept as the tag's own annotation.
+    for tag in ["is_transitive", "is_symmetric", "is_reflexive", "is_asymmetric", "is_functional", "is_inverse_functional"] {
+        if st.all(tag).any(|v| v.split_whitespace().next() == Some("false")) {
+            let prop = format!("{OIO}{tag}");
+            boolean_tags(b, ont, &iri, st, &[(tag, prop.as_str())]);
+        }
     }
     for cb in st.all("created_by") {
         assert_ann(b, ont, &iri, &format!("{OIO}created_by"), cb);
@@ -1889,24 +1967,7 @@ fn typedef_to_owl(
     // plus the obsolescence pointers (`replaced_by` → IAO_0100001, `consider` →
     // oboInOwl:consider) on the property. Without this the deprecation metadata the
     // release carries is lost.
-    if let Some(v) = st.get("is_obsolete") {
-        if v.split_whitespace().next() == Some("true") {
-            insert_annotated(
-                ont,
-                Component::AnnotationAssertion(AnnotationAssertion {
-                    subject: AnnotationSubject::IRI(b.iri(iri.as_str())),
-                    ann: Annotation { ann: Default::default(),
-                        ap: b.annotation_property(OWL_DEPRECATED),
-                        av: AnnotationValue::Literal(Literal::Datatype {
-                            literal: "true".to_string(),
-                            datatype_iri: b.iri(XSD_BOOLEAN),
-                        }),
-                    },
-                }),
-                qualifier_anns(b, v),
-            );
-        }
-    }
+    boolean_tags(b, ont, &iri, st, &[("is_obsolete", OWL_DEPRECATED), ("builtin", OIO_BUILTIN), ("is_anonymous", OIO_IS_ANONYMOUS)]);
     for rb in st.all("replaced_by") {
         let t = rb.split_whitespace().next().unwrap_or(rb);
         assert_ann_iri_with(b, ont, &iri, IAO_TERM_REPLACED_BY, &expand_curie(t), qualifier_anns(b, rb));
@@ -2205,69 +2266,55 @@ impl IdCtx {
 
 impl Ctx {
     fn new(model: &Model) -> Ctx {
-        // The prefixes usable for CURIE shortening are the document's own declared
-        // `xmlns:PREFIX` bindings (captured into `model.idspaces` at read time for
-        // RDF/XML, which carries no formal prefix map). Anything NOT declared falls
-        // to `id_impl`'s mechanical id rule — never a hard-coded well-known prefix.
-        // A namespace that appears only via a default `xmlns="…"` (cl-full.owl's
-        // dc/terms/skos) is therefore rendered by that rule, bare local or full IRI.
-        // A config-loaded model (`explicit_prefixes` set, e.g. mondo via
-        // `--add-prefixes`) always uses the reconstructed prefix set, even if
-        // `idspaces` is populated (it may carry the OWL xmlns fallback set,
-        // which is NOT the OBO idspace set). A plain RDF/XML model (cl/uberon) with
-        // no explicit prefixes keeps using its scanned `idspaces`.
-        // An OWL document that was read has an xmlns map, however few prefixes
-        // it declares: one declaring none beyond the built-in ones abbreviates
-        // nothing, and its IRIs outside those namespaces stay full.
+        // The prefixes an id is shortened with are the ones the source document
+        // declared, and, for a cleaned write, the ones the command line adds
+        // (`explicit_prefixes`). Anything else falls to `id_impl`'s mechanical
+        // id rule: a bare local name, or the full IRI.
+        //
+        // An OWL source's declarations are its xmlns or `Prefix(…)` bindings
+        // (`idspaces`, `rdf_prefixes`), however few: one declaring none beyond
+        // the built-in ones abbreviates nothing. A namespace that appears only
+        // through a default `xmlns="…"` (cl-full.owl's dc/terms/skos) is not a
+        // declaration either. An OBO source's declarations are its `idspace:`
+        // lines, which its reader records in `explicit_prefixes`.
         let scanned = !model.idspaces.is_empty() || !model.rdf_prefixes.is_empty();
-        let mut idspaces: Vec<(String, String)> =
-            if scanned && model.explicit_prefixes.is_empty() {
-                crate::io::declared_idspaces(model)
-        } else if model.obo_source && model.explicit_prefixes.is_empty() {
-            // An OBO document's only prefix declarations are its `idspace:`
-            // lines. With none declared (and none added on the command line),
-            // nothing shortens an id — the pipeline's own prefix map is not the
-            // document's.
-            Vec::new()
-        } else {
-            // No scanned prefix set (OBO→OBO, or an OWL/functional model whose prefix
-            // map horned-owl surfaces directly): fall back to the declared prefixes,
-            // skipping the `obo/` PURL space (table 5.9.2 handles it) and builtins.
-            //
-            // The document's own prefixes come FIRST, in declaration order (the curie
-            // map is an `IndexMap`, so `mappings()` preserves it). A namespace is
-            // shortened with its *first-declared* prefix: CL declares `terms:` before
-            // `dcterms:` (both `http://purl.org/dc/terms/`) so it renders `terms:`,
-            // while EFO declares `dcterms:` first so it renders `dcterms:`. Every
-            // declared prefix is kept (dedup only on the prefix *name*), not collapsed
-            // by namespace. Nothing is appended: a namespace the document never bound
-            // has no prefix to shorten with, and renders under `id_impl`'s mechanical
-            // rule (a bare local name, or the full IRI).
-            let mut v: Vec<(String, String)> = Vec::new();
-            for (prefix, ns) in model.prefixes.mappings() {
-                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
-                    continue;
-                }
-                if v.iter().any(|(p, _)| p == prefix) {
-                    continue;
-                }
-                v.push((prefix.clone(), ns.clone()));
+        let mut idspaces: Vec<(String, String)> = Vec::new();
+        let mut keep = |prefix: &str, ns: &str| {
+            if !prefix.is_empty()
+                && crate::io::idspace_namespace(ns)
+                && !idspaces.iter().any(|(p, _)| p == prefix)
+            {
+                idspaces.push((prefix.to_string(), ns.to_string()));
             }
-            // The document's declared RDF/XML xmlns (carried through the pipeline
-            // via the OFN `#rdfxmlns` comment) contribute their prefixes too — e.g.
-            // `its`/`swrl`, which mondo declares but which the CURIE prefix map does
-            // not carry. Same builtin/PURL skips as above.
-            for (prefix, ns) in &model.rdf_prefixes {
-                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
-                    continue;
-                }
-                if v.iter().any(|(p, _)| p == prefix) {
-                    continue;
-                }
-                v.push((prefix.clone(), ns.clone()));
-            }
-            v
         };
+        if scanned && model.explicit_prefixes.is_empty() {
+            for (prefix, ns) in crate::io::declared_idspaces(model) {
+                keep(&prefix, &ns);
+            }
+        } else if model.obo_source && !scanned {
+            for (prefix, ns) in &model.explicit_prefixes {
+                keep(prefix, ns);
+            }
+        } else {
+            // A prefix the command line adds replaces the source's binding of
+            // its name. The source's own follow, every prefix name kept rather
+            // than one per namespace: its xmlns or `Prefix(…)` bindings when it
+            // has them (carried through a pipeline by the OFN `#rdfxmlns`
+            // comment), and otherwise the prefix map a pipeline built. A
+            // namespace nothing bound has no prefix to shorten with.
+            for (prefix, ns) in &model.explicit_prefixes {
+                keep(prefix, ns);
+            }
+            if model.rdf_prefixes.is_empty() {
+                for (prefix, ns) in model.prefixes.mappings() {
+                    keep(prefix, ns);
+                }
+            } else {
+                for (prefix, ns) in &model.rdf_prefixes {
+                    keep(prefix, ns);
+                }
+            }
+        }
         // Sort by namespace length, longest first (so an IRI matches the most
         // specific namespace — `gwas_trait:` before `efo:`). For two prefixes that
         // share ONE namespace (aliases, e.g. `ICD11` and `icd11.foundation` for
@@ -2505,6 +2552,33 @@ fn fold(s: &str) -> String {
         .collect()
 }
 
+/// The synonym scope an `oboInOwl:hasScope` value names.
+fn synonym_scope(av: &AnnotationValue<RcStr>) -> Option<&'static str> {
+    let AnnotationValue::IRI(i) = av else { return None };
+    Some(match i.as_ref().strip_prefix(OIO)? {
+        "hasExactSynonym" => "EXACT",
+        "hasRelatedSynonym" => "RELATED",
+        "hasNarrowSynonym" => "NARROW",
+        "hasBroadSynonym" => "BROAD",
+        _ => return None,
+    })
+}
+
+/// The OBO tag an `oboInOwl:` boolean annotation property stands for.
+fn boolean_tag(local: &str) -> Option<&'static str> {
+    Some(match local {
+        "builtin" => "builtin",
+        "is_anonymous" => "is_anonymous",
+        "is_cyclic" => "is_cyclic",
+        "is_reflexive" => "is_reflexive",
+        "is_symmetric" => "is_symmetric",
+        "is_functional" => "is_functional",
+        "is_inverse_functional" => "is_inverse_functional",
+        "is_asymmetric" => "is_asymmetric",
+        _ => return None,
+    })
+}
+
 /// All the OBO-renderable facts about one term/typedef subject, grouped so the
 /// stanza can be emitted faithfully (axiom-annotation `[xref]`/`TYPE`/`{qual}`
 /// blocks included) and re-read to the same axioms.
@@ -2614,6 +2688,11 @@ struct SubjData {
     // (`TransitiveObjectProperty`) covers the true case; this carries an explicit
     // `false` (EFO marks several relations non-transitive) that would otherwise leak.
     transitive_anno: Option<bool>,
+    // The other boolean tags an annotation states (`builtin`, `is_anonymous`,
+    // `is_anti_symmetric`, `is_cyclic`, a characteristic stated as an annotation,
+    // and `is_metadata_tag`/`is_class_level` stated false), by tag: each is
+    // written as the tag itself, not as a `property_value:`.
+    bool_tags: BTreeMap<&'static str, bool>,
     symmetric: bool,
     reflexive: bool,
     asymmetric: bool,
@@ -2625,6 +2704,9 @@ struct SubjData {
     // (sub-property of oboInOwl:SubsetProperty / SynonymTypeProperty).
     subset_property: bool,
     synonymtype_property: bool,
+    // A synonym type's `oboInOwl:hasScope`: the scope (`EXACT`, …) of the
+    // synonym property it names.
+    synonym_scope: Option<&'static str>,
 }
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
@@ -3118,7 +3200,6 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     let mut ont_anns: Vec<(String, String, bool, Option<String>)> = Vec::new();
     let mut remarks: Vec<String> = Vec::new();
     let mut imports: Vec<String> = Vec::new();
-    let mut format_version: Option<String> = None;
     let mut directives: HashMap<&'static str, Vec<String>> = HashMap::new();
 
     // Per-subject count of annotation-assertion axioms. A subject's assertions sit
@@ -3141,7 +3222,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         if matches!(ac.component, Component::EquivalentClasses(_)) {
             equivs.push(ac);
         } else {
-            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut format_version, &mut directives);
+            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut directives);
         }
         match &ac.component {
             Component::AnnotationAssertion(aa) => {
@@ -3188,7 +3269,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .collect();
         keyed.sort_by_key(|(b, i, _)| (*b, *i));
         for (_, _, ac) in keyed {
-            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut format_version, &mut directives);
+            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut directives);
         }
     }
     let subclass_cap = owlapi_set_cap(subclass_count);
@@ -3421,19 +3502,19 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     // sub-property-of oboInOwl:SubsetProperty / SynonymTypeProperty axioms plus
     // the property's comment / label).
     let mut subsetdefs: Vec<(String, String)> = Vec::new();
-    let mut syntypedefs: Vec<(String, String)> = Vec::new();
+    let mut syntypedefs: Vec<(String, String, Option<&'static str>)> = Vec::new();
     for (iri, sd) in &data {
         if sd.subset_property {
             let descr = sd.comments.first().map(|(t, _)| t.clone()).unwrap_or_default();
             subsetdefs.push((ctx.id(iri), descr));
         } else if sd.synonymtype_property {
             let descr = sd.name.as_ref().map(|(t, _)| t.clone()).unwrap_or_default();
-            syntypedefs.push((ctx.id(iri), descr));
+            syntypedefs.push((ctx.id(iri), descr, sd.synonym_scope));
         }
     }
     subsetdefs.sort_by_key(|(id, d)| (fold(id), d.clone()));
     subsetdefs.dedup();
-    syntypedefs.sort_by_key(|(id, d)| (fold(id), d.clone()));
+    syntypedefs.sort_by_key(|(id, d, _)| (fold(id), d.clone()));
     syntypedefs.dedup();
 
     // Header, in OBO's header-tag order (format-version 0, data-version 10,
@@ -3441,9 +3522,9 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     // synonymtypedef 40, default-namespace 45, idspace 50, treat-xrefs-* 55–70,
     // remark 75, import 80, ontology 85, property_value 100, owl-axioms 110) —
     // the order released files such as CL's `cl.obo` carry.
-    // The default is 1.2, not 1.4: `format-version: 1.2` is what released OBO files
-    // carry, so a model that reaches the writer with no
-    // `oboInOwl:hasOBOFormatVersion` (one read from OWL, say) is stamped with that.
+    // `format-version` is always 1.2, the version of the document this writer
+    // produces, whatever `oboInOwl:hasOBOFormatVersion` the model carries: a 1.4
+    // source written back out says 1.2 like every other OBO file.
     // A header directive's tag lines (`tag: value`), in the collected+sorted
     // order. Written at the fixed header position for that tag.
     macro_rules! emit_directive {
@@ -3462,7 +3543,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             classes.iter().chain(obj_props.iter()).chain(ann_props.iter()).chain(individuals.iter()),
         )?;
     }
-    writeln!(writer, "format-version: {}", format_version.as_deref().unwrap_or("1.2"))?;
+    writeln!(writer, "format-version: 1.2")?;
     if let Some(dv) = data_version(ont_iri.as_deref(), ont_version_iri.as_deref()) {
         writeln!(writer, "data-version: {dv}")?;
     }
@@ -3472,8 +3553,11 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     for (id, descr) in &subsetdefs {
         writeln!(writer, "subsetdef: {id} \"{}\"", escape(descr))?;
     }
-    for (id, descr) in &syntypedefs {
-        writeln!(writer, "synonymtypedef: {id} \"{}\"", escape(descr))?;
+    for (id, descr, scope) in &syntypedefs {
+        match scope {
+            Some(scope) => writeln!(writer, "synonymtypedef: {id} \"{}\" {scope}", escape(descr))?,
+            None => writeln!(writer, "synonymtypedef: {id} \"{}\"", escape(descr))?,
+        }
     }
     emit_directive!("default-namespace");
     emit_directive!("namespace-id-rule");
@@ -3515,8 +3599,8 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .map(|(p, _)| p.as_str())
             .chain(model.rdf_prefixes.iter().map(|(p, _)| p.as_str()))
             .collect();
-        // Prefixes from an explicit `--prefixes`/`--add-prefixes` context: EVERY one
-        // gets an `idspace:`, whether or not it shortens an id (so mondo's `ICD11`
+        // Every explicit prefix (`Model::explicit_prefixes`) gets an
+        // `idspace:`, whether or not it shortens an id (so mondo's `ICD11`
         // appears with zero references).
         let explicit: std::collections::HashSet<&str> =
             model.explicit_prefixes.iter().map(|(p, _)| p.as_str()).collect();
@@ -3873,7 +3957,6 @@ fn record_ac(
     ont_anns: &mut Vec<(String, String, bool, Option<String>)>,
     remarks: &mut Vec<String>,
     imports: &mut Vec<String>,
-    format_version: &mut Option<String>,
     directives: &mut HashMap<&'static str, Vec<String>>,
 ) {
     let comp = &ac.component;
@@ -3894,7 +3977,8 @@ fn record_ac(
                 // treat-xrefs-as-*, date, …), not a header `property_value:`.
                 directives.entry(tag).or_default().push(val);
             } else if oa.0.ap.0.as_ref() == format!("{OIO}hasOBOFormatVersion") {
-                *format_version = Some(val);
+                // The header's `format-version` is always the version this writer
+                // produces, never the one the source declared.
             } else if oa.0.ap.0.as_ref() == RDFS_COMMENT {
                 // An ontology-level rdfs:comment is the OBO header `remark:` tag
                 // (CL's "See PMID:15693950 …; Contact Alexander Diehl …" line),
@@ -4493,9 +4577,25 @@ fn record_annotation(
             Some("created_by") => e.created_by.push(val),
             Some("creation_date") => e.creation_date.push(val),
             Some("shorthand") => e.shorthand = Some(val),
-            Some("is_metadata_tag") => e.is_metadata_tag = val == "true",
-            Some("is_class_level") => e.is_class_level = val == "true",
+            Some("is_metadata_tag") => {
+                e.is_metadata_tag = val == "true";
+                if val == "false" {
+                    e.bool_tags.insert("is_metadata_tag", false);
+                }
+            }
+            Some("is_class_level") => {
+                e.is_class_level = val == "true";
+                if val == "false" {
+                    e.bool_tags.insert("is_class_level", false);
+                }
+            }
             Some("is_transitive") => e.transitive_anno = Some(val == "true"),
+            Some("hasScope") if synonym_scope(&ann.av).is_some() => e.synonym_scope = synonym_scope(&ann.av),
+            Some(local) if (val == "true" || val == "false") && boolean_tag(local).is_some() => {
+                if let Some(tag) = boolean_tag(local) {
+                    e.bool_tags.insert(tag, val == "true");
+                }
+            }
             _ => match prop {
                 // `IAO:0000231` on a deprecated class records the obsolescence
                 // reason so `alt_id:` folding can recognise the "terms merged"
@@ -4511,6 +4611,9 @@ fn record_annotation(
                         _ => (val, String::new()),
                     };
                     e.property_values.push((ctx.id(prop), pv_val, is_iri, dt, axanns.clone(), prop.to_string(), val_iri));
+                }
+                IAO_ANTISYMMETRIC if val == "true" || val == "false" => {
+                    e.bool_tags.insert("is_anti_symmetric", val == "true");
                 }
                 // The OBO macro tags are Typedef-only; on anything else they stay
                 // ordinary property_values.
@@ -5688,6 +5791,9 @@ fn write_stanza<W: Write>(
 
     // --- The tags shared by [Term], [Typedef] and [Instance], in OBO's tag order. ---
     writeln!(writer, "id: {id}")?;
+    if let Some(v) = sd.bool_tags.get("is_anonymous") {
+        writeln!(writer, "is_anonymous: {v}")?;
+    }
     // One `name:` clause per distinct `rdfs:label`, ordered by case-folded value,
     // then case-sensitive value, then the axiom-set bucket for value-ties. A
     // single-label entity yields one line; a multi-label one (OBI:0000295's
@@ -5933,6 +6039,12 @@ fn write_stanza<W: Write>(
             format!("{}{desc_tok}{}", escape_xref(xid), render_quals(&quals)),
         )
     }).collect())?;
+    // `builtin:` follows `xref:` in a [Term]; a [Typedef] writes it after `range:`.
+    if kind == Stanza2::Term {
+        if let Some(v) = sd.bool_tags.get("builtin") {
+            writeln!(writer, "builtin: {v}")?;
+        }
+    }
 
     // `property_value:` sits after `xref:` in a [Typedef] but after
     // `relationship:` in a [Term] — the two frame types have different tag orders,
@@ -6123,6 +6235,9 @@ fn write_stanza<W: Write>(
             let quals = quals_with_xrefs(&dbxrefs, &quals);
             (fold(r), format!("{r}{}{}", render_quals(&quals), label_comment(labels, &[r])))
         }).collect())?;
+        if let Some(v) = sd.bool_tags.get("builtin") {
+            writeln!(writer, "builtin: {v}")?;
+        }
         // A two-link chain headed by the property itself is `transitive_over:`;
         // any other two-link chain is `holds_over_chain:`. Chains of three or more
         // links have no OBO tag at all and belong in `owl-axioms:`; emitting one as
@@ -6155,22 +6270,36 @@ fn write_stanza<W: Write>(
             }
         }
         write_sorted(writer, "holds_over_chain", chains)?;
-        if sd.reflexive {
-            writeln!(writer, "is_reflexive: true")?;
+        // A characteristic is `true` when its axiom or an annotation says so, and
+        // `false` when an annotation says that.
+        let characteristic = |axiom: bool, tag: &str| -> Option<bool> {
+            if axiom {
+                Some(true)
+            } else {
+                sd.bool_tags.get(tag).copied()
+            }
+        };
+        for tag in ["is_anti_symmetric", "is_cyclic"] {
+            if let Some(v) = sd.bool_tags.get(tag) {
+                writeln!(writer, "{tag}: {v}")?;
+            }
         }
-        if sd.symmetric {
-            writeln!(writer, "is_symmetric: true")?;
+        if let Some(v) = characteristic(sd.reflexive, "is_reflexive") {
+            writeln!(writer, "is_reflexive: {v}")?;
+        }
+        if let Some(v) = characteristic(sd.symmetric, "is_symmetric") {
+            writeln!(writer, "is_symmetric: {v}")?;
         }
         if sd.transitive || sd.transitive_anno == Some(true) {
             writeln!(writer, "is_transitive: true")?;
         } else if sd.transitive_anno == Some(false) {
             writeln!(writer, "is_transitive: false")?;
         }
-        if sd.functional {
-            writeln!(writer, "is_functional: true")?;
+        if let Some(v) = characteristic(sd.functional, "is_functional") {
+            writeln!(writer, "is_functional: {v}")?;
         }
-        if sd.inverse_functional {
-            writeln!(writer, "is_inverse_functional: true")?;
+        if let Some(v) = characteristic(sd.inverse_functional, "is_inverse_functional") {
+            writeln!(writer, "is_inverse_functional: {v}")?;
         }
         write_sorted(writer, "is_a", sd.sub_property_of.iter().map(|sp| {
             (fold(sp), format!("{sp}{}", label_comment(labels, &[sp])))
@@ -6258,14 +6387,20 @@ fn write_stanza<W: Write>(
     // reader re-classifies them as annotation properties (not object properties).
     if kind == Stanza2::AnnotationProperty || (typedef && sd.is_metadata_tag) {
         writeln!(writer, "is_metadata_tag: true")?;
+    } else if typedef && sd.bool_tags.get("is_metadata_tag") == Some(&false) {
+        writeln!(writer, "is_metadata_tag: false")?;
     }
     if typedef && sd.is_class_level {
         writeln!(writer, "is_class_level: true")?;
+    } else if typedef && sd.bool_tags.get("is_class_level") == Some(&false) {
+        writeln!(writer, "is_class_level: false")?;
     }
     // `is_asymmetric` has no assigned place in the Typedef tag order, so it is
     // written last, after even `expand_expression_to`.
-    if typedef && sd.asymmetric {
-        writeln!(writer, "is_asymmetric: true")?;
+    if typedef {
+        if let Some(v) = if sd.asymmetric { Some(true) } else { sd.bool_tags.get("is_asymmetric").copied() } {
+            writeln!(writer, "is_asymmetric: {v}")?;
+        }
     }
     Ok(())
 }

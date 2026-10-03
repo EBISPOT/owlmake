@@ -25,7 +25,7 @@ pub struct CommonArgs {
     #[arg(long = "input-format", value_name = "FORMAT")]
     pub input_format: Option<String>,
 
-    /// Use prefixes from a JSON-LD context file.
+    /// Bind the prefixes of a JSON-LD context file for reading CURIEs.
     #[arg(short = 'P', long = "prefixes", value_name = "FILE")]
     pub prefixes: Option<std::path::PathBuf>,
 
@@ -109,8 +109,8 @@ impl CommonArgs {
     /// The prefixes this command line supplies, in the order given: those of each
     /// `--prefixes`/`--add-prefixes` context file (both JSON-LD forms, a bare
     /// namespace string and `{"@id": …, "@prefix": true}`), then each
-    /// `--prefix "name: iri"`. The flag says whether one came from a file.
-    pub fn given_prefixes(&self) -> Result<Vec<(String, String, bool)>> {
+    /// `--prefix`/`--add-prefix "name: iri"`.
+    pub fn given_prefixes(&self) -> Result<Vec<(String, String)>> {
         let mut out = Vec::new();
         for file in self.prefixes.iter().chain(self.add_prefixes.iter()) {
             let text = std::fs::read_to_string(file)
@@ -121,13 +121,12 @@ impl CommonArgs {
             for (k, v) in ctx.as_object().into_iter().flatten() {
                 let ns = v.as_str().or_else(|| v.get("@id").and_then(|x| x.as_str()));
                 if let Some(ns) = ns {
-                    out.push((k.clone(), ns.to_string(), true));
+                    out.push((k.clone(), ns.to_string()));
                 }
             }
         }
         for spec in self.prefix.iter().chain(&self.add_prefix) {
-            let (name, ns) = Self::binding(spec)?;
-            out.push((name, ns, false));
+            out.push(Self::binding(spec)?);
         }
         Ok(out)
     }
@@ -142,32 +141,32 @@ impl CommonArgs {
     /// Apply prefix-affecting options to a freshly loaded model: they land after
     /// loading, on top of the document's own prefixes (`--noprefixes` clears the
     /// built-in defaults first).
+    ///
+    /// Every prefix given binds a name for reading CURIEs. `--prefix` and
+    /// `--prefixes` do nothing else. An ADDED prefix (`--add-prefix`,
+    /// `--add-prefixes`) is also declared by whatever is written next, used or
+    /// not, even by an ontology built from nothing, which declares no other. An
+    /// OBO document takes added prefixes as idspaces only when it is cleaned
+    /// (see `convert::apply_clean_obo`).
     pub fn apply(&self, model: &mut Model) -> Result<()> {
         if self.noprefixes {
             model.prefixes = PrefixMapping::default();
         }
-        for (name, ns, from_file) in self.given_prefixes()? {
+        for (name, ns) in self.given_prefixes()? {
             let _ = model.prefixes.add_prefix(&name, &ns);
-            // A prefix from a context FILE gets an `idspace:` line in OBO output
-            // whether or not it shortens anything, so those are kept apart.
-            if from_file && !model.explicit_prefixes.iter().any(|(p, _)| *p == name) {
-                model.explicit_prefixes.push((name, ns));
-            }
         }
-        // An ADDED prefix is declared by whatever is written next, used or not,
-        // even by an ontology built from nothing, which declares no other. A
-        // `--prefix` is for reading CURIEs only.
         let mut added = Vec::new();
         for file in &self.add_prefixes {
             let only = CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
-            added.extend(only.given_prefixes()?.into_iter().map(|(name, ns, _)| (name, ns)));
+            added.extend(only.given_prefixes()?);
         }
         for spec in &self.add_prefix {
             added.push(Self::binding(spec)?);
         }
         for (name, ns) in added {
-            if !model.built_prefixes.iter().any(|(p, _)| *p == name) {
-                model.built_prefixes.push((name, ns));
+            match model.added_prefixes.iter_mut().find(|(p, _)| *p == name) {
+                Some(slot) => slot.1 = ns,
+                None => model.added_prefixes.push((name, ns)),
             }
         }
         Ok(())

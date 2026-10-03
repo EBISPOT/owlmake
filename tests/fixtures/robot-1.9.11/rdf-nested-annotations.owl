@@ -1,0 +1,443 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/a#"
+     xml:base="http://example.org/a"
+     xmlns:a="http://example.org/a#"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/a">
+        <dc:creator>someone</dc:creator>
+        <rdfs:comment>about</rdfs:comment>
+        <rdfs:label xml:lang="en">a</rdfs:label>
+    </owl:Ontology>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:resource="http://example.org/a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget xml:lang="en">a</owl:annotatedTarget>
+        <rdfs:comment>translated</rdfs:comment>
+    </owl:Annotation>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:resource="http://example.org/a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>about</owl:annotatedTarget>
+        <rdfs:comment>reviewed</rdfs:comment>
+    </owl:Annotation>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:resource="http://example.org/a"/>
+        <owl:annotatedProperty rdf:resource="http://purl.org/dc/elements/1.1/creator"/>
+        <owl:annotatedTarget>someone</owl:annotatedTarget>
+        <rdfs:comment>by whom</rdfs:comment>
+    </owl:Annotation>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/a#ap -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/a#ap"/>
+    
+
+
+    <!-- http://purl.org/dc/elements/1.1/creator -->
+
+    <owl:AnnotationProperty rdf:about="http://purl.org/dc/elements/1.1/creator"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/a#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/a#p"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/a#d -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/a#d"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/a#A -->
+
+    <owl:Class rdf:about="http://example.org/a#A">
+        <rdfs:subClassOf rdf:resource="http://example.org/a#B"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/a#C"/>
+        <ap>value</ap>
+    </owl:Class>
+    <owl:Annotation>
+        <owl:annotatedSource>
+            <owl:Annotation>
+                <owl:annotatedSource rdf:nodeID="genid7"/>
+                <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+                <owl:annotatedTarget>branch</owl:annotatedTarget>
+                <rdfs:comment>n1</rdfs:comment>
+                <rdfs:label>n2</rdfs:label>
+            </owl:Annotation>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>n2</owl:annotatedTarget>
+        <rdfs:comment>m2</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid7">
+        <owl:annotatedSource rdf:resource="http://example.org/a#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#C"/>
+        <rdfs:comment>branch</rdfs:comment>
+        <rdfs:label>plain</rdfs:label>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid11"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>source</owl:annotatedTarget>
+        <rdfs:comment>checked</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid11">
+        <owl:annotatedSource rdf:resource="http://example.org/a#A"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#ap"/>
+        <owl:annotatedTarget>value</owl:annotatedTarget>
+        <rdfs:comment>source</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource>
+            <owl:Annotation>
+                <owl:annotatedSource rdf:nodeID="genid4"/>
+                <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+                <owl:annotatedTarget>deep</owl:annotatedTarget>
+                <rdfs:comment>deeper</rdfs:comment>
+            </owl:Annotation>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>deeper</owl:annotatedTarget>
+        <rdfs:comment>deepest</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid4">
+        <owl:annotatedSource rdf:resource="http://example.org/a#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#B"/>
+        <rdfs:comment>deep</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource>
+            <owl:Annotation>
+                <owl:annotatedSource rdf:nodeID="genid7"/>
+                <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+                <owl:annotatedTarget>branch</owl:annotatedTarget>
+                <rdfs:comment>n1</rdfs:comment>
+                <rdfs:label>n2</rdfs:label>
+            </owl:Annotation>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>n1</owl:annotatedTarget>
+        <rdfs:comment>m1</rdfs:comment>
+    </owl:Annotation>
+    
+
+
+    <!-- http://example.org/a#B -->
+
+    <owl:Class rdf:about="http://example.org/a#B">
+        <owl:equivalentClass rdf:nodeID="genid13"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid13">
+        <owl:onProperty rdf:resource="http://example.org/a#p"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/a#C"/>
+    </owl:Restriction>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid14"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#seeAlso"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/where"/>
+        <rdfs:seeAlso rdf:resource="http://example.org/why"/>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid14">
+        <owl:annotatedSource rdf:resource="http://example.org/a#B"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid13"/>
+        <rdfs:seeAlso rdf:resource="http://example.org/where"/>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/a#C -->
+
+    <owl:Class rdf:about="http://example.org/a#C"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/a#i -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/a#i">
+        <owl:sameAs rdf:resource="http://example.org/a#j"/>
+    </owl:NamedIndividual>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid16"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>same</owl:annotatedTarget>
+        <rdfs:comment>shared</rdfs:comment>
+        <owl:annotatedSource rdf:nodeID="genid18"/>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid16">
+        <owl:annotatedSource rdf:resource="http://example.org/a#i"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#j"/>
+        <rdfs:comment>same</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom rdf:nodeID="genid18">
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#k"/>
+        <rdfs:comment>same</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid19"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>negative</owl:annotatedTarget>
+        <rdfs:comment>not</rdfs:comment>
+    </owl:Annotation>
+    <rdf:Description rdf:nodeID="genid19">
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:resource="http://example.org/a#i"/>
+        <owl:assertionProperty rdf:resource="http://example.org/a#p"/>
+        <owl:targetIndividual rdf:resource="http://example.org/a#k"/>
+        <rdfs:comment>negative</rdfs:comment>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/a#j -->
+
+    <rdf:Description rdf:about="http://example.org/a#j">
+        <owl:sameAs rdf:resource="http://example.org/a#k"/>
+    </rdf:Description>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid16"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>same</owl:annotatedTarget>
+        <rdfs:comment>shared</rdfs:comment>
+        <owl:annotatedSource rdf:nodeID="genid18"/>
+    </owl:Annotation>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid19"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>negative</owl:annotatedTarget>
+        <rdfs:comment>not</rdfs:comment>
+    </owl:Annotation>
+    
+
+
+    <!-- http://example.org/a#k -->
+
+    <rdf:Description rdf:about="http://example.org/a#k"/>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid16"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>same</owl:annotatedTarget>
+        <rdfs:comment>shared</rdfs:comment>
+        <owl:annotatedSource rdf:nodeID="genid18"/>
+    </owl:Annotation>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid19"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>negative</owl:annotatedTarget>
+        <rdfs:comment>not</rdfs:comment>
+    </owl:Annotation>
+    
+
+
+    <!-- http://example.org/a#j -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/a#j">
+        <p rdf:resource="http://example.org/a#i"/>
+        <d>1</d>
+    </owl:NamedIndividual>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid21"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>a</owl:annotatedTarget>
+        <rdfs:comment>first</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid21">
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#p"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#i"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid23"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>b</owl:annotatedTarget>
+        <rdfs:comment>second</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid23">
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#p"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#i"/>
+        <rdfs:comment>b</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#p"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#i"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#d"/>
+        <owl:annotatedTarget>1</owl:annotatedTarget>
+        <rdfs:comment>w</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#d"/>
+        <owl:annotatedTarget>1</owl:annotatedTarget>
+        <rdfs:comment>x</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid28"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>y</owl:annotatedTarget>
+        <rdfs:comment>later</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid28">
+        <owl:annotatedSource rdf:resource="http://example.org/a#j"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/a#d"/>
+        <owl:annotatedTarget>1</owl:annotatedTarget>
+        <rdfs:comment>y</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/a#k -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/a#k"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotations
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description rdf:about="http://example.org/a#undeclared">
+        <rdfs:label>u</rdfs:label>
+    </rdf:Description>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid30"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>label</owl:annotatedTarget>
+        <rdfs:comment>untyped</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid30">
+        <owl:annotatedSource rdf:resource="http://example.org/a#undeclared"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>u</owl:annotatedTarget>
+        <rdfs:comment>label</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid33"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>gci</owl:annotatedTarget>
+        <rdfs:comment>general</rdfs:comment>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid33">
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/a#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/a#A"/>
+                <rdfs:subClassOf rdf:resource="http://example.org/a#B"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/a#B"/>
+        <rdfs:comment>gci</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid35"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>disjoint</owl:annotatedTarget>
+        <rdfs:comment>all</rdfs:comment>
+    </owl:Annotation>
+    <rdf:Description rdf:nodeID="genid35">
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/a#A"/>
+            <rdf:Description rdf:about="http://example.org/a#B"/>
+            <rdf:Description rdf:about="http://example.org/a#C"/>
+        </owl:members>
+        <rdfs:comment>disjoint</rdfs:comment>
+    </rdf:Description>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

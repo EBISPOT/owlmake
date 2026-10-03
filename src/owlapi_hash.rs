@@ -10,7 +10,8 @@
 //! - the hash codes (`equivalent_classes_hash` and the expression hashes under
 //!   it) — a prime-tagged polynomial over the axiom's components. Set-valued
 //!   components are stored SORTED and hashed as Java lists (seed 1, ordered),
-//!   except axiom annotation sets, which hash to 0 when empty. IRIs hash as
+//!   except axiom annotation sets, which hash to 0 when empty, and the
+//!   individuals of a one-of, which hash as a set (the sum). IRIs hash as
 //!   the sum of the Java string hashes of their namespace and NCName-suffix
 //!   halves;
 //! - the component order (`owl_cmp`) — OWLAPI's `compareTo`: type index first,
@@ -86,7 +87,7 @@ pub fn java_string_hash(s: &str) -> i32 {
 }
 
 /// Whether a code point may START an NCName (XML name start minus ':').
-fn is_ncname_start(c: char) -> bool {
+pub(crate) fn is_ncname_start(c: char) -> bool {
     matches!(c,
         'A'..='Z' | 'a'..='z' | '_'
         | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
@@ -96,7 +97,7 @@ fn is_ncname_start(c: char) -> bool {
 }
 
 /// Whether a code point may CONTINUE an NCName.
-fn is_ncname_char(c: char) -> bool {
+pub(crate) fn is_ncname_char(c: char) -> bool {
     is_ncname_start(c)
         || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }
@@ -264,10 +265,12 @@ pub fn ope_hash(ope: &OPE<RcStr>) -> i32 {
     }
 }
 
+/// An individual's hash. A named one is tagged like any other entity; an
+/// anonymous one is the string hash of its node id (`_:genid…`), untagged.
 fn ind_hash(i: &Individual<RcStr>) -> i32 {
     match i {
         Individual::Named(n) => tag(P_NAMED_INDIVIDUAL, &[iri_hash(n.0.as_ref())]),
-        Individual::Anonymous(_) => 0,
+        Individual::Anonymous(a) => java_string_hash(&crate::io::entities::node_id(a.0.as_ref())),
     }
 }
 
@@ -300,11 +303,12 @@ pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
         }
         CE::ObjectHasValue { ope, i } => tag(P_OBJ_HAS_VALUE, &[ope_hash(ope), ind_hash(i)]),
         CE::ObjectHasSelf(ope) => tag(P_OBJ_HAS_SELF, &[ope_hash(ope)]),
+        // The individuals are a set, not a sorted list, so they hash as one: the
+        // sum of the distinct members' hashes.
         CE::ObjectOneOf(v) => {
             let mut inds: Vec<&Individual<RcStr>> = v.iter().collect();
             inds.sort_by(|x, y| ind_cmp(x, y));
             inds.dedup_by(|x, y| ind_cmp(x, y) == Ordering::Equal);
-            // The individuals are a set, hashed as a set.
             let sum = inds.iter().map(|i| ind_hash(i)).fold(0i32, |acc, h| acc.wrapping_add(h));
             tag(P_OBJ_ONE_OF, &[sum])
         }
@@ -970,5 +974,26 @@ mod tests {
         assert_eq!(order[0], 2, "CL_4030101 first (bucket 0)");
         assert_eq!(order[1], 0, "CL_0002438 second (bucket 1)");
         assert_eq!(order[4], 1, "CL_4030100 last (bucket 9)");
+    }
+
+    /// Ground truth from the OWLAPI 4.5.29 runtime: `hashCode()` of each
+    /// expression, built with `OWLDataFactory`.
+    #[test]
+    fn individual_hashes_match_owlapi() {
+        let b: Build<RcStr> = Build::new();
+        let t = "http://example.org/t#";
+        let p = || OPE::ObjectProperty(b.object_property(format!("{t}p")));
+        let named = |n: &str| Individual::Named(b.named_individual(format!("{t}{n}")));
+        let value = |i: Individual<RcStr>| CE::ObjectHasValue { ope: p(), i };
+        assert_eq!(ce_hash(&value(named("a1"))), 2015939837);
+        assert_eq!(ce_hash(&value(named("a23"))), 2016031599);
+        // A one-of's individuals hash as a set: the order they are given in and
+        // a repeated member change nothing.
+        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a1"), named("a2")])), -1216281020);
+        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a2"), named("a1"), named("a2")])), -1216281020);
+        // An anonymous individual hashes as its node id, however the id is spelled.
+        let anon = |id: &str| Individual::Anonymous(horned_owl::model::AnonymousIndividual(RcStr::from(id)));
+        assert_eq!(ce_hash(&value(anon("_:genid2147483648"))), 575983105);
+        assert_eq!(ce_hash(&value(anon("genid2147483648"))), 575983105);
     }
 }

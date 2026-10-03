@@ -1,370 +1,179 @@
-//! OWL 2 Manchester Syntax support (the `.omn` format).
+//! OWL 2 Manchester Syntax (`.omn`) reading, and the class-expression parser
+//! the DOSDP engine and `explain` use.
 //!
-//! Covers the frame-based structure used in practice: `Prefix:`, `Ontology:`,
-//! `Class:` frames (Annotations / SubClassOf / EquivalentTo / DisjointWith) and
-//! `ObjectProperty:` frames, with class expressions built from `and`, `or`,
-//! `some`, `only`, `value`, `not`, and parentheses.
+//! A document is parsed whole: prefixes, the ontology header, every frame and
+//! section, axiom annotations, rules. A frame's list states one axiom per item —
+//! `DisjointWith: B, C` under `A` is `DisjointClasses(A B)` and
+//! `DisjointClasses(A C)` — and the members of an n-ary axiom are a set, so the
+//! same relation stated from both of its frames is one axiom. The writer is
+//! [`crate::io::manchester_write`].
 
-use std::collections::BTreeMap;
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 use anyhow::Result;
+use horned_owl::io::ParserConfiguration;
 use horned_owl::model::{
-    AnnotationAssertion, AnnotationSubject, AnnotationValue, Build, ClassExpression as CE, Component,
-    DeclareClass, DeclareObjectProperty, DisjointClasses, EquivalentClasses, Individual, Literal,
-    MutableOntology, ObjectPropertyExpression as OPE, RcStr, SubClassOf,
+    AnnotatedComponent, AnonymousIndividual, Build, ClassExpression as CE, Component, DataProperty, DifferentIndividuals,
+    DisjointClasses, DisjointDataProperties, DisjointObjectProperties, EquivalentClasses,
+    EquivalentDataProperties, EquivalentObjectProperties, Individual, InverseObjectProperties,
+    MutableOntology, ObjectPropertyExpression as OPE, RcStr, SameIndividual,
 };
 use horned_owl::ontology::set::SetOntology;
+use horned_owl::visitor::mutable::{VisitMut, WalkMut};
 
-use crate::model::{clone_prefixes, default_prefixes, Model};
-
-const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-
-// === Writer ==============================================================
-
-/// Write an ontology in Manchester Syntax.
-pub fn save<W: Write>(model: &Model, w: &mut W) -> Result<()> {
-    // Group axioms by subject class.
-    let mut labels: BTreeMap<String, String> = BTreeMap::new();
-    let mut supers: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut equivs: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut classes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut props: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-
-    for ac in model.ont.iter() {
-        match &ac.component {
-            Component::DeclareClass(dc) => {
-                classes.insert(dc.0 .0.as_ref().to_string());
-            }
-            Component::DeclareObjectProperty(dp) => {
-                props.insert(dp.0 .0.as_ref().to_string());
-            }
-            Component::AnnotationAssertion(aa) => {
-                if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(lit)) =
-                    (&aa.subject, &aa.ann.av)
-                {
-                    if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                        labels.insert(s.as_ref().to_string(), literal_text(lit));
-                    }
-                }
-            }
-            Component::SubClassOf(sc) => {
-                if let CE::Class(sub) = &sc.sub {
-                    classes.insert(sub.0.as_ref().to_string());
-                    supers
-                        .entry(sub.0.as_ref().to_string())
-                        .or_default()
-                        .push(render_ce(&sc.sup));
-                }
-            }
-            Component::EquivalentClasses(eq) => {
-                if let Some(CE::Class(c)) = eq.0.iter().find(|c| matches!(c, CE::Class(_))) {
-                    let key = c.0.as_ref().to_string();
-                    for m in &eq.0 {
-                        if !matches!(m, CE::Class(cc) if cc.0.as_ref() == key) {
-                            equivs.entry(key.clone()).or_default().push(render_ce(m));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    writeln!(w, "Prefix: owl: <http://www.w3.org/2002/07/owl#>")?;
-    writeln!(w, "Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>")?;
-    writeln!(w, "Ontology:")?;
-    writeln!(w)?;
-    for p in &props {
-        writeln!(w, "ObjectProperty: <{p}>")?;
-        if let Some(l) = labels.get(p) {
-            writeln!(w, "    Annotations: rdfs:label \"{}\"", escape(l))?;
-        }
-        writeln!(w)?;
-    }
-    for c in &classes {
-        writeln!(w, "Class: <{c}>")?;
-        if let Some(l) = labels.get(c) {
-            writeln!(w, "    Annotations: rdfs:label \"{}\"", escape(l))?;
-        }
-        if let Some(es) = equivs.get(c) {
-            writeln!(w, "    EquivalentTo: {}", es.join(",\n        "))?;
-        }
-        if let Some(ss) = supers.get(c) {
-            writeln!(w, "    SubClassOf: {}", ss.join(",\n        "))?;
-        }
-        writeln!(w)?;
-    }
-    Ok(())
-}
-
-fn render_ce(ce: &CE<RcStr>) -> String {
-    match ce {
-        CE::Class(c) => format!("<{}>", c.0.as_ref()),
-        CE::ObjectIntersectionOf(parts) => parts
-            .iter()
-            .map(render_ce_paren)
-            .collect::<Vec<_>>()
-            .join(" and "),
-        CE::ObjectUnionOf(parts) => parts
-            .iter()
-            .map(render_ce_paren)
-            .collect::<Vec<_>>()
-            .join(" or "),
-        CE::ObjectComplementOf(inner) => format!("not {}", render_ce_paren(inner)),
-        CE::ObjectSomeValuesFrom { ope, bce } => {
-            format!("{} some {}", render_ope(ope), render_ce_paren(bce))
-        }
-        CE::ObjectAllValuesFrom { ope, bce } => {
-            format!("{} only {}", render_ope(ope), render_ce_paren(bce))
-        }
-        CE::ObjectHasValue { ope, i } => format!("{} value {}", render_ope(ope), render_ind(i)),
-        _ => "owl:Thing".to_string(), // unsupported expression rendered as Thing
-    }
-}
-
-fn render_ce_paren(ce: &CE<RcStr>) -> String {
-    match ce {
-        CE::Class(_) => render_ce(ce),
-        _ => format!("({})", render_ce(ce)),
-    }
-}
-
-fn render_ope(ope: &OPE<RcStr>) -> String {
-    match ope {
-        OPE::ObjectProperty(p) => format!("<{}>", p.0.as_ref()),
-        OPE::InverseObjectProperty(p) => format!("inverse <{}>", p.0.as_ref()),
-    }
-}
-
-fn render_ind(i: &Individual<RcStr>) -> String {
-    match i {
-        Individual::Named(n) => format!("<{}>", n.0.as_ref()),
-        Individual::Anonymous(a) => format!("_:{}", a.0.as_ref()),
-    }
-}
-
-fn literal_text(lit: &Literal<RcStr>) -> String {
-    match lit {
-        Literal::Simple { literal }
-        | Literal::Language { literal, .. }
-        | Literal::Datatype { literal, .. } => literal.clone(),
-    }
-}
-
-fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
+use crate::io::natural_order::{iri_cmp, NaturalOrder};
+use crate::model::{Model, Onto};
 
 // === Reader ==============================================================
 
 /// Load an ontology from Manchester Syntax.
-pub fn load<R: BufRead>(mut reader: R) -> Result<Model> {
+///
+/// Node ids are local to the document: every `_:label` is re-minted, in order of
+/// first mention, from the blank-node counter, exactly as a functional-syntax
+/// read does.
+pub fn load<R: BufRead>(mut reader: R, cfg: ParserConfiguration<RcStr>) -> Result<Model> {
     let mut text = String::new();
     reader.read_to_string(&mut text)?;
-    let b = Build::new();
-    let mut ont: SetOntology<RcStr> = SetOntology::new();
-    let mut prefixes = default_prefixes();
-
-    let lines: Vec<&str> = text.lines().collect();
-    let mut i = 0;
-    // Header: Prefix: declarations.
-    while i < lines.len() {
-        let line = lines[i].trim();
-        if let Some(rest) = line.strip_prefix("Prefix:") {
-            if let Some((p, iri)) = rest.trim().split_once(char::is_whitespace) {
-                let p = p.trim().trim_end_matches(':');
-                let iri = iri.trim().trim_start_matches('<').trim_end_matches('>');
-                let _ = prefixes.add_prefix(p, iri);
-            }
-            i += 1;
-        } else if line.starts_with("Ontology:") || line.is_empty() {
-            i += 1;
-        } else {
-            break;
-        }
-    }
-
-    // Frames.
-    while i < lines.len() {
-        let line = lines[i].trim();
-        if line.is_empty() {
-            i += 1;
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("Class:") {
-            let subj = resolve(&prefixes, rest.trim());
-            ont.insert(Component::DeclareClass(DeclareClass(b.class(subj.clone()))));
-            i += 1;
-            i = parse_class_frame(&b, &mut ont, &prefixes, &lines, i, &subj)?;
-        } else if let Some(rest) = line.strip_prefix("ObjectProperty:") {
-            let subj = resolve(&prefixes, rest.trim());
-            ont.insert(Component::DeclareObjectProperty(DeclareObjectProperty(
-                b.object_property(subj),
-            )));
-            i += 1;
-            i = skip_frame(&lines, i);
-        } else {
-            i += 1;
-        }
-    }
-
-    Ok(Model::from_parts(ont, clone_prefixes(&prefixes)))
+    let (text, labels) = remint_node_ids(&text);
+    let (ont, prefixes): (Onto, horned_owl::curie::PrefixMapping) =
+        horned_owl::io::omn::read(text.as_bytes(), cfg)
+            .map_err(|e| anyhow::anyhow!("Manchester syntax parse error: {e}"))?;
+    let declared: Vec<(String, String)> = prefixes.mappings().map(|(p, ns)| (p.clone(), ns.clone())).collect();
+    let mut model = Model::from_parts(normalise(ont), prefixes);
+    // The document's `Prefix:` declarations are its format prefixes, which a
+    // write in another format carries over.
+    model.rdf_prefixes = declared;
+    model.anon_alloc_total = labels.len() as u64;
+    model.anon_doc_order = labels;
+    Ok(model)
 }
 
-/// Parse the sub-clauses of a Class frame until the next frame keyword.
-fn parse_class_frame(
-    b: &Build<RcStr>,
-    ont: &mut SetOntology<RcStr>,
-    prefixes: &horned_owl::curie::PrefixMapping,
-    lines: &[&str],
-    mut i: usize,
-    subj: &str,
-) -> Result<usize> {
-    while i < lines.len() {
-        let raw = lines[i];
-        let line = raw.trim();
-        if is_frame_start(line) {
-            break;
-        }
-        if line.is_empty() {
-            i += 1;
-            continue;
-        }
-        // A clause may be "Keyword: expr[, expr...]" possibly spanning lines.
-        let (keyword, mut body) = match line.split_once(':') {
-            Some((k, v)) => (k.trim().to_string(), v.trim().to_string()),
-            None => {
-                i += 1;
-                continue;
-            }
-        };
-        i += 1;
-        // Gather continuation lines (indented, not a new clause/frame).
-        while i < lines.len() {
-            let next = lines[i];
-            let nt = next.trim();
-            if nt.is_empty() || is_frame_start(nt) || looks_like_clause(nt) {
-                break;
-            }
-            body.push(' ');
-            body.push_str(nt);
-            i += 1;
-        }
-
-        match keyword.as_str() {
-            "SubClassOf" => {
-                for expr in split_top_commas(&body) {
-                    if let Some(ce) = parse_ce(b, prefixes, &expr) {
-                        ont.insert(Component::SubClassOf(SubClassOf {
-                            sub: CE::Class(b.class(subj)),
-                            sup: ce,
-                        }));
-                    }
-                }
-            }
-            "EquivalentTo" => {
-                for expr in split_top_commas(&body) {
-                    if let Some(ce) = parse_ce(b, prefixes, &expr) {
-                        ont.insert(Component::EquivalentClasses(EquivalentClasses(vec![
-                            CE::Class(b.class(subj)),
-                            ce,
-                        ])));
-                    }
-                }
-            }
-            "DisjointWith" => {
-                for expr in split_top_commas(&body) {
-                    if let Some(ce) = parse_ce(b, prefixes, &expr) {
-                        ont.insert(Component::DisjointClasses(DisjointClasses(vec![
-                            CE::Class(b.class(subj)),
-                            ce,
-                        ])));
-                    }
-                }
-            }
-            "Annotations" => {
-                for expr in split_top_commas(&body) {
-                    if let Some((prop, val)) = parse_annotation(prefixes, &expr) {
-                        ont.insert(Component::AnnotationAssertion(AnnotationAssertion {
-                            subject: AnnotationSubject::IRI(b.iri(subj)),
-                            ann: horned_owl::model::Annotation { ann: Default::default(),
-                                ap: b.annotation_property(prop.as_str()),
-                                av: AnnotationValue::Literal(Literal::Simple { literal: val }),
-                            },
-                        }));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(i)
-}
-
-fn skip_frame(lines: &[&str], mut i: usize) -> usize {
-    while i < lines.len() {
-        let line = lines[i].trim();
-        if is_frame_start(line) {
-            break;
-        }
-        i += 1;
-    }
-    i
-}
-
-fn is_frame_start(line: &str) -> bool {
-    ["Class:", "ObjectProperty:", "DataProperty:", "Individual:", "Datatype:", "AnnotationProperty:", "Ontology:", "Prefix:"]
-        .iter()
-        .any(|k| line.starts_with(k))
-}
-
-fn looks_like_clause(line: &str) -> bool {
-    ["SubClassOf:", "EquivalentTo:", "DisjointWith:", "Annotations:", "Types:", "Facts:", "SubPropertyOf:", "Domain:", "Range:", "Characteristics:"]
-        .iter()
-        .any(|k| line.starts_with(k))
-}
-
-/// Split on commas that are not inside parentheses.
-fn split_top_commas(s: &str) -> Vec<String> {
+/// The byte spans of the `_:label` node ids a Manchester document states, in
+/// document order. A `_:` inside a quoted string or a full IRI is not one, nor
+/// is one that continues a name; a `<` followed by a space or `=` is a facet,
+/// not the start of an IRI.
+fn node_id_spans(text: &str) -> Vec<(usize, usize)> {
+    let b = text.as_bytes();
+    let name_byte = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.' | b':');
     let mut out = Vec::new();
-    let mut depth = 0i32;
-    let mut cur = String::new();
-    for ch in s.chars() {
-        match ch {
-            '(' => {
-                depth += 1;
-                cur.push(ch);
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
             }
-            ')' => {
-                depth -= 1;
-                cur.push(ch);
+            b'<' if i + 1 < b.len() && !matches!(b[i + 1], b' ' | b'=' | b'\t' | b'\n' | b'\r') => {
+                while i < b.len() && b[i] != b'>' {
+                    i += 1;
+                }
+                i += 1;
             }
-            ',' if depth == 0 => {
-                out.push(cur.trim().to_string());
-                cur.clear();
+            b'_' if i + 1 < b.len() && b[i + 1] == b':' && (i == 0 || !name_byte(b[i - 1])) => {
+                let s = i;
+                let mut e = s + 2;
+                while e < b.len() && (b[e].is_ascii_alphanumeric() || matches!(b[e], b'_' | b'-' | b'.')) {
+                    e += 1;
+                }
+                while e > s + 2 && b[e - 1] == b'.' {
+                    e -= 1;
+                }
+                if e > s + 2 {
+                    out.push((s, e));
+                }
+                i = e.max(s + 2);
             }
-            _ => cur.push(ch),
+            _ => i += 1,
         }
-    }
-    if !cur.trim().is_empty() {
-        out.push(cur.trim().to_string());
     }
     out
 }
 
-fn parse_annotation(
-    prefixes: &horned_owl::curie::PrefixMapping,
-    expr: &str,
-) -> Option<(String, String)> {
-    let (prop, rest) = expr.split_once(char::is_whitespace)?;
-    let prop = resolve(prefixes, prop.trim());
-    let val = rest.trim();
-    let val = val.strip_prefix('"').and_then(|v| {
-        let end = v.find('"')?;
-        Some(v[..end].to_string())
-    })?;
-    Some((prop, val))
+/// Re-mint a Manchester document's node ids, returning the rewritten document
+/// and its new labels in first-mention order.
+fn remint_node_ids(text: &str) -> (String, Vec<String>) {
+    let spans = node_id_spans(text);
+    let mut index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for &(s, e) in &spans {
+        let n = index.len();
+        index.entry(&text[s + 2..e]).or_insert(n);
+    }
+    let base = super::mint_anon_ids(index.len());
+    let labels: Vec<String> = (0..index.len()).map(|k| format!("genid{}", base + k as u64)).collect();
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0usize;
+    for &(s, e) in &spans {
+        out.push_str(&text[last..s]);
+        out.push_str("_:");
+        out.push_str(&labels[index[&text[s + 2..e]]]);
+        last = e;
+    }
+    out.push_str(&text[last..]);
+    (out, labels)
+}
+
+/// Puts `_:` back on the node ids the parser strips it from, so an anonymous
+/// individual read from Manchester is the one a functional-syntax read of the
+/// same id gives.
+struct NodeIds;
+
+impl VisitMut<RcStr> for NodeIds {
+    fn visit_anonymous_individual(&mut self, a: &mut AnonymousIndividual<RcStr>) {
+        if !a.0.starts_with("_:") {
+            a.0 = RcStr::from(format!("_:{}", &*a.0));
+        }
+    }
+}
+
+/// `ont` with every node id spelled with its `_:`, and the members of every
+/// n-ary axiom in natural order, each once.
+fn normalise(ont: Onto) -> Onto {
+    use Component as C;
+    let order = NaturalOrder::default();
+    fn members<T: Clone>(v: &[T], cmp: impl Fn(&T, &T) -> std::cmp::Ordering) -> Vec<T> {
+        crate::io::natural_order::sorted_set(v, cmp).into_iter().cloned().collect()
+    }
+    let mut walk = WalkMut::new(NodeIds);
+    let mut out: Onto = SetOntology::new();
+    for mut ac in ont {
+        walk.annotated_component(&mut ac);
+        let AnnotatedComponent { component, ann } = ac;
+        let component = match component {
+            C::EquivalentClasses(x) => C::EquivalentClasses(EquivalentClasses(members(&x.0, |a, b| order.ce(a, b)))),
+            C::DisjointClasses(x) => C::DisjointClasses(DisjointClasses(members(&x.0, |a, b| order.ce(a, b)))),
+            C::EquivalentObjectProperties(x) => {
+                C::EquivalentObjectProperties(EquivalentObjectProperties(members(&x.0, |a, b| order.ope(a, b))))
+            }
+            C::DisjointObjectProperties(x) => {
+                C::DisjointObjectProperties(DisjointObjectProperties(members(&x.0, |a, b| order.ope(a, b))))
+            }
+            C::EquivalentDataProperties(x) => C::EquivalentDataProperties(EquivalentDataProperties(members(
+                &x.0,
+                |a: &DataProperty<RcStr>, b| iri_cmp(a.0.as_ref(), b.0.as_ref()),
+            ))),
+            C::DisjointDataProperties(x) => C::DisjointDataProperties(DisjointDataProperties(members(
+                &x.0,
+                |a: &DataProperty<RcStr>, b| iri_cmp(a.0.as_ref(), b.0.as_ref()),
+            ))),
+            C::SameIndividual(x) => C::SameIndividual(SameIndividual(members(&x.0, |a, b| order.individual(a, b)))),
+            C::DifferentIndividuals(x) => {
+                C::DifferentIndividuals(DifferentIndividuals(members(&x.0, |a, b| order.individual(a, b))))
+            }
+            C::InverseObjectProperties(InverseObjectProperties(p, q)) => {
+                if order.ope(&p, &q) == std::cmp::Ordering::Greater {
+                    C::InverseObjectProperties(InverseObjectProperties(q, p))
+                } else {
+                    C::InverseObjectProperties(InverseObjectProperties(p, q))
+                }
+            }
+            other => other,
+        };
+        out.insert(AnnotatedComponent { component, ann });
+    }
+    out
 }
 
 // --- Class-expression parser (recursive descent) ------------------------

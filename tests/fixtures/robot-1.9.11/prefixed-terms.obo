@@ -1,0 +1,19 @@
+format-version: 1.2
+ontology: ex
+
+[Term]
+id: EX:0000001
+name: thing one
+def: "The first example thing." []
+
+[Term]
+id: EX:0000002
+name: thing two
+def: "A kind of thing one." []
+is_a: EX:0000001 ! thing one
+
+[Term]
+id: EX:0000003
+name: thing three
+is_a: EX:0000001 ! thing one
+

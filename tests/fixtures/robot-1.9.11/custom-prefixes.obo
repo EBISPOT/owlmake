@@ -1,0 +1,11 @@
+format-version: 1.2
+idspace: bar http://example.org/bar# 
+idspace: dc http://purl.org/dc/elements/1.1/ 
+idspace: foo http://example.org/foo/ 
+ontology: ex
+
+[Term]
+id: EX:0000001
+name: thing one
+property_value: seeAlso foo:x
+

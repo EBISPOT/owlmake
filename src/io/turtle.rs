@@ -1,33 +1,72 @@
-//! Turtle support, bridged through the oxigraph triple store: the ontology is
-//! moved between Turtle and RDF/XML (which horned-owl reads/writes) via an
-//! in-memory store. This reuses the pure-Rust oxrdf serializers.
+//! Turtle and N-Triples input, and line-based RDF output, bridged through the
+//! oxigraph triple store: the ontology is moved between those syntaxes and
+//! RDF/XML (which horned-owl reads and writes) via an in-memory store. Turtle
+//! output is laid out by `owlapi_ttl`, which falls back to [`save_plain`].
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 
 use anyhow::{anyhow, Result};
-use oxigraph::io::{RdfFormat, RdfParser};
-use oxigraph::model::GraphNameRef;
+use oxigraph::io::{RdfFormat, RdfParser, RdfSerializer};
+use oxigraph::model::{BlankNode, GraphNameRef, NamedOrBlankNode, Term, Triple};
 use oxigraph::store::Store;
 
 use crate::io::Format;
 use crate::model::Model;
 
-/// Write a model as Turtle.
-pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
-    save_as(model, writer, RdfFormat::Turtle)
+/// Write a model as N-Triples.
+pub fn save_ntriples<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
+    save_lines(model, &[], writer, RdfFormat::NTriples)
 }
 
-/// [`save`] in an arbitrary line-based RDF syntax (Turtle or N-Triples).
-pub fn save_as<W: Write>(model: &Model, writer: &mut W, fmt: RdfFormat) -> Result<()> {
+/// Write a model as Turtle one statement at a time, declaring `prefixes`
+/// (name → namespace) and writing every IRI one of them covers as a prefixed
+/// name.
+pub fn save_plain<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W) -> Result<()> {
+    save_lines(model, prefixes, writer, RdfFormat::Turtle)
+}
+
+/// Every triple of the model's RDF mapping, each once, in a fixed order: a
+/// blank node is labelled by the order the mapping first names it, and the
+/// triples are sorted.
+pub(crate) fn mapped_triples(model: &Model) -> Result<Vec<Triple>> {
     let mut rdf = Vec::new();
     crate::io::write_to_ref(model, &mut rdf, Format::RdfXml)?;
-    let store = Store::new().map_err(|e| anyhow!("store: {e}"))?;
-    store
-        .load_from_slice(RdfParser::from_format(RdfFormat::RdfXml), &rdf)
-        .map_err(|e| anyhow!("loading triples: {e}"))?;
-    store
-        .dump_graph_to_writer(GraphNameRef::DefaultGraph, fmt, writer)
-        .map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
+    let mut labels: HashMap<BlankNode, BlankNode> = HashMap::new();
+    let mut label = |node: BlankNode| {
+        let next = labels.len();
+        labels.entry(node).or_insert_with(|| BlankNode::new_unchecked(format!("b{next}"))).clone()
+    };
+    let mut triples = Vec::new();
+    for quad in RdfParser::from_format(RdfFormat::RdfXml).for_slice(&rdf) {
+        let quad = quad.map_err(|e| anyhow!("loading triples: {e}"))?;
+        let subject = match quad.subject {
+            NamedOrBlankNode::BlankNode(b) => NamedOrBlankNode::BlankNode(label(b)),
+            named => named,
+        };
+        let object = match quad.object {
+            Term::BlankNode(b) => Term::BlankNode(label(b)),
+            other => other,
+        };
+        triples.push(Triple::new(subject, quad.predicate, object));
+    }
+    triples.sort_by_cached_key(|t| t.to_string());
+    triples.dedup();
+    Ok(triples)
+}
+
+fn save_lines<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W, fmt: RdfFormat) -> Result<()> {
+    let mut serializer = RdfSerializer::from_format(fmt);
+    for (name, ns) in prefixes {
+        serializer = serializer
+            .with_prefix(name.as_str(), ns.as_str())
+            .map_err(|e| anyhow!("prefix {name}: <{ns}>: {e}"))?;
+    }
+    let mut out = serializer.for_writer(writer);
+    for triple in &mapped_triples(model)? {
+        out.serialize_triple(triple).map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
+    }
+    out.finish().map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
     Ok(())
 }
 
@@ -51,7 +90,15 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
     store
         .dump_graph_to_writer(GraphNameRef::DefaultGraph, RdfFormat::RdfXml, &mut rdf)
         .map_err(|e| anyhow!("re-serializing as RDF/XML: {e}"))?;
+    let base = crate::io::anon_counter();
     let mut model = crate::io::load_from(std::io::Cursor::new(rdf), Format::RdfXml)?;
+    // A Turtle document's blank nodes take no ids of their own: its anonymous
+    // individuals are numbered from where the count stood, in the order the
+    // parse met them, and the count goes on after them.
+    if let Some(ids) = crate::io::numbered_individuals(&model.ont) {
+        let next = crate::io::renumber_individuals(&mut model.ont, ids, base);
+        crate::io::set_anon_counter(next);
+    }
     // That RDF/XML is oxigraph's own re-serialisation, not a source document, so its
     // xmlns block is oxigraph's invention — `oxrdfxml`'s writer unconditionally
     // declares `xmlns:its="http://www.w3.org/2005/11/its"` (for RDF 1.2 base
@@ -91,8 +138,19 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
         }
         model.prefixes = pm;
     }
-    model.rdf_prefixes = src_prefixes.clone();
-    model.idspaces = src_prefixes;
+    // The `idspace:` set is the document's prefixes less the namespaces no
+    // idspace may name, each namespace once — as for an RDF/XML source's
+    // `xmlns:` bindings.
+    let mut idspaces: Vec<(String, String)> = Vec::new();
+    for (p, ns) in &src_prefixes {
+        if !p.is_empty() && crate::io::idspace_namespace(ns) && !idspaces.iter().any(|(_, n)| n == ns) {
+            idspaces.push((p.clone(), ns.clone()));
+        }
+    }
+    model.idspaces = idspaces;
+    model.rdf_prefixes = src_prefixes;
+    // An untyped literal in Turtle or N-Triples is an `xsd:string`.
+    model.plain_literals_typed = true;
     Ok(model)
 }
 
@@ -111,6 +169,7 @@ fn add_missing_class_expression_types(store: &Store) -> Result<()> {
 
     const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
     const OWL: &str = "http://www.w3.org/2002/07/owl#";
+    const RDFS_DATATYPE: &str = "http://www.w3.org/2000/01/rdf-schema#Datatype";
     // Predicate → the `rdf:type` its subject must carry. `owl:onProperty` marks a
     // restriction; the set operators mark an anonymous class.
     let rules: [(&str, &str); 5] = [
@@ -130,10 +189,11 @@ fn add_missing_class_expression_types(store: &Store) -> Result<()> {
         for q in store.quads_for_pattern(None, Some(p), None, None) {
             let q = q.map_err(|e| anyhow!("scanning triples: {e}"))?;
             let subj = q.subject;
+            // A node typed in the OWL vocabulary, or as a data range, says what it is.
             let already = store
                 .quads_for_pattern(Some(subj.as_ref()), Some(type_pred), None, None)
                 .filter_map(|r| r.ok())
-                .any(|r| matches!(&r.object, Term::NamedNode(n) if n.as_str().starts_with(OWL)));
+                .any(|r| matches!(&r.object, Term::NamedNode(n) if n.as_str().starts_with(OWL) || n.as_str() == RDFS_DATATYPE));
             if !already {
                 missing.push(Quad::new(subj, t, t, GraphNameRef::DefaultGraph));
             }

@@ -206,12 +206,13 @@ pub struct Model {
     /// time (RDF/XML has no formal prefix map so it is scanned). Empty when the
     /// source is not an OWL document (an obo→obo trip keeps its own).
     pub idspaces: Vec<(String, String)>,
-    /// Prefixes loaded from an explicit `--prefixes`/`--add-prefixes` context file.
-    /// Unlike the built-in/default prefix map, EVERY explicitly-provided prefix gets
-    /// an `idspace:` line when writing OBO — regardless of whether it is used to
-    /// shorten an id — so mondo's `config/prefixes.jsonld` yields e.g.
-    /// `idspace: ICD11` even with zero ICD11 references. Recorded separately so the
-    /// OBO writer can tell them from the default map.
+    /// Prefixes an OBO rendering declares with an `idspace:` line whether or
+    /// not an id is shortened with them: an OBO source's own `idspace:` lines,
+    /// the prefixes the command line adds to a cleaned OBO write
+    /// (`convert --clean-obo`), and a build's `convert --add-prefixes` context,
+    /// so mondo's `config/prefixes.jsonld` yields `idspace: ICD11` even with
+    /// zero ICD11 references. Recorded apart from the CURIE map, which also
+    /// binds prefixes no document declared.
     pub explicit_prefixes: Vec<(String, String)>,
     /// Every `xmlns:PREFIX="NS"` declaration from an RDF/XML source, in document
     /// order, including built-in prefixes (owl, rdf, rdfs, xsd, xml, obo, …) that
@@ -226,13 +227,16 @@ pub struct Model {
     /// prefixes: the table's own CURIEs are bindings, and the document declares
     /// them. `babelon convert` is the case — `HP:0000001` binds
     /// `HP` to `http://purl.obolibrary.org/obo/HP_`, and the translation ontologies
-    /// open `xmlns:HP="http://purl.obolibrary.org/obo/HP_"`. A prefix ADDED on the
-    /// command line (`--add-prefix`, `--add-prefixes`) is one too, used or not: it
-    /// is how the mapping components ODK builds come to declare `sssom:`. Only bindings the
+    /// open `xmlns:HP="http://purl.obolibrary.org/obo/HP_"`. Only bindings the
     /// built-in namespaces do not already cover are recorded; the writer sorts the
     /// whole block by prefix length, so where they land is not this field's
     /// business.
     pub built_prefixes: Vec<(String, String)>,
+    /// Prefixes the command line adds to the document it writes
+    /// (`--add-prefix`, `--add-prefixes`). Every prefix-format writer — RDF/XML,
+    /// functional syntax, OWL/XML, Manchester, Turtle — declares each one, used
+    /// or not, over the source document's own, and abbreviates with it.
+    pub added_prefixes: Vec<(String, String)>,
     /// Per class IRI, the `genidN` blank-node ids referenced by `rdf:nodeID` in
     /// the class body, in document order. The RDF/XML writer assigns them
     /// positionally to the class's annotated anonymous superclasses
@@ -441,6 +445,7 @@ impl Model {
             explicit_prefixes: Vec::new(),
             rdf_prefixes: Vec::new(),
             built_prefixes: Vec::new(),
+            added_prefixes: Vec::new(),
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             closure_ann_ns: Vec::new(),
@@ -483,6 +488,7 @@ impl Model {
             explicit_prefixes: Vec::new(),
             rdf_prefixes: Vec::new(),
             built_prefixes: Vec::new(),
+            added_prefixes: Vec::new(),
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             closure_ann_ns: Vec::new(),
@@ -527,6 +533,7 @@ impl Model {
         self.idspaces = other.idspaces.clone();
         self.rdf_prefixes = other.rdf_prefixes.clone();
         self.built_prefixes = other.built_prefixes.clone();
+        self.added_prefixes = other.added_prefixes.clone();
         self.explicit_prefixes = other.explicit_prefixes.clone();
         self.owl_genid_refs = other.owl_genid_refs.clone();
         self.owl_label_order = other.owl_label_order.clone();
@@ -607,6 +614,7 @@ impl Clone for Model {
         m.idspaces = self.idspaces.clone();
         m.rdf_prefixes = self.rdf_prefixes.clone();
         m.built_prefixes = self.built_prefixes.clone();
+        m.added_prefixes = self.added_prefixes.clone();
         m.explicit_prefixes = self.explicit_prefixes.clone();
         m.owl_genid_refs = self.owl_genid_refs.clone();
         m.owl_label_order = self.owl_label_order.clone();

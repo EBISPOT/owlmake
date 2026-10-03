@@ -83,9 +83,12 @@ pub fn run_options() -> RunOptions {
     }
 }
 
+pub mod entities;
 pub mod manchester;
 pub mod manchester_parse;
+pub mod manchester_write;
 pub mod genid;
+pub mod natural_order;
 pub mod obo;
 pub mod obograph;
 pub mod ofncache;
@@ -93,6 +96,7 @@ pub mod frame_twins;
 pub mod owlfunc;
 pub mod owlapi_ttl;
 pub mod owlrdf;
+pub mod owx;
 pub mod turtle;
 pub mod jena_ttl;
 
@@ -500,7 +504,7 @@ fn sniff(bytes: &[u8]) -> Option<Format> {
         .take(4096)
         .map(|&b| b as char)
         .collect::<String>();
-    let trimmed = head.trim_start();
+    let trimmed = skip_comment_lines(&head);
     // A leading `<` is usually XML, but Turtle/N-Triples subjects are also
     // angle-bracketed IRIs — `<http://identifiers.org/hgnc/915> <…> "B2MR" .` is
     // exactly what `query --format ttl` writes when the constructed graph declares
@@ -522,6 +526,11 @@ fn sniff(bytes: &[u8]) -> Option<Format> {
     if trimmed.starts_with("Prefix(") || trimmed.starts_with("Ontology(") {
         return Some(Format::Functional);
     }
+    // Manchester syntax opens with its prefix declarations or its ontology
+    // frame, whatever the file is called.
+    if trimmed.starts_with("Prefix:") || trimmed.starts_with("Ontology:") {
+        return Some(Format::Manchester);
+    }
     if trimmed.starts_with("format-version:")
         || trimmed.starts_with("[Term]")
         || trimmed.starts_with("[Typedef]")
@@ -536,6 +545,16 @@ fn sniff(bytes: &[u8]) -> Option<Format> {
         return Some(Format::Turtle);
     }
     None
+}
+
+/// `text` from its first line that is neither blank nor a `#` comment, the
+/// comment of Turtle, N-Triples, functional and Manchester syntax.
+fn skip_comment_lines(text: &str) -> &str {
+    let mut rest = text.trim_start();
+    while rest.starts_with('#') {
+        rest = rest.split_once('\n').map_or("", |(_, next)| next).trim_start();
+    }
+    rest
 }
 
 /// Does `trimmed` open with an RDF term (`<IRI>`) rather than an XML tag? An
@@ -1390,6 +1409,131 @@ pub(crate) fn anon_individual_order(
     kept.into_iter().map(|b| &b.text).collect()
 }
 
+/// How many blank nodes an RDF/XML document has: the distinct nodes its
+/// triples name.
+fn document_blank_nodes(buf: &[u8], lax: bool) -> Result<usize> {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::model::{NamedOrBlankNode, Term};
+    let parser = RdfParser::from_format(RdfFormat::RdfXml);
+    let parser = if lax { parser.lenient() } else { parser };
+    let mut nodes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for quad in parser.for_slice(buf) {
+        let quad = quad.map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
+        if let NamedOrBlankNode::BlankNode(n) = &quad.subject {
+            nodes.insert(n.as_str().to_string());
+        }
+        if let Term::BlankNode(n) = &quad.object {
+            nodes.insert(n.as_str().to_string());
+        }
+    }
+    Ok(nodes.len())
+}
+
+/// The anonymous individuals of `ont`, by the number their `genid` id carries,
+/// or `None` when one carries another kind of id.
+pub(crate) fn numbered_individuals(ont: &Onto) -> Option<Vec<(u64, String)>> {
+    use horned_owl::model::{AnonymousIndividual, RcStr};
+    use horned_owl::visitor::immutable::{Visit, Walk};
+
+    struct Ids(std::collections::BTreeSet<String>);
+    impl Visit<RcStr> for Ids {
+        fn visit_anonymous_individual(&mut self, a: &AnonymousIndividual<RcStr>) {
+            self.0.insert(a.0.to_string());
+        }
+    }
+    let mut walk = Walk::new(Ids(std::collections::BTreeSet::new()));
+    for ac in ont.iter() {
+        walk.annotated_component(ac);
+    }
+    let mut ids: Vec<(u64, String)> = Vec::new();
+    for label in walk.into_visit().0 {
+        let n: u64 = label.strip_prefix("genid")?.parse().ok()?;
+        ids.push((n, label));
+    }
+    ids.sort();
+    Some(ids)
+}
+
+/// Number the anonymous individuals `ids` (from [`numbered_individuals`])
+/// `genid<first>` onwards, one id each, in the order of the numbers they carry,
+/// and return the id after the last.
+pub(crate) fn renumber_individuals(ont: &mut Onto, ids: Vec<(u64, String)>, first: u64) -> u64 {
+    use horned_owl::model::{AnonymousIndividual, MutableOntology, RcStr};
+    use horned_owl::visitor::mutable::{VisitMut, WalkMut};
+
+    let next = first + ids.len() as u64;
+    let renamed: std::collections::HashMap<String, RcStr> = ids
+        .into_iter()
+        .enumerate()
+        .filter(|(k, (n, _))| *n != first + *k as u64)
+        .map(|(k, (_, label))| (label, RcStr::from(format!("genid{}", first + k as u64))))
+        .collect();
+    if renamed.is_empty() {
+        return next;
+    }
+    struct Rename(std::collections::HashMap<String, RcStr>);
+    impl VisitMut<RcStr> for Rename {
+        fn visit_anonymous_individual(&mut self, a: &mut AnonymousIndividual<RcStr>) {
+            if let Some(to) = self.0.get(&*a.0) {
+                a.0 = to.clone();
+            }
+        }
+    }
+    let mut rename = WalkMut::new(Rename(renamed));
+    let mut out: Onto = horned_owl::ontology::set::SetOntology::new();
+    for mut ac in std::mem::take(ont) {
+        rename.annotated_component(&mut ac);
+        out.insert(ac);
+    }
+    *ont = out;
+    next
+}
+
+/// An `owl:versionIRI` statement about the ontology is its version IRI wherever
+/// the document makes it. The parse takes one stated before the ontology's
+/// `rdf:type owl:Ontology` for an ontology annotation, and declares
+/// `owl:versionIRI` an annotation property for it; both are put back here.
+fn version_iri_statement(ont: &mut Onto) {
+    use horned_owl::model::{
+        AnnotatedComponent, AnnotationValue, Component, DeclareAnnotationProperty, MutableOntology,
+        OntologyAnnotation, OntologyID, RcStr,
+    };
+    const VERSION_IRI: &str = "http://www.w3.org/2002/07/owl#versionIRI";
+    let id = ont.iter().find_map(|ac| match &ac.component {
+        Component::OntologyID(id) => Some(id.clone()),
+        _ => None,
+    });
+    let Some(id) = id else { return };
+    if id.iri.is_none() || id.viri.is_some() {
+        return;
+    }
+    let stated: Vec<AnnotatedComponent<RcStr>> = ont
+        .iter()
+        .filter(|ac| {
+            matches!(&ac.component, Component::OntologyAnnotation(OntologyAnnotation(a))
+                if a.ap.0.as_ref() == VERSION_IRI && matches!(a.av, AnnotationValue::IRI(_)))
+        })
+        .cloned()
+        .collect();
+    let [statement] = stated.as_slice() else { return };
+    let Component::OntologyAnnotation(OntologyAnnotation(a)) = &statement.component else { return };
+    let AnnotationValue::IRI(viri) = &a.av else { return };
+    let viri = viri.clone();
+    ont.remove(statement);
+    let declaration = ont
+        .iter()
+        .find(|ac| matches!(&ac.component, Component::DeclareAnnotationProperty(DeclareAnnotationProperty(p)) if p.0.as_ref() == VERSION_IRI))
+        .cloned();
+    if let Some(declaration) = declaration {
+        ont.remove(&declaration);
+    }
+    ont.remove(&AnnotatedComponent { component: Component::OntologyID(id.clone()), ann: Default::default() });
+    ont.insert(AnnotatedComponent {
+        component: Component::OntologyID(OntologyID { iri: id.iri, viri: Some(viri) }),
+        ann: Default::default(),
+    });
+}
+
 /// The hash-table capacity the anonymous-individual ordering masks against after
 /// `n` distinct keys — see [`anon_individual_order`]. Sizing is capacity 16, load
 /// factor 0.75, doubling whenever the size exceeds three quarters of it. The table
@@ -1939,20 +2083,36 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // merged in one step keep their nodes apart. The counter comes back
             // out where the parse left it.
             let b = horned_owl::model::Build::new_rc();
-            b.set_bnode_base(anon_counter() as i64);
+            let base = anon_counter();
+            b.set_bnode_base(base as i64);
             // The RDF reader takes its `Build` inside the configuration, and this
             // parse must share `b` so the counter can be read back afterwards.
             let mut rdf_cfg = ParserConfiguration::new(&b);
             rdf_cfg.lax = lax;
-            let (rdfo, _incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
+            let (rdfo, incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
                 horned_owl::io::rdf::reader::read(&mut buf.as_slice(), rdf_cfg.into())
                     .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
-            if let Some(n) = b.bnode_base() {
-                set_anon_counter(n as u64);
-            }
             // Move components out of the parser's Rc set rather than deep-cloning
             // every one (the naive From<ConcreteRDFOntology>).
-            let ont: Onto = rdfo.into_set_ontology_fast();
+            let mut ont: Onto = rdfo.into_set_ontology_fast();
+            let mut after = b.bnode_base().map(|n| n as u64);
+            // The parse takes an id for every blank node it tries as an
+            // individual, and the nodes a rule is made of, or triples it cannot
+            // read, are tried and rejected first. Where either is present the
+            // individuals are numbered again, after the document's own nodes.
+            let has_rule = ont.iter().any(|ac| matches!(ac.component, horned_owl::model::Component::Rule(_)));
+            if has_rule || !incomplete.is_complete() {
+                if let Some(ids) = numbered_individuals(&ont).filter(|ids| !ids.is_empty()) {
+                    let first = base + document_blank_nodes(&buf, lax)? as u64;
+                    if ids[0].0 >= first {
+                        after = Some(renumber_individuals(&mut ont, ids, first));
+                    }
+                }
+            }
+            if let Some(n) = after {
+                set_anon_counter(n);
+            }
+            version_iri_statement(&mut ont);
             let mut model = Model::from_parts(ont, crate::model::default_prefixes());
             model.idspaces = idspaces;
             model.rdf_prefixes = rdf_prefixes;
@@ -1975,10 +2135,24 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             Ok(model)
         }
         Format::OwlXml => {
-            let (ont, prefixes): (Onto, PrefixMapping) =
-                horned_owl::io::owx::reader::read(&mut reader, cfg)
+            // Every IRI is made absolute before the document is parsed, so the
+            // parser has no prefixes to expand an `IRI` value with: only an
+            // `abbreviatedIRI` names its IRI by prefix.
+            let mut text = String::new();
+            reader.read_to_string(&mut text)?;
+            let (text, declared) = owx::normalise_iris(&text)?;
+            let (ont, _): (Onto, PrefixMapping) =
+                horned_owl::io::owx::reader::read(&mut text.as_bytes(), cfg)
                     .map_err(|e| anyhow::anyhow!("OWL/XML parse error: {e}"))?;
-            Ok(Model::from_parts(ont, prefixes))
+            let mut prefixes = PrefixMapping::default();
+            for (name, ns) in &declared {
+                let _ = prefixes.add_prefix(name, ns);
+            }
+            let mut model = Model::from_parts(ont, prefixes);
+            // The document's `Prefix` elements are its format prefixes, which a
+            // write in another format carries over.
+            model.rdf_prefixes = declared;
+            Ok(model)
         }
         Format::Functional => {
             // The standard prefixes are predefined in functional syntax, but
@@ -2122,7 +2296,7 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
         }
         Format::Obo => obo::load(reader),
         Format::OboGraph => obograph::load(reader),
-        Format::Manchester => manchester::load(reader),
+        Format::Manchester => manchester::load(reader, cfg),
         Format::Turtle => turtle::load(reader),
         Format::NTriples => turtle::load_as(reader, oxigraph::io::RdfFormat::NTriples),
     }
@@ -2437,9 +2611,14 @@ fn write_to_with<W: Write>(
 ) -> Result<()> {
     match fmt {
         Format::RdfXml if rdfxml == RdfXmlWriter::Owlapi => {
-            // WIP full-fidelity RDF/XML writer (see owlrdf.rs).
-            crate::io::owlrdf::save(model, &mut writer)?;
-            return Ok(());
+            // An axiom the layout cannot state sends the whole document through
+            // the general writer, so it is never written without one.
+            let unstated = crate::io::owlrdf::try_save(model, &mut writer)?;
+            if unstated.is_empty() {
+                return Ok(());
+            }
+            crate::io::owlrdf::warn_unstated("RDF/XML", &unstated);
+            return write_to_with(model, writer, fmt, RdfXmlWriter::Horned);
         }
         Format::RdfXml => {
             // Declare every document prefix on `rdf:RDF`, so a re-reader recovers
@@ -2494,12 +2673,8 @@ fn write_to_with<W: Write>(
             }
         }
         Format::OwlXml => {
-            let prefixes = safe_prefixes(model);
-            let cm = take_cm(model);
-            let r = horned_owl::io::owx::writer::write(&mut writer, &cm, Some(&prefixes))
-                .map_err(|e| anyhow::anyhow!("OWL/XML write error: {e}"));
-            restore_cm(model, cm);
-            r?;
+            let prefixes = written_prefixes(model);
+            owx::save(model, &prefixes, &mut writer)?;
         }
         Format::Functional => {
             // Hand the writer the document's OWN prefixes, in document order: a
@@ -2507,13 +2682,7 @@ fn write_to_with<W: Write>(
             // longest valid match. The writer falls back to a full <IRI> for any IRI
             // no declared prefix can validly abbreviate, so passing all prefixes
             // always round-trips.
-            let document = if model.format_prefixes_cleared {
-                default_ofn_prefixes(model)
-            } else if !model.rdf_prefixes.is_empty() {
-                rdfxml_format_prefixes(model)
-            } else {
-                model.prefixes.clone()
-            };
+            let document = format_prefixes(model);
             // A saved prefix format always binds the DEFAULT prefix to the ontology
             // IRI plus `#`, so every functional file opens `Prefix(:=<…#>)`.
             // owlmake's own DOSDP modules are anonymous ontologies, so they carry no
@@ -2592,14 +2761,15 @@ fn write_to_with<W: Write>(
         }
         Format::Obo => obo::save(model, &mut writer)?,
         Format::OboGraph => obograph::save(model, &mut writer)?,
-        Format::Manchester => manchester::save(model, &mut writer)?,
-        Format::Turtle => match owlapi_ttl::render(model) {
-            Some(bytes) => writer.write_all(&bytes)?,
-            None => turtle::save(model, &mut writer)?,
-        },
-        Format::NTriples => {
-            turtle::save_as(model, &mut writer, oxigraph::io::RdfFormat::NTriples)?
+        Format::Manchester => {
+            let prefixes = written_prefixes(model);
+            manchester_write::save(model, &prefixes, &mut writer)?
         }
+        Format::Turtle => {
+            let prefixes = written_prefixes(model);
+            owlapi_ttl::save(model, &prefixes, &mut writer)?
+        }
+        Format::NTriples => turtle::save_ntriples(model, &mut writer)?,
     }
     Ok(())
 }
@@ -2793,7 +2963,7 @@ fn ofn_cache() -> bool {
 
 thread_local! {
     /// The file currently being written, for `OM_MODEL_DEBUG` (see
-    /// [`crate::io::owlrdf::save`]). Set by [`save_as`].
+    /// [`crate::io::owlrdf::try_save`]). Set by [`save_as`].
     static OUT_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
@@ -2914,6 +3084,40 @@ fn rdfxml_format_prefixes(model: &Model) -> PrefixMapping {
     out
 }
 
+/// The prefixes a prefix-format document — functional syntax, OWL/XML,
+/// Manchester — carries over from its source: the source document's own
+/// bindings over the five built-in ones, then every prefix the command line
+/// adds (`Model::added_prefixes`), a later binding of a name replacing an
+/// earlier one.
+fn format_prefixes(model: &Model) -> PrefixMapping {
+    let mut pm = if model.format_prefixes_cleared {
+        default_ofn_prefixes(model)
+    } else if !model.rdf_prefixes.is_empty() {
+        rdfxml_format_prefixes(model)
+    } else {
+        model.prefixes.clone()
+    };
+    for (p, ns) in &model.added_prefixes {
+        let _ = pm.add_prefix(p, ns);
+    }
+    pm
+}
+
+/// The prefixes an OWL/XML, Manchester or Turtle document declares: the format
+/// prefixes without the default (`:`) binding, shortest name first (in UTF-16
+/// code units), then in UTF-16 order.
+fn written_prefixes(model: &Model) -> Vec<(String, String)> {
+    use crate::io::natural_order::str_cmp;
+    let utf16_len = |s: &str| s.encode_utf16().count();
+    let mut v: Vec<(String, String)> = format_prefixes(model)
+        .mappings()
+        .filter(|(p, _)| !p.is_empty())
+        .map(|(p, ns)| (p.clone(), ns.clone()))
+        .collect();
+    v.sort_by(|a, b| utf16_len(&a.0).cmp(&utf16_len(&b.0)).then_with(|| str_cmp(&a.0, &b.0)));
+    v
+}
+
 /// The prefix map for an ontology whose document format carries no prefixes — i.e.
 /// one built by `query --update`, which hands the result a fresh ontology (see
 /// `Model::format_prefixes_cleared`). All that survives is the default `:` bound to
@@ -2961,36 +3165,6 @@ fn xml_legal_prefixes(pm: &PrefixMapping) -> PrefixMapping {
             continue;
         }
         let _ = out.add_prefix(prefix, ns);
-    }
-    out
-}
-
-/// horned-owl's functional/OWL-XML writers abbreviate any IRI whose namespace
-/// matches a prefix, even when the resulting local part is not a legal CURIE
-/// (e.g. it contains `/`, as in `http://purl.obolibrary.org/obo/ro/subsets#x`).
-/// Such output cannot be re-parsed, so any prefix that would do this is dropped
-/// and the affected IRIs fall back to a full `<IRI>`.
-fn safe_prefixes(model: &Model) -> PrefixMapping {
-    use horned_owl::visitor::immutable::{entity::IRIExtract, Walk};
-
-    let mut walk = Walk::new(IRIExtract::default());
-    walk.set_ontology(&model.ont);
-    let iris: Vec<String> = walk
-        .into_visit()
-        .into_set()
-        .into_iter()
-        .map(|i| i.as_ref().to_string())
-        .collect();
-
-    let mut out = PrefixMapping::default();
-    for (prefix, ns) in model.prefixes.mappings() {
-        let safe = iris
-            .iter()
-            .filter(|iri| iri.starts_with(ns.as_str()))
-            .all(|iri| is_valid_curie_local(&iri[ns.len()..]));
-        if safe {
-            let _ = out.add_prefix(prefix, ns);
-        }
     }
     out
 }
@@ -3058,7 +3232,7 @@ fn xml_entities_transform(body: &[u8], prefixes: &[(String, String)]) -> Vec<u8>
 }
 
 /// A conservative check that `local` is a legal CURIE local part for the
-/// functional/OWL-XML writers: no characters that would break re-parsing.
+/// functional-syntax writer: no characters that would break re-parsing.
 fn is_valid_curie_local(local: &str) -> bool {
     !local.is_empty()
         && !local.contains('/')

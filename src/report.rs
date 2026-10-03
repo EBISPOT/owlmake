@@ -493,9 +493,19 @@ pub fn run_report_with_profile(model: &Model, rules: &[ReportRule]) -> Result<Re
             continue;
         };
 
+        // A rule's query is expected to project `?property` and `?value`, and one
+        // that does not is told so once, whether or not it matched anything. A
+        // projected variable left unbound in a row is not a defect: every
+        // "missing X" rule binds `?value` only inside `FILTER NOT EXISTS` or an
+        // `OPTIONAL … FILTER(!bound(?value))`, so its rows carry an empty Value.
+        if prop_idx.is_none() {
+            status!("WARN: '{}' query is missing ?property variable", rule.name);
+        }
+        if value_idx.is_none() {
+            status!("WARN: '{}' query is missing ?value variable", rule.name);
+        }
+
         let mut rows = Vec::new();
-        let mut warned_property = false;
-        let mut warned_value = false;
         for (i, row) in table.rows.iter().enumerate() {
             let tsv = table.tsv_rows.get(i);
             let cell = |idx: usize| -> (&str, Option<&str>) {
@@ -522,49 +532,19 @@ pub fn run_report_with_profile(model: &Model, rules: &[ReportRule]) -> Result<Re
                 continue;
             }
 
-            let property = match prop_idx {
-                Some(idx) => {
-                    let (p, p_tsv) = cell(idx);
-                    if unbound(p, p_tsv) {
-                        if !warned_property {
-                            status!("WARN: '{}' query is missing ?property variable", rule.name);
-                            warned_property = true;
-                        }
-                        String::new()
-                    } else {
-                        term_display(p, p_tsv)
-                    }
-                }
-                None => {
-                    if !warned_property {
-                        status!("WARN: '{}' query is missing ?property variable", rule.name);
-                        warned_property = true;
-                    }
-                    String::new()
-                }
-            };
-
-            let value = match value_idx {
+            let binding = |idx: Option<usize>| match idx {
                 Some(idx) => {
                     let (v, v_tsv) = cell(idx);
                     if unbound(v, v_tsv) {
-                        if !warned_value {
-                            status!("WARN: '{}' query is missing ?value variable", rule.name);
-                            warned_value = true;
-                        }
                         String::new()
                     } else {
                         term_display(v, v_tsv)
                     }
                 }
-                None => {
-                    if !warned_value {
-                        status!("WARN: '{}' query is missing ?value variable", rule.name);
-                        warned_value = true;
-                    }
-                    String::new()
-                }
+                None => String::new(),
             };
+            let property = binding(prop_idx);
+            let value = binding(value_idx);
 
             rows.push(ReportRow {
                 level: rule.severity,

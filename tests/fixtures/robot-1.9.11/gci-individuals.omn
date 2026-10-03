@@ -1,0 +1,355 @@
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/t>
+
+
+
+Ontology: <http://example.org/t>
+
+
+ObjectProperty: <http://example.org/t#p>
+
+    
+ObjectProperty: <http://example.org/t#q>
+
+    
+Class: <http://example.org/t#C1>
+
+    
+Class: <http://example.org/t#C2>
+
+    
+Class: <http://example.org/t#C3>
+
+    
+Class: <http://example.org/t#C4>
+
+    
+Class: <http://example.org/t#C5>
+
+    
+Class: <http://example.org/t#C6>
+
+    
+Individual: <http://example.org/t#a10>
+
+    
+Individual: <http://example.org/t#a11>
+
+    
+Individual: <http://example.org/t#a12>
+
+    
+Individual: <http://example.org/t#a13>
+
+    
+Individual: <http://example.org/t#a14>
+
+    
+Individual: <http://example.org/t#a15>
+
+    
+Individual: <http://example.org/t#a16>
+
+    
+Individual: <http://example.org/t#a17>
+
+    
+Individual: <http://example.org/t#a18>
+
+    
+Individual: <http://example.org/t#a19>
+
+    
+Individual: <http://example.org/t#a1>
+
+    
+Individual: <http://example.org/t#a20>
+
+    
+Individual: <http://example.org/t#a21>
+
+    
+Individual: <http://example.org/t#a22>
+
+    
+Individual: <http://example.org/t#a23>
+
+    
+Individual: <http://example.org/t#a24>
+
+    
+Individual: <http://example.org/t#a2>
+
+    
+Individual: <http://example.org/t#a3>
+
+    
+Individual: <http://example.org/t#a4>
+
+    
+Individual: <http://example.org/t#a5>
+
+    
+Individual: <http://example.org/t#a6>
+
+    
+Individual: <http://example.org/t#a7>
+
+    
+Individual: <http://example.org/t#a8>
+
+    
+Individual: <http://example.org/t#a9>
+
+    
+Class: <http://example.org/t#p> value <http://example.org/t#a22>
+
+    SubClassOf: 
+        <http://example.org/t#C5>
+    
+    Class: <http://example.org/t#p> value <http://example.org/t#a23>
+    
+        SubClassOf: 
+            <http://example.org/t#C6>
+        
+        Class: {<http://example.org/t#a1> , <http://example.org/t#a2>}
+        
+            SubClassOf: 
+                <http://example.org/t#C2>
+            
+            Class: <http://example.org/t#p> value <http://example.org/t#a20>
+            
+                SubClassOf: 
+                    <http://example.org/t#C3>
+                
+                Class: <http://example.org/t#p> value <http://example.org/t#a21>
+                
+                    SubClassOf: 
+                        <http://example.org/t#C4>
+                    
+                    Class: {<http://example.org/t#a19> , <http://example.org/t#a20>}
+                    
+                        SubClassOf: 
+                            <http://example.org/t#C5>
+                        
+                        Class: {<http://example.org/t#a3> , <http://example.org/t#a4>}
+                        
+                            SubClassOf: 
+                                <http://example.org/t#C4>
+                            
+                            Class: <http://example.org/t#C5>
+                             and (<http://example.org/t#q> value <http://example.org/t#a4>)
+                            
+                                SubClassOf: 
+                                    <http://example.org/t#C1>
+                                
+                                Class: <http://example.org/t#C3>
+                                 and (<http://example.org/t#q> value <http://example.org/t#a2>)
+                                
+                                    SubClassOf: 
+                                        <http://example.org/t#C5>
+                                    
+                                    Class: {<http://example.org/t#a5> , <http://example.org/t#a6>}
+                                    
+                                        SubClassOf: 
+                                            <http://example.org/t#C1>
+                                        
+                                        Class: <http://example.org/t#C3>
+                                         and (<http://example.org/t#q> value <http://example.org/t#a8>)
+                                        
+                                            SubClassOf: 
+                                                <http://example.org/t#C5>
+                                            
+                                            Class: <http://example.org/t#C1>
+                                             and (<http://example.org/t#q> value <http://example.org/t#a6>)
+                                            
+                                                SubClassOf: 
+                                                    <http://example.org/t#C3>
+                                                
+                                                Class: {<http://example.org/t#a7> , <http://example.org/t#a8>}
+                                                
+                                                    SubClassOf: 
+                                                        <http://example.org/t#C3>
+                                                    
+                                                    Class: <http://example.org/t#C5>
+                                                     and (<http://example.org/t#q> value <http://example.org/t#a10>)
+                                                    
+                                                        SubClassOf: 
+                                                            <http://example.org/t#C1>
+                                                        
+                                                        Class: <http://example.org/t#p> value <http://example.org/t#a1>
+                                                        
+                                                            SubClassOf: 
+                                                                <http://example.org/t#C2>
+                                                            
+                                                            Class: <http://example.org/t#p> value <http://example.org/t#a2>
+                                                            
+                                                                SubClassOf: 
+                                                                    <http://example.org/t#C3>
+                                                                
+                                                                Class: <http://example.org/t#p> value <http://example.org/t#a3>
+                                                                
+                                                                    SubClassOf: 
+                                                                        <http://example.org/t#C4>
+                                                                    
+                                                                    Class: {<http://example.org/t#a10> , <http://example.org/t#a9>}
+                                                                    
+                                                                        SubClassOf: 
+                                                                            <http://example.org/t#C5>
+                                                                        
+                                                                        Class: <http://example.org/t#p> value <http://example.org/t#a24>
+                                                                        
+                                                                            SubClassOf: 
+                                                                                <http://example.org/t#C1>
+                                                                            
+                                                                            Class: <http://example.org/t#p> value <http://example.org/t#a11>
+                                                                            
+                                                                                SubClassOf: 
+                                                                                    <http://example.org/t#C6>
+                                                                                
+                                                                                Class: <http://example.org/t#p> value <http://example.org/t#a12>
+                                                                                
+                                                                                    SubClassOf: 
+                                                                                        <http://example.org/t#C1>
+                                                                                    
+                                                                                    Class: {<http://example.org/t#a11> , <http://example.org/t#a12>}
+                                                                                    
+                                                                                        SubClassOf: 
+                                                                                            <http://example.org/t#C2>
+                                                                                        
+                                                                                        Class: <http://example.org/t#p> value <http://example.org/t#a10>
+                                                                                        
+                                                                                            SubClassOf: 
+                                                                                                <http://example.org/t#C5>
+                                                                                            
+                                                                                            Class: {<http://example.org/t#a21> , <http://example.org/t#a22>}
+                                                                                            
+                                                                                                SubClassOf: 
+                                                                                                    <http://example.org/t#C2>
+                                                                                                
+                                                                                                Class: <http://example.org/t#p> value <http://example.org/t#a4>
+                                                                                                
+                                                                                                    SubClassOf: 
+                                                                                                        <http://example.org/t#C5>
+                                                                                                    
+                                                                                                    Class: <http://example.org/t#p> value <http://example.org/t#a5>
+                                                                                                    
+                                                                                                        SubClassOf: 
+                                                                                                            <http://example.org/t#C6>
+                                                                                                        
+                                                                                                        Class: {<http://example.org/t#a13> , <http://example.org/t#a14>}
+                                                                                                        
+                                                                                                            SubClassOf: 
+                                                                                                                <http://example.org/t#C4>
+                                                                                                            
+                                                                                                            Class: <http://example.org/t#p> value <http://example.org/t#a6>
+                                                                                                            
+                                                                                                                SubClassOf: 
+                                                                                                                    <http://example.org/t#C1>
+                                                                                                                
+                                                                                                                Class: <http://example.org/t#p> value <http://example.org/t#a7>
+                                                                                                                
+                                                                                                                    SubClassOf: 
+                                                                                                                        <http://example.org/t#C2>
+                                                                                                                    
+                                                                                                                    Class: {<http://example.org/t#a23> , <http://example.org/t#a24>}
+                                                                                                                    
+                                                                                                                        SubClassOf: 
+                                                                                                                            <http://example.org/t#C4>
+                                                                                                                        
+                                                                                                                        Class: <http://example.org/t#C6>
+                                                                                                                         and (<http://example.org/t#q> value <http://example.org/t#a5>)
+                                                                                                                        
+                                                                                                                            SubClassOf: 
+                                                                                                                                <http://example.org/t#C2>
+                                                                                                                            
+                                                                                                                            Class: <http://example.org/t#C4>
+                                                                                                                             and (<http://example.org/t#q> value <http://example.org/t#a3>)
+                                                                                                                            
+                                                                                                                                SubClassOf: 
+                                                                                                                                    <http://example.org/t#C6>
+                                                                                                                                
+                                                                                                                                Class: <http://example.org/t#C2>
+                                                                                                                                 and (<http://example.org/t#q> value <http://example.org/t#a1>)
+                                                                                                                                
+                                                                                                                                    SubClassOf: 
+                                                                                                                                        <http://example.org/t#C4>
+                                                                                                                                    
+                                                                                                                                    Class: <http://example.org/t#p> value <http://example.org/t#a8>
+                                                                                                                                    
+                                                                                                                                        SubClassOf: 
+                                                                                                                                            <http://example.org/t#C3>
+                                                                                                                                        
+                                                                                                                                        Class: <http://example.org/t#p> value <http://example.org/t#a9>
+                                                                                                                                        
+                                                                                                                                            SubClassOf: 
+                                                                                                                                                <http://example.org/t#C4>
+                                                                                                                                            
+                                                                                                                                            Class: {<http://example.org/t#a15> , <http://example.org/t#a16>}
+                                                                                                                                            
+                                                                                                                                                SubClassOf: 
+                                                                                                                                                    <http://example.org/t#C1>
+                                                                                                                                                
+                                                                                                                                                Class: <http://example.org/t#C4>
+                                                                                                                                                 and (<http://example.org/t#q> value <http://example.org/t#a9>)
+                                                                                                                                                
+                                                                                                                                                    SubClassOf: 
+                                                                                                                                                        <http://example.org/t#C6>
+                                                                                                                                                    
+                                                                                                                                                    Class: <http://example.org/t#C2>
+                                                                                                                                                     and (<http://example.org/t#q> value <http://example.org/t#a7>)
+                                                                                                                                                    
+                                                                                                                                                        SubClassOf: 
+                                                                                                                                                            <http://example.org/t#C4>
+                                                                                                                                                        
+                                                                                                                                                        Class: {<http://example.org/t#a17> , <http://example.org/t#a18>}
+                                                                                                                                                        
+                                                                                                                                                            SubClassOf: 
+                                                                                                                                                                <http://example.org/t#C3>
+                                                                                                                                                            
+                                                                                                                                                            Class: <http://example.org/t#C6>
+                                                                                                                                                             and (<http://example.org/t#q> value <http://example.org/t#a11>)
+                                                                                                                                                            
+                                                                                                                                                                SubClassOf: 
+                                                                                                                                                                    <http://example.org/t#C2>
+                                                                                                                                                                
+                                                                                                                                                                Class: <http://example.org/t#p> value <http://example.org/t#a15>
+                                                                                                                                                                
+                                                                                                                                                                    SubClassOf: 
+                                                                                                                                                                        <http://example.org/t#C4>
+                                                                                                                                                                    
+                                                                                                                                                                    Class: <http://example.org/t#p> value <http://example.org/t#a16>
+                                                                                                                                                                    
+                                                                                                                                                                        SubClassOf: 
+                                                                                                                                                                            <http://example.org/t#C5>
+                                                                                                                                                                        
+                                                                                                                                                                        Class: <http://example.org/t#p> value <http://example.org/t#a13>
+                                                                                                                                                                        
+                                                                                                                                                                            SubClassOf: 
+                                                                                                                                                                                <http://example.org/t#C2>
+                                                                                                                                                                            
+                                                                                                                                                                            Class: <http://example.org/t#p> value <http://example.org/t#a14>
+                                                                                                                                                                            
+                                                                                                                                                                                SubClassOf: 
+                                                                                                                                                                                    <http://example.org/t#C3>
+                                                                                                                                                                                
+                                                                                                                                                                                Class: <http://example.org/t#p> value <http://example.org/t#a19>
+                                                                                                                                                                                
+                                                                                                                                                                                    SubClassOf: 
+                                                                                                                                                                                        <http://example.org/t#C2>
+                                                                                                                                                                                    
+                                                                                                                                                                                    Class: <http://example.org/t#p> value <http://example.org/t#a17>
+                                                                                                                                                                                    
+                                                                                                                                                                                        SubClassOf: 
+                                                                                                                                                                                            <http://example.org/t#C6>
+                                                                                                                                                                                        
+                                                                                                                                                                                        Class: <http://example.org/t#p> value <http://example.org/t#a18>
+                                                                                                                                                                                        
+                                                                                                                                                                                            SubClassOf: 
+                                                                                                                                                                                                <http://example.org/t#C1>
+                                                                                                                                                                                            
+                                                                                                                                                                                            

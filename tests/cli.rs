@@ -3542,6 +3542,636 @@ fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+/// `report` warns about a rule whose query does not PROJECT `?property` or
+/// `?value`, once per rule, whether or not it matched anything. A projected
+/// variable left unbound is not a defect: the bundled "missing X" rules bind
+/// `?value` only inside `FILTER NOT EXISTS` or an `OPTIONAL … !bound`, and their
+/// rows are reported with an empty Value and no warning.
+#[test]
+fn report_warns_only_for_variables_a_query_does_not_project() {
+    let dir = tmp("report-vars");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ont = dir.join("test.obo");
+    std::fs::write(
+        &ont,
+        "format-version: 1.4\nontology: ex\n\n\
+         [Term]\nid: EX:0000001\nname: root thing\n\n\
+         [Term]\nid: EX:0000002\nname: thing A\nis_a: EX:0000001 ! root thing\n",
+    )
+    .unwrap();
+    let no_value = dir.join("no_value.sparql");
+    std::fs::write(
+        &no_value,
+        "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\
+         SELECT DISTINCT ?entity ?property WHERE { VALUES ?property { rdfs:label } ?entity ?property ?x }\n",
+    )
+    .unwrap();
+    let never = dir.join("never.sparql");
+    std::fs::write(&never, "SELECT ?entity WHERE { ?entity <http://example.org/nothing> ?o }\n").unwrap();
+
+    // The default profile: four of its rules match rows with an unbound `?value`.
+    let tsv = dir.join("default.tsv");
+    let out = bin().args(["report", "-i"]).arg(&ont).arg("-o").arg(&tsv).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("query is missing"), "{stderr}");
+    let rows = std::fs::read_to_string(&tsv).unwrap();
+    assert!(rows.contains("WARN\tmissing_definition\tobo:EX_0000001\tIAO:0000115\t\n"), "{rows}");
+
+    let profile = dir.join("profile.txt");
+    std::fs::write(
+        &profile,
+        format!("WARN\tfile:{}\nINFO\tfile:{}\n", no_value.display(), never.display()),
+    )
+    .unwrap();
+    let out = bin()
+        .args(["report", "-i"])
+        .arg(&ont)
+        .arg("--profile")
+        .arg(&profile)
+        .arg("-o")
+        .arg(dir.join("custom.tsv"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.matches("'no_value' query is missing ?value variable").count(), 1, "{stderr}");
+    assert!(!stderr.contains("'no_value' query is missing ?property"), "{stderr}");
+    // …and a rule that matched nothing is told all the same.
+    assert!(stderr.contains("'never' query is missing ?property variable"), "{stderr}");
+    assert!(stderr.contains("'never' query is missing ?value variable"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A source in `tests/fixtures/robot-1.9.11/`, where each sits beside what ROBOT
+/// 1.9.11 writes from it.
+fn robot_fixture(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11").join(name)
+}
+
+/// `om convert` a fixture with `args`, to a file named `out` (whose extension
+/// picks the format); the text written.
+fn convert_fixture(src: &str, out: &str, args: &[&str]) -> String {
+    let path = tmp(out);
+    let run = bin().args(["convert", "-i"]).arg(robot_fixture(src)).args(args).arg("-o").arg(&path).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    text
+}
+
+fn fixture_text(name: &str) -> String {
+    std::fs::read_to_string(robot_fixture(name)).unwrap()
+}
+
+/// Manchester syntax keeps what an ontology says about its terms — every
+/// annotation assertion, the annotations on them, annotation property frames,
+/// IRI and typed values, the ontology IRI — and reads all of it back. As ROBOT
+/// 1.9.11 writes and reads `annotated-terms`, a Turtle source whose untyped
+/// literals are `xsd:string`.
+#[test]
+fn manchester_keeps_annotations_and_reads_them_back() {
+    assert_eq!(
+        convert_fixture("annotated-terms.ttl", "annotated-terms.omn", &[]),
+        fixture_text("annotated-terms.omn")
+    );
+    assert_eq!(
+        convert_fixture("annotated-terms.omn", "annotated-terms.ofn", &[]),
+        fixture_text("annotated-terms.omn.ofn")
+    );
+}
+
+/// A prefix the command line adds is declared by every prefix format, used or
+/// not, and abbreviates the IRIs it covers; a context given with `-P` only reads
+/// CURIEs. As ROBOT 1.9.11 writes `prefixed-terms` and `anonymous-terms`.
+#[test]
+fn added_prefixes_are_declared_and_used_by_every_prefix_format() {
+    let obo = ["--add-prefix", "obo: http://purl.obolibrary.org/obo/"];
+    for ext in ["ofn", "owx", "omn", "ttl"] {
+        assert_eq!(
+            convert_fixture("prefixed-terms.ttl", &format!("added.{ext}"), &obo),
+            fixture_text(&format!("prefixed-terms.add-obo.{ext}")),
+            "{ext}"
+        );
+    }
+    assert_eq!(
+        convert_fixture("prefixed-terms.ttl", "unused.ofn", &["--add-prefix", "foo: http://example.org/foo/"]),
+        fixture_text("prefixed-terms.add-unused.ofn")
+    );
+    let context = robot_fixture("obo-context.json");
+    let read_only = ["-P", context.to_str().unwrap()];
+    for ext in ["ofn", "ttl"] {
+        assert_eq!(
+            convert_fixture("prefixed-terms.ttl", &format!("read-only.{ext}"), &read_only),
+            fixture_text(&format!("prefixed-terms.read-only.{ext}")),
+            "{ext}"
+        );
+    }
+    assert_eq!(
+        convert_fixture(
+            "anonymous-terms.ttl",
+            "anonymous.ttl",
+            &["--add-prefix", "obo: http://purl.obolibrary.org/obo/", "--add-prefix", "foo: http://example.org/foo/"]
+        ),
+        fixture_text("anonymous-terms.add-prefixes.ttl")
+    );
+}
+
+/// OWL/XML names an IRI by prefix only in `abbreviatedIRI`, and only with a
+/// prefix whose namespace is the IRI's own. An `IRI` value is an IRI — absolute,
+/// or relative to `xml:base` — and one that looks like a CURIE names the IRI it
+/// spells. As ROBOT 1.9.11 writes `prefixed-terms` and reads
+/// `curie-iri-attributes`.
+#[test]
+fn owlxml_names_an_iri_by_prefix_only_in_abbreviated_iri() {
+    assert_eq!(convert_fixture("prefixed-terms.ttl", "plain.owx", &[]), fixture_text("prefixed-terms.owx"));
+    assert_eq!(
+        convert_fixture("curie-iri-attributes.owx", "curie-iri-attributes.ofn", &[]),
+        fixture_text("curie-iri-attributes.ofn")
+    );
+}
+
+/// The `idspace:` lines an OBO document gets from a Turtle source are the
+/// prefixes it binds, less the built-in vocabularies and the OBO PURL space — as
+/// for an RDF/XML source's `xmlns:` bindings. As ROBOT 1.9.11 writes
+/// `prefixed-terms` and `custom-prefixes`.
+#[test]
+fn a_turtle_sources_prefixes_become_idspaces_as_xmlns_bindings_do() {
+    assert_eq!(convert_fixture("prefixed-terms.ttl", "prefixed.obo", &[]), fixture_text("prefixed-terms.obo"));
+    assert_eq!(convert_fixture("custom-prefixes.ttl", "custom.obo", &[]), fixture_text("custom-prefixes.obo"));
+}
+
+/// An OBO document read as ROBOT 1.9.11 reads it: every header tag kept (the
+/// ones without a rule of their own as `oboInOwl:` ontology annotations), a
+/// synonym type's scope, every boolean tag whether `true` or `false`, and
+/// declarations for the properties the OBO vocabulary names but not for the ones
+/// the document only uses — and written back out with the same tags.
+#[test]
+fn obo_tags_are_read_and_written_as_robot_does() {
+    for ext in ["ofn", "owx", "owl"] {
+        assert_eq!(
+            convert_fixture("obo-terms.obo", &format!("obo-terms.{ext}"), &[]),
+            fixture_text(&format!("obo-terms.{ext}")),
+            "{ext}"
+        );
+    }
+    for ext in ["ofn", "owx", "obo"] {
+        assert_eq!(
+            convert_fixture("obo-tags.obo", &format!("obo-tags.out.{ext}"), &[]),
+            fixture_text(&format!("obo-tags.out.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// An OBO document's `idspace:` lines, and the prefixes its ids are shortened
+/// with, are the ones its source declared: a Turtle or RDF/XML source's
+/// prefixes, an OBO source's own `idspace:` lines, less the OBO PURL and
+/// built-in namespaces either way. A prefix the command line adds joins them
+/// only when the document is cleaned. With `--clean-obo`, every added prefix
+/// gets an `idspace:`, used or not, and shortens ids. Without it,
+/// `--add-prefix` and `--add-prefixes` leave the OBO document as it was. As
+/// ROBOT 1.9.11 writes all three sources.
+#[test]
+fn added_prefixes_become_obo_idspaces_only_when_cleaned() {
+    let context = robot_fixture("obo-prefixes.json");
+    let context = context.to_str().unwrap();
+    let baz = "baz: http://example.org/baz/";
+    for src in ["ttl", "owl", "obo"] {
+        let input = format!("obo-prefixes.{src}");
+        let out = format!("obo-prefixes-{src}.obo");
+        let plain = fixture_text(&format!("obo-prefixes.{src}.out.obo"));
+        for args in [&[][..], &["--add-prefixes", context], &["--add-prefix", baz], &["--clean-obo", "strict"]] {
+            assert_eq!(convert_fixture(&input, &out, args), plain, "{src} {args:?}");
+        }
+        assert_eq!(
+            convert_fixture(&input, &out, &["--add-prefixes", context, "--clean-obo", "strict"]),
+            fixture_text(&format!("obo-prefixes.{src}.add-prefixes-clean.obo")),
+            "{src}"
+        );
+        assert_eq!(
+            convert_fixture(&input, &out, &["--add-prefix", baz, "--clean-obo", "strict"]),
+            fixture_text(&format!("obo-prefixes.{src}.add-prefix-clean.obo")),
+            "{src}"
+        );
+    }
+}
+
+/// General class axioms are written one frame per subclass expression, in the
+/// order a hash map keyed by those expressions holds them: by bucket, and
+/// within a bucket last-first. An individual in the expression is hashed as a
+/// named individual, as a set member in a one-of, and by node id when it is
+/// anonymous. As ROBOT 1.9.11 writes them.
+#[test]
+fn general_class_axioms_are_framed_in_hash_map_order() {
+    for name in ["gci-individuals", "gci-anonymous"] {
+        assert_eq!(
+            convert_fixture(&format!("{name}.ofn"), &format!("{name}.omn"), &[]),
+            fixture_text(&format!("{name}.omn")),
+            "{name}"
+        );
+    }
+}
+
+/// An individual is typed first with its declared type, then with the classes
+/// asserted for it in IRI order — `owl:Thing` among them, though RDF/XML names
+/// the element after it — then with the asserted expressions. As ROBOT 1.9.11
+/// writes `typed-individual` in RDF/XML and in Turtle.
+#[test]
+fn an_individual_lists_its_declared_type_first() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("typed-individual.ofn", &format!("typed-individual.{ext}"), &[]),
+            fixture_text(&format!("typed-individual.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Every property axiom is stated where ROBOT 1.9.11 states it, in RDF/XML and
+/// in Turtle: an annotated one reifies after its subject's block (an annotated
+/// anonymous domain or range as a node of its own), a binary one is stated of
+/// its first member in order, each axiom about an inverse property is a node of
+/// its own after the property, a datatype's definition follows its annotations,
+/// and the members of a data range, a one-of and a facet list come in order. The
+/// closing general axiom's node id pins the numbering of every node before it.
+#[test]
+fn property_axioms_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-property-axioms.ofn", &format!("rdf-property-axioms.{ext}"), &[]),
+            fixture_text(&format!("rdf-property-axioms.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Every individual axiom is stated where ROBOT 1.9.11 states it, in RDF/XML
+/// and in Turtle: annotated class and property assertions reify after the
+/// individual, an assertion on an inverse is stated the other way round, a pair
+/// of individuals is stated of the first, and an anonymous individual's own
+/// statements form its block. The closing general axiom's node id pins the
+/// numbering of every node before it.
+#[test]
+fn individual_axioms_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-individual-axioms.ofn", &format!("rdf-individual-axioms.{ext}"), &[]),
+            fixture_text(&format!("rdf-individual-axioms.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Axioms about inverse properties, keys, disjoint unions and annotated negative
+/// assertions are stated where ROBOT 1.9.11 states them, in RDF/XML and in
+/// Turtle. An annotated axiom about an inverse reifies with the inverse's node
+/// nested as its source; a named property's annotated edge to an inverse names
+/// the inverse by id; a key's inverse member is nested in its list; an
+/// annotated key or disjoint union reifies with its list as the target, a list
+/// Turtle names by id. The closing general axiom's node id pins the numbering
+/// of every node before it.
+#[test]
+fn inverse_property_axioms_keys_and_unions_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-inverse-axioms.ofn", &format!("rdf-inverse-axioms.{ext}"), &[]),
+            fixture_text(&format!("rdf-inverse-axioms.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Equivalences and samenesses of three or more members are stated as ROBOT
+/// 1.9.11 states them, in RDF/XML and in Turtle: one triple per consecutive pair
+/// of the ordered members, every named member after the first a block of its
+/// own, and, annotated, every pair reified with its anonymous members defined by
+/// id. Equivalences of classes and of object properties take their pairs in
+/// order, those of data properties and samenesses in the order of a hash set of
+/// the pairs, which this document's members do not share with their order. An
+/// equivalence with no named class is a general axiom, and one whose inverse
+/// member's property comes first is stated after that property.
+#[test]
+fn equivalences_and_samenesses_of_three_or_more_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-nary-axioms.ofn", &format!("rdf-nary-axioms.{ext}"), &[]),
+            fixture_text(&format!("rdf-nary-axioms.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Annotations of annotations are stated as ROBOT 1.9.11 states them, in
+/// RDF/XML and in Turtle: each annotated annotation is an `owl:Annotation` node
+/// whose source is what it annotates, the roots of the graph are those whose own
+/// annotations are not annotated, and the axiom's node is named by id after the
+/// first of them. The pairs of a sameness share one set of such nodes, and the
+/// ontology's come after its header in the order of a hash set of its triples.
+/// The annotated axioms are on classes, individuals and an undeclared IRI, and
+/// two are general axioms. Assertions of one statement that differ only in
+/// their annotations are reified in the order of their annotations.
+#[test]
+fn annotations_of_annotations_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-nested-annotations.ofn", &format!("rdf-nested-annotations.{ext}"), &[]),
+            fixture_text(&format!("rdf-nested-annotations.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Anonymous individuals are written as ROBOT 1.9.11 writes them, in RDF/XML
+/// and in Turtle: each individual's statements are made in the first graph to
+/// reach it — an entity's, the ontology's, a general axiom's, or its own in the
+/// anonymous section — nested where it is an object, or named by id and
+/// defined after the first block naming it when the document names it twice or
+/// the graph names it as the object of two statements. Its reifications and
+/// negative assertions are roots of that graph; an `owl:AllDifferent` reached
+/// first from one of its members is too.
+#[test]
+fn anonymous_individuals_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-anonymous-individuals.ofn", &format!("rdf-anonymous-individuals.{ext}"), &[]),
+            fixture_text(&format!("rdf-anonymous-individuals.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// An anonymous individual in an annotation of an annotation is written as
+/// ROBOT 1.9.11 writes it, in RDF/XML and in Turtle: as the value of an
+/// annotation on the node of an annotated annotation, nested with what it is
+/// stated to be, and as the value of an annotated annotation, named by id in
+/// the axiom's node and as the `owl:annotatedTarget` of the annotation's. The
+/// annotations are on the ontology, on assertions, class and property axioms,
+/// a general axiom, n-ary axioms, a negative assertion and a rule.
+#[test]
+fn anonymous_individuals_in_annotations_of_annotations_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-nested-anonymous.ofn", &format!("rdf-nested-anonymous.{ext}"), &[]),
+            fixture_text(&format!("rdf-nested-anonymous.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// The annotations of an assertion on an inverse property reify the
+/// statement of the named property it is, with no warning, annotations of
+/// annotations and anonymous values included, and the document reads back
+/// whole.
+#[test]
+fn the_annotations_of_an_assertion_on_an_inverse_are_stated() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("inverse-assertion.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/w#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/w>\nDeclaration(Class(:A))\nDeclaration(ObjectProperty(:p))\n\
+         Declaration(ObjectProperty(:q))\nDeclaration(NamedIndividual(:i))\nDeclaration(NamedIndividual(:j))\n\
+         ObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nn\") rdfs:comment \"ann\") ObjectInverseOf(:p) :i :j)\n\
+         ObjectPropertyAssertion(Annotation(rdfs:seeAlso _:x) ObjectInverseOf(:q) :i :j)\nClassAssertion(:A _:x)\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("inverse-assertion.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let query = "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                     PREFIX : <http://example.org/w#> \
+                     ASK { :j :p :i ; :q :i . ?a owl:annotatedSource :j ; owl:annotatedProperty :p ; owl:annotatedTarget :i ; \
+                     rdfs:comment \"ann\" . ?n owl:annotatedSource ?a ; owl:annotatedProperty rdfs:comment ; \
+                     owl:annotatedTarget \"ann\" ; rdfs:comment \"nn\" . ?b owl:annotatedSource :j ; owl:annotatedProperty :q ; \
+                     owl:annotatedTarget :i ; rdfs:seeAlso ?x . ?x a :A }";
+        let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
+        assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{}", String::from_utf8_lossy(&text));
+        // Read back, the document holds the assertions, stated of the named
+        // properties, and the class assertion.
+        let back = tmp(&format!("inverse-assertion-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let read = std::fs::read_to_string(&back).unwrap();
+        for axiom in [
+            "ObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nn\") rdfs:comment \"ann\") :p :j :i)",
+            "ObjectPropertyAssertion(Annotation(rdfs:seeAlso _:genid",
+            "ClassAssertion(:A _:genid",
+        ] {
+            assert!(read.contains(axiom), "{ext}: {axiom}\n{read}");
+        }
+        let _ = std::fs::remove_file(&back);
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
+/// An annotated chain whose super-property is an inverse is stated of the
+/// inverse's node, the nested source of its reification, with no warning.
+#[test]
+fn an_annotated_chain_under_an_inverse_is_stated() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("inverse-chain.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/w#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/w>\nDeclaration(ObjectProperty(:p))\nDeclaration(ObjectProperty(:q))\n\
+         Declaration(ObjectProperty(:r))\n\
+         SubObjectPropertyOf(Annotation(rdfs:comment \"chain\") ObjectPropertyChain(:p ObjectInverseOf(:q)) ObjectInverseOf(:r))\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("inverse-chain.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let query = "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> PREFIX : <http://example.org/w#> \
+                     ASK { ?x owl:inverseOf :r ; owl:propertyChainAxiom ?l . ?l rdf:first :p ; rdf:rest/rdf:first/owl:inverseOf :q . \
+                     ?a owl:annotatedSource ?x ; owl:annotatedProperty owl:propertyChainAxiom ; owl:annotatedTarget ?t ; \
+                     rdfs:comment \"chain\" . ?t rdf:first :p ; rdf:rest/rdf:first/owl:inverseOf :q }";
+        let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
+        assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{}", String::from_utf8_lossy(&text));
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
+/// An equivalence, inverse or disjointness between a named property and an
+/// inverse whose property comes first in IRI order is stated of the named
+/// property, with no warning, annotations and all, and reads back whole.
+#[test]
+fn an_axiom_between_a_property_and_an_earlier_inverse_is_stated() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("inverse-first.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/w#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/w>\nDeclaration(ObjectProperty(:p))\nDeclaration(ObjectProperty(:q))\n\
+         Declaration(ObjectProperty(:r))\nEquivalentObjectProperties(:q ObjectInverseOf(:p))\n\
+         InverseObjectProperties(Annotation(rdfs:comment \"inverse\") :q ObjectInverseOf(:p))\n\
+         DisjointObjectProperties(:r ObjectInverseOf(:p))\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("inverse-first.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let holds = |pattern: &str| {
+            let query = format!(
+                "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                 PREFIX : <http://example.org/w#> ASK {{ {pattern} }}"
+            );
+            let answer = SparqlEvaluator::new().parse_query(&query).unwrap().on_store(&store).execute().unwrap();
+            matches!(answer, QueryResults::Boolean(true))
+        };
+        for pattern in [
+            ":q owl:equivalentProperty ?x . ?x owl:inverseOf :p",
+            ":r owl:propertyDisjointWith ?x . ?x owl:inverseOf :p",
+            ":q owl:inverseOf ?x . ?x owl:inverseOf :p . ?a owl:annotatedSource :q ; owl:annotatedProperty owl:inverseOf ; \
+             owl:annotatedTarget ?x ; rdfs:comment \"inverse\"",
+        ] {
+            assert!(holds(pattern), "{ext}: {pattern}\n{}", String::from_utf8_lossy(&text));
+        }
+        // Read back, the document holds the three axioms.
+        let back = tmp(&format!("inverse-first-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let read = std::fs::read_to_string(&back).unwrap();
+        for axiom in [
+            "EquivalentObjectProperties(:q ObjectInverseOf(:p))",
+            "InverseObjectProperties(Annotation(rdfs:comment \"inverse\") :q ObjectInverseOf(:p))",
+            "DisjointObjectProperties(:r ObjectInverseOf(:p))",
+        ] {
+            assert!(read.contains(axiom), "{ext}: {axiom}\n{read}");
+        }
+        let _ = std::fs::remove_file(&back);
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
+/// A document holding an axiom the RDF layout cannot state is written in full
+/// through the plain RDF mapping, with a warning naming the axiom. An anonymous
+/// individual named by id is defined once, by the first graph to name it, and a
+/// class assertion about it that a later graph makes would be written nowhere:
+/// here `:i`'s difference from it names it first, and `:j`'s assertion reaches
+/// its type. In RDF/XML and in Turtle, the node `:i` differs from is the one
+/// `:j` and `:k` assert and the assertion types.
+#[test]
+fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("anon-object.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
+         DifferentIndividuals(:i _:x)\nObjectPropertyAssertion(:p :j _:x)\n\
+         ObjectPropertyAssertion(:q :k _:x)\nClassAssertion(:B _:x)\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("anon-object.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(
+            stderr.contains("layout cannot state 1 axiom(s)") && stderr.contains("ClassAssertion"),
+            "{ext}: {stderr}"
+        );
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let joined = SparqlEvaluator::new()
+            .parse_query(
+                "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX : <http://example.org/a#> \
+                 ASK { :i owl:differentFrom ?x . :j :p ?x . :k :q ?x . ?x a :B }",
+            )
+            .unwrap()
+            .on_store(&store)
+            .execute()
+            .unwrap();
+        assert!(matches!(joined, QueryResults::Boolean(true)), "{ext}: {}", String::from_utf8_lossy(&text));
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
+/// A document is read in the syntax its content is in, whatever the file is
+/// called, and comment lines before its first statement do not hide it. ROBOT's
+/// `asserted-equiv.owl` example is Manchester syntax, and is written as ROBOT
+/// 1.9.11 writes it.
+#[test]
+fn a_manchester_document_named_owl_is_read_as_manchester() {
+    assert_eq!(
+        convert_fixture("manchester-document.owl", "manchester-document.rdf.owl", &[]),
+        fixture_text("manchester-document.robot.owl")
+    );
+    assert_eq!(
+        convert_fixture("manchester-document.owl", "manchester-document.ttl", &[]),
+        fixture_text("manchester-document.robot.ttl")
+    );
+    let src = tmp("commented-manchester.owl");
+    let out = tmp("commented-manchester.rdf.owl");
+    std::fs::write(&src, format!("# A comment\n\n{}", fixture_text("manchester-document.owl"))).unwrap();
+    let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("manchester-document.robot.owl"));
+    let _ = std::fs::remove_file(&src);
+    let _ = std::fs::remove_file(&out);
+}
+
+/// Line-based RDF is the same bytes on every run: N-Triples, and Turtle for a
+/// document the layout cannot state. Each blank node takes its label from the
+/// order the mapping first names it, and the triples are sorted.
+#[test]
+fn line_based_rdf_is_the_same_on_every_run() {
+    let src = tmp("blank-nodes.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
+         SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n\
+         DifferentIndividuals(:i _:x)\nObjectPropertyAssertion(:p :j _:x)\n\
+         ObjectPropertyAssertion(:q :k _:x)\nClassAssertion(:B _:x)\n)\n",
+    )
+    .unwrap();
+    for ext in ["nt", "ttl"] {
+        let runs: Vec<Vec<u8>> = (0..3)
+            .map(|i| {
+                let out = tmp(&format!("blank-nodes-{i}.{ext}"));
+                let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+                assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+                let text = std::fs::read(&out).unwrap();
+                let _ = std::fs::remove_file(&out);
+                text
+            })
+            .collect();
+        assert!(runs.iter().all(|r| *r == runs[0]), "{ext} differs between runs");
+        assert!(String::from_utf8_lossy(&runs[0]).contains("_:b0"), "{ext}: {}", String::from_utf8_lossy(&runs[0]));
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
 /// `owltools … --run-reasoner -u` lists, after the unsatisfiable count, every
 /// direct superclass the reasoner infers that no `SubClassOf` asserts, and every
 /// named equivalence — each class as its id and quoted label, or its id twice
