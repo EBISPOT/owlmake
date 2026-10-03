@@ -1846,8 +1846,12 @@ fn export_parents(
         text.push_str(&ids.id(c));
         text.push('\t');
         text.push_str(&label(c));
-        // Every superclass, as the reasoner's flattened node set hands them over.
+        // Every superclass, as the reasoner's flattened node set hands them over;
+        // the set holds owl:Thing too, which sizes it.
         let mut flat: Vec<&str> = supers.get(c.as_str()).cloned().unwrap_or_default();
+        if !flat.contains(&OWL_THING) {
+            flat.push(OWL_THING);
+        }
         flat.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
         let flat = in_set_order(flat);
         for (pi, _) in props.iter().enumerate() {

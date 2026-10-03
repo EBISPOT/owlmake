@@ -3981,3 +3981,28 @@ fn reason_lists_unsatisfiable_classes_in_bottom_node_order() {
     assert_eq!(robot.len(), 263);
     assert_eq!(ours, robot);
 }
+
+/// `owltools --export-parents` lists a cell's parents in the order of the sets
+/// they pass through, the first being every superclass of the row's class with
+/// owl:Thing among them. X:0000900 has twelve superclasses besides owl:Thing,
+/// so owl:Thing takes that set from 16 buckets to 32; the two parents' classes
+/// share a bucket at 16 and at every later step, and at 32 the second whole
+/// comes first. The expected table is owltools 2020-04-06's (ODK v1.6.1), the
+/// same three times over.
+#[test]
+fn export_parents_sizes_the_superclass_set_with_owl_thing() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/export-parents");
+    let out = tmp("thing-sizes.tsv");
+    let run = bin()
+        .arg("owltools")
+        .arg(fixtures.join("thing-sizes.ofn"))
+        .args(["--reasoner", "mexr", "--export-parents", "-p", "BFO:0000050", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        std::fs::read_to_string(fixtures.join("thing-sizes.owltools.tsv")).unwrap()
+    );
+}
