@@ -135,6 +135,7 @@ fn add_missing_class_expression_types(store: &Store) -> Result<()> {
 
     const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
     const OWL: &str = "http://www.w3.org/2002/07/owl#";
+    const RDFS_DATATYPE: &str = "http://www.w3.org/2000/01/rdf-schema#Datatype";
     // Predicate → the `rdf:type` its subject must carry. `owl:onProperty` marks a
     // restriction; the set operators mark an anonymous class.
     let rules: [(&str, &str); 5] = [
@@ -154,10 +155,11 @@ fn add_missing_class_expression_types(store: &Store) -> Result<()> {
         for q in store.quads_for_pattern(None, Some(p), None, None) {
             let q = q.map_err(|e| anyhow!("scanning triples: {e}"))?;
             let subj = q.subject;
+            // A node typed in the OWL vocabulary, or as a data range, says what it is.
             let already = store
                 .quads_for_pattern(Some(subj.as_ref()), Some(type_pred), None, None)
                 .filter_map(|r| r.ok())
-                .any(|r| matches!(&r.object, Term::NamedNode(n) if n.as_str().starts_with(OWL)));
+                .any(|r| matches!(&r.object, Term::NamedNode(n) if n.as_str().starts_with(OWL) || n.as_str() == RDFS_DATATYPE));
             if !already {
                 missing.push(Quad::new(subj, t, t, GraphNameRef::DefaultGraph));
             }

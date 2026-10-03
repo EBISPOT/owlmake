@@ -209,6 +209,31 @@ fn functional_matches_rdfxml() {
     );
 }
 
+/// Cross-format agreement: functional syntax vs Turtle, the ontology's IRI and
+/// version IRI included. A rule's atoms keep the order of the document they were
+/// read from, which is not the same in the two serializations of
+/// `swrl_two_variables`.
+#[test]
+fn functional_matches_turtle() {
+    let mut rep = Report::new();
+    for name in base_names() {
+        let result = (|| {
+            let a = try_load(&path_for(&name, "owl-functional", "ofn"))?;
+            let b = try_load(&path_for(&name, "owl-ttl", "ttl"))?;
+            if diff::ontology_id(&a) != diff::ontology_id(&b) {
+                return Err(format!("ontology id {:?} vs {:?}", diff::ontology_id(&a), diff::ontology_id(&b)));
+            }
+            semantic_eq(&a, &b)
+        })();
+        rep.record(&name, result);
+    }
+    rep.print("Functional vs Turtle");
+    assert!(
+        rep.pass * 100 >= rep.total * 98,
+        "Functional/Turtle cross-format parity regressed below 98%"
+    );
+}
+
 /// Each corpus ontology written as OWL/XML and as Manchester syntax is what
 /// ROBOT 1.9.11 writes converting the same functional-syntax document, byte for
 /// byte: `tests/corpus/robot-1.9.11/` holds ROBOT's output for every document it

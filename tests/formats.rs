@@ -282,3 +282,32 @@ fn an_annotated_property_assertion_survives_rdfxml() {
     assert!(kept, "the axiom annotation did not survive the round trip:\n{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An `owl:versionIRI` statement about the ontology is its version IRI wherever
+/// the document makes it, even ahead of the `rdf:type owl:Ontology` that says
+/// what the subject is — never an ontology annotation.
+#[test]
+fn a_version_iri_stated_before_the_ontology_type_is_the_version_iri() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    const DOC: &str = concat!(
+        "<?xml version=\"1.0\"?>\n",
+        "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" ",
+        "xmlns:owl=\"http://www.w3.org/2002/07/owl#\">\n",
+        "  <rdf:Description rdf:about=\"http://example.org/o\">\n",
+        "    <owl:versionIRI rdf:resource=\"http://example.org/o/v1\"/>\n",
+        "    <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#Ontology\"/>\n",
+        "  </rdf:Description>\n",
+        "  <owl:Class rdf:about=\"http://example.org/A\"/>\n",
+        "</rdf:RDF>\n",
+    );
+    io::reset_anon_counter();
+    let m = io::load_from(std::io::Cursor::new(DOC.as_bytes()), Format::RdfXml).unwrap();
+    assert_eq!(
+        owlmake::diff::ontology_id(&m),
+        (Some("http://example.org/o".to_string()), Some("http://example.org/o/v1".to_string()))
+    );
+    let mut ofn = Vec::new();
+    io::write_to_ref(&m, &mut ofn, Format::Functional).unwrap();
+    let text = String::from_utf8(ofn).unwrap();
+    assert!(!text.contains("owl:versionIRI"), "{text}");
+}

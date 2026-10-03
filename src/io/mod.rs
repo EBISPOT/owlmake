@@ -1393,6 +1393,51 @@ pub(crate) fn anon_individual_order(
     kept.into_iter().map(|b| &b.text).collect()
 }
 
+/// An `owl:versionIRI` statement about the ontology is its version IRI wherever
+/// the document makes it. The parse takes one stated before the ontology's
+/// `rdf:type owl:Ontology` for an ontology annotation, and declares
+/// `owl:versionIRI` an annotation property for it; both are put back here.
+fn version_iri_statement(ont: &mut Onto) {
+    use horned_owl::model::{
+        AnnotatedComponent, AnnotationValue, Component, DeclareAnnotationProperty, MutableOntology,
+        OntologyAnnotation, OntologyID, RcStr,
+    };
+    const VERSION_IRI: &str = "http://www.w3.org/2002/07/owl#versionIRI";
+    let id = ont.iter().find_map(|ac| match &ac.component {
+        Component::OntologyID(id) => Some(id.clone()),
+        _ => None,
+    });
+    let Some(id) = id else { return };
+    if id.iri.is_none() || id.viri.is_some() {
+        return;
+    }
+    let stated: Vec<AnnotatedComponent<RcStr>> = ont
+        .iter()
+        .filter(|ac| {
+            matches!(&ac.component, Component::OntologyAnnotation(OntologyAnnotation(a))
+                if a.ap.0.as_ref() == VERSION_IRI && matches!(a.av, AnnotationValue::IRI(_)))
+        })
+        .cloned()
+        .collect();
+    let [statement] = stated.as_slice() else { return };
+    let Component::OntologyAnnotation(OntologyAnnotation(a)) = &statement.component else { return };
+    let AnnotationValue::IRI(viri) = &a.av else { return };
+    let viri = viri.clone();
+    ont.remove(statement);
+    let declaration = ont
+        .iter()
+        .find(|ac| matches!(&ac.component, Component::DeclareAnnotationProperty(DeclareAnnotationProperty(p)) if p.0.as_ref() == VERSION_IRI))
+        .cloned();
+    if let Some(declaration) = declaration {
+        ont.remove(&declaration);
+    }
+    ont.remove(&AnnotatedComponent { component: Component::OntologyID(id.clone()), ann: Default::default() });
+    ont.insert(AnnotatedComponent {
+        component: Component::OntologyID(OntologyID { iri: id.iri, viri: Some(viri) }),
+        ann: Default::default(),
+    });
+}
+
 /// The hash-table capacity the anonymous-individual ordering masks against after
 /// `n` distinct keys — see [`anon_individual_order`]. Sizing is capacity 16, load
 /// factor 0.75, doubling whenever the size exceeds three quarters of it. The table
@@ -1955,7 +2000,8 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             }
             // Move components out of the parser's Rc set rather than deep-cloning
             // every one (the naive From<ConcreteRDFOntology>).
-            let ont: Onto = rdfo.into_set_ontology_fast();
+            let mut ont: Onto = rdfo.into_set_ontology_fast();
+            version_iri_statement(&mut ont);
             let mut model = Model::from_parts(ont, crate::model::default_prefixes());
             model.idspaces = idspaces;
             model.rdf_prefixes = rdf_prefixes;
