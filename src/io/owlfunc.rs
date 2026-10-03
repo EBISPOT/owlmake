@@ -225,7 +225,9 @@ pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
 /// Orders data ranges the way class expressions are ordered: by the form's index,
 /// then by components. A named datatype is an ENTITY, so it takes the entity block's
 /// 1004 and precedes every anonymous form; the anonymous forms follow in enumeration
-/// order. Forms with no arm of their own compare equal, so this is a preorder.
+/// order. The operands of a union or intersection, the values of a one-of and the
+/// restrictions of a datatype restriction are sets, compared in their own sorted
+/// order.
 pub(crate) fn cmp_dr(a: &DR<RcStr>, b: &DR<RcStr>) -> Ordering {
     fn idx(dr: &DR<RcStr>) -> i32 {
         match dr {
@@ -246,16 +248,44 @@ pub(crate) fn cmp_dr(a: &DR<RcStr>, b: &DR<RcStr>) -> Ordering {
         (DR::DataComplementOf(x), DR::DataComplementOf(y)) => cmp_dr(x, y),
         (DR::DataIntersectionOf(x), DR::DataIntersectionOf(y))
         | (DR::DataUnionOf(x), DR::DataUnionOf(y)) => {
-            for (p, q) in x.iter().zip(y.iter()) {
-                let c = cmp_dr(p, q);
-                if c != Ordering::Equal {
-                    return c;
-                }
-            }
-            x.len().cmp(&y.len())
+            let mut x: Vec<&DR<RcStr>> = x.iter().collect();
+            let mut y: Vec<&DR<RcStr>> = y.iter().collect();
+            x.sort_by(|p, q| cmp_dr(p, q));
+            y.sort_by(|p, q| cmp_dr(p, q));
+            cmp_sorted(&x, &y, |p, q| cmp_dr(p, q))
+        }
+        (DR::DataOneOf(x), DR::DataOneOf(y)) => {
+            let mut x: Vec<_> = x.iter().map(crate::io::owlrdf::literal_key).collect();
+            let mut y: Vec<_> = y.iter().map(crate::io::owlrdf::literal_key).collect();
+            x.sort();
+            y.sort();
+            cmp_sorted(&x, &y, |p, q| p.cmp(q))
+        }
+        (DR::DatatypeRestriction(dx, fx), DR::DatatypeRestriction(dy, fy)) => {
+            dx.0.as_ref().cmp(dy.0.as_ref()).then_with(|| {
+                let key = |f: &horned_owl::model::FacetRestriction<RcStr>| {
+                    (crate::io::owlrdf::facet_rank(f.f.as_ref()), crate::io::owlrdf::literal_key(&f.l))
+                };
+                let mut x: Vec<_> = fx.iter().map(key).collect();
+                let mut y: Vec<_> = fy.iter().map(key).collect();
+                x.sort();
+                y.sort();
+                cmp_sorted(&x, &y, |p, q| p.cmp(q))
+            })
         }
         _ => Ordering::Equal,
     }
+}
+
+/// Two sorted sets, element by element and then by size.
+fn cmp_sorted<T>(a: &[T], b: &[T], cmp: impl Fn(&T, &T) -> Ordering) -> Ordering {
+    for (p, q) in a.iter().zip(b.iter()) {
+        let c = cmp(p, q);
+        if c != Ordering::Equal {
+            return c;
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// Compare two operand lists element-by-element (they are already stored sorted).
@@ -415,8 +445,63 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::Rule(x), Component::Rule(y)) => {
             atom_key(&x.body).cmp(&atom_key(&y.body)).then_with(|| atom_key(&x.head).cmp(&atom_key(&y.head)))
         }
+        (Component::ObjectPropertyDomain(x), Component::ObjectPropertyDomain(y)) => {
+            cmp_ope(&x.ope, &y.ope).then_with(|| cmp_ce(&x.ce, &y.ce))
+        }
+        (Component::DataPropertyDomain(x), Component::DataPropertyDomain(y)) => {
+            x.dp.0.as_ref().cmp(y.dp.0.as_ref()).then_with(|| cmp_ce(&x.ce, &y.ce))
+        }
+        (Component::DataPropertyRange(x), Component::DataPropertyRange(y)) => {
+            x.dp.0.as_ref().cmp(y.dp.0.as_ref()).then_with(|| cmp_dr(&x.dr, &y.dr))
+        }
+        (Component::DatatypeDefinition(x), Component::DatatypeDefinition(y)) => {
+            x.kind.0.as_ref().cmp(y.kind.0.as_ref()).then_with(|| cmp_dr(&x.range, &y.range))
+        }
+        (Component::SubDataPropertyOf(x), Component::SubDataPropertyOf(y)) => {
+            x.sub.0.as_ref().cmp(y.sub.0.as_ref()).then_with(|| x.sup.0.as_ref().cmp(y.sup.0.as_ref()))
+        }
+        (Component::EquivalentObjectProperties(x), Component::EquivalentObjectProperties(y)) => {
+            cmp_ope_set(&x.0, &y.0)
+        }
+        (Component::DisjointObjectProperties(x), Component::DisjointObjectProperties(y)) => {
+            cmp_ope_set(&x.0, &y.0)
+        }
+        (Component::InverseObjectProperties(x), Component::InverseObjectProperties(y)) => {
+            cmp_ope_set(&[x.0.clone(), x.1.clone()], &[y.0.clone(), y.1.clone()])
+        }
+        (Component::EquivalentDataProperties(x), Component::EquivalentDataProperties(y)) => cmp_dp_set(&x.0, &y.0),
+        (Component::DisjointDataProperties(x), Component::DisjointDataProperties(y)) => cmp_dp_set(&x.0, &y.0),
+        (Component::FunctionalObjectProperty(x), Component::FunctionalObjectProperty(y)) => cmp_ope(&x.0, &y.0),
+        (Component::InverseFunctionalObjectProperty(x), Component::InverseFunctionalObjectProperty(y)) => {
+            cmp_ope(&x.0, &y.0)
+        }
+        (Component::SymmetricObjectProperty(x), Component::SymmetricObjectProperty(y)) => cmp_ope(&x.0, &y.0),
+        (Component::AsymmetricObjectProperty(x), Component::AsymmetricObjectProperty(y)) => cmp_ope(&x.0, &y.0),
+        (Component::TransitiveObjectProperty(x), Component::TransitiveObjectProperty(y)) => cmp_ope(&x.0, &y.0),
+        (Component::ReflexiveObjectProperty(x), Component::ReflexiveObjectProperty(y)) => cmp_ope(&x.0, &y.0),
+        (Component::FunctionalDataProperty(x), Component::FunctionalDataProperty(y)) => {
+            x.0 .0.as_ref().cmp(y.0 .0.as_ref())
+        }
         _ => Ordering::Equal,
     }
+}
+
+/// Two sets of data properties, each in its own order.
+fn cmp_dp_set(a: &[horned_owl::model::DataProperty<RcStr>], b: &[horned_owl::model::DataProperty<RcStr>]) -> Ordering {
+    let mut a: Vec<&str> = a.iter().map(|p| p.0.as_ref()).collect();
+    let mut b: Vec<&str> = b.iter().map(|p| p.0.as_ref()).collect();
+    a.sort();
+    b.sort();
+    a.cmp(&b)
+}
+
+/// Two sets of object property expressions, each in its own order.
+fn cmp_ope_set(a: &[OPE<RcStr>], b: &[OPE<RcStr>]) -> Ordering {
+    let mut a: Vec<&OPE<RcStr>> = a.iter().collect();
+    let mut b: Vec<&OPE<RcStr>> = b.iter().collect();
+    a.sort_by(|p, q| cmp_ope(p, q));
+    b.sort_by(|p, q| cmp_ope(p, q));
+    cmp_sorted(&a, &b, |p, q| cmp_ope(p, q))
 }
 
 /// A simple ordering key for a SWRL atom list: the sequence of predicate IRIs.

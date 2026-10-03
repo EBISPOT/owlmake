@@ -234,12 +234,12 @@ fn functional_matches_turtle() {
     );
 }
 
-/// Each corpus ontology written as OWL/XML and as Manchester syntax is what
-/// ROBOT 1.9.11 writes converting the same functional-syntax document, byte for
-/// byte: `tests/corpus/robot-1.9.11/` holds ROBOT's output for every document it
-/// converts (it cannot load `import`, `happy_person` and `swrl_individual`).
+/// Each corpus ontology written as OWL/XML, Manchester syntax and Turtle is
+/// what ROBOT 1.9.11 writes converting the same functional-syntax document, byte
+/// for byte: `tests/corpus/robot-1.9.11/` holds ROBOT's output for every document
+/// it converts (it cannot load `import`, `happy_person` and `swrl_individual`).
 #[test]
-fn owlxml_and_manchester_are_written_as_robot_writes_them() {
+fn owlxml_manchester_and_turtle_are_written_as_robot_writes_them() {
     let dir = Path::new(CORPUS).join("robot-1.9.11");
     let mut expected: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()))
@@ -252,6 +252,7 @@ fn owlxml_and_manchester_are_written_as_robot_writes_them() {
         let fmt = match path.extension().and_then(|x| x.to_str()) {
             Some("owx") => Format::OwlXml,
             Some("omn") => Format::Manchester,
+            Some("ttl") => Format::Turtle,
             _ => continue,
         };
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -264,7 +265,7 @@ fn owlxml_and_manchester_are_written_as_robot_writes_them() {
             fails.push(path.file_name().unwrap().to_string_lossy().to_string());
         }
     }
-    assert_eq!(compared, 238, "the reference set is ROBOT's OWL/XML and Manchester for 119 documents");
+    assert_eq!(compared, 357, "the reference set is ROBOT's OWL/XML, Manchester and Turtle for 119 documents");
     assert!(fails.is_empty(), "{} of {compared} differ from ROBOT 1.9.11: {}", fails.len(), fails.join(" "));
 }
 

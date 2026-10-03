@@ -2595,9 +2595,14 @@ fn write_to_with<W: Write>(
 ) -> Result<()> {
     match fmt {
         Format::RdfXml if rdfxml == RdfXmlWriter::Owlapi => {
-            // WIP full-fidelity RDF/XML writer (see owlrdf.rs).
-            crate::io::owlrdf::save(model, &mut writer)?;
-            return Ok(());
+            // An axiom the layout cannot state sends the whole document through
+            // the general writer, so it is never written without one.
+            let unstated = crate::io::owlrdf::try_save(model, &mut writer)?;
+            if unstated.is_empty() {
+                return Ok(());
+            }
+            crate::io::owlrdf::warn_unstated("RDF/XML", &unstated);
+            return write_to_with(model, writer, fmt, RdfXmlWriter::Horned);
         }
         Format::RdfXml => {
             // Declare every document prefix on `rdf:RDF`, so a re-reader recovers
@@ -2750,13 +2755,11 @@ fn write_to_with<W: Write>(
             let prefixes = written_prefixes(model);
             manchester_write::save(model, &prefixes, &mut writer)?
         }
-        Format::Turtle => match owlapi_ttl::render(model) {
-            Some(bytes) => writer.write_all(&bytes)?,
-            None => turtle::save(model, &written_prefixes(model), &mut writer)?,
-        },
-        Format::NTriples => {
-            turtle::save_as(model, &[], &mut writer, oxigraph::io::RdfFormat::NTriples)?
+        Format::Turtle => {
+            let prefixes = written_prefixes(model);
+            owlapi_ttl::save(model, &prefixes, &mut writer)?
         }
+        Format::NTriples => turtle::save_ntriples(model, &mut writer)?,
     }
     Ok(())
 }
@@ -2950,7 +2953,7 @@ fn ofn_cache() -> bool {
 
 thread_local! {
     /// The file currently being written, for `OM_MODEL_DEBUG` (see
-    /// [`crate::io::owlrdf::save`]). Set by [`save_as`].
+    /// [`crate::io::owlrdf::try_save`]). Set by [`save_as`].
     static OUT_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 

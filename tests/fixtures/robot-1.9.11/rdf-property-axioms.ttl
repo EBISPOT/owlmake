@@ -1,0 +1,374 @@
+@prefix : <http://example.org/p#> .
+@prefix p: <http://example.org/p#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/p> .
+
+<http://example.org/p> rdf:type owl:Ontology .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/p#ap
+p:ap rdf:type owl:AnnotationProperty ;
+     rdfs:label "ap" ;
+     rdfs:subPropertyOf p:aq ;
+     rdfs:range xsd:string ;
+     rdfs:domain p:A .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:ap ;
+   owl:annotatedProperty rdfs:label ;
+   owl:annotatedTarget "ap" ;
+   rdfs:comment "label"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:ap ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget p:aq ;
+   rdfs:comment "sub"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:ap ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget p:A ;
+   rdfs:comment "domain"
+ ] .
+
+
+###  http://example.org/p#aq
+p:aq rdf:type owl:AnnotationProperty .
+
+
+#################################################################
+#    Datatypes
+#################################################################
+
+###  http://example.org/p#dt
+p:dt rdf:type rdfs:Datatype ;
+     rdfs:label "dt" ;
+     owl:equivalentClass _:genid4 .
+
+_:genid4 rdf:type rdfs:Datatype ;
+          owl:onDatatype xsd:integer ;
+          owl:withRestrictions ( [ xsd:minInclusive 1
+                                 ]
+                                 [ xsd:maxExclusive 10
+                                 ]
+                               ) .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:dt ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid4 ;
+   rdfs:comment "def"
+ ] .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/p#p
+p:p rdf:type owl:ObjectProperty ;
+    owl:equivalentProperty p:q ;
+    rdfs:subPropertyOf p:q ;
+    owl:inverseOf p:r ;
+    rdf:type owl:FunctionalProperty ;
+    rdfs:domain p:A ;
+    rdfs:range [ owl:intersectionOf ( p:B
+                                      p:C
+                                    ) ;
+                 rdf:type owl:Class
+               ] ,
+               _:genid18 ;
+    owl:propertyDisjointWith p:s ;
+    rdfs:label "p" .
+
+_:genid18 rdf:type owl:Restriction ;
+           owl:onProperty p:q ;
+           owl:someValuesFrom p:B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget p:q ;
+   rdfs:comment "equivalent"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget p:q ;
+   rdfs:comment "sub"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty owl:inverseOf ;
+   owl:annotatedTarget p:r ;
+   rdfs:comment "inverse"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget owl:FunctionalProperty ;
+   rdfs:comment "functional"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget p:A ;
+   rdfs:comment "domain"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid18 ;
+   rdfs:comment "range"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty owl:propertyDisjointWith ;
+   owl:annotatedTarget p:s ;
+   rdfs:comment "disjoint"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:p ;
+   owl:annotatedProperty rdfs:label ;
+   owl:annotatedTarget "p" ;
+   rdfs:comment "label"
+ ] .
+
+
+###  http://example.org/p#q
+p:q rdf:type owl:ObjectProperty .
+
+[ owl:inverseOf p:q ;
+   owl:equivalentProperty [ owl:inverseOf p:s
+                          ]
+ ] .
+
+[ owl:inverseOf p:q ;
+   rdfs:subPropertyOf p:r
+ ] .
+
+[ owl:inverseOf p:q ;
+   rdf:type owl:TransitiveProperty
+ ] .
+
+[ owl:inverseOf p:q ;
+   rdfs:domain p:A
+ ] .
+
+[ owl:inverseOf p:q ;
+   rdfs:range p:B
+ ] .
+
+
+###  http://example.org/p#r
+p:r rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/p#s
+p:s rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/p#d
+p:d rdf:type owl:DatatypeProperty ;
+    owl:equivalentProperty p:g ;
+    rdfs:subPropertyOf p:e ;
+    rdf:type owl:FunctionalProperty ;
+    rdfs:domain [ rdf:type owl:Restriction ;
+                  owl:onProperty p:p ;
+                  owl:someValuesFrom p:B
+                ] ,
+                _:genid32 ;
+    rdfs:range [ rdf:type rdfs:Datatype ;
+                 owl:oneOf [ rdf:type rdf:List ;
+                             rdf:first "a" ;
+                             rdf:rest [ rdf:type rdf:List ;
+                                        rdf:first "a"@en ;
+                                        rdf:rest [ rdf:type rdf:List ;
+                                                   rdf:first "b" ;
+                                                   rdf:rest [ rdf:type rdf:List ;
+                                                              rdf:first 1 ;
+                                                              rdf:rest rdf:nil
+                                                            ]
+                                                 ]
+                                      ]
+                           ]
+               ] ,
+               _:genid39 ;
+    owl:propertyDisjointWith p:e .
+
+_:genid32 rdf:type owl:Restriction ;
+           owl:onProperty p:q ;
+           owl:someValuesFrom p:B .
+
+_:genid39 rdf:type rdfs:Datatype ;
+           owl:intersectionOf ( xsd:string
+                                [ rdf:type rdfs:Datatype ;
+                                  owl:datatypeComplementOf xsd:integer
+                                ]
+                              ) .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:d ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget p:g ;
+   rdfs:comment "equivalent"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:d ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget p:e ;
+   rdfs:comment "sub"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:d ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget owl:FunctionalProperty ;
+   rdfs:comment "functional"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:d ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget _:genid32 ;
+   rdfs:comment "domain"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:d ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid39 ;
+   rdfs:comment "range"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:d ;
+   owl:annotatedProperty owl:propertyDisjointWith ;
+   owl:annotatedTarget p:e ;
+   rdfs:comment "disjoint"
+ ] .
+
+
+###  http://example.org/p#e
+p:e rdf:type owl:DatatypeProperty ;
+    rdfs:range xsd:integer .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:e ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget xsd:integer ;
+   rdfs:comment "named"
+ ] .
+
+
+###  http://example.org/p#g
+p:g rdf:type owl:DatatypeProperty ;
+    rdfs:range [ rdf:type rdfs:Datatype ;
+                 owl:unionOf ( xsd:integer
+                               xsd:string
+                             )
+               ] .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/p#A
+p:A rdf:type owl:Class .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource p:A ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget owl:Class ;
+   rdfs:comment "declared"
+ ] .
+
+
+###  http://example.org/p#B
+p:B rdf:type owl:Class .
+
+
+###  http://example.org/p#C
+p:C rdf:type owl:Class .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ rdf:type owl:Restriction ;
+                        owl:onProperty p:r ;
+                        owl:someValuesFrom p:C ;
+                        owl:equivalentClass _:genid51
+                      ] ;
+  owl:annotatedProperty owl:equivalentClass ;
+  owl:annotatedTarget _:genid51 ;
+  rdfs:comment "counter"
+] .
+
+_:genid51 rdf:type owl:Restriction ;
+           owl:onProperty p:r ;
+           owl:allValuesFrom p:C .
+
+
+[ rdfs:comment "all" ;
+  rdf:type owl:AllDisjointProperties ;
+  owl:members ( p:d
+                p:e
+                p:g
+              )
+] .
+
+
+#################################################################
+#    Rules
+#################################################################
+
+p:x rdf:type <http://www.w3.org/2003/11/swrl#Variable> .
+
+p:y rdf:type <http://www.w3.org/2003/11/swrl#Variable> .
+
+[ rdf:type <http://www.w3.org/2003/11/swrl#Imp> ;
+   <http://www.w3.org/2003/11/swrl#body> [ rdf:type <http://www.w3.org/2003/11/swrl#AtomList> ;
+                                           rdf:first [ rdf:type <http://www.w3.org/2003/11/swrl#IndividualPropertyAtom> ;
+                                                       <http://www.w3.org/2003/11/swrl#propertyPredicate> [ owl:inverseOf p:p
+                                                                                                          ] ;
+                                                       <http://www.w3.org/2003/11/swrl#argument1> p:x ;
+                                                       <http://www.w3.org/2003/11/swrl#argument2> p:y
+                                                     ] ;
+                                           rdf:rest rdf:nil
+                                         ] ;
+   <http://www.w3.org/2003/11/swrl#head> [ rdf:type <http://www.w3.org/2003/11/swrl#AtomList> ;
+                                           rdf:first [ rdf:type <http://www.w3.org/2003/11/swrl#ClassAtom> ;
+                                                       <http://www.w3.org/2003/11/swrl#classPredicate> p:A ;
+                                                       <http://www.w3.org/2003/11/swrl#argument1> p:x
+                                                     ] ;
+                                           rdf:rest rdf:nil
+                                         ]
+ ] .
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

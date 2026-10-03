@@ -1,6 +1,7 @@
-//! Turtle support, bridged through the oxigraph triple store: the ontology is
-//! moved between Turtle and RDF/XML (which horned-owl reads/writes) via an
-//! in-memory store. This reuses the pure-Rust oxrdf serializers.
+//! Turtle and N-Triples input, and line-based RDF output, bridged through the
+//! oxigraph triple store: the ontology is moved between those syntaxes and
+//! RDF/XML (which horned-owl reads and writes) via an in-memory store. Turtle
+//! output is laid out by `owlapi_ttl`, which falls back to [`save_plain`].
 
 use std::io::{BufRead, Write};
 
@@ -12,26 +13,31 @@ use oxigraph::store::Store;
 use crate::io::Format;
 use crate::model::Model;
 
-/// Write a model as Turtle, declaring `prefixes` (name → namespace) and
-/// writing every IRI one of them covers as a prefixed name.
-pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W) -> Result<()> {
-    save_as(model, prefixes, writer, RdfFormat::Turtle)
+/// Write a model as N-Triples.
+pub fn save_ntriples<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
+    save_lines(model, &[], writer, RdfFormat::NTriples)
 }
 
-/// [`save`] in an arbitrary line-based RDF syntax (Turtle or N-Triples). A
-/// syntax without prefixed names ignores `prefixes`.
-pub fn save_as<W: Write>(
-    model: &Model,
-    prefixes: &[(String, String)],
-    writer: &mut W,
-    fmt: RdfFormat,
-) -> Result<()> {
+/// Write a model as Turtle one statement at a time, declaring `prefixes`
+/// (name → namespace) and writing every IRI one of them covers as a prefixed
+/// name.
+pub fn save_plain<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W) -> Result<()> {
+    save_lines(model, prefixes, writer, RdfFormat::Turtle)
+}
+
+/// Every triple of the model's RDF mapping, through the in-memory store.
+pub(crate) fn mapped_triples(model: &Model) -> Result<Store> {
     let mut rdf = Vec::new();
     crate::io::write_to_ref(model, &mut rdf, Format::RdfXml)?;
     let store = Store::new().map_err(|e| anyhow!("store: {e}"))?;
     store
         .load_from_slice(RdfParser::from_format(RdfFormat::RdfXml), &rdf)
         .map_err(|e| anyhow!("loading triples: {e}"))?;
+    Ok(store)
+}
+
+fn save_lines<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W, fmt: RdfFormat) -> Result<()> {
+    let store = mapped_triples(model)?;
     let mut serializer = RdfSerializer::from_format(fmt);
     for (name, ns) in prefixes {
         serializer = serializer
