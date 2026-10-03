@@ -1,0 +1,79 @@
+Prefix(:=<http://example.org/r#>)
+Prefix(r:=<http://example.org/r#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/r>
+Annotation(Annotation(Annotation(rdfs:comment "ontology three") rdfs:comment "ontology two") rdfs:comment "ontology one")
+
+Declaration(Class(r:A))
+Declaration(Class(r:B))
+Declaration(Class(r:C))
+Declaration(ObjectProperty(r:p))
+Declaration(ObjectProperty(r:q))
+Declaration(ObjectProperty(r:r))
+Declaration(DataProperty(r:d))
+Declaration(DataProperty(r:e))
+Declaration(DataProperty(r:f))
+Declaration(NamedIndividual(r:i))
+Declaration(NamedIndividual(r:j))
+Declaration(NamedIndividual(r:k))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: r:p (r:p)
+
+DisjointObjectProperties(r:p r:q r:r)
+DisjointObjectProperties(Annotation(rdfs:comment "disjoint properties") r:p r:q ObjectInverseOf(r:r))
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: r:d (r:d)
+
+DisjointDataProperties(Annotation(rdfs:comment "disjoint data properties") r:d r:e r:f)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: r:A (r:A)
+
+
+# Class: r:B (r:B)
+
+
+# Class: r:C (r:C)
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: r:i (r:i)
+
+ObjectPropertyAssertion(Annotation(Annotation(Annotation(rdfs:comment "three") rdfs:comment "two") rdfs:comment "one") r:q r:i r:j)
+NegativeObjectPropertyAssertion(Annotation(Annotation(rdfs:comment "negative two") rdfs:comment "negative one") r:p r:i r:k)
+
+# Individual: r:j (r:j)
+
+NegativeDataPropertyAssertion(Annotation(rdfs:comment "negative data") r:d r:j "x")
+
+# Individual: r:k (r:k)
+
+
+
+DisjointClasses(Annotation(Annotation(rdfs:comment "disjoint two") rdfs:comment "disjoint one") r:A r:B r:C)
+DifferentIndividuals(Annotation(Annotation(rdfs:comment "different two") rdfs:comment "different one") r:i r:j r:k)
+)

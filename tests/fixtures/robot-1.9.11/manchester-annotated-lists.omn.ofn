@@ -1,0 +1,57 @@
+Prefix(:=<http://example.org/m#>)
+Prefix(m:=<http://example.org/m#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/m>
+
+Declaration(ObjectProperty(m:p))
+Declaration(ObjectProperty(m:q))
+Declaration(DataProperty(m:d))
+Declaration(DataProperty(m:e))
+Declaration(NamedIndividual(m:i))
+Declaration(NamedIndividual(m:j))
+Declaration(NamedIndividual(m:k))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(Datatype(rdf:PlainLiteral))
+Declaration(Datatype(xsd:integer))
+Declaration(Datatype(xsd:string))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: m:q (m:q)
+
+FunctionalObjectProperty(m:q)
+TransitiveObjectProperty(Annotation(rdfs:comment "t") m:q)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: m:e (m:e)
+
+DataPropertyRange(Annotation(rdfs:comment "r") m:e xsd:integer)
+DataPropertyRange(m:e xsd:string)
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: m:i (m:i)
+
+ObjectPropertyAssertion(m:p m:i m:j)
+ObjectPropertyAssertion(Annotation(rdfs:comment "x") m:q m:i m:k)
+NegativeObjectPropertyAssertion(Annotation(rdfs:comment "z") m:p m:i m:k)
+DataPropertyAssertion(Annotation(rdfs:comment "y") m:d m:i "v")
+
+
+)

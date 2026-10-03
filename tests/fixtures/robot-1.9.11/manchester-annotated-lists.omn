@@ -1,0 +1,73 @@
+Prefix: m: <http://example.org/m#>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/m>
+
+
+
+Ontology: <http://example.org/m>
+
+
+AnnotationProperty: rdfs:comment
+
+    
+Datatype: rdf:PlainLiteral
+
+    
+Datatype: xsd:integer
+
+    
+Datatype: xsd:string
+
+    
+ObjectProperty: m:p
+
+    
+ObjectProperty: m:q
+
+    Characteristics: 
+        Functional,
+        
+            Annotations: rdfs:comment "t"
+        Transitive
+    
+    
+DataProperty: m:d
+
+    
+DataProperty: m:e
+
+    Range: 
+        
+            Annotations: rdfs:comment "r"
+        xsd:integer,
+        xsd:string
+    
+    
+Individual: m:i
+
+    Facts:  
+     m:p  m:j,
+     
+     Annotations: rdfs:comment "x"
+                 
+                 m:q  m:k,
+     
+     Annotations: rdfs:comment "z"
+                 
+                  not  m:p  m:k,
+     
+     Annotations: rdfs:comment "y"
+                 
+                 m:d  "v"
+    
+    
+Individual: m:j
+
+    
+Individual: m:k
+
+    

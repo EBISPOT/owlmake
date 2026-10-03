@@ -3975,7 +3975,8 @@ fn the_annotations_of_an_assertion_on_an_inverse_are_stated() {
 }
 
 /// An annotated chain whose super-property is an inverse is stated of the
-/// inverse's node, the nested source of its reification, with no warning.
+/// inverse's node, the nested source of its reification, with no warning, and
+/// reads back whole.
 #[test]
 fn an_annotated_chain_under_an_inverse_is_stated() {
     use oxigraph::io::{RdfFormat, RdfParser};
@@ -4006,9 +4007,98 @@ fn an_annotated_chain_under_an_inverse_is_stated() {
                      rdfs:comment \"chain\" . ?t rdf:first :p ; rdf:rest/rdf:first/owl:inverseOf :q }";
         let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
         assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{}", String::from_utf8_lossy(&text));
+        let back = tmp(&format!("inverse-chain-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let read = std::fs::read_to_string(&back).unwrap();
+        let axiom = "SubObjectPropertyOf(Annotation(rdfs:comment \"chain\") \
+                     ObjectPropertyChain(:p ObjectInverseOf(:q)) ObjectInverseOf(:r))";
+        assert!(read.contains(axiom), "{ext}: {axiom}\n{read}");
+        let _ = std::fs::remove_file(&back);
         let _ = std::fs::remove_file(&out);
     }
     let _ = std::fs::remove_file(&src);
+}
+
+/// What ROBOT 1.9.11 writes of `read-annotations` as RDF/XML, Turtle and
+/// OWL/XML reads back as ROBOT reads each of them: annotations of annotations
+/// three deep, on an assertion and on the ontology's own annotation, and the
+/// annotated axioms stated on a node of their own — negative assertions, n-ary
+/// disjointness and difference, disjoint properties with an inverse member —
+/// with theirs.
+#[test]
+fn annotations_are_read_as_robot_reads_them() {
+    for ext in ["owl", "ttl", "owx"] {
+        assert_eq!(
+            convert_fixture(&format!("read-annotations.{ext}"), &format!("read-annotations-{ext}.ofn"), &[]),
+            fixture_text("read-annotations.read.ofn"),
+            "{ext}"
+        );
+    }
+}
+
+/// An anonymous individual is read wherever an axiom names one: a has-value's
+/// value, the one its class assertion types; an enumeration's member; the other
+/// member of a sameness and of a difference; the source and the target of a
+/// negative assertion. As ROBOT 1.9.11 writes `read-anonymous` in RDF/XML and
+/// Turtle, and as owlmake writes it.
+#[test]
+fn anonymous_individuals_are_read_wherever_an_axiom_names_one() {
+    // The node id the first `_:genid…` after `prefix` names.
+    fn id_after<'a>(read: &'a str, prefix: &str) -> Option<&'a str> {
+        let at = read.find(prefix)? + prefix.len();
+        let rest = &read[at..];
+        Some(&rest[..rest.find([')', ' '])?])
+    }
+    let check = |what: &str, read: &str| {
+        let value = id_after(read, "SubClassOf(:A ObjectHasValue(:p _:")
+            .unwrap_or_else(|| panic!("{what}: the has-value\n{read}"));
+        assert!(read.contains(&format!("ClassAssertion(:C _:{value})")), "{what}: the typed value\n{read}");
+        let mut ids = vec![value];
+        for (prefix, suffix) in [
+            ("SubClassOf(:B ObjectOneOf(:i _:", "))"),
+            ("SameIndividual(:i _:", ")"),
+            ("DifferentIndividuals(:j _:", ")"),
+            ("NegativeObjectPropertyAssertion(:p :i _:", ")"),
+            ("NegativeObjectPropertyAssertion(:p _:", " :j)"),
+        ] {
+            let id = id_after(read, prefix).unwrap_or_else(|| panic!("{what}: {prefix}…\n{read}"));
+            assert!(read.contains(&format!("{prefix}{id}{suffix}")), "{what}: {prefix}{id}{suffix}\n{read}");
+            ids.push(id);
+        }
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 6, "{what}: six individuals\n{read}");
+    };
+    for ext in ["owl", "ttl"] {
+        let read = convert_fixture(&format!("read-anonymous.{ext}"), &format!("read-anonymous-{ext}.ofn"), &[]);
+        check(&format!("ROBOT's {ext}"), &read);
+        let written = tmp(&format!("read-anonymous-written.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(robot_fixture("read-anonymous.ofn")).arg("-o").arg(&written).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let back = tmp(&format!("read-anonymous-written-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&written).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        check(&format!("owlmake's {ext}"), &std::fs::read_to_string(&back).unwrap());
+        let _ = std::fs::remove_file(&written);
+        let _ = std::fs::remove_file(&back);
+    }
+}
+
+/// Each entry of an annotated list in Manchester syntax — `Facts:`,
+/// `Characteristics:`, a data property's `Range:` — carries annotations of its
+/// own after a comma, as ROBOT 1.9.11 writes `manchester-annotated-lists`, and
+/// the document reads back as ROBOT reads it.
+#[test]
+fn annotated_list_entries_are_read_from_manchester_syntax() {
+    assert_eq!(
+        convert_fixture("manchester-annotated-lists.ofn", "annotated-lists.omn", &[]),
+        fixture_text("manchester-annotated-lists.omn")
+    );
+    assert_eq!(
+        convert_fixture("manchester-annotated-lists.omn", "annotated-lists.ofn", &[]),
+        fixture_text("manchester-annotated-lists.omn.ofn")
+    );
 }
 
 /// A namespace the document binds only to the empty prefix is declared under a

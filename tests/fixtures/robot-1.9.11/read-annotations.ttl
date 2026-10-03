@@ -1,0 +1,188 @@
+@prefix : <http://example.org/r#> .
+@prefix r: <http://example.org/r#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/r> .
+
+<http://example.org/r> rdf:type owl:Ontology ;
+                        rdfs:comment "ontology one" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource <http://example.org/r> ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "ontology one" ;
+                         rdfs:comment "ontology two"
+                       ] ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "ontology two" ;
+   rdfs:comment "ontology three"
+ ] .
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/r#p
+r:p rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/r#q
+r:q rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/r#r
+r:r rdf:type owl:ObjectProperty .
+
+[ rdfs:comment "disjoint properties" ;
+   rdf:type owl:AllDisjointProperties ;
+   owl:members ( r:p
+                 r:q
+                 [ owl:inverseOf r:r
+                 ]
+               )
+ ] .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/r#d
+r:d rdf:type owl:DatatypeProperty .
+
+
+###  http://example.org/r#e
+r:e rdf:type owl:DatatypeProperty .
+
+
+###  http://example.org/r#f
+r:f rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/r#A
+r:A rdf:type owl:Class .
+
+
+###  http://example.org/r#B
+r:B rdf:type owl:Class .
+
+
+###  http://example.org/r#C
+r:C rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/r#i
+r:i rdf:type owl:NamedIndividual ;
+    r:q r:j .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource [ rdf:type owl:Annotation ;
+                         owl:annotatedSource _:genid8 ;
+                         owl:annotatedProperty rdfs:comment ;
+                         owl:annotatedTarget "one" ;
+                         rdfs:comment "two"
+                       ] ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "two" ;
+   rdfs:comment "three"
+ ] .
+
+_:genid8 rdf:type owl:Axiom ;
+          owl:annotatedSource r:i ;
+          owl:annotatedProperty r:q ;
+          owl:annotatedTarget r:j ;
+          rdfs:comment "one" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid11 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "negative one" ;
+   rdfs:comment "negative two"
+ ] .
+
+_:genid11 rdf:type owl:NegativePropertyAssertion ;
+           owl:sourceIndividual r:i ;
+           owl:assertionProperty r:p ;
+           owl:targetIndividual r:k ;
+           rdfs:comment "negative one" .
+
+
+###  http://example.org/r#j
+r:j rdf:type owl:NamedIndividual .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual r:j ;
+   owl:assertionProperty r:d ;
+   owl:targetValue "x" ;
+   rdfs:comment "negative data"
+ ] .
+
+
+###  http://example.org/r#k
+r:k rdf:type owl:NamedIndividual .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid14 ;
+  owl:annotatedProperty rdfs:comment ;
+  owl:annotatedTarget "disjoint one" ;
+  rdfs:comment "disjoint two"
+] .
+
+_:genid14 rdf:type owl:AllDisjointClasses ;
+           owl:members ( r:A
+                         r:B
+                         r:C
+                       ) ;
+           rdfs:comment "disjoint one" .
+
+
+[ rdf:type owl:Annotation ;
+  owl:annotatedSource _:genid19 ;
+  owl:annotatedProperty rdfs:comment ;
+  owl:annotatedTarget "different one" ;
+  rdfs:comment "different two"
+] .
+
+_:genid19 rdf:type owl:AllDifferent ;
+           owl:distinctMembers ( r:i
+                                 r:j
+                                 r:k
+                               ) ;
+           rdfs:comment "different one" .
+
+
+[ rdf:type owl:AllDisjointProperties ;
+  owl:members ( r:p
+                r:q
+                r:r
+              )
+] .
+
+
+[ rdfs:comment "disjoint data properties" ;
+  rdf:type owl:AllDisjointProperties ;
+  owl:members ( r:d
+                r:e
+                r:f
+              )
+] .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi
