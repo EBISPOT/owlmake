@@ -10,7 +10,8 @@
 //! - the hash codes (`equivalent_classes_hash` and the expression hashes under
 //!   it) — a prime-tagged polynomial over the axiom's components. Set-valued
 //!   components are stored SORTED and hashed as Java lists (seed 1, ordered),
-//!   except axiom annotation sets, which hash to 0 when empty. IRIs hash as
+//!   except axiom annotation sets, which hash to 0 when empty, and the
+//!   individuals of a one-of, which hash as a set (the sum). IRIs hash as
 //!   the sum of the Java string hashes of their namespace and NCName-suffix
 //!   halves;
 //! - the component order (`owl_cmp`) — OWLAPI's `compareTo`: type index first,
@@ -48,7 +49,7 @@ const P_OBJ_HAS_VALUE: i32 = 3659;
 const P_DATATYPE: i32 = 3911;
 const P_OBJECT_PROPERTY: i32 = 4153;
 const P_OBJ_INVERSE: i32 = 4241;
-const P_NAMED_INDIVIDUAL: i32 = 4663;
+const P_NAMED_INDIVIDUAL: i32 = 4327;
 /// An `AnnotationProperty` is hashed the same way wherever it appears — as an
 /// assertion's property, and as the property of one of the assertion's own
 /// annotations.
@@ -264,10 +265,12 @@ pub fn ope_hash(ope: &OPE<RcStr>) -> i32 {
     }
 }
 
+/// An individual's hash. A named one is tagged like any other entity; an
+/// anonymous one is the string hash of its node id (`_:genid…`), untagged.
 fn ind_hash(i: &Individual<RcStr>) -> i32 {
     match i {
         Individual::Named(n) => tag(P_NAMED_INDIVIDUAL, &[iri_hash(n.0.as_ref())]),
-        Individual::Anonymous(_) => 0,
+        Individual::Anonymous(a) => java_string_hash(&crate::io::entities::node_id(a.0.as_ref())),
     }
 }
 
@@ -300,12 +303,14 @@ pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
         }
         CE::ObjectHasValue { ope, i } => tag(P_OBJ_HAS_VALUE, &[ope_hash(ope), ind_hash(i)]),
         CE::ObjectHasSelf(ope) => tag(P_OBJ_HAS_SELF, &[ope_hash(ope)]),
+        // The individuals are a set, not a sorted list, so they hash as one: the
+        // sum of the distinct members' hashes.
         CE::ObjectOneOf(v) => {
             let mut inds: Vec<&Individual<RcStr>> = v.iter().collect();
             inds.sort_by(|x, y| ind_cmp(x, y));
             inds.dedup_by(|x, y| ind_cmp(x, y) == Ordering::Equal);
-            let hs: Vec<i32> = inds.iter().map(|i| ind_hash(i)).collect();
-            tag(P_OBJ_ONE_OF, &[list_hash(&hs)])
+            let sum = inds.iter().fold(0i32, |acc, i| acc.wrapping_add(ind_hash(i)));
+            tag(P_OBJ_ONE_OF, &[sum])
         }
         // Data ranges do not appear in the axioms these orders decide.
         _ => 0,
@@ -666,5 +671,26 @@ mod tests {
         assert_eq!(order[0], 2, "CL_4030101 first (bucket 0)");
         assert_eq!(order[1], 0, "CL_0002438 second (bucket 1)");
         assert_eq!(order[4], 1, "CL_4030100 last (bucket 9)");
+    }
+
+    /// Ground truth from the OWLAPI 4.5.29 runtime: `hashCode()` of each
+    /// expression, built with `OWLDataFactory`.
+    #[test]
+    fn individual_hashes_match_owlapi() {
+        let b: Build<RcStr> = Build::new();
+        let t = "http://example.org/t#";
+        let p = || OPE::ObjectProperty(b.object_property(format!("{t}p")));
+        let named = |n: &str| Individual::Named(b.named_individual(format!("{t}{n}")));
+        let value = |i: Individual<RcStr>| CE::ObjectHasValue { ope: p(), i };
+        assert_eq!(ce_hash(&value(named("a1"))), 2015939837);
+        assert_eq!(ce_hash(&value(named("a23"))), 2016031599);
+        // A one-of's individuals hash as a set: the order they are given in and
+        // a repeated member change nothing.
+        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a1"), named("a2")])), -1216281020);
+        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a2"), named("a1"), named("a2")])), -1216281020);
+        // An anonymous individual hashes as its node id, however the id is spelled.
+        let anon = |id: &str| Individual::Anonymous(horned_owl::model::AnonymousIndividual(RcStr::from(id)));
+        assert_eq!(ce_hash(&value(anon("_:genid2147483648"))), 575983105);
+        assert_eq!(ce_hash(&value(anon("genid2147483648"))), 575983105);
     }
 }

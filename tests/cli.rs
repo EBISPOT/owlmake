@@ -3752,3 +3752,19 @@ fn added_prefixes_become_obo_idspaces_only_when_cleaned() {
         );
     }
 }
+
+/// General class axioms are written one frame per subclass expression, in the
+/// order a hash map keyed by those expressions holds them: by bucket, and
+/// within a bucket last-first. An individual in the expression is hashed as a
+/// named individual, as a set member in a one-of, and by node id when it is
+/// anonymous. As ROBOT 1.9.11 writes them.
+#[test]
+fn general_class_axioms_are_framed_in_hash_map_order() {
+    for name in ["gci-individuals", "gci-anonymous"] {
+        assert_eq!(
+            convert_fixture(&format!("{name}.ofn"), &format!("{name}.omn"), &[]),
+            fixture_text(&format!("{name}.omn")),
+            "{name}"
+        );
+    }
+}

@@ -1670,6 +1670,8 @@ impl<'m> Renderer<'m> {
 
     /// General class axioms, grouped by subclass: the groups in the order a
     /// hash map keyed by the subclass holds them, each frame's tab left open.
+    /// The map is filled in the axioms' natural order, each new key put at the
+    /// head of its bucket, so the groups sharing a bucket come out last-first.
     fn gcis(&mut self) {
         use Component as C;
         let order = self.order;
@@ -1688,7 +1690,7 @@ impl<'m> Renderer<'m> {
         let mut idx: Vec<usize> = (0..groups.len()).collect();
         idx.sort_by_key(|&i| {
             let h = hashes[i] as u32;
-            (h ^ (h >> 16)) & (cap - 1)
+            ((h ^ (h >> 16)) & (cap - 1), std::cmp::Reverse(i))
         });
         for i in idx {
             let (sub, axs) = &groups[i];

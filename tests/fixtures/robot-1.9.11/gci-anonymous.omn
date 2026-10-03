@@ -1,0 +1,242 @@
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/t>
+
+
+
+Ontology: <http://example.org/t>
+
+
+ObjectProperty: <http://example.org/t#p>
+
+    
+Class: <http://example.org/t#C1>
+
+    
+Class: <http://example.org/t#C2>
+
+    
+Class: <http://example.org/t#C3>
+
+    
+Class: <http://example.org/t#C4>
+
+    
+Class: <http://example.org/t#C5>
+
+    
+Class: <http://example.org/t#C6>
+
+    
+Individual: <http://example.org/t#a1>
+
+    
+Individual: <http://example.org/t#a2>
+
+    
+Individual: <http://example.org/t#a3>
+
+    
+Individual: <http://example.org/t#a4>
+
+    
+Individual: <http://example.org/t#a5>
+
+    
+Individual: <http://example.org/t#a6>
+
+    
+Individual: <http://example.org/t#a7>
+
+    
+Individual: <http://example.org/t#a8>
+
+    
+Individual: _:genid2147483648
+
+    
+Individual: _:genid2147483649
+
+    
+Individual: _:genid2147483650
+
+    
+Individual: _:genid2147483651
+
+    
+Individual: _:genid2147483652
+
+    
+Individual: _:genid2147483653
+
+    
+Individual: _:genid2147483654
+
+    
+Individual: _:genid2147483655
+
+    
+Individual: _:genid2147483656
+
+    
+Individual: _:genid2147483657
+
+    
+Individual: _:genid2147483658
+
+    
+Individual: _:genid2147483659
+
+    
+Individual: _:genid2147483660
+
+    
+Individual: _:genid2147483661
+
+    
+Individual: _:genid2147483662
+
+    
+Individual: _:genid2147483663
+
+    
+Individual: _:genid2147483664
+
+    
+Individual: _:genid2147483665
+
+    
+Class: <http://example.org/t#p> value _:genid2147483654
+
+    SubClassOf: 
+        <http://example.org/t#C2>
+    
+    Class: <http://example.org/t#p> value _:genid2147483655
+    
+        SubClassOf: 
+            <http://example.org/t#C3>
+        
+        Class: <http://example.org/t#p> value _:genid2147483656
+        
+            SubClassOf: 
+                <http://example.org/t#C4>
+            
+            Class: <http://example.org/t#p> value _:genid2147483657
+            
+                SubClassOf: 
+                    <http://example.org/t#C5>
+                
+                Class: <http://example.org/t#p> value _:genid2147483650
+                
+                    SubClassOf: 
+                        <http://example.org/t#C4>
+                    
+                    Class: <http://example.org/t#p> value _:genid2147483651
+                    
+                        SubClassOf: 
+                            <http://example.org/t#C5>
+                        
+                        Class: <http://example.org/t#p> value _:genid2147483652
+                        
+                            SubClassOf: 
+                                <http://example.org/t#C6>
+                            
+                            Class: <http://example.org/t#p> value _:genid2147483653
+                            
+                                SubClassOf: 
+                                    <http://example.org/t#C1>
+                                
+                                Class: {<http://example.org/t#a1> , _:genid2147483660}
+                                
+                                    SubClassOf: 
+                                        <http://example.org/t#C2>
+                                    
+                                    Class: {<http://example.org/t#a2> , _:genid2147483661}
+                                    
+                                        SubClassOf: 
+                                            <http://example.org/t#C3>
+                                        
+                                        Class: <http://example.org/t#p> value _:genid2147483648
+                                        
+                                            SubClassOf: 
+                                                <http://example.org/t#C2>
+                                            
+                                            Class: <http://example.org/t#p> value <http://example.org/t#a1>
+                                            
+                                                SubClassOf: 
+                                                    <http://example.org/t#C2>
+                                                
+                                                Class: <http://example.org/t#p> value _:genid2147483649
+                                                
+                                                    SubClassOf: 
+                                                        <http://example.org/t#C3>
+                                                    
+                                                    Class: <http://example.org/t#p> value <http://example.org/t#a2>
+                                                    
+                                                        SubClassOf: 
+                                                            <http://example.org/t#C3>
+                                                        
+                                                        Class: <http://example.org/t#p> value <http://example.org/t#a3>
+                                                        
+                                                            SubClassOf: 
+                                                                <http://example.org/t#C4>
+                                                            
+                                                            Class: <http://example.org/t#p> value <http://example.org/t#a4>
+                                                            
+                                                                SubClassOf: 
+                                                                    <http://example.org/t#C5>
+                                                                
+                                                                Class: {<http://example.org/t#a5> , _:genid2147483664}
+                                                                
+                                                                    SubClassOf: 
+                                                                        <http://example.org/t#C6>
+                                                                    
+                                                                    Class: <http://example.org/t#p> value <http://example.org/t#a5>
+                                                                    
+                                                                        SubClassOf: 
+                                                                            <http://example.org/t#C6>
+                                                                        
+                                                                        Class: <http://example.org/t#p> value <http://example.org/t#a6>
+                                                                        
+                                                                            SubClassOf: 
+                                                                                <http://example.org/t#C1>
+                                                                            
+                                                                            Class: {<http://example.org/t#a6> , _:genid2147483665}
+                                                                            
+                                                                                SubClassOf: 
+                                                                                    <http://example.org/t#C1>
+                                                                                
+                                                                                Class: <http://example.org/t#p> value <http://example.org/t#a7>
+                                                                                
+                                                                                    SubClassOf: 
+                                                                                        <http://example.org/t#C2>
+                                                                                    
+                                                                                    Class: <http://example.org/t#p> value <http://example.org/t#a8>
+                                                                                    
+                                                                                        SubClassOf: 
+                                                                                            <http://example.org/t#C3>
+                                                                                        
+                                                                                        Class: {<http://example.org/t#a3> , _:genid2147483662}
+                                                                                        
+                                                                                            SubClassOf: 
+                                                                                                <http://example.org/t#C4>
+                                                                                            
+                                                                                            Class: {<http://example.org/t#a4> , _:genid2147483663}
+                                                                                            
+                                                                                                SubClassOf: 
+                                                                                                    <http://example.org/t#C5>
+                                                                                                
+                                                                                                Class: <http://example.org/t#p> value _:genid2147483658
+                                                                                                
+                                                                                                    SubClassOf: 
+                                                                                                        <http://example.org/t#C6>
+                                                                                                    
+                                                                                                    Class: <http://example.org/t#p> value _:genid2147483659
+                                                                                                    
+                                                                                                        SubClassOf: 
+                                                                                                            <http://example.org/t#C1>
+                                                                                                        
+                                                                                                        
