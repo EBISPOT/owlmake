@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://purl.obolibrary.org/obo/ex.owl" ontologyIRI="http://purl.obolibrary.org/obo/ex.owl" xmlns:owl="http://www.w3.org/2002/07/owl#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:xsd="http://www.w3.org/2001/XMLSchema#" xmlns:xml="http://www.w3.org/XML/1998/namespace" xmlns:obo="http://purl.obolibrary.org/obo/">
+    <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+    <Prefix name="rdf" IRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+    <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+    <Prefix name="xsd" IRI="http://www.w3.org/2001/XMLSchema#"/>
+    <Prefix name="xml" IRI="http://www.w3.org/XML/1998/namespace"/>
+    <Prefix name="obo" IRI="http://purl.obolibrary.org/obo/"/>
+    <Declaration>
+        <Class IRI="obo:EX_0000001"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="obo:EX_0000002"/>
+    </Declaration>
+    <SubClassOf>
+        <Class IRI="obo:EX_0000002"/>
+        <Class IRI="obo:EX_0000001"/>
+    </SubClassOf>
+    <AnnotationAssertion>
+        <AnnotationProperty IRI="rdfs:label"/>
+        <IRI>obo:EX_0000001</IRI>
+        <Literal>thing one</Literal>
+    </AnnotationAssertion>
+    <AnnotationAssertion>
+        <AnnotationProperty IRI="rdfs:label"/>
+        <IRI>obo:EX_0000002</IRI>
+        <Literal>thing two</Literal>
+    </AnnotationAssertion>
+</Ontology>

@@ -86,7 +86,7 @@ pub fn java_string_hash(s: &str) -> i32 {
 }
 
 /// Whether a code point may START an NCName (XML name start minus ':').
-fn is_ncname_start(c: char) -> bool {
+pub(crate) fn is_ncname_start(c: char) -> bool {
     matches!(c,
         'A'..='Z' | 'a'..='z' | '_'
         | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
@@ -96,7 +96,7 @@ fn is_ncname_start(c: char) -> bool {
 }
 
 /// Whether a code point may CONTINUE an NCName.
-fn is_ncname_char(c: char) -> bool {
+pub(crate) fn is_ncname_char(c: char) -> bool {
     is_ncname_start(c)
         || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }

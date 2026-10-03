@@ -3118,7 +3118,6 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     let mut ont_anns: Vec<(String, String, bool, Option<String>)> = Vec::new();
     let mut remarks: Vec<String> = Vec::new();
     let mut imports: Vec<String> = Vec::new();
-    let mut format_version: Option<String> = None;
     let mut directives: HashMap<&'static str, Vec<String>> = HashMap::new();
 
     // Per-subject count of annotation-assertion axioms. A subject's assertions sit
@@ -3141,7 +3140,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         if matches!(ac.component, Component::EquivalentClasses(_)) {
             equivs.push(ac);
         } else {
-            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut format_version, &mut directives);
+            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut directives);
         }
         match &ac.component {
             Component::AnnotationAssertion(aa) => {
@@ -3188,7 +3187,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .collect();
         keyed.sort_by_key(|(b, i, _)| (*b, *i));
         for (_, _, ac) in keyed {
-            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut format_version, &mut directives);
+            record_ac(ac, &ctx, &mut classes, &mut obj_props, &mut ann_props, &mut individuals, &mut data, &mut ont_iri, &mut ont_version_iri, &mut ont_anns, &mut remarks, &mut imports, &mut directives);
         }
     }
     let subclass_cap = owlapi_set_cap(subclass_count);
@@ -3441,9 +3440,9 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     // synonymtypedef 40, default-namespace 45, idspace 50, treat-xrefs-* 55–70,
     // remark 75, import 80, ontology 85, property_value 100, owl-axioms 110) —
     // the order released files such as CL's `cl.obo` carry.
-    // The default is 1.2, not 1.4: `format-version: 1.2` is what released OBO files
-    // carry, so a model that reaches the writer with no
-    // `oboInOwl:hasOBOFormatVersion` (one read from OWL, say) is stamped with that.
+    // `format-version` is always 1.2, the version of the document this writer
+    // produces, whatever `oboInOwl:hasOBOFormatVersion` the model carries: a 1.4
+    // source written back out says 1.2 like every other OBO file.
     // A header directive's tag lines (`tag: value`), in the collected+sorted
     // order. Written at the fixed header position for that tag.
     macro_rules! emit_directive {
@@ -3462,7 +3461,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             classes.iter().chain(obj_props.iter()).chain(ann_props.iter()).chain(individuals.iter()),
         )?;
     }
-    writeln!(writer, "format-version: {}", format_version.as_deref().unwrap_or("1.2"))?;
+    writeln!(writer, "format-version: 1.2")?;
     if let Some(dv) = data_version(ont_iri.as_deref(), ont_version_iri.as_deref()) {
         writeln!(writer, "data-version: {dv}")?;
     }
@@ -3515,8 +3514,8 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .map(|(p, _)| p.as_str())
             .chain(model.rdf_prefixes.iter().map(|(p, _)| p.as_str()))
             .collect();
-        // Prefixes from an explicit `--prefixes`/`--add-prefixes` context: EVERY one
-        // gets an `idspace:`, whether or not it shortens an id (so mondo's `ICD11`
+        // Prefixes from an `--add-prefixes` context: EVERY one gets an
+        // `idspace:`, whether or not it shortens an id (so mondo's `ICD11`
         // appears with zero references).
         let explicit: std::collections::HashSet<&str> =
             model.explicit_prefixes.iter().map(|(p, _)| p.as_str()).collect();
@@ -3873,7 +3872,6 @@ fn record_ac(
     ont_anns: &mut Vec<(String, String, bool, Option<String>)>,
     remarks: &mut Vec<String>,
     imports: &mut Vec<String>,
-    format_version: &mut Option<String>,
     directives: &mut HashMap<&'static str, Vec<String>>,
 ) {
     let comp = &ac.component;
@@ -3894,7 +3892,8 @@ fn record_ac(
                 // treat-xrefs-as-*, date, …), not a header `property_value:`.
                 directives.entry(tag).or_default().push(val);
             } else if oa.0.ap.0.as_ref() == format!("{OIO}hasOBOFormatVersion") {
-                *format_version = Some(val);
+                // The header's `format-version` is always the version this writer
+                // produces, never the one the source declared.
             } else if oa.0.ap.0.as_ref() == RDFS_COMMENT {
                 // An ontology-level rdfs:comment is the OBO header `remark:` tag
                 // (CL's "See PMID:15693950 …; Contact Alexander Diehl …" line),

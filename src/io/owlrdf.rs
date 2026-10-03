@@ -415,6 +415,13 @@ fn owlapi_prefixes(model: &Model, ont_iri: &str) -> Vec<(String, String)> {
             .map(|(p, ns)| (p.clone(), ns.clone()))
             .collect()
     };
+    // The prefixes the command line adds go on top, a name they bind replacing
+    // the source's binding of it.
+    let format_prefixes: Vec<(String, String)> = format_prefixes
+        .into_iter()
+        .filter(|(p, _)| !model.added_prefixes.iter().any(|(a, _)| a == p))
+        .chain(model.added_prefixes.iter().cloned())
+        .collect();
     let mut out_map: BTreeMap<String, String> = BTreeMap::new();
     let mut declared_ns: HashSet<String> = HashSet::new();
     for (p, ns) in &format_prefixes {

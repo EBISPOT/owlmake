@@ -5,28 +5,41 @@
 use std::io::{BufRead, Write};
 
 use anyhow::{anyhow, Result};
-use oxigraph::io::{RdfFormat, RdfParser};
+use oxigraph::io::{RdfFormat, RdfParser, RdfSerializer};
 use oxigraph::model::GraphNameRef;
 use oxigraph::store::Store;
 
 use crate::io::Format;
 use crate::model::Model;
 
-/// Write a model as Turtle.
-pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
-    save_as(model, writer, RdfFormat::Turtle)
+/// Write a model as Turtle, declaring `prefixes` (name → namespace) and
+/// writing every IRI one of them covers as a prefixed name.
+pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W) -> Result<()> {
+    save_as(model, prefixes, writer, RdfFormat::Turtle)
 }
 
-/// [`save`] in an arbitrary line-based RDF syntax (Turtle or N-Triples).
-pub fn save_as<W: Write>(model: &Model, writer: &mut W, fmt: RdfFormat) -> Result<()> {
+/// [`save`] in an arbitrary line-based RDF syntax (Turtle or N-Triples). A
+/// syntax without prefixed names ignores `prefixes`.
+pub fn save_as<W: Write>(
+    model: &Model,
+    prefixes: &[(String, String)],
+    writer: &mut W,
+    fmt: RdfFormat,
+) -> Result<()> {
     let mut rdf = Vec::new();
     crate::io::write_to_ref(model, &mut rdf, Format::RdfXml)?;
     let store = Store::new().map_err(|e| anyhow!("store: {e}"))?;
     store
         .load_from_slice(RdfParser::from_format(RdfFormat::RdfXml), &rdf)
         .map_err(|e| anyhow!("loading triples: {e}"))?;
+    let mut serializer = RdfSerializer::from_format(fmt);
+    for (name, ns) in prefixes {
+        serializer = serializer
+            .with_prefix(name.as_str(), ns.as_str())
+            .map_err(|e| anyhow!("prefix {name}: <{ns}>: {e}"))?;
+    }
     store
-        .dump_graph_to_writer(GraphNameRef::DefaultGraph, fmt, writer)
+        .dump_graph_to_writer(GraphNameRef::DefaultGraph, serializer, writer)
         .map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
     Ok(())
 }
@@ -91,8 +104,19 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
         }
         model.prefixes = pm;
     }
-    model.rdf_prefixes = src_prefixes.clone();
-    model.idspaces = src_prefixes;
+    // The `idspace:` set is the document's prefixes less the namespaces no
+    // idspace may name, each namespace once — as for an RDF/XML source's
+    // `xmlns:` bindings.
+    let mut idspaces: Vec<(String, String)> = Vec::new();
+    for (p, ns) in &src_prefixes {
+        if !p.is_empty() && crate::io::idspace_namespace(ns) && !idspaces.iter().any(|(_, n)| n == ns) {
+            idspaces.push((p.clone(), ns.clone()));
+        }
+    }
+    model.idspaces = idspaces;
+    model.rdf_prefixes = src_prefixes;
+    // An untyped literal in Turtle or N-Triples is an `xsd:string`.
+    model.plain_literals_typed = true;
     Ok(model)
 }
 

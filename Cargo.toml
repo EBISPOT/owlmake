@@ -32,6 +32,12 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "1"
+# The XML reader behind the OWL/XML reader's IRI pass and `semsql`'s RDF/XML
+# statement loader. The `statements` table groups triples by the document's
+# top-level elements, which is an XML fact no triple-level API reports, so the
+# loader reads the XML itself. horned-owl depends on the same version on every
+# target, so the wasm build carries no second copy.
+quick-xml = "0.37"
 # default-features disabled to drop the `rocksdb` feature: it pulls in
 # `oxrocksdb-sys`, which compiles a bundled RocksDB C++ library (cc + bindgen)
 # for oxigraph's on-disk persistent `Store`. We only ever use the in-memory
@@ -174,10 +180,6 @@ mimalloc = "0.1"
 # double-quoted word as an Identifier, so the fallback would still be ours), and
 # turso is +21 MB and wants bindgen/libclang.
 rusqlite = { version = "0.32", features = ["bundled"] }
-# The XML reader behind `semsql`'s RDF/XML statement loader. The `statements`
-# table groups triples by the document's top-level elements, which is an XML
-# fact no triple-level API reports, so the loader reads the XML itself.
-quick-xml = "0.37"
 # Columnar I/O for the embedding parquet (read `ecto.parquet`, write compatible
 # output). Apache Arrow/Parquet, pure Rust; `zstd` matches OLS's compression (its
 # C is statically linked like mimalloc, native-only — not in the wasm core).

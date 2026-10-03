@@ -1,0 +1,115 @@
+Prefix: EX: <http://example.org/EX_>
+Prefix: dcterms: <http://purl.org/dc/terms/>
+Prefix: obo: <http://purl.obolibrary.org/obo/>
+Prefix: oboInOwl: <http://www.geneontology.org/formats/oboInOwl#>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/test.owl>
+
+
+
+Ontology: <http://example.org/test.owl>
+
+
+AnnotationProperty: <http://example.org/EX_0000900>
+
+    Annotations: 
+        rdfs:label "abbreviation"
+    
+    
+AnnotationProperty: dcterms:contributor
+
+    
+AnnotationProperty: dcterms:source
+
+    
+AnnotationProperty: obo:IAO_0000112
+
+    Annotations: 
+        rdfs:label "example of usage"
+    
+    
+AnnotationProperty: obo:IAO_0000115
+
+    Annotations: 
+        rdfs:label "definition"
+    
+    
+AnnotationProperty: obo:IAO_0000119
+
+    Annotations: 
+        rdfs:label "definition source"
+    
+    
+AnnotationProperty: oboInOwl:hasDbXref
+
+    
+AnnotationProperty: oboInOwl:hasExactSynonym
+
+    
+AnnotationProperty: oboInOwl:hasRelatedSynonym
+
+    
+AnnotationProperty: oboInOwl:hasSynonymType
+
+    
+AnnotationProperty: rdfs:comment
+
+    
+AnnotationProperty: rdfs:label
+
+    
+Datatype: xsd:anyURI
+
+    
+Datatype: xsd:string
+
+    
+ObjectProperty: <http://example.org/EX_0000100>
+
+    Annotations: 
+        rdfs:label "part of"
+    
+    
+Class: <http://example.org/EX_0000001>
+
+    Annotations: 
+        rdfs:label "thing A"
+    
+    
+Class: <http://example.org/EX_0000002>
+
+    Annotations: 
+        
+            Annotations: dcterms:contributor <https://orcid.org/0000-0000-0000-0000>, 
+                         dcterms:source "https://example.org/source/2"^^xsd:anyURI, 
+                         rdfs:comment "Example note."
+        obo:IAO_0000112 "An example of thing B in use.",
+        
+            Annotations: obo:IAO_0000119 "https://example.org/source/1"^^xsd:anyURI
+        obo:IAO_0000115 "A thing A that is part of a thing C.",
+        oboInOwl:hasDbXref "EXT:123",
+        
+            Annotations: rdfs:comment "Cross-reference note."
+        oboInOwl:hasDbXref "EXT:456",
+        
+            Annotations: oboInOwl:hasSynonymType <http://example.org/EX_0000900>
+        oboInOwl:hasExactSynonym "B thing",
+        oboInOwl:hasRelatedSynonym "thing of type B",
+        rdfs:comment "A comment about thing B.",
+        rdfs:label "thing B"
+    
+    SubClassOf: 
+        <http://example.org/EX_0000001>,
+        <http://example.org/EX_0000100> some <http://example.org/EX_0000003>
+    
+    
+Class: <http://example.org/EX_0000003>
+
+    Annotations: 
+        rdfs:label "thing C"
+    
+    

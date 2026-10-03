@@ -3535,3 +3535,164 @@ fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "Number of cycles: 0\n");
     assert_eq!(out.status.code(), Some(0));
 }
+
+/// `report` warns about a rule whose query does not PROJECT `?property` or
+/// `?value`, once per rule, whether or not it matched anything. A projected
+/// variable left unbound is not a defect: the bundled "missing X" rules bind
+/// `?value` only inside `FILTER NOT EXISTS` or an `OPTIONAL … !bound`, and their
+/// rows are reported with an empty Value and no warning.
+#[test]
+fn report_warns_only_for_variables_a_query_does_not_project() {
+    let dir = tmp("report-vars");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ont = dir.join("test.obo");
+    std::fs::write(
+        &ont,
+        "format-version: 1.4\nontology: ex\n\n\
+         [Term]\nid: EX:0000001\nname: root thing\n\n\
+         [Term]\nid: EX:0000002\nname: thing A\nis_a: EX:0000001 ! root thing\n",
+    )
+    .unwrap();
+    let no_value = dir.join("no_value.sparql");
+    std::fs::write(
+        &no_value,
+        "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\
+         SELECT DISTINCT ?entity ?property WHERE { VALUES ?property { rdfs:label } ?entity ?property ?x }\n",
+    )
+    .unwrap();
+    let never = dir.join("never.sparql");
+    std::fs::write(&never, "SELECT ?entity WHERE { ?entity <http://example.org/nothing> ?o }\n").unwrap();
+
+    // The default profile: four of its rules match rows with an unbound `?value`.
+    let tsv = dir.join("default.tsv");
+    let out = bin().args(["report", "-i"]).arg(&ont).arg("-o").arg(&tsv).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("query is missing"), "{stderr}");
+    let rows = std::fs::read_to_string(&tsv).unwrap();
+    assert!(rows.contains("WARN\tmissing_definition\tobo:EX_0000001\tIAO:0000115\t\n"), "{rows}");
+
+    let profile = dir.join("profile.txt");
+    std::fs::write(
+        &profile,
+        format!("WARN\tfile:{}\nINFO\tfile:{}\n", no_value.display(), never.display()),
+    )
+    .unwrap();
+    let out = bin()
+        .args(["report", "-i"])
+        .arg(&ont)
+        .arg("--profile")
+        .arg(&profile)
+        .arg("-o")
+        .arg(dir.join("custom.tsv"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.matches("'no_value' query is missing ?value variable").count(), 1, "{stderr}");
+    assert!(!stderr.contains("'no_value' query is missing ?property"), "{stderr}");
+    // …and a rule that matched nothing is told all the same.
+    assert!(stderr.contains("'never' query is missing ?property variable"), "{stderr}");
+    assert!(stderr.contains("'never' query is missing ?value variable"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A source in `tests/fixtures/robot-1.9.11/`, where each sits beside what ROBOT
+/// 1.9.11 writes from it.
+fn robot_fixture(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11").join(name)
+}
+
+/// `om convert` a fixture with `args`, to a file named `out` (whose extension
+/// picks the format); the text written.
+fn convert_fixture(src: &str, out: &str, args: &[&str]) -> String {
+    let path = tmp(out);
+    let run = bin().args(["convert", "-i"]).arg(robot_fixture(src)).args(args).arg("-o").arg(&path).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    text
+}
+
+fn fixture_text(name: &str) -> String {
+    std::fs::read_to_string(robot_fixture(name)).unwrap()
+}
+
+/// Manchester syntax keeps what an ontology says about its terms — every
+/// annotation assertion, the annotations on them, annotation property frames,
+/// IRI and typed values, the ontology IRI — and reads all of it back. As ROBOT
+/// 1.9.11 writes and reads `annotated-terms`, a Turtle source whose untyped
+/// literals are `xsd:string`.
+#[test]
+fn manchester_keeps_annotations_and_reads_them_back() {
+    assert_eq!(
+        convert_fixture("annotated-terms.ttl", "annotated-terms.omn", &[]),
+        fixture_text("annotated-terms.omn")
+    );
+    assert_eq!(
+        convert_fixture("annotated-terms.omn", "annotated-terms.ofn", &[]),
+        fixture_text("annotated-terms.omn.ofn")
+    );
+}
+
+/// A prefix the command line adds is declared by every prefix format, used or
+/// not, and abbreviates the IRIs it covers; a context given with `-P` only reads
+/// CURIEs. As ROBOT 1.9.11 writes `prefixed-terms` and `anonymous-terms`.
+#[test]
+fn added_prefixes_are_declared_and_used_by_every_prefix_format() {
+    let obo = ["--add-prefix", "obo: http://purl.obolibrary.org/obo/"];
+    for ext in ["ofn", "owx", "omn"] {
+        assert_eq!(
+            convert_fixture("prefixed-terms.ttl", &format!("added.{ext}"), &obo),
+            fixture_text(&format!("prefixed-terms.add-obo.{ext}")),
+            "{ext}"
+        );
+    }
+    assert_eq!(
+        convert_fixture("prefixed-terms.ttl", "unused.ofn", &["--add-prefix", "foo: http://example.org/foo/"]),
+        fixture_text("prefixed-terms.add-unused.ofn")
+    );
+    let context = robot_fixture("obo-context.json");
+    let read_only = ["-P", context.to_str().unwrap()];
+    assert_eq!(
+        convert_fixture("prefixed-terms.ttl", "read-only.ofn", &read_only),
+        fixture_text("prefixed-terms.read-only.ofn")
+    );
+    assert_eq!(
+        convert_fixture(
+            "anonymous-terms.ttl",
+            "anonymous.ttl",
+            &["--add-prefix", "obo: http://purl.obolibrary.org/obo/", "--add-prefix", "foo: http://example.org/foo/"]
+        ),
+        fixture_text("anonymous-terms.add-prefixes.ttl")
+    );
+    // Turtle of anything richer is laid out triple by triple, but declares and
+    // uses the same prefixes.
+    let ttl = convert_fixture("prefixed-terms.ttl", "added.ttl", &obo);
+    assert!(ttl.contains("@prefix obo: <http://purl.obolibrary.org/obo/> ."), "{ttl}");
+    assert!(ttl.contains("obo:ex.owl a owl:Ontology"), "{ttl}");
+    let ttl = convert_fixture("prefixed-terms.ttl", "read-only.ttl", &read_only);
+    assert!(!ttl.contains("@prefix obo:"), "{ttl}");
+}
+
+/// OWL/XML names an IRI by prefix only in `abbreviatedIRI`, and only with a
+/// prefix whose namespace is the IRI's own. An `IRI` value is an IRI — absolute,
+/// or relative to `xml:base` — and one that looks like a CURIE names the IRI it
+/// spells. As ROBOT 1.9.11 writes `prefixed-terms` and reads
+/// `curie-iri-attributes`.
+#[test]
+fn owlxml_names_an_iri_by_prefix_only_in_abbreviated_iri() {
+    assert_eq!(convert_fixture("prefixed-terms.ttl", "plain.owx", &[]), fixture_text("prefixed-terms.owx"));
+    assert_eq!(
+        convert_fixture("curie-iri-attributes.owx", "curie-iri-attributes.ofn", &[]),
+        fixture_text("curie-iri-attributes.ofn")
+    );
+}
+
+/// The `idspace:` lines an OBO document gets from a Turtle source are the
+/// prefixes it binds, less the built-in vocabularies and the OBO PURL space — as
+/// for an RDF/XML source's `xmlns:` bindings. As ROBOT 1.9.11 writes
+/// `prefixed-terms` and `custom-prefixes`.
+#[test]
+fn a_turtle_sources_prefixes_become_idspaces_as_xmlns_bindings_do() {
+    assert_eq!(convert_fixture("prefixed-terms.ttl", "prefixed.obo", &[]), fixture_text("prefixed-terms.obo"));
+    assert_eq!(convert_fixture("custom-prefixes.ttl", "custom.obo", &[]), fixture_text("custom-prefixes.obo"));
+}

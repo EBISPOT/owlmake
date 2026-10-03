@@ -83,15 +83,19 @@ pub fn run_options() -> RunOptions {
     }
 }
 
+pub mod entities;
 pub mod manchester;
 pub mod manchester_parse;
+pub mod manchester_write;
 pub mod genid;
+pub mod natural_order;
 pub mod obo;
 pub mod obograph;
 pub mod ofncache;
 pub mod owlfunc;
 pub mod owlapi_ttl;
 pub mod owlrdf;
+pub mod owx;
 pub mod turtle;
 pub mod jena_ttl;
 
@@ -1974,10 +1978,24 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             Ok(model)
         }
         Format::OwlXml => {
-            let (ont, prefixes): (Onto, PrefixMapping) =
-                horned_owl::io::owx::reader::read(&mut reader, cfg)
+            // Every IRI is made absolute before the document is parsed, so the
+            // parser has no prefixes to expand an `IRI` value with: only an
+            // `abbreviatedIRI` names its IRI by prefix.
+            let mut text = String::new();
+            reader.read_to_string(&mut text)?;
+            let (text, declared) = owx::normalise_iris(&text)?;
+            let (ont, _): (Onto, PrefixMapping) =
+                horned_owl::io::owx::reader::read(&mut text.as_bytes(), cfg)
                     .map_err(|e| anyhow::anyhow!("OWL/XML parse error: {e}"))?;
-            Ok(Model::from_parts(ont, prefixes))
+            let mut prefixes = PrefixMapping::default();
+            for (name, ns) in &declared {
+                let _ = prefixes.add_prefix(name, ns);
+            }
+            let mut model = Model::from_parts(ont, prefixes);
+            // The document's `Prefix` elements are its format prefixes, which a
+            // write in another format carries over.
+            model.rdf_prefixes = declared;
+            Ok(model)
         }
         Format::Functional => {
             // The standard prefixes are predefined in functional syntax, but
@@ -2121,7 +2139,7 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
         }
         Format::Obo => obo::load(reader),
         Format::OboGraph => obograph::load(reader),
-        Format::Manchester => manchester::load(reader),
+        Format::Manchester => manchester::load(reader, cfg),
         Format::Turtle => turtle::load(reader),
         Format::NTriples => turtle::load_as(reader, oxigraph::io::RdfFormat::NTriples),
     }
@@ -2493,12 +2511,8 @@ fn write_to_with<W: Write>(
             }
         }
         Format::OwlXml => {
-            let prefixes = safe_prefixes(model);
-            let cm = take_cm(model);
-            let r = horned_owl::io::owx::writer::write(&mut writer, &cm, Some(&prefixes))
-                .map_err(|e| anyhow::anyhow!("OWL/XML write error: {e}"));
-            restore_cm(model, cm);
-            r?;
+            let prefixes = written_prefixes(model);
+            owx::save(model, &prefixes, &mut writer)?;
         }
         Format::Functional => {
             // Hand the writer the document's OWN prefixes, in document order: a
@@ -2506,13 +2520,7 @@ fn write_to_with<W: Write>(
             // longest valid match. The writer falls back to a full <IRI> for any IRI
             // no declared prefix can validly abbreviate, so passing all prefixes
             // always round-trips.
-            let document = if model.format_prefixes_cleared {
-                default_ofn_prefixes(model)
-            } else if !model.rdf_prefixes.is_empty() {
-                rdfxml_format_prefixes(model)
-            } else {
-                model.prefixes.clone()
-            };
+            let document = format_prefixes(model);
             // A saved prefix format always binds the DEFAULT prefix to the ontology
             // IRI plus `#`, so every functional file opens `Prefix(:=<…#>)`.
             // owlmake's own DOSDP modules are anonymous ontologies, so they carry no
@@ -2597,13 +2605,16 @@ fn write_to_with<W: Write>(
         }
         Format::Obo => obo::save(model, &mut writer)?,
         Format::OboGraph => obograph::save(model, &mut writer)?,
-        Format::Manchester => manchester::save(model, &mut writer)?,
+        Format::Manchester => {
+            let prefixes = written_prefixes(model);
+            manchester_write::save(model, &prefixes, &mut writer)?
+        }
         Format::Turtle => match owlapi_ttl::render(model) {
             Some(bytes) => writer.write_all(&bytes)?,
-            None => turtle::save(model, &mut writer)?,
+            None => turtle::save(model, &written_prefixes(model), &mut writer)?,
         },
         Format::NTriples => {
-            turtle::save_as(model, &mut writer, oxigraph::io::RdfFormat::NTriples)?
+            turtle::save_as(model, &[], &mut writer, oxigraph::io::RdfFormat::NTriples)?
         }
     }
     Ok(())
@@ -2919,6 +2930,40 @@ fn rdfxml_format_prefixes(model: &Model) -> PrefixMapping {
     out
 }
 
+/// The prefixes a prefix-format document — functional syntax, OWL/XML,
+/// Manchester — carries over from its source: the source document's own
+/// bindings over the five built-in ones, then every prefix the command line
+/// adds (`Model::added_prefixes`), a later binding of a name replacing an
+/// earlier one.
+fn format_prefixes(model: &Model) -> PrefixMapping {
+    let mut pm = if model.format_prefixes_cleared {
+        default_ofn_prefixes(model)
+    } else if !model.rdf_prefixes.is_empty() {
+        rdfxml_format_prefixes(model)
+    } else {
+        model.prefixes.clone()
+    };
+    for (p, ns) in &model.added_prefixes {
+        let _ = pm.add_prefix(p, ns);
+    }
+    pm
+}
+
+/// The prefixes an OWL/XML, Manchester or Turtle document declares: the format
+/// prefixes without the default (`:`) binding, shortest name first (in UTF-16
+/// code units), then in UTF-16 order.
+fn written_prefixes(model: &Model) -> Vec<(String, String)> {
+    use crate::io::natural_order::str_cmp;
+    let utf16_len = |s: &str| s.encode_utf16().count();
+    let mut v: Vec<(String, String)> = format_prefixes(model)
+        .mappings()
+        .filter(|(p, _)| !p.is_empty())
+        .map(|(p, ns)| (p.clone(), ns.clone()))
+        .collect();
+    v.sort_by(|a, b| utf16_len(&a.0).cmp(&utf16_len(&b.0)).then_with(|| str_cmp(&a.0, &b.0)));
+    v
+}
+
 /// The prefix map for an ontology whose document format carries no prefixes — i.e.
 /// one built by `query --update`, which hands the result a fresh ontology (see
 /// `Model::format_prefixes_cleared`). All that survives is the default `:` bound to
@@ -2966,36 +3011,6 @@ fn xml_legal_prefixes(pm: &PrefixMapping) -> PrefixMapping {
             continue;
         }
         let _ = out.add_prefix(prefix, ns);
-    }
-    out
-}
-
-/// horned-owl's functional/OWL-XML writers abbreviate any IRI whose namespace
-/// matches a prefix, even when the resulting local part is not a legal CURIE
-/// (e.g. it contains `/`, as in `http://purl.obolibrary.org/obo/ro/subsets#x`).
-/// Such output cannot be re-parsed, so any prefix that would do this is dropped
-/// and the affected IRIs fall back to a full `<IRI>`.
-fn safe_prefixes(model: &Model) -> PrefixMapping {
-    use horned_owl::visitor::immutable::{entity::IRIExtract, Walk};
-
-    let mut walk = Walk::new(IRIExtract::default());
-    walk.set_ontology(&model.ont);
-    let iris: Vec<String> = walk
-        .into_visit()
-        .into_set()
-        .into_iter()
-        .map(|i| i.as_ref().to_string())
-        .collect();
-
-    let mut out = PrefixMapping::default();
-    for (prefix, ns) in model.prefixes.mappings() {
-        let safe = iris
-            .iter()
-            .filter(|iri| iri.starts_with(ns.as_str()))
-            .all(|iri| is_valid_curie_local(&iri[ns.len()..]));
-        if safe {
-            let _ = out.add_prefix(prefix, ns);
-        }
     }
     out
 }
@@ -3063,7 +3078,7 @@ fn xml_entities_transform(body: &[u8], prefixes: &[(String, String)]) -> Vec<u8>
 }
 
 /// A conservative check that `local` is a legal CURIE local part for the
-/// functional/OWL-XML writers: no characters that would break re-parsing.
+/// functional-syntax writer: no characters that would break re-parsing.
 fn is_valid_curie_local(local: &str) -> bool {
     !local.is_empty()
         && !local.contains('/')

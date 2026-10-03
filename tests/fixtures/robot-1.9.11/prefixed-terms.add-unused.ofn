@@ -1,0 +1,49 @@
+Prefix(:=<http://purl.obolibrary.org/obo/ex.owl#>)
+Prefix(EX:=<http://purl.obolibrary.org/obo/EX_>)
+Prefix(IAO:=<http://purl.obolibrary.org/obo/IAO_>)
+Prefix(foo:=<http://example.org/foo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/ex.owl>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000003>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000115>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://purl.obolibrary.org/obo/IAO_0000115> (definition)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/IAO_0000115> "definition")
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000001> (thing one)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000001> "The first example thing.")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000001> "thing one")
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000002> (thing two)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000002> "A kind of thing one.")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000002> "thing two")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000002> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000003> (thing three)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000003> "thing three")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000003> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

@@ -382,6 +382,29 @@ SubObjectPropertyOf(ObjectPropertyChain(obo:BFO_0000050 obo:BFO_0000050 obo:RO_0
     );
 }
 
+/// The header's `format-version` is the version of the document being written,
+/// so a 1.4 source comes back out as 1.2 — read directly, and after a trip
+/// through OWL that carries `oboInOwl:hasOBOFormatVersion "1.4"` — and the
+/// stored value never becomes a header `property_value:` either.
+#[test]
+fn obo_writer_always_writes_format_version_1_2() {
+    let src = "format-version: 1.4\nontology: ex\n\n[Term]\nid: EX:0000001\nname: thing one\n";
+    let m = load_obo(src);
+    let mut out = Vec::new();
+    io::write_to_ref(&m, &mut out, Format::Obo).unwrap();
+    let obo = String::from_utf8(out).unwrap();
+    assert!(obo.starts_with("format-version: 1.2\n"), "{obo}");
+    assert!(!obo.contains("1.4"), "{obo}");
+
+    let mut ofn = Vec::new();
+    io::write_to_ref(&m, &mut ofn, Format::Functional).unwrap();
+    let ofn = String::from_utf8(ofn).unwrap();
+    assert!(ofn.contains("hasOBOFormatVersion") && ofn.contains("\"1.4\""), "{ofn}");
+    let obo = to_obo(&ofn);
+    assert!(obo.starts_with("format-version: 1.2\n"), "{obo}");
+    assert!(!obo.contains("1.4"), "{obo}");
+}
+
 #[test]
 fn obo_writer_emits_header_and_macro_tags() {
     // `data-version:` comes from the version IRI, `remark:` from the ontology's

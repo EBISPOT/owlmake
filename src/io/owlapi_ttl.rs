@@ -1,6 +1,7 @@
-//! The framed Turtle layout for a saved model: a fixed prefix block, an
-//! ontology header, entity sections under banner comments, one aligned block
-//! per entity, and a closing banner.
+//! The framed Turtle layout for a saved model: a prefix block (the built-in
+//! prefixes and those the command line adds), an ontology header, entity
+//! sections under banner comments, one aligned block per entity, and a closing
+//! banner.
 //!
 //! The layout covers a model made of entity declarations and unannotated
 //! annotation assertions on named subjects — the shape a merge of construct
@@ -14,7 +15,7 @@ use horned_owl::model::{AnnotationSubject, AnnotationValue, Component};
 
 use crate::model::Model;
 
-/// The declared prefixes, in the order the block prints them.
+/// The built-in prefixes every block declares.
 const PREFIXES: [(&str, &str); 5] = [
     ("owl", "http://www.w3.org/2002/07/owl#"),
     ("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
@@ -53,22 +54,35 @@ struct Entity {
     anns: BTreeMap<String, BTreeSet<(u8, String, String)>>,
 }
 
-/// An IRI as the layout prints it: prefixed when a declared prefix covers it
-/// and the remainder is a plain local name, framed otherwise.
-fn iri(u: &str) -> String {
-    for (p, ns) in PREFIXES {
-        if let Some(local) = u.strip_prefix(ns) {
-            if !local.is_empty()
-                && local.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                return format!("{p}:{local}");
-            }
+/// The prefixes the block declares: the built-in ones and every prefix the
+/// command line adds (`Model::added_prefixes`), shortest name first, then
+/// alphabetically.
+fn declared(model: &Model) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = PREFIXES.iter().map(|(p, ns)| (p.to_string(), ns.to_string())).collect();
+    for (p, ns) in &model.added_prefixes {
+        match v.iter_mut().find(|(q, _)| q == p) {
+            Some(slot) => slot.1 = ns.clone(),
+            None => v.push((p.clone(), ns.clone())),
+        }
+    }
+    v.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then_with(|| crate::io::natural_order::str_cmp(&a.0, &b.0)));
+    v
+}
+
+/// An IRI as the layout prints it: prefixed when its namespace — up to its
+/// longest NCName suffix — is a declared prefix's, framed otherwise. A
+/// namespace two names bind is written with the later of them.
+fn iri(u: &str, prefixes: &[(String, String)]) -> String {
+    let (ns, local) = crate::io::natural_order::iri_split(u);
+    if !local.is_empty() {
+        if let Some((p, _)) = prefixes.iter().rev().find(|(_, n)| n == ns) {
+            return format!("{p}:{local}");
         }
     }
     format!("<{u}>")
 }
 
-fn literal(lit: &horned_owl::model::Literal<crate::model::Str>) -> String {
+fn literal(lit: &horned_owl::model::Literal<crate::model::Str>, prefixes: &[(String, String)]) -> String {
     use horned_owl::model::Literal as L;
     let escape = |s: &str| -> String {
         let mut out = String::with_capacity(s.len());
@@ -87,7 +101,7 @@ fn literal(lit: &horned_owl::model::Literal<crate::model::Str>) -> String {
         L::Simple { literal } => format!("\"{}\"", escape(literal)),
         L::Language { literal, lang } => format!("\"{}\"@{lang}", escape(literal)),
         L::Datatype { literal, datatype_iri } => {
-            format!("\"{}\"^^{}", escape(literal), iri(datatype_iri.as_ref()))
+            format!("\"{}\"^^{}", escape(literal), iri(datatype_iri.as_ref(), prefixes))
         }
     }
 }
@@ -96,6 +110,7 @@ fn literal(lit: &horned_owl::model::Literal<crate::model::Str>) -> String {
 /// layout does not state.
 pub fn render(model: &Model) -> Option<Vec<u8>> {
     use Component as C;
+    let prefixes = declared(model);
     let mut entities: BTreeMap<String, Entity> = BTreeMap::new();
     // A second declaration puns the entity across sections, which the layout
     // does not state.
@@ -131,9 +146,9 @@ pub fn render(model: &Model) -> Option<Vec<u8>> {
                 let AnnotationSubject::IRI(subject) = &aa.subject else { return None };
                 let (rank, key, rendered) = match &aa.ann.av {
                     AnnotationValue::IRI(v) => {
-                        (0u8, v.as_ref().to_string(), iri(v.as_ref()))
+                        (0u8, v.as_ref().to_string(), iri(v.as_ref(), &prefixes))
                     }
-                    AnnotationValue::Literal(l) => (1u8, l.literal().clone(), literal(l)),
+                    AnnotationValue::Literal(l) => (1u8, l.literal().clone(), literal(l, &prefixes)),
                     AnnotationValue::AnonymousIndividual(_) => return None,
                 };
                 entities
@@ -156,7 +171,7 @@ pub fn render(model: &Model) -> Option<Vec<u8>> {
     }
 
     let mut out = String::new();
-    for (p, ns) in PREFIXES {
+    for (p, ns) in &prefixes {
         out.push_str(&format!("@prefix {p}: <{ns}> .\n"));
     }
     out.push_str("@base <http://www.w3.org/2002/07/owl#> .\n\n");
@@ -171,7 +186,7 @@ pub fn render(model: &Model) -> Option<Vec<u8>> {
         out.push_str(&format!("{BANNER}\n#    {title}\n{BANNER}\n\n"));
         for (subject, e) in members {
             out.push_str(&format!("###  {subject}\n"));
-            let subj = iri(subject);
+            let subj = iri(subject, &prefixes);
             let pred_col = subj.chars().count() + 1;
             out.push_str(&format!("{subj} rdf:type {}", KINDS[section]));
             let mut anns = e.anns.iter().peekable();
@@ -179,7 +194,7 @@ pub fn render(model: &Model) -> Option<Vec<u8>> {
                 out.push_str(" ;");
             }
             while let Some((pred, values)) = anns.next() {
-                let pred = iri(pred);
+                let pred = iri(pred, &prefixes);
                 let obj_col = pred_col + pred.chars().count() + 1;
                 out.push('\n');
                 out.push_str(&" ".repeat(pred_col));

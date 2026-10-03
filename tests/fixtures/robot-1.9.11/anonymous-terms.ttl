@@ -1,0 +1,12 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+[ rdf:type owl:Ontology ] .
+
+<http://purl.obolibrary.org/obo/EX_0000001> rdf:type owl:Class ;
+    rdfs:label "thing one" ;
+    rdfs:seeAlso <http://purl.obolibrary.org/obo/EX_0000002> .
+<http://purl.obolibrary.org/obo/EX_0000002> rdf:type owl:Class ;
+    rdfs:label "thing two" .
+<http://example.org/foo/bar> rdf:type owl:AnnotationProperty .

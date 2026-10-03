@@ -1,0 +1,90 @@
+Prefix(:=<http://example.org/test.owl#>)
+Prefix(EX:=<http://example.org/EX_>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(dcterms:=<http://purl.org/dc/terms/>)
+Prefix(oboInOwl:=<http://www.geneontology.org/formats/oboInOwl#>)
+
+
+Ontology(<http://example.org/test.owl>
+
+Declaration(Class(<http://example.org/EX_0000001>))
+Declaration(Class(<http://example.org/EX_0000002>))
+Declaration(Class(<http://example.org/EX_0000003>))
+Declaration(ObjectProperty(<http://example.org/EX_0000100>))
+Declaration(AnnotationProperty(<http://example.org/EX_0000900>))
+Declaration(AnnotationProperty(obo:IAO_0000112))
+Declaration(AnnotationProperty(obo:IAO_0000115))
+Declaration(AnnotationProperty(obo:IAO_0000119))
+Declaration(AnnotationProperty(dcterms:contributor))
+Declaration(AnnotationProperty(dcterms:source))
+Declaration(AnnotationProperty(oboInOwl:hasDbXref))
+Declaration(AnnotationProperty(oboInOwl:hasExactSynonym))
+Declaration(AnnotationProperty(oboInOwl:hasRelatedSynonym))
+Declaration(AnnotationProperty(oboInOwl:hasSynonymType))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:label))
+Declaration(Datatype(xsd:anyURI))
+Declaration(Datatype(xsd:string))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/EX_0000900> (abbreviation)
+
+AnnotationAssertion(rdfs:label <http://example.org/EX_0000900> "abbreviation")
+
+# Annotation Property: obo:IAO_0000112 (example of usage)
+
+AnnotationAssertion(rdfs:label obo:IAO_0000112 "example of usage")
+
+# Annotation Property: obo:IAO_0000115 (definition)
+
+AnnotationAssertion(rdfs:label obo:IAO_0000115 "definition")
+
+# Annotation Property: obo:IAO_0000119 (definition source)
+
+AnnotationAssertion(rdfs:label obo:IAO_0000119 "definition source")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/EX_0000100> (part of)
+
+AnnotationAssertion(rdfs:label <http://example.org/EX_0000100> "part of")
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/EX_0000001> (thing A)
+
+AnnotationAssertion(rdfs:label <http://example.org/EX_0000001> "thing A")
+
+# Class: <http://example.org/EX_0000002> (thing B)
+
+AnnotationAssertion(Annotation(dcterms:contributor <https://orcid.org/0000-0000-0000-0000>) Annotation(dcterms:source "https://example.org/source/2"^^xsd:anyURI) Annotation(rdfs:comment "Example note.") obo:IAO_0000112 <http://example.org/EX_0000002> "An example of thing B in use.")
+AnnotationAssertion(Annotation(obo:IAO_0000119 "https://example.org/source/1"^^xsd:anyURI) obo:IAO_0000115 <http://example.org/EX_0000002> "A thing A that is part of a thing C.")
+AnnotationAssertion(oboInOwl:hasDbXref <http://example.org/EX_0000002> "EXT:123")
+AnnotationAssertion(Annotation(rdfs:comment "Cross-reference note.") oboInOwl:hasDbXref <http://example.org/EX_0000002> "EXT:456")
+AnnotationAssertion(Annotation(oboInOwl:hasSynonymType <http://example.org/EX_0000900>) oboInOwl:hasExactSynonym <http://example.org/EX_0000002> "B thing")
+AnnotationAssertion(oboInOwl:hasRelatedSynonym <http://example.org/EX_0000002> "thing of type B")
+AnnotationAssertion(rdfs:comment <http://example.org/EX_0000002> "A comment about thing B.")
+AnnotationAssertion(rdfs:label <http://example.org/EX_0000002> "thing B")
+SubClassOf(<http://example.org/EX_0000002> <http://example.org/EX_0000001>)
+SubClassOf(<http://example.org/EX_0000002> ObjectSomeValuesFrom(<http://example.org/EX_0000100> <http://example.org/EX_0000003>))
+
+# Class: <http://example.org/EX_0000003> (thing C)
+
+AnnotationAssertion(rdfs:label <http://example.org/EX_0000003> "thing C")
+
+
+)
