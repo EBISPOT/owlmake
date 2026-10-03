@@ -1505,6 +1505,46 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         }
     }
 
+    // An annotated chain whose super-property is an inverse is stated under the
+    // property the inverse names, as the nested source of its reification. Its
+    // nodes come after every other: the list's cells, then the reification.
+    let mut inverse_chains: Vec<&AnnotatedComponent<RcStr>> = model
+        .ont
+        .iter()
+        .filter(|ac| {
+            !ac.ann.is_empty()
+                && matches!(&ac.component, Component::SubObjectPropertyOf(ax)
+                    if matches!(ax.sub, SOPE::ObjectPropertyChain(_)) && matches!(ax.sup, OPE::InverseObjectProperty(_)))
+        })
+        .collect();
+    inverse_chains.sort_by(|a, b| cmp_annotated_axiom(a, b));
+    for ac in inverse_chains {
+        let Component::SubObjectPropertyOf(ax) = &ac.component else { continue };
+        let (SOPE::ObjectPropertyChain(chain), OPE::InverseObjectProperty(sup)) = (&ax.sub, &ax.sup) else {
+            continue;
+        };
+        let owner = sup.0.as_ref().to_string();
+        g.cur_owner = owner.clone();
+        g.intern.clear();
+        g.graph_seq += 1;
+        let head = g.translate_ope_list(chain);
+        let rid = g.fresh();
+        let members: String = chain
+            .iter()
+            .filter_map(|m| match m {
+                OPE::ObjectProperty(p) => Some(format!("{}\u{2}", crate::io::owlrdf::esc_attr(p.0.as_ref()))),
+                OPE::InverseObjectProperty(_) => None,
+            })
+            .collect();
+        let pred = "http://www.w3.org/2002/07/owl#propertyChainAxiom";
+        if let Some(head) = head {
+            g.shared_seq.entry(owner.clone()).or_default().push((format!("LIST\u{1}{pred}\u{1}{members}"), head));
+            g.reif.entry(owner.clone()).or_default().push((format!("~{pred}\u{1}N\u{1}genid{head}"), rid));
+        }
+        g.reif.entry(owner).or_default().push((format!("~{pred}\u{1}C\u{1}{members}"), rid));
+        g.translate_annotations(&ac.ann);
+    }
+
     g
 }
 
@@ -1761,8 +1801,45 @@ impl Genids {
                 // blank nodes — see `has_shared_structure`.
                 let desharded = has_shared_structure(&ac.component);
                 self.record_operands = !desharded;
-                self.pairwise_ce(owner, &ax.0, &ac.ann, Some(P_EQUIV));
+                let members = ordered_ces(&ax.0);
+                if members.len() > 2 {
+                    self.chain_ce(owner, &members, &ac.ann);
+                } else {
+                    self.pairwise_ce(owner, &ax.0, &ac.ann, Some(P_EQUIV));
+                }
                 self.record_operands = false;
+            }
+            Component::EquivalentObjectProperties(ax) if ordered_opes(&ax.0).len() > 2 => {
+                self.chain_ope(owner, &ordered_opes(&ax.0), &ac.ann);
+            }
+            // Three or more equivalent data properties are their consecutive
+            // pairs, taken in the order of a hash set of those pairs.
+            Component::EquivalentDataProperties(ax)
+                if ax.0.iter().map(|d| d.0.as_ref()).collect::<std::collections::BTreeSet<&str>>().len() > 2 =>
+            {
+                let mut members: Vec<&horned_owl::model::DataProperty<RcStr>> = ax.0.iter().collect();
+                members.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a.0.as_ref(), b.0.as_ref()));
+                members.dedup();
+                if !ac.ann.is_empty() {
+                    let hashes: Vec<i32> = members
+                        .windows(2)
+                        .map(|w| {
+                            let pair = Component::EquivalentDataProperties(horned_owl::model::EquivalentDataProperties(
+                                vec![w[0].clone(), w[1].clone()],
+                            ));
+                            crate::owlapi_hash::axiom_hash(&pair, &ac.ann).unwrap_or(0)
+                        })
+                        .collect();
+                    for i in crate::owlapi_hash::hashset_order(&hashes) {
+                        let rid = self.fresh();
+                        let sig = format!(
+                            "{P_EQUIV_PROPERTY}\u{1}R\u{1}{}",
+                            crate::io::owlrdf::esc_attr(members[i + 1].0.as_ref())
+                        );
+                        self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
+                        self.translate_annotations(&ac.ann);
+                    }
+                }
             }
             Component::DisjointClasses(ax) => {
                 if ax.0.len() == 2 {
@@ -2184,11 +2261,24 @@ impl Genids {
         let mut sorted: Vec<&Individual<RcStr>> = members.iter().collect();
         sorted.sort_by(|a, b| cmp_individual(a, b));
         sorted.dedup();
-        let pairs: Vec<(&Individual<RcStr>, &Individual<RcStr>)> = if consecutive || sorted.len() == 2 {
+        let mut pairs: Vec<(&Individual<RcStr>, &Individual<RcStr>)> = if consecutive || sorted.len() == 2 {
             sorted.windows(2).map(|w| (w[0], w[1])).collect()
         } else {
             Vec::new()
         };
+        // A sameness of three or more is its consecutive pairs, taken in the
+        // order of a hash set of those pairs.
+        if pairs.len() > 1 {
+            let hashes: Vec<i32> = pairs
+                .iter()
+                .map(|(a, b)| {
+                    let pair = Component::SameIndividual(horned_owl::model::SameIndividual(vec![(*a).clone(), (*b).clone()]));
+                    crate::owlapi_hash::axiom_hash(&pair, anns).unwrap_or(0)
+                })
+                .collect();
+            let order = crate::owlapi_hash::hashset_order(&hashes);
+            pairs = order.into_iter().map(|i| pairs[i]).collect();
+        }
         for (a, b) in pairs {
             self.translate_individual(a);
             self.translate_individual(b);
@@ -2277,6 +2367,92 @@ impl Genids {
         head
     }
 
+    /// An equivalence of three or more classes: one triple for each consecutive
+    /// pair of its ordered members, all in this graph, each reified on its own
+    /// when the axiom is annotated. A member in two pairs is one node. Every
+    /// anonymous member's id is recorded under `NARY⊕sig` for the writer.
+    fn chain_ce(&mut self, owner: &str, members: &[&CE<RcStr>], anns: &std::collections::BTreeSet<Annotation<RcStr>>) {
+        let record = self.record_operands;
+        let first_anon = !matches!(members[0], CE::Class(_));
+        if first_anon {
+            self.record_operands = record;
+            if let Some(id) = self.translate_ce(members[0]) {
+                self.record_chain_member(owner, format!("NARY\u{1}{}", ce_sig(members[0])), id);
+            }
+        }
+        for i in 0..members.len() - 1 {
+            let object = members[i + 1];
+            self.record_operands = record;
+            let mut id = None;
+            if !matches!(object, CE::Class(_)) {
+                let sig = ce_sig(object);
+                let reuse = self.eq_sigs.contains(&sig)
+                    || self.annotated_sigs.contains(&sig)
+                    || self.carried_shared.contains(&crate::io::anon_sig_hash(&sig));
+                id = self.translate_ce_maybe_reuse(object, reuse);
+                self.eq_sigs.insert(sig.clone());
+                if let Some(id) = id {
+                    self.intern.entry(sig.clone()).or_insert(id);
+                    self.record_chain_member(owner, format!("NARY\u{1}{sig}"), id);
+                }
+            }
+            if anns.is_empty() {
+                continue;
+            }
+            let rid = self.fresh();
+            let target = match object {
+                CE::Class(c) => format!("R\u{1}{}", crate::io::owlrdf::esc_attr(c.0.as_ref())),
+                _ => format!("N\u{1}genid{}", id.unwrap_or(0)),
+            };
+            // The first member, anonymous, is nested in its reification.
+            let nested = if i == 0 && first_anon { "~" } else { "" };
+            self.reif.entry(self.cur_owner.clone()).or_default().push((format!("{nested}{P_EQUIV}\u{1}{target}"), rid));
+            self.translate_annotations(anns);
+            // The host's own pair is found as a binary equivalence's target is.
+            if i == 0 && !first_anon {
+                if let Some(id) = id {
+                    self.record_shared(owner, object, id);
+                }
+            }
+        }
+    }
+
+    /// An equivalence of three or more object properties, as `chain_ce`: an
+    /// inverse member is a node of its own, recorded under `NARY⊕INV⊕iri`.
+    fn chain_ope(&mut self, owner: &str, members: &[&OPE<RcStr>], anns: &std::collections::BTreeSet<Annotation<RcStr>>) {
+        let node = |g: &mut Self, ope: &OPE<RcStr>| match ope {
+            OPE::InverseObjectProperty(p) => {
+                let id = g.fresh();
+                g.record_chain_member(owner, format!("NARY\u{1}INV\u{1}{}", p.0.as_ref()), id);
+                Some(id)
+            }
+            OPE::ObjectProperty(_) => None,
+        };
+        let first_anon = node(self, members[0]).is_some();
+        for i in 0..members.len() - 1 {
+            let object = members[i + 1];
+            let id = node(self, object);
+            if anns.is_empty() {
+                continue;
+            }
+            let rid = self.fresh();
+            let target = match (object, id) {
+                (OPE::ObjectProperty(p), _) => format!("R\u{1}{}", crate::io::owlrdf::esc_attr(p.0.as_ref())),
+                (_, id) => format!("N\u{1}genid{}", id.unwrap_or(0)),
+            };
+            let nested = if i == 0 && first_anon { "~" } else { "" };
+            self.reif
+                .entry(self.cur_owner.clone())
+                .or_default()
+                .push((format!("{nested}{P_EQUIV_PROPERTY}\u{1}{target}"), rid));
+            self.translate_annotations(anns);
+        }
+    }
+
+    fn record_chain_member(&mut self, owner: &str, sig: String, id: u64) {
+        self.shared_seq.entry(owner.to_string()).or_default().push((sig, id));
+    }
+
     /// Pairwise expansion over class expressions: sort, then for each i<j pair emit
     /// a single-triple axiom (subject = ops[i], object = ops[j]).
     fn pairwise_ce(
@@ -2343,6 +2519,22 @@ impl Genids {
         self.shared_seq.entry(owner.to_string()).or_default().push((sig.clone(), id));
         self.shared.entry(owner.to_string()).or_default().insert(sig, id);
     }
+}
+
+/// The members of an n-ary class axiom in order, each once.
+pub(crate) fn ordered_ces(members: &[CE<RcStr>]) -> Vec<&CE<RcStr>> {
+    let mut v: Vec<&CE<RcStr>> = members.iter().collect();
+    v.sort_by(|a, b| cmp_ce(a, b));
+    v.dedup();
+    v
+}
+
+/// The members of an n-ary object property axiom in order, each once.
+pub(crate) fn ordered_opes(members: &[OPE<RcStr>]) -> Vec<&OPE<RcStr>> {
+    let mut v: Vec<&OPE<RcStr>> = members.iter().collect();
+    v.sort_by(|a, b| crate::io::owlfunc::cmp_ope(a, b));
+    v.dedup();
+    v
 }
 
 /// Owning entity IRI for an axiom: the entity whose block it renders inside.
@@ -2473,7 +2665,7 @@ fn ope_iri(ope: &OPE<RcStr>) -> &str {
 /// The first property block that states a binary or n-ary object property
 /// axiom: the block of its first member in order, when that member is named, or
 /// of the property any inverse member names — whichever is rendered first.
-fn nary_ope_owner(members: &[OPE<RcStr>]) -> Option<String> {
+pub(crate) fn nary_ope_owner(members: &[OPE<RcStr>]) -> Option<String> {
     let mut sorted: Vec<&OPE<RcStr>> = members.iter().collect();
     sorted.sort_by(|a, b| crate::io::owlfunc::cmp_ope(a, b));
     let first = match sorted.first() {

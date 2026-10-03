@@ -952,11 +952,21 @@ fn write_root_blocks<W: Write>(
     roots: &BTreeMap<String, Vec<(String, String)>>,
     anon_roots: &str,
 ) -> Result<()> {
+    // One block per member, in IRI order, holding every pair it is the subject
+    // of in the host's graph.
+    let mut blocks: Vec<(&str, String)> = Vec::new();
     for (member, body) in roots.get(host).into_iter().flatten() {
         if member == host {
             continue;
         }
-        write_entity(w, "rdf:Description", member, body, anon_roots)?;
+        match blocks.iter_mut().find(|(m, _)| *m == member.as_str()) {
+            Some((_, b)) => b.push_str(body),
+            None => blocks.push((member, body.clone())),
+        }
+    }
+    blocks.sort_by(|a, b| iri_key(a.0).cmp(&iri_key(b.0)));
+    for (member, body) in blocks {
+        write_entity(w, "rdf:Description", member, &body, anon_roots)?;
     }
     Ok(())
 }
@@ -1534,26 +1544,183 @@ fn render_chain_link(ope: &OPE<RcStr>) -> String {
     }
 }
 
-/// An n-ary equivalence as consecutive pairs of its ordered `members`, all in
-/// the first member's graph: the first keeps its own pair as an edge, and each
-/// later member is a root block after it, holding the edge to the next.
-fn consecutive_pairs(
-    members: &[String],
-    tag: &str,
-    edges: &mut BTreeMap<String, Vec<String>>,
-    roots: &mut BTreeMap<String, Vec<(String, String)>>,
+/// A member of an equivalence or sameness of three or more members.
+enum ChainMember<'a> {
+    Named(String),
+    /// An anonymous class expression.
+    Class(&'a CE<RcStr>),
+    /// The inverse of the named property.
+    Inverse(String),
+}
+
+/// An equivalence or sameness of three or more members: one triple for each
+/// consecutive pair of its ordered members, all in the graph of its host. Each
+/// named member but the host is a root of that graph, a block of its own after
+/// the host's holding the pair it is the subject of, and an anonymous member
+/// holds its pair itself. Annotated, every pair is reified, and so every member
+/// after the first that is not named is a reification's target, defined by id.
+struct Chain<'a> {
+    /// The element of each pair's triple.
+    tag: &'static str,
+    /// Its predicate.
+    pred: &'static str,
+    members: Vec<ChainMember<'a>>,
+    /// The id of each member defined by id.
+    ids: Vec<Option<String>>,
+    anns: Vec<(String, AnnotationValue<RcStr>)>,
+}
+
+impl Chain<'_> {
+    /// Member `i`, not named, as a node nested at `indent`, holding its pair.
+    fn nested(&self, i: usize, indent: usize) -> String {
+        let pad = " ".repeat(indent);
+        let pair = self.edge(i, indent + 4);
+        match &self.members[i] {
+            ChainMember::Class(ce) => insert_before_close(&render_ce(ce, indent, &Genids::new()), &pair),
+            ChainMember::Inverse(p) => format!(
+                "{pad}<rdf:Description>\n{pad}    <owl:inverseOf rdf:resource=\"{}\"/>\n{pair}{pad}</rdf:Description>\n",
+                esc_attr(p)
+            ),
+            ChainMember::Named(iri) => format!("{pad}<rdf:Description rdf:about=\"{}\"/>\n", esc_attr(iri)),
+        }
+    }
+
+    /// The triple of the pair member `i` is the subject of, as an edge at
+    /// `indent`; nothing for the last member.
+    fn edge(&self, i: usize, indent: usize) -> String {
+        let pad = " ".repeat(indent);
+        let tag = self.tag;
+        match (self.members.get(i + 1), self.ids.get(i + 1).cloned().flatten()) {
+            (None, _) => String::new(),
+            (Some(ChainMember::Named(iri)), _) => format!("{pad}<{tag} rdf:resource=\"{}\"/>\n", esc_attr(iri)),
+            (Some(_), Some(g)) => format!("{pad}<{tag} rdf:nodeID=\"{g}\"/>\n"),
+            (Some(_), None) => format!("{pad}<{tag}>\n{}{pad}</{tag}>\n", self.nested(i + 1, indent + 4)),
+        }
+    }
+
+    /// The definition of member `i`, when it is defined by id: the id, and the
+    /// node holding its pair.
+    fn def(&self, i: usize) -> Option<(String, String)> {
+        let g = self.ids.get(i).cloned().flatten()?;
+        let node = match &self.members[i] {
+            ChainMember::Class(ce) => inject_nodeid(&render_ce(ce, 4, &Genids::new()), &g),
+            ChainMember::Inverse(p) => inverse_node_def(&g, p),
+            ChainMember::Named(_) => return None,
+        };
+        let def = insert_before_close(&node, &self.edge(i, 8));
+        Some((g, def))
+    }
+
+    /// The reification of the pair member `i` is the subject of. A source that
+    /// is neither named nor defined by id is nested in it.
+    fn reif(&self, i: usize, prefixes: &[(String, String)]) -> String {
+        let slot = |role: &str, j: usize| match (&self.members[j], self.ids[j].as_deref()) {
+            (ChainMember::Named(iri), _) => format!("        <owl:{role} rdf:resource=\"{}\"/>\n", esc_attr(iri)),
+            (_, Some(g)) => format!("        <owl:{role} rdf:nodeID=\"{g}\"/>\n"),
+            (_, None) => format!("        <owl:{role}>\n{}        </owl:{role}>\n", self.nested(j, 12)),
+        };
+        let mut s = String::from("    <owl:Axiom>\n");
+        s.push_str(&slot("annotatedSource", i));
+        s.push_str(&format!("        <owl:annotatedProperty rdf:resource=\"{}\"/>\n", self.pred));
+        s.push_str(&slot("annotatedTarget", i + 1));
+        let mut ns: Vec<&(String, AnnotationValue<RcStr>)> = self.anns.iter().collect();
+        ns.sort_by_key(|a| ann_key(&a.0, &a.1));
+        for (p, av) in ns {
+            s.push_str(&render_ann(p, av, prefixes));
+        }
+        s.push_str("    </owl:Axiom>\n");
+        s
+    }
+
+    /// What the host's own block does not hold: a root block for each named
+    /// member but the host, and, annotated, the reification of every pair from
+    /// the one member `first` is the subject of, and the definition of every
+    /// member after it defined by id.
+    fn place(
+        &self,
+        host: &str,
+        first: usize,
+        prefixes: &[(String, String)],
+        root_blocks: &mut BTreeMap<String, Vec<(String, String)>>,
+        roots: &mut BTreeMap<String, String>,
+        defs: &mut BTreeMap<String, Vec<(String, String)>>,
+    ) {
+        for (i, m) in self.members.iter().enumerate() {
+            if let ChainMember::Named(iri) = m {
+                if iri != host {
+                    root_blocks.entry(host.to_string()).or_default().push((iri.clone(), self.edge(i, 8)));
+                }
+            }
+        }
+        if self.anns.is_empty() {
+            return;
+        }
+        for i in first..self.members.len() - 1 {
+            roots.entry(host.to_string()).or_default().push_str(&self.reif(i, prefixes));
+        }
+        for i in first + 1..self.members.len() {
+            if let Some(d) = self.def(i) {
+                defs.entry(host.to_string()).or_default().push(d);
+            }
+        }
+    }
+}
+
+/// Queue the definitions among `defs` of the nodes `text` names by id and no
+/// earlier block has placed, in the order it names them.
+fn enqueue_named(
+    text: &str,
+    defs: &[(String, String)],
+    placed: &mut HashSet<String>,
+    queue: &mut std::collections::VecDeque<usize>,
 ) {
-    let Some(host) = members.first() else { return };
-    if let Some(second) = members.get(1) {
-        edges.entry(host.clone()).or_default().push(second.clone());
+    let mut rest = text;
+    while let Some(at) = rest.find("rdf:nodeID=\"") {
+        rest = &rest[at + "rdf:nodeID=\"".len()..];
+        let id = &rest[..rest.find('"').unwrap_or(0)];
+        if let Some(k) = defs.iter().position(|(g, _)| g == id) {
+            if placed.insert(id.to_string()) {
+                queue.push_back(k);
+            }
+        }
     }
-    for (i, member) in members.iter().enumerate().skip(1) {
-        let body = members
-            .get(i + 1)
-            .map(|next| format!("        <{tag} rdf:resource=\"{}\"/>\n", esc_attr(next)))
-            .unwrap_or_default();
-        roots.entry(host.clone()).or_default().push((member.clone(), body));
+}
+
+/// `text`, a run of top-level blocks, with each of `defs` written straight
+/// after the first block that names its node by id, and after the definitions
+/// that block brings, in the order they are named. A node `text` defines
+/// itself keeps its place.
+fn place_defs(text: &str, defs: Option<&Vec<(String, String)>>) -> String {
+    let Some(defs) = defs.filter(|d| !d.is_empty()) else { return text.to_string() };
+    let opening_id = |line: &str| -> Option<String> {
+        let open = line.split_once('>').map_or(line, |(open, _)| open);
+        between(open, " rdf:nodeID=\"", "\"").map(str::to_string)
+    };
+    let mut placed: HashSet<String> = text
+        .lines()
+        .filter(|l| l.starts_with("    <") && !l.starts_with("    </"))
+        .filter_map(opening_id)
+        .collect();
+    let mut out = String::new();
+    let mut block = String::new();
+    for line in text.split_inclusive('\n') {
+        block.push_str(line);
+        let top = line.starts_with("    <") && !line.starts_with("    <!--");
+        if top && (line.starts_with("    </") || line.trim_end().ends_with("/>")) {
+            out.push_str(&block);
+            // The definitions this block brings, each followed in turn by those
+            // it names.
+            let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+            enqueue_named(&block, defs, &mut placed, &mut queue);
+            while let Some(k) = queue.pop_front() {
+                out.push_str(&defs[k].1);
+                enqueue_named(&defs[k].1, defs, &mut placed, &mut queue);
+            }
+            block.clear();
+        }
     }
+    out.push_str(&block);
+    out
 }
 
 /// The first id the numbering pass recorded under `sig` that no earlier
@@ -3032,6 +3199,16 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     //
     // host -> (member, the member's lines in the host's graph), in member order.
     let mut root_blocks: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    // What the host's own block of such a chain (see `Chain`) does not hold:
+    // the reifications of its later pairs, more anonymous roots of the host's
+    // graph; the definitions of its members defined by id, each placed after the
+    // first block to name it; the member of the host's own pair, nested with the
+    // pair that member is the subject of, by host and member; and the edge the
+    // definition of that member holds, by its id.
+    let mut chain_roots: BTreeMap<String, String> = BTreeMap::new();
+    let mut chain_defs: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    let mut chain_nested: HashMap<(String, String), String> = HashMap::new();
+    let mut chain_tail: HashMap<String, String> = HashMap::new();
     #[allow(clippy::type_complexity)]
     let mut op_chains: BTreeMap<String, Vec<(Vec<OPE<RcStr>>, Vec<(String, AnnotationValue<RcStr>)>)>> =
         BTreeMap::new();
@@ -3411,85 +3588,132 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 // A binary axiom stays whole; a longer one becomes the CONSECUTIVE
                 // pairs of its (sorted) member list.
                 let members = sorted_members(&si.0);
-                // An annotated pair of named members reifies its one edge.
-                let named_pair = members.len() == 2 && members.iter().all(Option::is_some);
-                if (annotated(ac) && !named_pair)
+                // An annotated pair of named members reifies its one edge, and
+                // a longer sameness of named members each of its pairs.
+                let all_named = members.iter().all(Option::is_some);
+                let named_pair = members.len() == 2 && all_named;
+                if (annotated(ac) && !all_named)
                     || members.first().is_some_and(Option::is_none)
                     || (members.len() > 2 && members.iter().any(Option::is_none))
                 {
                     left_out.push(ac);
                 }
-                if annotated(ac) && named_pair {
-                    if let (Some(subject), Some(object)) = (&members[0], &members[1]) {
-                        edge_reifs.entry(subject.clone()).or_default().push((
+                if members.len() > 2 && all_named {
+                    let named: Vec<String> = members.iter().flatten().cloned().collect();
+                    let host = named[0].clone();
+                    if annotated(ac) {
+                        edge_reifs.entry(host.clone()).or_default().push((
                             "http://www.w3.org/2002/07/owl#sameAs",
-                            object.clone(),
+                            named[1].clone(),
                             ax_anns(ac),
                         ));
                     }
-                }
-                // The first pair is the host's own; the rest belong to the root
-                // blocks that follow it.
-                if let Some(subject) = members.first().and_then(|m| m.clone()) {
-                    if let Some(pair) = members.windows(2).next() {
-                        ind_identity
-                            .entry(subject.clone())
-                            .or_default()
-                            .push(("owl:sameAs", pair[1].clone()));
+                    ind_identity.entry(host.clone()).or_default().push(("owl:sameAs", Some(named[1].clone())));
+                    let chain = Chain {
+                        tag: "owl:sameAs",
+                        pred: "http://www.w3.org/2002/07/owl#sameAs",
+                        members: named.iter().map(|m| ChainMember::Named(m.clone())).collect(),
+                        ids: vec![None; named.len()],
+                        anns: ax_anns(ac),
+                    };
+                    chain.place(&host, 1, &prefixes, &mut root_blocks, &mut chain_roots, &mut chain_defs);
+                } else {
+                    if annotated(ac) && named_pair {
+                        if let (Some(subject), Some(object)) = (&members[0], &members[1]) {
+                            edge_reifs.entry(subject.clone()).or_default().push((
+                                "http://www.w3.org/2002/07/owl#sameAs",
+                                object.clone(),
+                                ax_anns(ac),
+                            ));
+                        }
                     }
-                    for (i, m) in members.iter().enumerate().skip(1) {
-                        let Some(m) = m else { continue };
-                        let body = match members.get(i + 1).and_then(|n| n.clone()) {
-                            Some(next) => format!(
-                                "        <owl:sameAs rdf:resource=\"{}\"/>\n",
-                                esc_attr(&next)
-                            ),
-                            None => String::new(),
-                        };
-                        root_blocks.entry(subject.clone()).or_default().push((m.clone(), body));
+                    // The first pair is the host's own; the rest belong to the root
+                    // blocks that follow it.
+                    if let Some(subject) = members.first().and_then(|m| m.clone()) {
+                        if let Some(pair) = members.windows(2).next() {
+                            ind_identity
+                                .entry(subject.clone())
+                                .or_default()
+                                .push(("owl:sameAs", pair[1].clone()));
+                        }
+                        for (i, m) in members.iter().enumerate().skip(1) {
+                            let Some(m) = m else { continue };
+                            let body = match members.get(i + 1).and_then(|n| n.clone()) {
+                                Some(next) => format!(
+                                    "        <owl:sameAs rdf:resource=\"{}\"/>\n",
+                                    esc_attr(&next)
+                                ),
+                                None => String::new(),
+                            };
+                            root_blocks.entry(subject.clone()).or_default().push((m.clone(), body));
+                        }
                     }
                 }
             }
             Component::EquivalentClasses(eq) => {
-                // Three or more members split into CONSECUTIVE pairs, all rendered
-                // in the first member's graph: it keeps the first pair, and each
-                // later member is a root block after it carrying its own.
-                if eq.0.len() > 2 {
-                    if annotated(ac) || eq.0.iter().any(|m| !matches!(m, CE::Class(_))) {
-                        left_out.push(ac);
-                    }
-                    let mut named: Vec<String> = eq
-                        .0
+                // Three or more members are a chain of consecutive pairs in the
+                // graph of the first member when it is named, and a general axiom
+                // when none is.
+                let members = crate::io::genid::ordered_ces(&eq.0);
+                if members.len() > 2 {
+                    let anns = ax_anns(ac);
+                    let host = match members[0] {
+                        CE::Class(c) => Some(c.0.as_ref().to_string()),
+                        _ => None,
+                    };
+                    let owner = host.clone().unwrap_or_else(|| "__general__".to_string());
+                    // The numbering pass recorded every anonymous member's id, in
+                    // order; the first member is never defined by id.
+                    let ids: Vec<Option<String>> = members
                         .iter()
-                        .filter_map(|m| match m {
-                            CE::Class(c) => Some(c.0.as_ref().to_string()),
-                            _ => None,
+                        .enumerate()
+                        .map(|(i, m)| {
+                            if matches!(m, CE::Class(_)) || anns.is_empty() || inline_anon() {
+                                return None;
+                            }
+                            let sig = format!("NARY\u{1}{}", crate::io::genid::ce_sig(m));
+                            let id = seq_id(shared_seq.get(&owner), &sig, &mut taken_ids);
+                            id.filter(|_| i > 0).map(|g| format!("genid{g}"))
                         })
                         .collect();
-                    named.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
-                    if named.len() == eq.0.len() {
-                        if let Some(host) = named.first().cloned() {
-                            if let Some(second) = named.get(1) {
-                                equiv_class.entry(host.clone()).or_default().push((
-                                    CE::Class(horned_owl::model::Class(
-                                        model.build.iri(second.as_str()),
-                                    )),
-                                    Vec::new(),
-                                ));
+                    let chain = Chain {
+                        tag: "owl:equivalentClass",
+                        pred: EQUIV_PROP,
+                        members: members
+                            .iter()
+                            .map(|m| match m {
+                                CE::Class(c) => ChainMember::Named(c.0.as_ref().to_string()),
+                                ce => ChainMember::Class(ce),
+                            })
+                            .collect(),
+                        ids,
+                        anns: anns.clone(),
+                    };
+                    match host {
+                        // The host's own pair is an equivalence of its block.
+                        Some(host) => {
+                            if !matches!(members[1], CE::Class(_)) {
+                                match chain.ids[1].clone() {
+                                    Some(g) => {
+                                        chain_tail.insert(g, chain.edge(1, 8));
+                                    }
+                                    None => {
+                                        chain_nested.insert((host.clone(), ce_sig(members[1])), chain.nested(1, 12));
+                                    }
+                                }
                             }
-                            for (i, m) in named.iter().enumerate().skip(1) {
-                                let body = match named.get(i + 1) {
-                                    Some(next) => format!(
-                                        "        <owl:equivalentClass rdf:resource=\"{}\"/>\n",
-                                        esc_attr(next)
-                                    ),
-                                    None => String::new(),
-                                };
-                                root_blocks
-                                    .entry(host.clone())
-                                    .or_default()
-                                    .push((m.clone(), body));
-                            }
+                            equiv_class.entry(host.clone()).or_default().push((members[1].clone(), anns));
+                            chain.place(&host, 1, &prefixes, &mut root_blocks, &mut chain_roots, &mut chain_defs);
+                        }
+                        None => {
+                            let block = if anns.is_empty() {
+                                chain.nested(0, 4)
+                            } else {
+                                let reifs: String = (0..members.len() - 1).map(|i| chain.reif(i, &prefixes)).collect();
+                                let defs: Vec<(String, String)> = (1..members.len()).filter_map(|i| chain.def(i)).collect();
+                                place_defs(&order_reifs_by_genid(&reifs, reif_genids.get("__general__")), Some(&defs))
+                            };
+                            gci_blocks.push((ac, block));
                         }
                     }
                 }
@@ -3538,18 +3762,36 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         op_chains.entry(sup.0.as_ref().to_string()).or_default().push((links, anns));
                     }
                     // A chain whose super-property is an inverse is stated of that
-                    // inverse's node, a block of its own.
+                    // inverse's node: a block of its own, or, annotated, the nested
+                    // source of the chain's reification, whose list Turtle names
+                    // by id.
                     OPE::InverseObjectProperty(sup) => {
+                        let owner = sup.0.as_ref().to_string();
                         if annotated(ac) {
-                            left_out.push(ac);
+                            let pred = "http://www.w3.org/2002/07/owl#propertyChainAxiom";
+                            let items: Vec<String> = chain.iter().map(render_chain_link).collect();
+                            let members = list_members(chain.iter().filter_map(|link| match link {
+                                OPE::ObjectProperty(p) => Some(p.0.as_ref()),
+                                OPE::InverseObjectProperty(_) => None,
+                            }));
+                            let gid = named_lists()
+                                .then(|| seq_id(shared_seq.get(&owner), &format!("LIST\u{1}{pred}\u{1}{members}"), &mut taken_ids))
+                                .flatten()
+                                .map(|id| format!("genid{id}"));
+                            let mut def = String::new();
+                            let (edge, target) = list_slots("owl:propertyChainAxiom", &items, gid.as_deref(), &mut def);
+                            let triple: String = edge.split_inclusive('\n').map(|line| format!("        {line}")).collect();
+                            let reif = inverse_source_reif(&owner, &triple, pred, &target, &ax_anns(ac), &prefixes);
+                            inv_roots.entry(owner).or_default().push(format!("{reif}{def}"));
+                        } else {
+                            let links: String = chain.iter().map(render_chain_link).collect();
+                            op_inv.entry(owner).or_default().push((
+                                25,
+                                format!(
+                                    "        <owl:propertyChainAxiom rdf:parseType=\"Collection\">\n{links}        </owl:propertyChainAxiom>\n"
+                                ),
+                            ));
                         }
-                        let links: String = chain.iter().map(render_chain_link).collect();
-                        op_inv.entry(sup.0.as_ref().to_string()).or_default().push((
-                            25,
-                            format!(
-                                "        <owl:propertyChainAxiom rdf:parseType=\"Collection\">\n{links}        </owl:propertyChainAxiom>\n"
-                            ),
-                        ));
                     }
                 },
             },
@@ -3752,13 +3994,61 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::EquivalentObjectProperties(e) => {
-                if e.0.len() > 2 {
-                    let mut named: Vec<String> = e.0.iter().filter_map(op_name).collect();
-                    if annotated(ac) || named.len() != e.0.len() {
-                        left_out.push(ac);
-                    } else {
-                        named.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
-                        consecutive_pairs(&named, "owl:equivalentProperty", &mut op_equiv, &mut root_blocks);
+                let members = crate::io::genid::ordered_opes(&e.0);
+                if members.len() > 2 {
+                    // A chain of consecutive pairs in the graph of the first
+                    // property block to state it: its first member's, when that is
+                    // named, or an inverse member's property's, when that comes
+                    // first.
+                    let anns = ax_anns(ac);
+                    let host = crate::io::genid::nary_ope_owner(&e.0).unwrap_or_default();
+                    let ids: Vec<Option<String>> = members
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| match m {
+                            OPE::InverseObjectProperty(p) if !anns.is_empty() => {
+                                let sig = format!("NARY\u{1}INV\u{1}{}", p.0.as_ref());
+                                let id = seq_id(shared_seq.get(&host), &sig, &mut taken_ids);
+                                id.filter(|_| i > 0).map(|g| format!("genid{g}"))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let chain = Chain {
+                        tag: "owl:equivalentProperty",
+                        pred: P_EQUIV_PROPERTY,
+                        members: members
+                            .iter()
+                            .map(|m| match m {
+                                OPE::ObjectProperty(p) => ChainMember::Named(p.0.as_ref().to_string()),
+                                OPE::InverseObjectProperty(p) => ChainMember::Inverse(p.0.as_ref().to_string()),
+                            })
+                            .collect(),
+                        ids,
+                        anns: anns.clone(),
+                    };
+                    match (&chain.members[0], &chain.members[1]) {
+                        // The host's own pair is an edge of its block.
+                        (ChainMember::Named(first), ChainMember::Named(second)) if *first == host => {
+                            if !anns.is_empty() {
+                                edge_reifs.entry(host.clone()).or_default().push((P_EQUIV_PROPERTY, second.clone(), anns.clone()));
+                            }
+                            op_equiv.entry(host.clone()).or_default().push(second.clone());
+                            chain.place(&host, 1, &prefixes, &mut root_blocks, &mut chain_roots, &mut chain_defs);
+                        }
+                        (ChainMember::Named(first), ChainMember::Inverse(second)) if *first == host => {
+                            let node = chain.def(1);
+                            match node {
+                                Some(_) => chain_roots.entry(host.clone()).or_default().push_str(&chain.reif(0, &prefixes)),
+                                None => {
+                                    chain_nested.insert((host.clone(), format!("INV\u{1}{second}")), chain.nested(1, 12));
+                                }
+                            }
+                            op_edge_inv.entry(host.clone()).or_default().push((12, "owl:equivalentProperty", second.clone(), node));
+                            chain.place(&host, 1, &prefixes, &mut root_blocks, &mut chain_roots, &mut chain_defs);
+                        }
+                        // A host that is no member holds none of the pairs.
+                        _ => chain.place(&host, 0, &prefixes, &mut root_blocks, &mut chain_roots, &mut chain_defs),
                     }
                 } else if let (Some(a), Some(b)) = (op_name(&e.0[0]), op_name(&e.0[1])) {
                     let (a, b) = ordered(a, b);
@@ -3769,16 +4059,27 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::EquivalentDataProperties(e) => {
-                if e.0.len() > 2 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    } else {
-                        let mut members: Vec<String> = e.0.iter().map(|d| d.0.as_ref().to_string()).collect();
-                        members.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
-                        consecutive_pairs(&members, "owl:equivalentProperty", &mut dp_equiv, &mut root_blocks);
+                let mut members: Vec<String> = e.0.iter().map(|d| d.0.as_ref().to_string()).collect();
+                members.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
+                members.dedup();
+                if members.len() > 2 {
+                    // A chain of consecutive pairs in its first member's graph.
+                    let anns = ax_anns(ac);
+                    let host = members[0].clone();
+                    if !anns.is_empty() {
+                        edge_reifs.entry(host.clone()).or_default().push((P_EQUIV_PROPERTY, members[1].clone(), anns.clone()));
                     }
-                } else {
-                    let (a, b) = ordered(e.0[0].0.as_ref().to_string(), e.0[1].0.as_ref().to_string());
+                    dp_equiv.entry(host.clone()).or_default().push(members[1].clone());
+                    let chain = Chain {
+                        tag: "owl:equivalentProperty",
+                        pred: P_EQUIV_PROPERTY,
+                        members: members.iter().map(|m| ChainMember::Named(m.clone())).collect(),
+                        ids: vec![None; members.len()],
+                        anns,
+                    };
+                    chain.place(&host, 1, &prefixes, &mut root_blocks, &mut chain_roots, &mut chain_defs);
+                } else if members.len() == 2 {
+                    let (a, b) = (members[0].clone(), members[1].clone());
                     if annotated(ac) {
                         edge_reifs.entry(a.clone()).or_default().push((P_EQUIV_PROPERTY, b.clone(), ax_anns(ac)));
                     }
@@ -4292,10 +4593,14 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         body.push_str(&format!("        <{tag} rdf:nodeID=\"{gid}\"/>\n"));
                         defs.push_str(def);
                     }
-                    None => body.push_str(&format!(
-                        "        <{tag}>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </{tag}>\n",
-                        esc_attr(inverse_of)
-                    )),
+                    // A chain's member holds the pair it is the subject of.
+                    None => match chain_nested.get(&(iri.clone(), format!("INV\u{1}{inverse_of}"))) {
+                        Some(node) => body.push_str(&format!("        <{tag}>\n{node}        </{tag}>\n")),
+                        None => body.push_str(&format!(
+                            "        <{tag}>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </{tag}>\n",
+                            esc_attr(inverse_of)
+                        )),
+                    },
                 }
             }
         };
@@ -4413,13 +4718,15 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let inverse_roots: String = inv_roots.get(iri).into_iter().flatten().map(String::as_str).collect();
         let anon_roots = order_reifs_by_genid(
             &format!(
-                "{dr_reif}{chain_reif}{ann_after}{}{}{inverse_blocks}{inverse_roots}",
+                "{dr_reif}{chain_reif}{ann_after}{}{}{inverse_blocks}{inverse_roots}{}",
                 type_reifs(iri),
-                edge_reif_blocks(iri)
+                edge_reif_blocks(iri),
+                chain_roots.get(iri).map_or("", String::as_str)
             ),
             reif_genids.get(iri),
         );
-        write_entity(w, "owl:ObjectProperty", iri, &body, &format!("{defs}{anon_roots}"))?;
+        let after = place_defs(&format!("{defs}{anon_roots}"), chain_defs.get(iri));
+        write_entity(w, "owl:ObjectProperty", iri, &body, &after)?;
         write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
     }
 
@@ -4495,7 +4802,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             body.push_str(&abody);
             let anon_roots = order_reifs_by_genid(
-                &format!("{dr_reif}{ann_after}{}{}", type_reifs(iri), edge_reif_blocks(iri)),
+                &format!(
+                    "{dr_reif}{ann_after}{}{}{}",
+                    type_reifs(iri),
+                    edge_reif_blocks(iri),
+                    chain_roots.get(iri).map_or("", String::as_str)
+                ),
                 reif_genids.get(iri),
             );
             write_entity(w, "owl:DatatypeProperty", iri, &body, &format!("{dr_defs}{anon_roots}"))?;
@@ -4686,10 +4998,14 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         WRITER_SKIPS.with(|c| c.set(c.get() + 1));
                         // An annotated axiom over this expression already emitted the
                         // `rdf:nodeID` edge; that is this axiom's triple too.
-                    } else if !seen_plain_anon_eq.insert(sig) {
+                    } else if !seen_plain_anon_eq.insert(sig.clone()) {
                         WRITER_SKIPS.with(|c| c.set(c.get() + 1));
                     } else if true {
-                        let inner = render_ce(eq, 12, &operand_map);
+                        // A chain's member holds the pair it is the subject of.
+                        let inner = match chain_nested.get(&(iri.clone(), sig)) {
+                            Some(node) => node.clone(),
+                            None => render_ce(eq, 12, &operand_map),
+                        };
                         if !inner.is_empty() {
                             body.push_str(&format!("        <owl:equivalentClass>\n{inner}        </owl:equivalentClass>\n"));
                         }
@@ -4921,16 +5237,24 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             let gid = &after_q[..after_q.find('"').unwrap_or(0)];
             if seen_gid.insert(gid) && emitted_defs.insert(gid.to_string()) {
                 if let Some(ce) = def_by_gid.get(gid) {
-                    anon_defs.push_str(&inject_nodeid(&render_ce(ce, 4, &operand_map), gid));
+                    let def = inject_nodeid(&render_ce(ce, 4, &operand_map), gid);
+                    match chain_tail.get(gid) {
+                        Some(pair) => anon_defs.push_str(&insert_before_close(&def, pair)),
+                        None => anon_defs.push_str(&def),
+                    }
                 }
             }
             rest = after_q;
         }
         let reifs = order_reifs_by_genid(
-            &format!("{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{union_reif}{key_reif}{ann_reif}{}", type_reifs(iri)),
+            &format!(
+                "{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{union_reif}{key_reif}{ann_reif}{}{}",
+                type_reifs(iri),
+                chain_roots.get(iri).map_or("", String::as_str)
+            ),
             reif_genids.get(iri),
         );
-        let after = format!("{anon_defs}{list_defs}{reifs}");
+        let after = place_defs(&format!("{anon_defs}{list_defs}{reifs}"), chain_defs.get(iri));
         let anon_roots = reifs;
         // Element choice, as for annotation properties above: the
         // `rdf:type owl:Class` triple is written only when nothing else supplies
@@ -5107,7 +5431,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             let anon_roots = order_reifs_by_genid(
-                &format!("{ce_type_reif}{ann_after}{}{prop_reifs}{}{negs}", type_reifs(iri), edge_reif_blocks(iri)),
+                &format!(
+                    "{ce_type_reif}{ann_after}{}{prop_reifs}{}{negs}{}",
+                    type_reifs(iri),
+                    edge_reif_blocks(iri),
+                    chain_roots.get(iri).map_or("", String::as_str)
+                ),
                 reif_genids.get(iri),
             );
             let after = format!("{type_defs}{anon_roots}");

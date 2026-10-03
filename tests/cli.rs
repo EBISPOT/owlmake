@@ -3840,6 +3840,63 @@ fn inverse_property_axioms_keys_and_unions_are_written_as_robot_writes_them() {
     }
 }
 
+/// Equivalences and samenesses of three or more members are stated as ROBOT
+/// 1.9.11 states them, in RDF/XML and in Turtle: one triple per consecutive pair
+/// of the ordered members, every named member after the first a block of its
+/// own, and, annotated, every pair reified with its anonymous members defined by
+/// id. Equivalences of classes and of object properties take their pairs in
+/// order, those of data properties and samenesses in the order of a hash set of
+/// the pairs, which this document's members do not share with their order. An
+/// equivalence with no named class is a general axiom, and one whose inverse
+/// member's property comes first is stated after that property.
+#[test]
+fn equivalences_and_samenesses_of_three_or_more_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-nary-axioms.ofn", &format!("rdf-nary-axioms.{ext}"), &[]),
+            fixture_text(&format!("rdf-nary-axioms.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// An annotated chain whose super-property is an inverse is stated of the
+/// inverse's node, the nested source of its reification, with no warning.
+#[test]
+fn an_annotated_chain_under_an_inverse_is_stated() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("inverse-chain.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/w#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/w>\nDeclaration(ObjectProperty(:p))\nDeclaration(ObjectProperty(:q))\n\
+         Declaration(ObjectProperty(:r))\n\
+         SubObjectPropertyOf(Annotation(rdfs:comment \"chain\") ObjectPropertyChain(:p ObjectInverseOf(:q)) ObjectInverseOf(:r))\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("inverse-chain.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let query = "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> PREFIX : <http://example.org/w#> \
+                     ASK { ?x owl:inverseOf :r ; owl:propertyChainAxiom ?l . ?l rdf:first :p ; rdf:rest/rdf:first/owl:inverseOf :q . \
+                     ?a owl:annotatedSource ?x ; owl:annotatedProperty owl:propertyChainAxiom ; owl:annotatedTarget ?t ; \
+                     rdfs:comment \"chain\" . ?t rdf:first :p ; rdf:rest/rdf:first/owl:inverseOf :q }";
+        let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
+        assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{}", String::from_utf8_lossy(&text));
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
 /// An equivalence, inverse or disjointness between a named property and an
 /// inverse whose property comes first in IRI order is stated of the named
 /// property, with no warning, annotations and all, and reads back whole.
