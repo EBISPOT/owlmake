@@ -55,6 +55,14 @@ a:p rdf:type owl:ObjectProperty .
 
 
 #################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/a#d
+a:d rdf:type owl:DatatypeProperty .
+
+
+#################################################################
 #    Classes
 #################################################################
 
@@ -234,7 +242,69 @@ a:j owl:sameAs a:k .
 
 
 ###  http://example.org/a#j
-a:j rdf:type owl:NamedIndividual .
+a:j rdf:type owl:NamedIndividual ;
+    a:p a:i ;
+    a:d "1" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid21 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "a" ;
+   rdfs:comment "first"
+ ] .
+
+_:genid21 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty a:p ;
+           owl:annotatedTarget a:i ;
+           rdfs:comment "a" .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid23 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "b" ;
+   rdfs:comment "second"
+ ] .
+
+_:genid23 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty a:p ;
+           owl:annotatedTarget a:i ;
+           rdfs:comment "b" .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource a:j ;
+   owl:annotatedProperty a:p ;
+   owl:annotatedTarget a:i ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource a:j ;
+   owl:annotatedProperty a:d ;
+   owl:annotatedTarget "1" ;
+   rdfs:comment "w"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource a:j ;
+   owl:annotatedProperty a:d ;
+   owl:annotatedTarget "1" ;
+   rdfs:comment "x"
+ ] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid28 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "y" ;
+   rdfs:comment "later"
+ ] .
+
+_:genid28 rdf:type owl:Axiom ;
+           owl:annotatedSource a:j ;
+           owl:annotatedProperty a:d ;
+           owl:annotatedTarget "1" ;
+           rdfs:comment "y" .
 
 
 ###  http://example.org/a#k
@@ -248,13 +318,13 @@ a:k rdf:type owl:NamedIndividual .
 a:undeclared rdfs:label "u" .
 
 [ rdf:type owl:Annotation ;
-   owl:annotatedSource _:genid21 ;
+   owl:annotatedSource _:genid30 ;
    owl:annotatedProperty rdfs:comment ;
    owl:annotatedTarget "label" ;
    rdfs:comment "untyped"
  ] .
 
-_:genid21 rdf:type owl:Axiom ;
+_:genid30 rdf:type owl:Axiom ;
            owl:annotatedSource a:undeclared ;
            owl:annotatedProperty rdfs:label ;
            owl:annotatedTarget "u" ;
@@ -266,13 +336,13 @@ _:genid21 rdf:type owl:Axiom ;
 #################################################################
 
 [ rdf:type owl:Annotation ;
-  owl:annotatedSource _:genid24 ;
+  owl:annotatedSource _:genid33 ;
   owl:annotatedProperty rdfs:comment ;
   owl:annotatedTarget "gci" ;
   rdfs:comment "general"
 ] .
 
-_:genid24 rdf:type owl:Axiom ;
+_:genid33 rdf:type owl:Axiom ;
            owl:annotatedSource [ rdf:type owl:Restriction ;
                                  owl:onProperty a:p ;
                                  owl:someValuesFrom a:A ;
@@ -284,13 +354,13 @@ _:genid24 rdf:type owl:Axiom ;
 
 
 [ rdf:type owl:Annotation ;
-  owl:annotatedSource _:genid26 ;
+  owl:annotatedSource _:genid35 ;
   owl:annotatedProperty rdfs:comment ;
   owl:annotatedTarget "disjoint" ;
   rdfs:comment "all"
 ] .
 
-_:genid26 rdf:type owl:AllDisjointClasses ;
+_:genid35 rdf:type owl:AllDisjointClasses ;
            owl:members ( a:A
                          a:B
                          a:C

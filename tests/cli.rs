@@ -3867,7 +3867,8 @@ fn equivalences_and_samenesses_of_three_or_more_are_written_as_robot_writes_them
 /// first of them. The pairs of a sameness share one set of such nodes, and the
 /// ontology's come after its header in the order of a hash set of its triples.
 /// The annotated axioms are on classes, individuals and an undeclared IRI, and
-/// two are general axioms.
+/// two are general axioms. Assertions of one statement that differ only in
+/// their annotations are reified in the order of their annotations.
 #[test]
 fn annotations_of_annotations_are_written_as_robot_writes_them() {
     for ext in ["owl", "ttl"] {
@@ -3896,6 +3897,79 @@ fn anonymous_individuals_are_written_as_robot_writes_them() {
             "{ext}"
         );
     }
+}
+
+/// An anonymous individual in an annotation of an annotation is written as
+/// ROBOT 1.9.11 writes it, in RDF/XML and in Turtle: as the value of an
+/// annotation on the node of an annotated annotation, nested with what it is
+/// stated to be, and as the value of an annotated annotation, named by id in
+/// the axiom's node and as the `owl:annotatedTarget` of the annotation's. The
+/// annotations are on the ontology, on assertions, class and property axioms,
+/// a general axiom, n-ary axioms, a negative assertion and a rule.
+#[test]
+fn anonymous_individuals_in_annotations_of_annotations_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-nested-anonymous.ofn", &format!("rdf-nested-anonymous.{ext}"), &[]),
+            fixture_text(&format!("rdf-nested-anonymous.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// The annotations of an assertion on an inverse property reify the
+/// statement of the named property it is, with no warning, annotations of
+/// annotations and anonymous values included, and the document reads back
+/// whole.
+#[test]
+fn the_annotations_of_an_assertion_on_an_inverse_are_stated() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("inverse-assertion.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/w#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/w>\nDeclaration(Class(:A))\nDeclaration(ObjectProperty(:p))\n\
+         Declaration(ObjectProperty(:q))\nDeclaration(NamedIndividual(:i))\nDeclaration(NamedIndividual(:j))\n\
+         ObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nn\") rdfs:comment \"ann\") ObjectInverseOf(:p) :i :j)\n\
+         ObjectPropertyAssertion(Annotation(rdfs:seeAlso _:x) ObjectInverseOf(:q) :i :j)\nClassAssertion(:A _:x)\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("inverse-assertion.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let query = "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                     PREFIX : <http://example.org/w#> \
+                     ASK { :j :p :i ; :q :i . ?a owl:annotatedSource :j ; owl:annotatedProperty :p ; owl:annotatedTarget :i ; \
+                     rdfs:comment \"ann\" . ?n owl:annotatedSource ?a ; owl:annotatedProperty rdfs:comment ; \
+                     owl:annotatedTarget \"ann\" ; rdfs:comment \"nn\" . ?b owl:annotatedSource :j ; owl:annotatedProperty :q ; \
+                     owl:annotatedTarget :i ; rdfs:seeAlso ?x . ?x a :A }";
+        let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
+        assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{}", String::from_utf8_lossy(&text));
+        // Read back, the document holds the assertions, stated of the named
+        // properties, and the class assertion.
+        let back = tmp(&format!("inverse-assertion-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let read = std::fs::read_to_string(&back).unwrap();
+        for axiom in [
+            "ObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nn\") rdfs:comment \"ann\") :p :j :i)",
+            "ObjectPropertyAssertion(Annotation(rdfs:seeAlso _:genid",
+            "ClassAssertion(:A _:genid",
+        ] {
+            assert!(read.contains(axiom), "{ext}: {axiom}\n{read}");
+        }
+        let _ = std::fs::remove_file(&back);
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
 }
 
 /// An annotated chain whose super-property is an inverse is stated of the

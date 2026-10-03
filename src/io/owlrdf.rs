@@ -1769,7 +1769,7 @@ fn render_target(av: &AnnotationValue<RcStr>) -> String {
                 )
             }
         }
-        _ => String::new(),
+        AnnotationValue::AnonymousIndividual(a) => anon_slot("owl:annotatedTarget", a.0.as_ref(), "        "),
     }
 }
 
@@ -1901,14 +1901,18 @@ fn qname_iri(tag: &str) -> String {
 }
 
 /// Whether the layout states the annotations of annotations `ac` carries: on
-/// the ontology, or on an axiom among `numbered` (by `axiom_identity`), with
-/// every annotated annotation's value named or a literal.
-fn nested_annotations_stated(ac: &AnnotatedComponent<RcStr>, numbered: &HashSet<u64>) -> bool {
-    fn stated(anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>) -> bool {
-        anns.iter().all(|a| {
-            a.ann.is_empty() || (!matches!(a.av, AnnotationValue::AnonymousIndividual(_)) && stated(&a.ann))
-        })
-    }
+/// the ontology, or on an axiom among `numbered` (by `axiom_identity`). An
+/// annotated annotation's value is named or a literal, or, where the document
+/// states its anonymous individuals from its model (`anon_model`), any value.
+fn nested_annotations_stated(ac: &AnnotatedComponent<RcStr>, numbered: &HashSet<u64>, anon_model: bool) -> bool {
+    let stated = |anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>| {
+        fn named(anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>) -> bool {
+            anns.iter().all(|a| {
+                a.ann.is_empty() || (!matches!(a.av, AnnotationValue::AnonymousIndividual(_)) && named(&a.ann))
+            })
+        }
+        anon_model || named(anns)
+    };
     let nested = |anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>| anns.iter().any(|a| !a.ann.is_empty());
     match &ac.component {
         Component::OntologyAnnotation(oa) => !nested(&oa.0.ann) || stated(&BTreeSet::from([oa.0.clone()])),
@@ -4065,8 +4069,9 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let mut ind_props: BTreeMap<String, Vec<IndProp>> = BTreeMap::new();
     // An annotated property assertion is reified as an `<owl:Axiom>` after the
     // individual, like an annotated `rdf:type`: COHO's `has_data_collection_location`
-    // assertions carry the recruitment quote and its source this way.
-    type PropReif = (String, String, Option<String>, Vec<(String, AnnotationValue<RcStr>)>);
+    // assertions carry the recruitment quote and its source this way. The last
+    // field is whether the assertion is on an inverse, stated the other way round.
+    type PropReif = (String, String, Option<String>, Vec<(String, AnnotationValue<RcStr>)>, bool);
     let mut prop_reif: BTreeMap<String, Vec<PropReif>> = BTreeMap::new();
     let mut ann_assertions: BTreeMap<String, Vec<Ann>> = BTreeMap::new();
     let mut anon_ind: BTreeMap<String, Vec<Ann>> = BTreeMap::new();
@@ -4248,9 +4253,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let nested_anon = |i: &str| anon_objects.contains(i);
     for ac in model.ont.iter() {
         // An annotation of an annotation is stated on the ontology, and on an
-        // axiom the numbering pass numbered its nodes for. Its value is named or
-        // a literal.
-        if !nested_annotations_stated(ac, &genid_pass.nested_axioms) {
+        // axiom the numbering pass numbered its nodes for.
+        if !nested_annotations_stated(ac, &genid_pass.nested_axioms, anon_model) {
             left_out.push(ac);
         }
         // …and the ontology's are stated of its IRI, so an ontology with none
@@ -4857,10 +4861,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             // this way.
             Component::ObjectPropertyAssertion(opa) => {
                 // An assertion on an inverse is stated of the named property, the
-                // other way round, and its annotations reify that statement. That
-                // reification is a node of this writer's own: the statement the
-                // other way round is a new axiom, and the numbering has none for
-                // it (see `genid`).
+                // other way round, and its annotations reify that statement, a
+                // node numbered after every other (`genid::inverse_assertion`).
                 let (p, from, to) = match &opa.ope {
                     OPE::ObjectProperty(p) => (p, &opa.from, &opa.to),
                     OPE::InverseObjectProperty(p) => (p, &opa.to, &opa.from),
@@ -4889,6 +4891,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                             o.0.as_ref().to_string(),
                             None,
                             ax_anns(ac),
+                            matches!(opa.ope, OPE::InverseObjectProperty(_)),
                         ));
                     }
                 }
@@ -4920,6 +4923,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                             dpa.to.literal().clone(),
                             Some(attrs),
                             ax_anns(ac),
+                            false,
                         ));
                     }
                 }
@@ -5350,6 +5354,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         };
         ontology_nested.sort_by_key(|(_, ids)| (bucket(ids[0]), ids[0]));
     }
+    let mut header_roots = String::new();
     for (a, ids) in ontology_nested {
         let source = match &ont_iri {
             Some(iri) => format!("        <owl:annotatedSource rdf:resource=\"{}\"/>\n", esc_attr(iri)),
@@ -5358,9 +5363,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let mut roots = Vec::new();
         annotation_nodes(&BTreeSet::from([a.clone()]), &source, "", &mut ids.iter().copied(), &mut roots, &prefixes);
         for (_, root) in roots {
-            write!(w, "{root}")?;
+            header_roots.push_str(&root);
         }
     }
+    write!(w, "{}", resolve_anon(crate::io::genid::HEADER_GRAPH, &header_roots))?;
 
     // The per-kind entity sections are driven by the ontology's SIGNATURE, not by
     // its `Declaration` axioms, so an entity that is only *referenced* still gets a
@@ -6515,9 +6521,23 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             body.push_str(&abody);
             let mut prop_reifs = String::new();
             if let Some(reifs) = prop_reif.get(iri) {
+                // By property and target, as numbered: an assertion on an inverse
+                // after the others, and assertions of one statement by their
+                // annotations.
                 let mut reifs = reifs.clone();
-                reifs.sort_by(|a, b| iri_key(&a.0).cmp(&iri_key(&b.0)).then_with(|| a.1.cmp(&b.1)));
-                for (p, v, lit, anns) in reifs {
+                let ann_list = |anns: &[(String, AnnotationValue<RcStr>)]| {
+                    let mut v = anns.to_vec();
+                    v.sort_by_key(|x| ann_key(&x.0, &x.1));
+                    v
+                };
+                reifs.sort_by(|a, b| {
+                    iri_key(&a.0)
+                        .cmp(&iri_key(&b.0))
+                        .then_with(|| a.1.cmp(&b.1))
+                        .then_with(|| a.4.cmp(&b.4))
+                        .then_with(|| cmp_ann_list(&ann_list(&a.3), &ann_list(&b.3)))
+                });
+                for (p, v, lit, anns, _) in reifs {
                     let t = match lit {
                         Some(attrs) => format!("        <owl:annotatedTarget{attrs}>{}</owl:annotatedTarget>\n", esc(&v)),
                         None => format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(&v)),

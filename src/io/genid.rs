@@ -1835,7 +1835,50 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         g.translate_node_annotations(rid, &ac.ann);
     }
 
+    // An annotated assertion on an inverse property between named individuals
+    // is stated of the named property, the other way round, in the graph of
+    // its subject that way round, and its annotations reify that statement.
+    // Its nodes come after every other: the reification, then those its
+    // annotations take.
+    let mut inverse_assertions: Vec<&AnnotatedComponent<RcStr>> = model
+        .ont
+        .iter()
+        .filter(|ac| !ac.ann.is_empty() && inverse_assertion(&ac.component).is_some())
+        .collect();
+    inverse_assertions.sort_by(|a, b| cmp_annotated_axiom(a, b));
+    for ac in inverse_assertions {
+        let Some((p, subject, target)) = inverse_assertion(&ac.component) else { continue };
+        let owner = subject.to_string();
+        g.cur_owner = owner.clone();
+        g.begin_graph(owner.clone());
+        g.cur_axiom = ac.ann.iter().any(|a| !a.ann.is_empty()).then(|| axiom_identity(ac));
+        g.intern.clear();
+        g.graph_seq += 1;
+        let rid = g.fresh();
+        let sig = format!(
+            "{}\u{1}R\u{1}{}",
+            crate::io::owlrdf::esc_attr(p),
+            crate::io::owlrdf::esc_attr(target)
+        );
+        g.reif.entry(owner).or_default().push((sig, rid));
+        g.translate_node_annotations(rid, &ac.ann);
+    }
+
     g
+}
+
+/// An assertion on an inverse property between named individuals, as the
+/// statement of the named property it is: (property, subject, target).
+fn inverse_assertion(c: &Component<RcStr>) -> Option<(&str, &str, &str)> {
+    match c {
+        Component::ObjectPropertyAssertion(ax) => match (&ax.ope, &ax.from, &ax.to) {
+            (OPE::InverseObjectProperty(p), Individual::Named(target), Individual::Named(subject)) => {
+                Some((p.0.as_ref(), subject.0.as_ref(), target.0.as_ref()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The entity whose rendered block this component becomes part of, when it
@@ -1916,7 +1959,10 @@ impl Genids {
             self.anon_home.insert(key, self.cur_graph.clone());
             self.anon_order.push(key);
         }
+        // An axiom reached from an annotation is numbered inside the axiom
+        // that annotation is on, which goes on after it.
         let outer = std::mem::replace(&mut self.cur_anon_axiom, anon_key);
+        let outer_axiom = self.cur_axiom;
         self.translate_axiom_nodes(owner, ac);
         self.cur_anon_axiom = None;
         // …and, its own statements made, reaches the anonymous individuals it
@@ -1927,6 +1973,7 @@ impl Genids {
             }
         }
         self.cur_anon_axiom = outer;
+        self.cur_axiom = outer_axiom;
     }
 
     fn translate_axiom_nodes(&mut self, owner: &str, ac: &AnnotatedComponent<RcStr>) {
@@ -2233,7 +2280,8 @@ impl Genids {
                 self.object(to);
                 // The assertion stated the other way round is a new axiom without
                 // the annotations, so only an assertion on a named property
-                // reifies.
+                // reifies here. The reification of one on an inverse takes its
+                // nodes after every other (`inverse_assertion`).
                 if !ac.ann.is_empty() && matches!(ax.ope, OPE::ObjectProperty(_)) {
                     self.object(from);
                     self.object(to);
@@ -3238,6 +3286,9 @@ pub(crate) fn referenced_anonymous(ac: &AnnotatedComponent<RcStr>) -> Vec<String
     }
     let mut out = Vec::new();
     component_anonymous(&ac.component, &mut out);
+    if let Component::OntologyAnnotation(oa) = &ac.component {
+        anns(&oa.0.ann, &mut out);
+    }
     anns(&ac.ann, &mut out);
     let mut seen = std::collections::HashSet::new();
     out.retain(|x| seen.insert(x.clone()));
