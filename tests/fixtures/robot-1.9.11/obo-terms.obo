@@ -1,0 +1,92 @@
+format-version: 1.2
+data-version: ex/releases/2026-01-01/ex.owl
+date: 01:01:2026 12:00
+saved-by: someone
+auto-generated-by: something
+subsetdef: core "Core subset"
+subsetdef: slim_extra "Extra slim"
+synonymtypedef: ABBR "abbreviation" EXACT
+synonymtypedef: PLURAL "plural form"
+synonymtypedef: OLD "old name" RELATED
+default-namespace: example
+idspace: foo http://example.org/foo/
+remark: A remark.
+ontology: ex
+property_value: http://purl.org/dc/terms/license http://creativecommons.org/licenses/by/4.0/
+property_value: http://purl.org/dc/elements/1.1/title "Example ontology" xsd:string
+
+[Term]
+id: EX:0000001
+name: thing one
+namespace: example
+alt_id: EX:0000099
+def: "The first example thing." [PMID:123, foo:abc]
+comment: A comment.
+subset: core
+synonym: "T1" EXACT ABBR [PMID:9]
+synonym: "things one" RELATED PLURAL []
+synonym: "thingo" NARROW []
+synonym: "the one" BROAD [foo:x]
+synonym: "previous" EXACT OLD []
+xref: foo:xyz {comment="hello"}
+xref: Wikipedia:Thing "a description"
+created_by: someone
+creation_date: 2020-01-01T00:00:00Z
+property_value: IAO:0000112 "example use" xsd:string
+property_value: RO:0002161 NCBITaxon:9606
+property_value: foo:score "3" xsd:integer
+
+[Term]
+id: EX:0000002
+name: thing two
+is_a: EX:0000001 {source="PMID:7"}
+relationship: part_of EX:0000003
+disjoint_from: EX:0000003
+intersection_of: EX:0000001
+intersection_of: part_of EX:0000003
+
+[Term]
+id: EX:0000003
+name: thing three
+is_obsolete: false
+
+[Term]
+id: EX:0000004
+name: obsolete thing
+is_obsolete: true
+replaced_by: EX:0000001
+consider: EX:0000002
+
+[Term]
+id: EX:0000005
+name: union thing
+union_of: EX:0000001
+union_of: EX:0000003
+equivalent_to: EX:0000006
+
+[Term]
+id: EX:0000006
+name: six
+
+[Typedef]
+id: part_of
+name: part of
+xref: BFO:0000050
+is_transitive: true
+domain: EX:0000001
+range: EX:0000003
+inverse_of: has_part
+
+[Typedef]
+id: has_part
+name: has part
+xref: BFO:0000051
+is_symmetric: false
+transitive_over: part_of
+holds_over_chain: part_of part_of
+
+[Typedef]
+id: note
+name: note
+is_metadata_tag: true
+is_class_level: true

@@ -1,0 +1,126 @@
+Prefix(:=<http://purl.obolibrary.org/obo/ex.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/ex.owl>
+<http://purl.obolibrary.org/obo/ex/2026-01-01/ex.owl>
+Annotation(<http://www.geneontology.org/formats/oboInOwl#NamespaceIdRule> "* EX:$sequence(7,0,9999999)$")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#auto-generated-by> "something")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#date> "01:01:2026 12:00")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#default-relationship-id-prefix> "RO")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "1.4")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#id-mapping> "part_of BFO:0000050")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#logical-definition-view-relation> "part_of")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#relax-unique-identifier-assumption-for-namespace> "foo")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#relax-unique-label-assumption-for-namespace> "foo")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#saved-by> "someone")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#treat-xrefs-as-equivalent> "CL")
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/ex#rel_a>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/ex#rel_b>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000427>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#NamespaceIdRule>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#auto-generated-by>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#builtin>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#date>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#default-relationship-id-prefix>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#id>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#id-mapping>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_anonymous>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_asymmetric>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_class_level>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_cyclic>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_functional>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_inverse_functional>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_metadata_tag>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_reflexive>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_symmetric>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_transitive>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#logical-definition-view-relation>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#relax-unique-identifier-assumption-for-namespace>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#relax-unique-label-assumption-for-namespace>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#saved-by>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#treat-xrefs-as-equivalent>))
+Declaration(AnnotationProperty(rdfs:label))
+Declaration(AnnotationProperty(owl:deprecated))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://purl.obolibrary.org/obo/IAO_0000427> (antisymmetric property)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/IAO_0000427> "antisymmetric property")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#NamespaceIdRule> (namespace-id-rule)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#NamespaceIdRule> "namespace-id-rule")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> (has_obo_format_version)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "has_obo_format_version")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#id> (id)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#id> "id")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#logical-definition-view-relation> (logical-definition-view-relation)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#logical-definition-view-relation> "logical-definition-view-relation")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#treat-xrefs-as-equivalent> (treat-xrefs-as-equivalent)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#treat-xrefs-as-equivalent> "treat-xrefs-as-equivalent")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://purl.obolibrary.org/obo/ex#rel_a> (rel a)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000427> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#builtin> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/ex#rel_a> "rel_a")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_asymmetric> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_class_level> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_cyclic> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_functional> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_inverse_functional> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_metadata_tag> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_reflexive> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_symmetric> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_transitive> <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex#rel_a> "rel a")
+AnnotationAssertion(owl:deprecated <http://purl.obolibrary.org/obo/ex#rel_a> "false"^^xsd:boolean)
+
+# Object Property: <http://purl.obolibrary.org/obo/ex#rel_b> (rel b)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000427> <http://purl.obolibrary.org/obo/ex#rel_b> "true"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#builtin> <http://purl.obolibrary.org/obo/ex#rel_b> "true"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/ex#rel_b> "rel_b")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_cyclic> <http://purl.obolibrary.org/obo/ex#rel_b> "true"^^xsd:boolean)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex#rel_b> "rel b")
+TransitiveObjectProperty(<http://purl.obolibrary.org/obo/ex#rel_b>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000001> (one)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#builtin> <http://purl.obolibrary.org/obo/EX_0000001> "false"^^xsd:boolean)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/EX_0000001> "EX:0000001")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_anonymous> <http://purl.obolibrary.org/obo/EX_0000001> "false"^^xsd:boolean)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000001> "one")
+AnnotationAssertion(owl:deprecated <http://purl.obolibrary.org/obo/EX_0000001> "false"^^xsd:boolean)
+
+
+)

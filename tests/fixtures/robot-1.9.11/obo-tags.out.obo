@@ -1,0 +1,43 @@
+format-version: 1.2
+data-version: 2026-01-01
+date: 01:01:2026 12:00
+saved-by: someone
+auto-generated-by: something
+namespace-id-rule: * EX:$sequence(7,0,9999999)$
+treat-xrefs-as-equivalent: CL
+ontology: ex
+property_value: default-relationship-id-prefix "RO" xsd:string
+property_value: id-mapping "part_of BFO:0000050" xsd:string
+property_value: relax-unique-identifier-assumption-for-namespace "foo" xsd:string
+property_value: relax-unique-label-assumption-for-namespace "foo" xsd:string
+logical-definition-view-relation: part_of
+
+[Term]
+id: EX:0000001
+is_anonymous: false
+name: one
+builtin: false
+
+[Typedef]
+id: rel_a
+name: rel a
+builtin: false
+is_anti_symmetric: false
+is_cyclic: false
+is_reflexive: false
+is_symmetric: false
+is_transitive: false
+is_functional: false
+is_inverse_functional: false
+is_metadata_tag: false
+is_class_level: false
+is_asymmetric: false
+
+[Typedef]
+id: rel_b
+name: rel b
+builtin: true
+is_anti_symmetric: true
+is_cyclic: true
+is_transitive: true
+

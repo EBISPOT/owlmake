@@ -3696,3 +3696,26 @@ fn a_turtle_sources_prefixes_become_idspaces_as_xmlns_bindings_do() {
     assert_eq!(convert_fixture("prefixed-terms.ttl", "prefixed.obo", &[]), fixture_text("prefixed-terms.obo"));
     assert_eq!(convert_fixture("custom-prefixes.ttl", "custom.obo", &[]), fixture_text("custom-prefixes.obo"));
 }
+
+/// An OBO document read as ROBOT 1.9.11 reads it: every header tag kept (the
+/// ones without a rule of their own as `oboInOwl:` ontology annotations), a
+/// synonym type's scope, every boolean tag whether `true` or `false`, and
+/// declarations for the properties the OBO vocabulary names but not for the ones
+/// the document only uses — and written back out with the same tags.
+#[test]
+fn obo_tags_are_read_and_written_as_robot_does() {
+    for ext in ["ofn", "owx", "owl"] {
+        assert_eq!(
+            convert_fixture("obo-terms.obo", &format!("obo-terms.{ext}"), &[]),
+            fixture_text(&format!("obo-terms.{ext}")),
+            "{ext}"
+        );
+    }
+    for ext in ["ofn", "owx", "obo"] {
+        assert_eq!(
+            convert_fixture("obo-tags.obo", &format!("obo-tags.out.{ext}"), &[]),
+            fixture_text(&format!("obo-tags.out.{ext}")),
+            "{ext}"
+        );
+    }
+}

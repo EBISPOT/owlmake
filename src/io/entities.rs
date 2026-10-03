@@ -184,22 +184,35 @@ pub fn signature(model: &Model) -> BTreeSet<(Kind, String)> {
     walk.into_visit().out
 }
 
-/// The entities `model` declares.
+/// The entity a declaration declares.
+pub fn declaration(c: &Component<RcStr>) -> Option<(Kind, &str)> {
+    match c {
+        Component::DeclareClass(e) => Some((Kind::Class, e.0.as_ref())),
+        Component::DeclareObjectProperty(e) => Some((Kind::ObjectProperty, e.0.as_ref())),
+        Component::DeclareDataProperty(e) => Some((Kind::DataProperty, e.0.as_ref())),
+        Component::DeclareNamedIndividual(e) => Some((Kind::NamedIndividual, e.0.as_ref())),
+        Component::DeclareAnnotationProperty(e) => Some((Kind::AnnotationProperty, e.0.as_ref())),
+        Component::DeclareDatatype(e) => Some((Kind::Datatype, e.0.as_ref())),
+        _ => None,
+    }
+}
+
+/// Whether a declaration of `model` is one its reader supplied for an entity
+/// the source document names without declaring (`Model::materialised_declarations`).
+/// A written document declares such an entity among those it declares for the
+/// ontology, not among the ontology's own declarations.
+pub fn is_materialised(model: &Model, kind: Kind, iri: &str) -> bool {
+    model.materialised_declarations.contains(&closure_key(kind, iri))
+}
+
+/// The entities `model` declares itself.
 pub fn declared(model: &Model) -> HashSet<(Kind, String)> {
     model
         .ont
         .iter()
-        .filter_map(|ac| match &ac.component {
-            Component::DeclareClass(e) => Some((Kind::Class, e.0.as_ref().to_string())),
-            Component::DeclareObjectProperty(e) => Some((Kind::ObjectProperty, e.0.as_ref().to_string())),
-            Component::DeclareDataProperty(e) => Some((Kind::DataProperty, e.0.as_ref().to_string())),
-            Component::DeclareNamedIndividual(e) => Some((Kind::NamedIndividual, e.0.as_ref().to_string())),
-            Component::DeclareAnnotationProperty(e) => {
-                Some((Kind::AnnotationProperty, e.0.as_ref().to_string()))
-            }
-            Component::DeclareDatatype(e) => Some((Kind::Datatype, e.0.as_ref().to_string())),
-            _ => None,
-        })
+        .filter_map(|ac| declaration(&ac.component))
+        .filter(|(kind, iri)| !is_materialised(model, *kind, iri))
+        .map(|(kind, iri)| (kind, iri.to_string()))
         .collect()
 }
 
@@ -226,7 +239,8 @@ pub fn illegal_punnings(signature: &BTreeSet<(Kind, String)>) -> HashSet<String>
         .collect()
 }
 
-/// The `closure_declared` key of an entity (see `Model::closure_declared`).
+/// The `closure_declared` and `materialised_declarations` key of an entity (see
+/// `Model::closure_declared`).
 fn closure_key(kind: Kind, iri: &str) -> String {
     let k = match kind {
         Kind::Class => "class",
