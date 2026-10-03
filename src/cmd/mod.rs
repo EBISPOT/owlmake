@@ -143,7 +143,9 @@ impl CommonArgs {
     /// Every prefix given binds a name for reading CURIEs. `--prefix` and
     /// `--prefixes` do nothing else. An ADDED prefix (`--add-prefix`,
     /// `--add-prefixes`) is also declared by whatever is written next, used or
-    /// not, even by an ontology built from nothing, which declares no other.
+    /// not, even by an ontology built from nothing, which declares no other. An
+    /// OBO document takes added prefixes as idspaces only when it is cleaned
+    /// (see `convert::apply_clean_obo`).
     pub fn apply(&self, model: &mut Model) -> Result<()> {
         if self.noprefixes {
             model.prefixes = PrefixMapping::default();
@@ -154,15 +156,7 @@ impl CommonArgs {
         let mut added = Vec::new();
         for file in &self.add_prefixes {
             let only = CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
-            for (name, ns) in only.given_prefixes()? {
-                // A prefix from an added context FILE gets an `idspace:` line in
-                // OBO output whether or not it shortens anything, so those are
-                // kept apart too.
-                if !model.explicit_prefixes.iter().any(|(p, _)| *p == name) {
-                    model.explicit_prefixes.push((name.clone(), ns.clone()));
-                }
-                added.push((name, ns));
-            }
+            added.extend(only.given_prefixes()?);
         }
         for spec in &self.add_prefix {
             added.push(Self::binding(spec)?);

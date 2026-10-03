@@ -3719,3 +3719,36 @@ fn obo_tags_are_read_and_written_as_robot_does() {
         );
     }
 }
+
+/// An OBO document's `idspace:` lines, and the prefixes its ids are shortened
+/// with, are the ones its source declared: a Turtle or RDF/XML source's
+/// prefixes, an OBO source's own `idspace:` lines, less the OBO PURL and
+/// built-in namespaces either way. A prefix the command line adds joins them
+/// only when the document is cleaned. With `--clean-obo`, every added prefix
+/// gets an `idspace:`, used or not, and shortens ids. Without it,
+/// `--add-prefix` and `--add-prefixes` leave the OBO document as it was. As
+/// ROBOT 1.9.11 writes all three sources.
+#[test]
+fn added_prefixes_become_obo_idspaces_only_when_cleaned() {
+    let context = robot_fixture("obo-prefixes.json");
+    let context = context.to_str().unwrap();
+    let baz = "baz: http://example.org/baz/";
+    for src in ["ttl", "owl", "obo"] {
+        let input = format!("obo-prefixes.{src}");
+        let out = format!("obo-prefixes-{src}.obo");
+        let plain = fixture_text(&format!("obo-prefixes.{src}.out.obo"));
+        for args in [&[][..], &["--add-prefixes", context], &["--add-prefix", baz], &["--clean-obo", "strict"]] {
+            assert_eq!(convert_fixture(&input, &out, args), plain, "{src} {args:?}");
+        }
+        assert_eq!(
+            convert_fixture(&input, &out, &["--add-prefixes", context, "--clean-obo", "strict"]),
+            fixture_text(&format!("obo-prefixes.{src}.add-prefixes-clean.obo")),
+            "{src}"
+        );
+        assert_eq!(
+            convert_fixture(&input, &out, &["--add-prefix", baz, "--clean-obo", "strict"]),
+            fixture_text(&format!("obo-prefixes.{src}.add-prefix-clean.obo")),
+            "{src}"
+        );
+    }
+}

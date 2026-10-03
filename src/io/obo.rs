@@ -2266,69 +2266,55 @@ impl IdCtx {
 
 impl Ctx {
     fn new(model: &Model) -> Ctx {
-        // The prefixes usable for CURIE shortening are the document's own declared
-        // `xmlns:PREFIX` bindings (captured into `model.idspaces` at read time for
-        // RDF/XML, which carries no formal prefix map). Anything NOT declared falls
-        // to `id_impl`'s mechanical id rule — never a hard-coded well-known prefix.
-        // A namespace that appears only via a default `xmlns="…"` (cl-full.owl's
-        // dc/terms/skos) is therefore rendered by that rule, bare local or full IRI.
-        // A config-loaded model (`explicit_prefixes` set, e.g. mondo via
-        // `--add-prefixes`) always uses the reconstructed prefix set, even if
-        // `idspaces` is populated (it may carry the OWL xmlns fallback set,
-        // which is NOT the OBO idspace set). A plain RDF/XML model (cl/uberon) with
-        // no explicit prefixes keeps using its scanned `idspaces`.
-        // An OWL document that was read has an xmlns map, however few prefixes
-        // it declares: one declaring none beyond the built-in ones abbreviates
-        // nothing, and its IRIs outside those namespaces stay full.
+        // The prefixes an id is shortened with are the ones the source document
+        // declared, and, for a cleaned write, the ones the command line adds
+        // (`explicit_prefixes`). Anything else falls to `id_impl`'s mechanical
+        // id rule: a bare local name, or the full IRI.
+        //
+        // An OWL source's declarations are its xmlns or `Prefix(…)` bindings
+        // (`idspaces`, `rdf_prefixes`), however few: one declaring none beyond
+        // the built-in ones abbreviates nothing. A namespace that appears only
+        // through a default `xmlns="…"` (cl-full.owl's dc/terms/skos) is not a
+        // declaration either. An OBO source's declarations are its `idspace:`
+        // lines, which its reader records in `explicit_prefixes`.
         let scanned = !model.idspaces.is_empty() || !model.rdf_prefixes.is_empty();
-        let mut idspaces: Vec<(String, String)> =
-            if scanned && model.explicit_prefixes.is_empty() {
-                crate::io::declared_idspaces(model)
-        } else if model.obo_source && model.explicit_prefixes.is_empty() {
-            // An OBO document's only prefix declarations are its `idspace:`
-            // lines. With none declared (and none added on the command line),
-            // nothing shortens an id — the pipeline's own prefix map is not the
-            // document's.
-            Vec::new()
-        } else {
-            // No scanned prefix set (OBO→OBO, or an OWL/functional model whose prefix
-            // map horned-owl surfaces directly): fall back to the declared prefixes,
-            // skipping the `obo/` PURL space (table 5.9.2 handles it) and builtins.
-            //
-            // The document's own prefixes come FIRST, in declaration order (the curie
-            // map is an `IndexMap`, so `mappings()` preserves it). A namespace is
-            // shortened with its *first-declared* prefix: CL declares `terms:` before
-            // `dcterms:` (both `http://purl.org/dc/terms/`) so it renders `terms:`,
-            // while EFO declares `dcterms:` first so it renders `dcterms:`. Every
-            // declared prefix is kept (dedup only on the prefix *name*), not collapsed
-            // by namespace. Nothing is appended: a namespace the document never bound
-            // has no prefix to shorten with, and renders under `id_impl`'s mechanical
-            // rule (a bare local name, or the full IRI).
-            let mut v: Vec<(String, String)> = Vec::new();
-            for (prefix, ns) in model.prefixes.mappings() {
-                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
-                    continue;
-                }
-                if v.iter().any(|(p, _)| p == prefix) {
-                    continue;
-                }
-                v.push((prefix.clone(), ns.clone()));
+        let mut idspaces: Vec<(String, String)> = Vec::new();
+        let mut keep = |prefix: &str, ns: &str| {
+            if !prefix.is_empty()
+                && crate::io::idspace_namespace(ns)
+                && !idspaces.iter().any(|(p, _)| p == prefix)
+            {
+                idspaces.push((prefix.to_string(), ns.to_string()));
             }
-            // The document's declared RDF/XML xmlns (carried through the pipeline
-            // via the OFN `#rdfxmlns` comment) contribute their prefixes too — e.g.
-            // `its`/`swrl`, which mondo declares but which the CURIE prefix map does
-            // not carry. Same builtin/PURL skips as above.
-            for (prefix, ns) in &model.rdf_prefixes {
-                if prefix.is_empty() || !crate::io::idspace_namespace(ns) {
-                    continue;
-                }
-                if v.iter().any(|(p, _)| p == prefix) {
-                    continue;
-                }
-                v.push((prefix.clone(), ns.clone()));
-            }
-            v
         };
+        if scanned && model.explicit_prefixes.is_empty() {
+            for (prefix, ns) in crate::io::declared_idspaces(model) {
+                keep(&prefix, &ns);
+            }
+        } else if model.obo_source && !scanned {
+            for (prefix, ns) in &model.explicit_prefixes {
+                keep(prefix, ns);
+            }
+        } else {
+            // A prefix the command line adds replaces the source's binding of
+            // its name. The source's own follow, every prefix name kept rather
+            // than one per namespace: its xmlns or `Prefix(…)` bindings when it
+            // has them (carried through a pipeline by the OFN `#rdfxmlns`
+            // comment), and otherwise the prefix map a pipeline built. A
+            // namespace nothing bound has no prefix to shorten with.
+            for (prefix, ns) in &model.explicit_prefixes {
+                keep(prefix, ns);
+            }
+            if model.rdf_prefixes.is_empty() {
+                for (prefix, ns) in model.prefixes.mappings() {
+                    keep(prefix, ns);
+                }
+            } else {
+                for (prefix, ns) in &model.rdf_prefixes {
+                    keep(prefix, ns);
+                }
+            }
+        }
         // Sort by namespace length, longest first (so an IRI matches the most
         // specific namespace — `gwas_trait:` before `efo:`). For two prefixes that
         // share ONE namespace (aliases, e.g. `ICD11` and `icd11.foundation` for
@@ -3613,7 +3599,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             .map(|(p, _)| p.as_str())
             .chain(model.rdf_prefixes.iter().map(|(p, _)| p.as_str()))
             .collect();
-        // Prefixes from an `--add-prefixes` context: EVERY one gets an
+        // Every explicit prefix (`Model::explicit_prefixes`) gets an
         // `idspace:`, whether or not it shortens an id (so mondo's `ICD11`
         // appears with zero references).
         let explicit: std::collections::HashSet<&str> =

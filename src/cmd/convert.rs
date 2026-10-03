@@ -249,6 +249,16 @@ fn clean_options(spec: &str) -> CleanOptions {
 /// Apply `convert --clean-obo <spec>` to `model` (already known to be written as
 /// OBO).
 pub fn apply_clean_obo(model: &mut crate::model::Model, spec: &str) {
+    // A cleaned document declares an `idspace:` for every prefix the command
+    // line adds, used or not, and shortens ids with it. Uncleaned, it declares
+    // only the prefixes of its source.
+    for (name, ns) in model.added_prefixes.clone() {
+        let _ = model.prefixes.add_prefix(&name, &ns);
+        match model.explicit_prefixes.iter_mut().find(|(p, _)| *p == name) {
+            Some(slot) => slot.1 = ns,
+            None => model.explicit_prefixes.push((name, ns)),
+        }
+    }
     let o = clean_options(spec);
     // Supernumerary single-valued annotations go FIRST, and in particular before
     // the untranslatable drop. Which of a subject's two `rdfs:comment`s survives

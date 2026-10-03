@@ -156,12 +156,13 @@ pub struct Model {
     /// time (RDF/XML has no formal prefix map so it is scanned). Empty when the
     /// source is not an OWL document (an obo→obo trip keeps its own).
     pub idspaces: Vec<(String, String)>,
-    /// Prefixes loaded from an `--add-prefixes` context file.
-    /// Unlike the built-in/default prefix map, EVERY explicitly-provided prefix gets
-    /// an `idspace:` line when writing OBO — regardless of whether it is used to
-    /// shorten an id — so mondo's `config/prefixes.jsonld` yields e.g.
-    /// `idspace: ICD11` even with zero ICD11 references. Recorded separately so the
-    /// OBO writer can tell them from the default map.
+    /// Prefixes an OBO rendering declares with an `idspace:` line whether or
+    /// not an id is shortened with them: an OBO source's own `idspace:` lines,
+    /// the prefixes the command line adds to a cleaned OBO write
+    /// (`convert --clean-obo`), and a build's `convert --add-prefixes` context,
+    /// so mondo's `config/prefixes.jsonld` yields `idspace: ICD11` even with
+    /// zero ICD11 references. Recorded apart from the CURIE map, which also
+    /// binds prefixes no document declared.
     pub explicit_prefixes: Vec<(String, String)>,
     /// Every `xmlns:PREFIX="NS"` declaration from an RDF/XML source, in document
     /// order, including built-in prefixes (owl, rdf, rdfs, xsd, xml, obo, …) that
