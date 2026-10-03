@@ -1393,6 +1393,86 @@ pub(crate) fn anon_individual_order(
     kept.into_iter().map(|b| &b.text).collect()
 }
 
+/// How many blank nodes an RDF/XML document has: the distinct nodes its
+/// triples name.
+fn document_blank_nodes(buf: &[u8], lax: bool) -> Result<usize> {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::model::{NamedOrBlankNode, Term};
+    let parser = RdfParser::from_format(RdfFormat::RdfXml);
+    let parser = if lax { parser.lenient() } else { parser };
+    let mut nodes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for quad in parser.for_slice(buf) {
+        let quad = quad.map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
+        if let NamedOrBlankNode::BlankNode(n) = &quad.subject {
+            nodes.insert(n.as_str().to_string());
+        }
+        if let Term::BlankNode(n) = &quad.object {
+            nodes.insert(n.as_str().to_string());
+        }
+    }
+    Ok(nodes.len())
+}
+
+/// The anonymous individuals of `ont`, by the number their `genid` id carries,
+/// or `None` when one carries another kind of id.
+pub(crate) fn numbered_individuals(ont: &Onto) -> Option<Vec<(u64, String)>> {
+    use horned_owl::model::{AnonymousIndividual, RcStr};
+    use horned_owl::visitor::immutable::{Visit, Walk};
+
+    struct Ids(std::collections::BTreeSet<String>);
+    impl Visit<RcStr> for Ids {
+        fn visit_anonymous_individual(&mut self, a: &AnonymousIndividual<RcStr>) {
+            self.0.insert(a.0.to_string());
+        }
+    }
+    let mut walk = Walk::new(Ids(std::collections::BTreeSet::new()));
+    for ac in ont.iter() {
+        walk.annotated_component(ac);
+    }
+    let mut ids: Vec<(u64, String)> = Vec::new();
+    for label in walk.into_visit().0 {
+        let n: u64 = label.strip_prefix("genid")?.parse().ok()?;
+        ids.push((n, label));
+    }
+    ids.sort();
+    Some(ids)
+}
+
+/// Number the anonymous individuals `ids` (from [`numbered_individuals`])
+/// `genid<first>` onwards, one id each, in the order of the numbers they carry,
+/// and return the id after the last.
+pub(crate) fn renumber_individuals(ont: &mut Onto, ids: Vec<(u64, String)>, first: u64) -> u64 {
+    use horned_owl::model::{AnonymousIndividual, MutableOntology, RcStr};
+    use horned_owl::visitor::mutable::{VisitMut, WalkMut};
+
+    let next = first + ids.len() as u64;
+    let renamed: std::collections::HashMap<String, RcStr> = ids
+        .into_iter()
+        .enumerate()
+        .filter(|(k, (n, _))| *n != first + *k as u64)
+        .map(|(k, (_, label))| (label, RcStr::from(format!("genid{}", first + k as u64))))
+        .collect();
+    if renamed.is_empty() {
+        return next;
+    }
+    struct Rename(std::collections::HashMap<String, RcStr>);
+    impl VisitMut<RcStr> for Rename {
+        fn visit_anonymous_individual(&mut self, a: &mut AnonymousIndividual<RcStr>) {
+            if let Some(to) = self.0.get(&*a.0) {
+                a.0 = to.clone();
+            }
+        }
+    }
+    let mut rename = WalkMut::new(Rename(renamed));
+    let mut out: Onto = horned_owl::ontology::set::SetOntology::new();
+    for mut ac in std::mem::take(ont) {
+        rename.annotated_component(&mut ac);
+        out.insert(ac);
+    }
+    *ont = out;
+    next
+}
+
 /// An `owl:versionIRI` statement about the ontology is its version IRI wherever
 /// the document makes it. The parse takes one stated before the ontology's
 /// `rdf:type owl:Ontology` for an ontology annotation, and declares
@@ -1987,20 +2067,35 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // merged in one step keep their nodes apart. The counter comes back
             // out where the parse left it.
             let b = horned_owl::model::Build::new_rc();
-            b.set_bnode_base(anon_counter() as i64);
+            let base = anon_counter();
+            b.set_bnode_base(base as i64);
             // The RDF reader takes its `Build` inside the configuration, and this
             // parse must share `b` so the counter can be read back afterwards.
             let mut rdf_cfg = ParserConfiguration::new(&b);
             rdf_cfg.lax = lax;
-            let (rdfo, _incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
+            let (rdfo, incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
                 horned_owl::io::rdf::reader::read(&mut buf.as_slice(), rdf_cfg.into())
                     .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
-            if let Some(n) = b.bnode_base() {
-                set_anon_counter(n as u64);
-            }
             // Move components out of the parser's Rc set rather than deep-cloning
             // every one (the naive From<ConcreteRDFOntology>).
             let mut ont: Onto = rdfo.into_set_ontology_fast();
+            let mut after = b.bnode_base().map(|n| n as u64);
+            // The parse takes an id for every blank node it tries as an
+            // individual, and the nodes a rule is made of, or triples it cannot
+            // read, are tried and rejected first. Where either is present the
+            // individuals are numbered again, after the document's own nodes.
+            let has_rule = ont.iter().any(|ac| matches!(ac.component, horned_owl::model::Component::Rule(_)));
+            if has_rule || !incomplete.is_complete() {
+                if let Some(ids) = numbered_individuals(&ont).filter(|ids| !ids.is_empty()) {
+                    let first = base + document_blank_nodes(&buf, lax)? as u64;
+                    if ids[0].0 >= first {
+                        after = Some(renumber_individuals(&mut ont, ids, first));
+                    }
+                }
+            }
+            if let Some(n) = after {
+                set_anon_counter(n);
+            }
             version_iri_statement(&mut ont);
             let mut model = Model::from_parts(ont, crate::model::default_prefixes());
             model.idspaces = idspaces;

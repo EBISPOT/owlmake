@@ -64,7 +64,15 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
     store
         .dump_graph_to_writer(GraphNameRef::DefaultGraph, RdfFormat::RdfXml, &mut rdf)
         .map_err(|e| anyhow!("re-serializing as RDF/XML: {e}"))?;
+    let base = crate::io::anon_counter();
     let mut model = crate::io::load_from(std::io::Cursor::new(rdf), Format::RdfXml)?;
+    // A Turtle document's blank nodes take no ids of their own: its anonymous
+    // individuals are numbered from where the count stood, in the order the
+    // parse met them, and the count goes on after them.
+    if let Some(ids) = crate::io::numbered_individuals(&model.ont) {
+        let next = crate::io::renumber_individuals(&mut model.ont, ids, base);
+        crate::io::set_anon_counter(next);
+    }
     // That RDF/XML is oxigraph's own re-serialisation, not a source document, so its
     // xmlns block is oxigraph's invention — `oxrdfxml`'s writer unconditionally
     // declares `xmlns:its="http://www.w3.org/2005/11/its"` (for RDF 1.2 base

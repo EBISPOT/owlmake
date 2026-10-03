@@ -311,3 +311,25 @@ fn a_version_iri_stated_before_the_ontology_type_is_the_version_iri() {
     let text = String::from_utf8(ofn).unwrap();
     assert!(!text.contains("owl:versionIRI"), "{text}");
 }
+
+/// An anonymous individual is numbered after the blank nodes an RDF/XML
+/// document holds — `swrl_individual` has six, so its one individual is
+/// `_:genid2147483654` — however many nodes the read tries as individuals and
+/// rejects (here the rule and its atoms). A Turtle document's blank nodes take
+/// no ids, so the same individual read from Turtle is `_:genid2147483648`.
+#[test]
+fn anonymous_individuals_are_numbered_after_the_documents_own_blank_nodes() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    for (path, label) in [
+        ("tests/corpus/owl-rdf/swrl_individual.owl", "_:genid2147483654"),
+        ("tests/corpus/owl-ttl/swrl_individual.ttl", "_:genid2147483648"),
+    ] {
+        io::reset_anon_counter();
+        let m = io::load(std::path::Path::new(path)).unwrap();
+        let mut ofn = Vec::new();
+        io::write_to_ref(&m, &mut ofn, Format::Functional).unwrap();
+        let text = String::from_utf8(ofn).unwrap();
+        assert!(text.contains(label), "{path}:\n{text}");
+        assert_eq!(text.matches("_:genid").count(), text.matches(label).count(), "{path}:\n{text}");
+    }
+}
