@@ -3953,3 +3953,31 @@ SELECT DISTINCT ?xref WHERE {
 \"R:D1\"
 ");
 }
+
+/// `reason` lists unsatisfiable classes in the order the reasoner's bottom node
+/// iterates them. The node is a concurrent hash table keyed on each IRI's string
+/// hash and filled in the order the classes were queued, and the listing copies
+/// it through three hash sets of classes. `bottom-order.ofn` has 263
+/// unsatisfiable classes, 159 of them in groups that collide in both tables, so
+/// the listing turns on the queue order and on how the table's doublings
+/// reorder its chains. The expected listing is ROBOT 1.9.10's (ODK v1.6.1) on
+/// one CPU, the same three times over.
+#[test]
+fn reason_lists_unsatisfiable_classes_in_bottom_node_order() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/elk-order");
+    let run = bin()
+        .args(["reason", "-r", "ELK", "-i"])
+        .arg(fixtures.join("bottom-order.ofn"))
+        .output()
+        .unwrap();
+    assert!(!run.status.success());
+    let listed = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter_map(|l| l.split_once("unsatisfiable: ").map(|(_, iri)| iri.trim().to_string()))
+            .collect()
+    };
+    let ours = listed(&String::from_utf8_lossy(&run.stdout));
+    let robot = listed(&std::fs::read_to_string(fixtures.join("bottom-order.robot.txt")).unwrap());
+    assert_eq!(robot.len(), 263);
+    assert_eq!(ours, robot);
+}

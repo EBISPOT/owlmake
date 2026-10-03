@@ -13,6 +13,7 @@
 // browser, alongside the built-in EL engine.
 pub mod dl;
 pub mod el;
+pub mod elk_order;
 pub mod entail;
 pub mod whelk;
 pub mod whelk_order;
