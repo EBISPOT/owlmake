@@ -1058,7 +1058,7 @@ pub(crate) fn span_gaps_shared(
             .into_iter()
             .enumerate()
             .map(|(ins, it)| {
-                let h = crate::io::obo::owlapi_ce_hash(&it.0);
+                let h = crate::owlapi_hash::ce_hash(&it.0);
                 let spread = (h ^ ((h as u32) >> 16) as i32) as usize;
                 (spread & (cap - 1), ins, it)
             })

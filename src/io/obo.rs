@@ -5353,92 +5353,6 @@ pub(crate) fn owlapi_set_cap(n: usize) -> usize {
     cap
 }
 
-/// The hash of a class expression: each expression type is seeded with its own
-/// prime and folds `hash = 31*hash + component`.
-/// A named class is `2293*31 + IRI`; a some/all restriction adds property
-/// then filler; a conjunction adds its operands' list hash, taken over the operands
-/// in canonical order.
-/// Only the expression shapes OBO produces (is_a/relationship/GCI heads) are
-/// covered; anything else returns 0, which is harmless — it only feeds a
-/// tie-break between clauses of otherwise identical value.
-pub(crate) fn owlapi_ce_hash(ce: &CE<RcStr>) -> i32 {
-    let ope_iri = |ope: &OPE<RcStr>| match ope {
-        OPE::ObjectProperty(r) => r.0.as_ref().to_string(),
-        OPE::InverseObjectProperty(r) => r.0.as_ref().to_string(),
-    };
-    match ce {
-        CE::Class(c) => (2293i32.wrapping_mul(31)).wrapping_add(owlapi_iri_hash(c.0.as_ref())),
-        CE::ObjectSomeValuesFrom { ope, bce } => {
-            let mut h: i32 = 3517;
-            h = h.wrapping_mul(31).wrapping_add(
-                4153i32.wrapping_mul(31).wrapping_add(owlapi_iri_hash(&ope_iri(ope))),
-            );
-            h.wrapping_mul(31).wrapping_add(owlapi_ce_hash(bce))
-        }
-        CE::ObjectAllValuesFrom { ope, bce } => {
-            let mut h: i32 = 2833;
-            h = h.wrapping_mul(31).wrapping_add(
-                4153i32.wrapping_mul(31).wrapping_add(owlapi_iri_hash(&ope_iri(ope))),
-            );
-            h.wrapping_mul(31).wrapping_add(owlapi_ce_hash(bce))
-        }
-        CE::ObjectIntersectionOf(parts) => {
-            let mut ops: Vec<&CE<RcStr>> = parts.iter().collect();
-            ops.sort_by(|a, b| owlapi_ce_sort_key(a).cmp(&owlapi_ce_sort_key(b)));
-            let mut acc: i32 = 1;
-            for o in ops {
-                acc = acc.wrapping_mul(31).wrapping_add(owlapi_ce_hash(o));
-            }
-            3083i32.wrapping_mul(31).wrapping_add(acc)
-        }
-        // Cardinality restrictions fold property, then the bound, then filler
-        // (seeds: exact 3001, max 3187, min 3259).
-        CE::ObjectExactCardinality { n, ope, bce } => owlapi_card_hash(3001, *n, ope, bce),
-        CE::ObjectMaxCardinality { n, ope, bce } => owlapi_card_hash(3187, *n, ope, bce),
-        CE::ObjectMinCardinality { n, ope, bce } => owlapi_card_hash(3259, *n, ope, bce),
-        // A union folds like an intersection, under its own seed. Returning 0 for it
-        // instead puts every axiom whose definition mentions a union into the same
-        // hash bucket, which duplicates EFO's `intersection_of:` genus lines onto
-        // the wrong five classes.
-        CE::ObjectUnionOf(parts) => {
-            let mut ops: Vec<&CE<RcStr>> = parts.iter().collect();
-            ops.sort_by(|a, b| owlapi_ce_sort_key(a).cmp(&owlapi_ce_sort_key(b)));
-            let mut acc: i32 = 1;
-            for o in ops {
-                acc = acc.wrapping_mul(31).wrapping_add(owlapi_ce_hash(o));
-            }
-            3581i32.wrapping_mul(31).wrapping_add(acc)
-        }
-        CE::ObjectComplementOf(b) => {
-            2909i32.wrapping_mul(31).wrapping_add(owlapi_ce_hash(b))
-        }
-        CE::ObjectHasSelf(ope) => 3433i32
-            .wrapping_mul(31)
-            .wrapping_add(4153i32.wrapping_mul(31).wrapping_add(owlapi_iri_hash(&ope_iri(ope)))),
-        _ => 0,
-    }
-}
-
-/// The hash of an object cardinality restriction: `seed`, then
-/// `31*hash + {property, cardinality, filler}` in that order.
-fn owlapi_card_hash(seed: i32, n: u32, ope: &OPE<RcStr>, bce: &CE<RcStr>) -> i32 {
-    let prop_iri = match ope {
-        OPE::ObjectProperty(r) => r.0.as_ref().to_string(),
-        OPE::InverseObjectProperty(r) => r.0.as_ref().to_string(),
-    };
-    let mut h: i32 = seed;
-    h = h
-        .wrapping_mul(31)
-        .wrapping_add(4153i32.wrapping_mul(31).wrapping_add(owlapi_iri_hash(&prop_iri)));
-    h = h.wrapping_mul(31).wrapping_add(n as i32);
-    h.wrapping_mul(31).wrapping_add(owlapi_ce_hash(bce))
-}
-
-/// The hash of a SubClassOf axiom: seed 2063, then
-/// `31*hash + component` over subclass, superclass, and the annotation-collection
-/// hash. Each axiom type is processed as one table, so a subject's
-/// `is_a:`/`relationship:` clauses left tied by the value comparison come out in
-/// this hash's bucket order within that global set (see [`owlapi_aa_bucket`]).
 /// The hash of an EquivalentClasses axiom: seed 811, then the class expressions,
 /// then the axiom annotations. The members hash as a LIST — `acc = 31*acc + member`
 /// over them in canonical order — not as a set sum.
@@ -5446,17 +5360,16 @@ pub(crate) fn owlapi_equivalent_classes_hash(
     members: &[CE<RcStr>],
     anns: &BTreeSet<Annotation<RcStr>>,
 ) -> i32 {
-    let mut sorted: Vec<&CE<RcStr>> = members.iter().collect();
-    sorted.sort_by(|a, b| owlapi_ce_sort_key(a).cmp(&owlapi_ce_sort_key(b)));
-    let mut acc: i32 = 1;
-    for m in sorted {
-        acc = acc.wrapping_mul(31).wrapping_add(owlapi_ce_hash(m));
-    }
     let mut h: i32 = 811;
-    h = h.wrapping_mul(31).wrapping_add(acc);
+    h = h.wrapping_mul(31).wrapping_add(crate::owlapi_hash::ce_set_hash(members));
     h.wrapping_mul(31).wrapping_add(owlapi_aa_collection_hash(&Ctx::default(), anns))
 }
 
+/// The hash of a SubClassOf axiom: seed 2063, then
+/// `31*hash + component` over subclass, superclass, and the annotation-collection
+/// hash. Each axiom type is processed as one table, so a subject's
+/// `is_a:`/`relationship:` clauses left tied by the value comparison come out in
+/// this hash's bucket order within that global set (see [`owlapi_aa_bucket`]).
 fn owlapi_subclassof_hash(
     ctx: &Ctx,
     sub: &CE<RcStr>,
@@ -5464,8 +5377,8 @@ fn owlapi_subclassof_hash(
     anns: &BTreeSet<Annotation<RcStr>>,
 ) -> i32 {
     let mut h: i32 = 2063;
-    h = h.wrapping_mul(31).wrapping_add(owlapi_ce_hash(sub));
-    h = h.wrapping_mul(31).wrapping_add(owlapi_ce_hash(sup));
+    h = h.wrapping_mul(31).wrapping_add(crate::owlapi_hash::ce_hash(sub));
+    h = h.wrapping_mul(31).wrapping_add(crate::owlapi_hash::ce_hash(sup));
     h.wrapping_mul(31)
         .wrapping_add(owlapi_aa_collection_hash(ctx, anns))
 }

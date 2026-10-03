@@ -274,6 +274,13 @@ fn ind_hash(i: &Individual<RcStr>) -> i32 {
     }
 }
 
+/// The hash of a set of class expressions as OWLAPI stores one: the list hash
+/// of its distinct members in `owl_cmp` order.
+pub fn ce_set_hash(v: &[CE<RcStr>]) -> i32 {
+    let hs: Vec<i32> = sorted_distinct(v).iter().map(|c| ce_hash(c)).collect();
+    list_hash(&hs)
+}
+
 pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
     match ce {
         CE::Class(c) => tag(P_CLASS, &[iri_hash(c.0.as_ref())]),
@@ -283,14 +290,8 @@ pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
         CE::ObjectAllValuesFrom { ope, bce } => {
             tag(P_OBJ_ALL_VALUES, &[ope_hash(ope), ce_hash(bce)])
         }
-        CE::ObjectIntersectionOf(v) => {
-            let hs: Vec<i32> = sorted_distinct(v).iter().map(|c| ce_hash(c)).collect();
-            tag(P_OBJ_INTERSECTION, &[list_hash(&hs)])
-        }
-        CE::ObjectUnionOf(v) => {
-            let hs: Vec<i32> = sorted_distinct(v).iter().map(|c| ce_hash(c)).collect();
-            tag(P_OBJ_UNION, &[list_hash(&hs)])
-        }
+        CE::ObjectIntersectionOf(v) => tag(P_OBJ_INTERSECTION, &[ce_set_hash(v)]),
+        CE::ObjectUnionOf(v) => tag(P_OBJ_UNION, &[ce_set_hash(v)]),
         CE::ObjectComplementOf(b) => tag(P_OBJ_COMPLEMENT, &[ce_hash(b)]),
         CE::ObjectExactCardinality { n, ope, bce } => {
             tag(P_OBJ_EXACT_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce)])
@@ -613,7 +614,6 @@ pub fn equivalent_classes_hash(
     members: &[CE<RcStr>],
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
 ) -> i32 {
-    let member_hashes: Vec<i32> = sorted_distinct(members).iter().map(|c| ce_hash(c)).collect();
     let ann_hash = if anns.is_empty() {
         0
     } else {
@@ -622,7 +622,7 @@ pub fn equivalent_classes_hash(
         let hs: Vec<i32> = sorted.iter().map(|a| annotation_hash(a)).collect();
         list_hash(&hs)
     };
-    tag(P_EQUIVALENT_CLASSES, &[list_hash(&member_hashes), ann_hash])
+    tag(P_EQUIVALENT_CLASSES, &[ce_set_hash(members), ann_hash])
 }
 
 /// The hash of a named individual.
