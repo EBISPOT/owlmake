@@ -3954,17 +3954,19 @@ fn the_annotations_of_an_assertion_on_an_inverse_are_stated() {
         let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
         assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{}", String::from_utf8_lossy(&text));
         // Read back, the document holds the assertions, stated of the named
-        // properties, and the class assertion.
+        // properties, and the class assertion. RDF/XML declares the document's
+        // namespace under a prefix of its own, `w`, which the read-back takes.
         let back = tmp(&format!("inverse-assertion-{ext}.ofn"));
         let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
         assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
         let read = std::fs::read_to_string(&back).unwrap();
+        let w = if ext == "owl" { "w:" } else { ":" };
         for axiom in [
-            "ObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nn\") rdfs:comment \"ann\") :p :j :i)",
-            "ObjectPropertyAssertion(Annotation(rdfs:seeAlso _:genid",
-            "ClassAssertion(:A _:genid",
+            format!("ObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nn\") rdfs:comment \"ann\") {w}p {w}j {w}i)"),
+            "ObjectPropertyAssertion(Annotation(rdfs:seeAlso _:genid".to_string(),
+            format!("ClassAssertion({w}A _:genid"),
         ] {
-            assert!(read.contains(axiom), "{ext}: {axiom}\n{read}");
+            assert!(read.contains(axiom.as_str()), "{ext}: {axiom}\n{read}");
         }
         let _ = std::fs::remove_file(&back);
         let _ = std::fs::remove_file(&out);
@@ -4007,6 +4009,18 @@ fn an_annotated_chain_under_an_inverse_is_stated() {
         let _ = std::fs::remove_file(&out);
     }
     let _ = std::fs::remove_file(&src);
+}
+
+/// A namespace the document binds only to the empty prefix is declared under a
+/// prefix of its own too, when a property in it is written as an element — an
+/// object, a data or an annotation property — as ROBOT 1.9.11 writes
+/// `rdf-generated-prefix`.
+#[test]
+fn a_property_namespace_bound_to_the_empty_prefix_gets_a_prefix_of_its_own() {
+    assert_eq!(
+        convert_fixture("rdf-generated-prefix.ofn", "generated-prefix.owl", &[]),
+        fixture_text("rdf-generated-prefix.owl")
+    );
 }
 
 /// An equivalence, inverse or disjointness between a named property and an

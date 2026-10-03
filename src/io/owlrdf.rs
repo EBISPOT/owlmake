@@ -1248,18 +1248,10 @@ const RDF_PLAIN_LITERAL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Plai
 /// `Model::closure_ann_ns`) live only in the bytes on disk and every downstream
 /// artefact drops them.
 pub fn document_prefixes(model: &Model) -> Vec<(String, String)> {
-    let hdr_iri: String = model
-        .ont
-        .iter()
-        .find_map(|ac| match &ac.component {
-            Component::OntologyID(id) => id.iri.as_ref().map(|i| i.as_ref().to_string()),
-            _ => None,
-        })
-        .unwrap_or_default();
-    owlapi_prefixes(model, &hdr_iri)
+    owlapi_prefixes(model)
 }
 
-fn owlapi_prefixes(model: &Model, ont_iri: &str) -> Vec<(String, String)> {
+fn owlapi_prefixes(model: &Model) -> Vec<(String, String)> {
     // namespace -> prefix, seeded with the built-in bindings.
     let mut ns2p: BTreeMap<String, String> = BTreeMap::new();
     for (p, ns) in [
@@ -1379,7 +1371,6 @@ fn owlapi_prefixes(model: &Model, ont_iri: &str) -> Vec<(String, String)> {
     const PRIME_DATA_PROPERTY: u32 = 4073;
     const PRIME_OBJECT_PROPERTY: u32 = 4153;
     const PRIME_ANNOTATION_PROPERTY: u32 = 6067;
-    let default_ns = format!("{ont_iri}#");
     let mut sig_ns: BTreeSet<String> = BTreeSet::new();
     // …and the ENTITIES behind them, because the order they are visited decides
     // which namespace keeps the bare prefix. The entity set is walked in hash-
@@ -1489,10 +1480,12 @@ fn owlapi_prefixes(model: &Model, ont_iri: &str) -> Vec<(String, String)> {
         }
         out
     };
-    // One counter shared across every generated prefix, not one per base.
+    // One counter shared across every generated prefix, not one per base. A
+    // namespace bound only to the empty prefix — the document's default one
+    // included — gets a prefix of its own like any other.
     let mut candidate_index = 1u32;
     for ns in &ordered_ns {
-        if ns == &default_ns || ns.is_empty() || declared_ns.contains(ns) {
+        if ns.is_empty() || declared_ns.contains(ns) {
             continue;
         }
         // The prefix for this namespace: its registered name, or `generate_prefix`
@@ -3952,7 +3945,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             _ => None,
         })
         .unwrap_or_default();
-    let mut prefixes = owlapi_prefixes(model, &hdr_iri);
+    let mut prefixes = owlapi_prefixes(model);
     // The document namespace is also the DEFAULT one — `xmlns="<ontology IRI>#"`
     // in the header — so an element in it is written unprefixed even where the
     // same namespace also has a named prefix. Binding it first is what makes

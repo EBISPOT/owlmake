@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/anon#>)
+Ontology(<http://example.org/anon>
+Declaration(ObjectProperty(:p))
+Declaration(DataProperty(:d))
+Declaration(AnnotationProperty(:a))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+ObjectPropertyAssertion(:p :i :j)
+DataPropertyAssertion(:d :i "x")
+AnnotationAssertion(:a :i "y")
+)
