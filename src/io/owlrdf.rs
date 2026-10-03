@@ -125,9 +125,7 @@ fn render_ann(prop_iri: &str, av: &AnnotationValue<RcStr>, prefixes: &[(String, 
         // is rendered where that node belongs. An SSSOM mapping set in RDF is
         // made of these — its `sssom:mappings` values are the reification nodes
         // of its 51,582 mappings, each rendered again as its own `Axiom` block.
-        AnnotationValue::AnonymousIndividual(_) => {
-            format!("        <{q}>\n            <rdf:Description/>\n        </{q}>\n")
-        }
+        AnnotationValue::AnonymousIndividual(a) => anon_slot(&q, a.0.as_ref(), "        "),
     }
 }
 
@@ -433,6 +431,763 @@ fn anonymous_object(id: &str, pad: &str) -> String {
     } else {
         format!("{pad}<rdf:Description/>\n")
     }
+}
+
+// === Anonymous individuals ===============================================
+//
+// An anonymous individual's statements are made in the graph that first
+// reaches it: the graph of the entity whose statement names it as an object,
+// of the general axiom whose class expression holds it, of the ontology whose
+// annotation it is, or, when every statement naming it is about it, a graph of
+// its own in the anonymous section. In that graph each statement it is the
+// subject of is nested in its node, and each reification or negative
+// assertion about it is a root; in every other graph its node is empty.
+//
+// Where it is an object it is nested, unless the document names it twice or
+// more, or the graph names it as the object of two statements. Then it is
+// written by id and defined once in the document: after the first block of
+// the first graph to name it by id, with what that graph states about it.
+
+/// Opens a placeholder line for an anonymous individual in object position,
+/// `{indent}\u{E000}{property}\u{E001}{individual}\n`, the property empty for a
+/// member of a collection and [`ANON_ROOT`] for a root of its own.
+/// [`resolve_anon`] writes it as the graph being written states it.
+const ANON_SLOT: char = '\u{E000}';
+const ANON_SEP: char = '\u{E001}';
+/// A line `\u{E002}{node}\n` gives the block after it the node it is, which
+/// orders it among the roots of its graph (see [`keyed_blocks`]).
+const ROOT_KEY: char = '\u{E002}';
+/// The property of a placeholder for an individual written as a root.
+const ANON_ROOT: &str = "\u{E003}";
+
+thread_local! {
+    /// The anonymous individuals of the document being written from its model.
+    static ANON_DOC: std::cell::RefCell<Option<AnonDoc>> = const { std::cell::RefCell::new(None) };
+}
+
+/// One statement an anonymous individual is the subject of: a property element
+/// at the indent of a top-level block's body, or the type the node's element is
+/// named after.
+#[derive(Clone)]
+enum AnonEdge {
+    Element(String),
+    Property(String),
+}
+
+/// What the document states about its anonymous individuals, graph by graph.
+#[derive(Default)]
+struct AnonDoc {
+    /// Each individual's node.
+    ids: HashMap<String, u64>,
+    /// `genid{node}` of each individual, to the individual.
+    by_gid: HashMap<String, String>,
+    /// The individuals the document names twice or more.
+    repeated: HashSet<String>,
+    /// For a graph and an individual, how many of the graph's statements have
+    /// it as their object.
+    objects: HashMap<(String, String), u32>,
+    /// For a graph and an individual, the statements of the graph about it, in
+    /// the order they are made.
+    edges: HashMap<(String, String), Vec<AnonEdge>>,
+    /// For a graph, the roots its anonymous individuals add to it, by node.
+    roots: HashMap<String, Vec<(u64, String)>>,
+    /// For a graph, the definitions of the class expressions its anonymous
+    /// individuals name by id.
+    defs: HashMap<String, Vec<(String, String)>>,
+    /// The individuals whose definition has been written.
+    written: HashSet<String>,
+    /// The class expressions of `defs` whose definition has been written.
+    written_defs: HashSet<String>,
+}
+
+/// Whether the document being written states its anonymous individuals from
+/// its model.
+fn anon_doc_active() -> bool {
+    ANON_DOC.with(|d| d.borrow().is_some())
+}
+
+/// The anonymous individual `x` as the object of the property element `q`
+/// at `pad`.
+fn anon_slot(q: &str, x: &str, pad: &str) -> String {
+    if anon_doc_active() {
+        format!("{pad}{ANON_SLOT}{q}{ANON_SEP}{x}\n")
+    } else {
+        format!("{pad}<{q}>\n{pad}    <rdf:Description/>\n{pad}</{q}>\n")
+    }
+}
+
+/// The anonymous individual `x` as a member of a collection at `pad`.
+fn anon_item(x: &str, pad: &str) -> String {
+    if anon_doc_active() {
+        format!("{pad}{ANON_SLOT}{ANON_SEP}{x}\n")
+    } else {
+        anonymous_object(x, pad)
+    }
+}
+
+/// An individual as the object of the property element `q` at `pad`.
+fn individual_slot(q: &str, i: &Individual<RcStr>, pad: &str) -> String {
+    match i {
+        Individual::Named(n) => format!("{pad}<{q} rdf:resource=\"{}\"/>\n", esc_attr(n.0.as_ref())),
+        Individual::Anonymous(a) => anon_slot(q, a.0.as_ref(), pad),
+    }
+}
+
+/// The node of the anonymous individual `x`, when the document is written
+/// from its model.
+fn anon_node(x: &str) -> Option<u64> {
+    ANON_DOC.with(|d| d.borrow().as_ref().and_then(|doc| doc.ids.get(x).copied()))
+}
+
+/// The roots the anonymous individuals add to `graph`, each after a line
+/// naming its node.
+fn anon_root_blocks(graph: &str) -> String {
+    ANON_DOC.with(|d| {
+        let d = d.borrow();
+        let Some(doc) = d.as_ref() else { return String::new() };
+        doc.roots
+            .get(graph)
+            .into_iter()
+            .flatten()
+            .map(|(node, block)| format!("{ROOT_KEY}{node}\n{block}"))
+            .collect()
+    })
+}
+
+/// `text`, top-level blocks of `graph`, with each anonymous individual written
+/// as `graph` states it, and each node named by id defined after the first
+/// block naming it, in the order they are named.
+fn resolve_anon(graph: &str, text: &str) -> String {
+    ANON_DOC.with(|d| match d.borrow_mut().as_mut() {
+        Some(doc) => doc.resolve(graph, text),
+        None => text.to_string(),
+    })
+}
+
+/// The id a top-level block's own element carries.
+fn opening_node_id(block: &str) -> Option<String> {
+    let line = block.lines().find(|l| l.starts_with("    <") && !l.starts_with("    <!--"))?;
+    let open = line.split_once('>').map_or(line, |(open, _)| open);
+    between(open, " rdf:nodeID=\"", "\"").map(str::to_string)
+}
+
+/// The nodes `block` names by id, in order, but its own element's.
+fn named_node_ids(block: &str) -> Vec<String> {
+    let own = opening_node_id(block);
+    let mut out = Vec::new();
+    let mut first_open = true;
+    for line in block.lines() {
+        if line.starts_with("    <") && !line.starts_with("    </") && !line.starts_with("    <!--") && first_open {
+            first_open = false;
+            if own.is_some() {
+                continue;
+            }
+        }
+        let mut rest = line;
+        while let Some(at) = rest.find("rdf:nodeID=\"") {
+            rest = &rest[at + "rdf:nodeID=\"".len()..];
+            let id = &rest[..rest.find('"').unwrap_or(0)];
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
+/// `text` split into its top-level blocks, each with the lines before it.
+fn top_level_blocks(text: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut block = String::new();
+    for line in text.split_inclusive('\n') {
+        block.push_str(line);
+        let top = line.starts_with("    <") && !line.starts_with("    <!--");
+        if top && (line.starts_with("    </") || line.trim_end().ends_with("/>")) {
+            blocks.push(std::mem::take(&mut block));
+        }
+    }
+    if !block.is_empty() {
+        blocks.push(block);
+    }
+    blocks
+}
+
+/// `text` with every line moved from an indent of 8 to one of `indent`.
+fn reindent(text: &str, indent: usize) -> String {
+    let pad = " ".repeat(indent);
+    text.split_inclusive('\n').map(|line| format!("{pad}{}", line.strip_prefix("        ").unwrap_or(line))).collect()
+}
+
+impl AnonDoc {
+    fn node_id(&self, x: &str) -> u64 {
+        self.ids.get(x).copied().unwrap_or(0)
+    }
+
+    /// Whether `graph` names `x` by id.
+    fn by_id(&self, graph: &str, x: &str) -> bool {
+        self.repeated.contains(x) || self.objects.get(&(graph.to_string(), x.to_string())).copied().unwrap_or(0) >= 2
+    }
+
+    fn edge(&mut self, graph: &str, x: &str, edge: AnonEdge) {
+        self.edges.entry((graph.to_string(), x.to_string())).or_default().push(edge);
+    }
+
+    fn root(&mut self, graph: &str, node: u64, block: String) {
+        self.roots.entry(graph.to_string()).or_default().push((node, block));
+    }
+
+    /// The node element of `x` at `pad`, with what `graph` states about it.
+    fn node(&self, graph: &str, x: &str, pad: &str, id: Option<u64>, open: &mut Vec<String>) -> String {
+        let edges = self.edges.get(&(graph.to_string(), x.to_string())).cloned().unwrap_or_default();
+        // The node's element is named after the last type it can be named after.
+        let named = edges.iter().rposition(|e| matches!(e, AnonEdge::Element(_)));
+        let mut element = "rdf:Description".to_string();
+        let mut body = String::new();
+        for (i, e) in edges.iter().enumerate() {
+            match e {
+                AnonEdge::Element(t) if Some(i) == named => element = t.clone(),
+                AnonEdge::Element(t) => {
+                    body.push_str(&format!("{pad}    <rdf:type rdf:resource=\"{}\"/>\n", esc_attr(&qname_iri(t))))
+                }
+                AnonEdge::Property(text) => body.push_str(&reindent(text, pad.len() + 4)),
+            }
+        }
+        open.push(x.to_string());
+        let body = self.expand(graph, &body, open);
+        open.pop();
+        let attr = id.map(|n| format!(" rdf:nodeID=\"genid{n}\"")).unwrap_or_default();
+        if body.is_empty() {
+            format!("{pad}<{element}{attr}/>\n")
+        } else {
+            format!("{pad}<{element}{attr}>\n{body}{pad}</{element}>\n")
+        }
+    }
+
+    /// `text` with each placeholder written.
+    fn expand(&self, graph: &str, text: &str, open: &mut Vec<String>) -> String {
+        if !text.contains(ANON_SLOT) {
+            return text.to_string();
+        }
+        let mut out = String::new();
+        for line in text.split_inclusive('\n') {
+            let Some(at) = line.find(ANON_SLOT) else {
+                out.push_str(line);
+                continue;
+            };
+            let pad = &line[..at];
+            let rest = line[at + ANON_SLOT.len_utf8()..].trim_end_matches('\n');
+            let (q, x) = rest.split_once(ANON_SEP).unwrap_or(("", rest));
+            let id = self.node_id(x);
+            if q == ANON_ROOT {
+                let id = self.repeated.contains(x).then_some(id);
+                out.push_str(&self.node(graph, x, pad, id, open));
+            } else if self.by_id(graph, x) || open.iter().any(|o| o == x) {
+                match q {
+                    "" => out.push_str(&format!("{pad}<rdf:Description rdf:nodeID=\"genid{id}\"/>\n")),
+                    q => out.push_str(&format!("{pad}<{q} rdf:nodeID=\"genid{id}\"/>\n")),
+                }
+            } else if q.is_empty() {
+                out.push_str(&self.node(graph, x, pad, None, open));
+            } else {
+                let node = self.node(graph, x, &format!("{pad}    "), None, open);
+                out.push_str(&format!("{pad}<{q}>\n{node}{pad}</{q}>\n"));
+            }
+        }
+        out
+    }
+
+    fn resolve(&mut self, graph: &str, text: &str) -> String {
+        let text = self.expand(graph, text, &mut Vec::new());
+        let blocks = top_level_blocks(&text);
+        let defined = |g: &String| self.by_gid.contains_key(g) || self.defs.get(graph).is_some_and(|d| d.iter().any(|(id, _)| id == g));
+        if !blocks.iter().any(|b| named_node_ids(b).iter().any(defined)) {
+            return text;
+        }
+        // The definitions already among the blocks, of nodes an earlier block
+        // names, move to where the queue puts them.
+        let mut named: HashSet<String> = HashSet::new();
+        let mut defs: HashMap<String, String> = HashMap::new();
+        let mut kept = Vec::new();
+        for b in blocks {
+            if let Some(g) = opening_node_id(&b).filter(|g| named.contains(g) && !self.by_gid.contains_key(g)) {
+                defs.insert(g, b);
+                continue;
+            }
+            named.extend(named_node_ids(&b));
+            kept.push(b);
+        }
+        let own: Vec<(String, String)> = self.defs.get(graph).cloned().unwrap_or_default();
+        let mut out = String::new();
+        let mut placed: HashSet<String> = HashSet::new();
+        for b in kept {
+            out.push_str(&b);
+            let mut queue: std::collections::VecDeque<String> = named_node_ids(&b).into();
+            while let Some(g) = queue.pop_front() {
+                let def = match self.by_gid.get(&g).cloned() {
+                    Some(x) => {
+                        if !self.written.insert(x.clone()) {
+                            continue;
+                        }
+                        let id = self.node_id(&x);
+                        self.node(graph, &x, "    ", Some(id), &mut Vec::new())
+                    }
+                    None => match (defs.get(&g), own.iter().find(|(id, _)| *id == g)) {
+                        (Some(d), _) if placed.insert(g.clone()) => d.clone(),
+                        (None, Some((_, d))) if self.written_defs.insert(g.clone()) => {
+                            self.expand(graph, d, &mut Vec::new())
+                        }
+                        _ => continue,
+                    },
+                };
+                queue.extend(named_node_ids(&def));
+                out.push_str(&def);
+            }
+        }
+        out
+    }
+}
+
+/// The anonymous individuals the document names twice or more: once for each
+/// end of an object property assertion, the object of a negative one, each
+/// member of a sameness or a difference, each individual in a class expression
+/// or a rule, and the value of an annotation assertion, of an ontology
+/// annotation or of an annotation's annotation; twice for the value of an
+/// axiom's own annotation. What a class, data or negative data assertion is
+/// about does not count, nor does an annotation assertion's subject.
+fn anonymous_multiples(model: &Model) -> HashSet<String> {
+    use horned_owl::model::{Atom, IArgument};
+    fn add(n: &mut HashMap<String, u32>, x: &str) {
+        *n.entry(x.to_string()).or_default() += 1;
+    }
+    fn ind(n: &mut HashMap<String, u32>, i: &Individual<RcStr>) {
+        if let Individual::Anonymous(a) = i {
+            add(n, a.0.as_ref());
+        }
+    }
+    fn ce(n: &mut HashMap<String, u32>, c: &CE<RcStr>) {
+        match c {
+            CE::ObjectHasValue { i, .. } => ind(n, i),
+            CE::ObjectOneOf(v) => v.iter().for_each(|i| ind(n, i)),
+            _ => crate::io::genid::sub_expressions(c).into_iter().for_each(|s| ce(n, s)),
+        }
+    }
+    fn value(n: &mut HashMap<String, u32>, av: &AnnotationValue<RcStr>) {
+        if let AnnotationValue::AnonymousIndividual(a) = av {
+            add(n, a.0.as_ref());
+        }
+    }
+    fn nested(n: &mut HashMap<String, u32>, anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>) {
+        for a in anns {
+            value(n, &a.av);
+            nested(n, &a.ann);
+        }
+    }
+    fn iarg(n: &mut HashMap<String, u32>, a: &IArgument<RcStr>) {
+        if let IArgument::Individual(i) = a {
+            ind(n, i);
+        }
+    }
+    let mut n: HashMap<String, u32> = HashMap::new();
+    for ac in model.ont.iter() {
+        if let Component::OntologyAnnotation(oa) = &ac.component {
+            value(&mut n, &oa.0.av);
+            continue;
+        }
+        for a in &ac.ann {
+            value(&mut n, &a.av);
+        }
+        nested(&mut n, &ac.ann);
+        match &ac.component {
+            Component::ClassAssertion(a) => ce(&mut n, &a.ce),
+            Component::ObjectPropertyAssertion(a) => {
+                ind(&mut n, &a.from);
+                ind(&mut n, &a.to);
+            }
+            Component::NegativeObjectPropertyAssertion(a) => ind(&mut n, &a.to),
+            Component::SameIndividual(a) => a.0.iter().for_each(|i| ind(&mut n, i)),
+            Component::DifferentIndividuals(a) => a.0.iter().for_each(|i| ind(&mut n, i)),
+            Component::AnnotationAssertion(a) => value(&mut n, &a.ann.av),
+            Component::SubClassOf(a) => {
+                ce(&mut n, &a.sub);
+                ce(&mut n, &a.sup);
+            }
+            Component::EquivalentClasses(a) => a.0.iter().for_each(|x| ce(&mut n, x)),
+            Component::DisjointClasses(a) => a.0.iter().for_each(|x| ce(&mut n, x)),
+            Component::DisjointUnion(a) => a.1.iter().for_each(|x| ce(&mut n, x)),
+            Component::ObjectPropertyDomain(a) => ce(&mut n, &a.ce),
+            Component::ObjectPropertyRange(a) => ce(&mut n, &a.ce),
+            Component::DataPropertyDomain(a) => ce(&mut n, &a.ce),
+            Component::HasKey(a) => ce(&mut n, &a.ce),
+            Component::Rule(r) => {
+                for atom in r.body.iter().chain(r.head.iter()) {
+                    match atom {
+                        Atom::ClassAtom { pred, arg } => {
+                            iarg(&mut n, arg);
+                            ce(&mut n, pred);
+                        }
+                        Atom::ObjectPropertyAtom { args, .. } => {
+                            iarg(&mut n, &args.0);
+                            iarg(&mut n, &args.1);
+                        }
+                        Atom::SameIndividualAtom(_, b) => iarg(&mut n, b),
+                        Atom::DifferentIndividualsAtom(a, _) => iarg(&mut n, a),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    n.into_iter().filter(|(_, c)| *c > 1).map(|(x, _)| x).collect()
+}
+
+/// An `<owl:Axiom>` block reifying the statement of `prop` from `source` to
+/// `target` (both complete property element lines), with `anns`.
+fn anon_reification(source: &str, prop: &str, target: &str, anns: &str) -> String {
+    format!(
+        "    <owl:Axiom>\n{source}        <owl:annotatedProperty rdf:resource=\"{}\"/>\n{target}{anns}    </owl:Axiom>\n",
+        esc_attr(prop)
+    )
+}
+
+/// The `owl:annotatedTarget` of a statement whose object is `i`: an
+/// anonymous individual by id.
+fn individual_target(i: &Individual<RcStr>) -> String {
+    match i {
+        Individual::Named(n) => format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(n.0.as_ref())),
+        Individual::Anonymous(a) => {
+            format!("        <owl:annotatedTarget rdf:nodeID=\"genid{}\"/>\n", anon_node(a.0.as_ref()).unwrap_or(0))
+        }
+    }
+}
+
+/// A negative assertion's node, `source` its source individual, `prop` its
+/// assertion property and `target` its target, each a complete line.
+fn negative_assertion(source: &str, prop: &str, target: &str, anns: &str) -> String {
+    format!("    <rdf:Description>\n        <rdf:type rdf:resource=\"{NEG_PA}\"/>\n{source}{prop}{target}{anns}    </rdf:Description>\n")
+}
+
+/// The `owl:assertionProperty` of a negative object property assertion.
+fn assertion_property(ope: &OPEx<RcStr>) -> String {
+    match ope {
+        OPEx::ObjectProperty(p) => {
+            format!("        <owl:assertionProperty rdf:resource=\"{}\"/>\n", esc_attr(p.0.as_ref()))
+        }
+        OPEx::InverseObjectProperty(p) => format!(
+            "        <owl:assertionProperty>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </owl:assertionProperty>\n",
+            esc_attr(p.0.as_ref())
+        ),
+    }
+}
+
+/// The statements about the anonymous individuals of `model`, graph by graph,
+/// from the numbering pass `g`. An axiom the layout cannot state that way is
+/// added to `left_out`.
+fn build_anon_doc<'m>(
+    model: &'m Model,
+    g: &crate::io::genid::Genids,
+    prefixes: &[(String, String)],
+    left_out: &mut Vec<&'m AnnotatedComponent<RcStr>>,
+) -> AnonDoc {
+    use crate::io::genid::{axiom_identity, names_anonymous, GENERAL_GRAPH, HEADER_GRAPH};
+    let mut doc = AnonDoc {
+        ids: g.anon_ids.clone(),
+        repeated: anonymous_multiples(model),
+        objects: g.anon_objects.clone(),
+        ..Default::default()
+    };
+    doc.by_gid = doc.ids.iter().map(|(x, n)| (format!("genid{n}"), x.clone())).collect();
+    let mut by_key: HashMap<u64, &AnnotatedComponent<RcStr>> = HashMap::new();
+    for ac in model.ont.iter() {
+        if names_anonymous(&ac.component) {
+            by_key.insert(axiom_identity(ac), ac);
+        }
+    }
+    // An axiom about an anonymous individual that no graph reaches is stated
+    // nowhere.
+    for key in g.unreached() {
+        if let Some(ac) = by_key.get(&key) {
+            left_out.push(ac);
+        }
+    }
+    let rdf_type = format!("{RDF_NS}type");
+    let mut graph_of: HashMap<u64, String> = HashMap::new();
+    for key in &g.anon_order {
+        let (Some(ac), Some(graph)) = (by_key.get(key).copied(), g.anon_home.get(key)) else { continue };
+        graph_of.insert(*key, graph.clone());
+        let nodes = g.anon_reif.get(key).cloned().unwrap_or_default();
+        let node = nodes.first().copied().unwrap_or(0);
+        let anns = node_annotations(ac, prefixes);
+        let annotated = !ac.ann.is_empty();
+        match &ac.component {
+            Component::ClassAssertion(ax) => {
+                let Individual::Anonymous(a) = &ax.i else { continue };
+                let x = a.0.as_ref();
+                // The target of an annotated assertion is named by id.
+                let target = match &ax.ce {
+                    CE::Class(c) if matches!(c.0.as_ref(), "http://www.w3.org/2002/07/owl#Thing" | "http://www.w3.org/2002/07/owl#Nothing") => {
+                        doc.edge(graph, x, AnonEdge::Element(qname(c.0.as_ref(), prefixes)));
+                        format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(c.0.as_ref()))
+                    }
+                    CE::Class(c) => {
+                        let edge = format!("        <rdf:type rdf:resource=\"{}\"/>\n", esc_attr(c.0.as_ref()));
+                        doc.edge(graph, x, AnonEdge::Property(edge));
+                        format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(c.0.as_ref()))
+                    }
+                    ce if !annotated => {
+                        let edge = format!("        <rdf:type>\n{}        </rdf:type>\n", render_ce(ce, 12, &Genids::new()));
+                        doc.edge(graph, x, AnonEdge::Property(edge));
+                        String::new()
+                    }
+                    ce => match g.anon_ce.get(key) {
+                        Some(id) => {
+                            let gid = format!("genid{id}");
+                            doc.edge(graph, x, AnonEdge::Property(format!("        <rdf:type rdf:nodeID=\"{gid}\"/>\n")));
+                            let def = inject_nodeid(&render_ce(ce, 4, &Genids::new()), &gid);
+                            doc.defs.entry(graph.clone()).or_default().push((gid.clone(), def));
+                            format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n")
+                        }
+                        None => {
+                            left_out.push(ac);
+                            continue;
+                        }
+                    },
+                };
+                if annotated {
+                    let block = anon_reification(&anon_slot("owl:annotatedSource", x, "        "), &rdf_type, &target, &anns);
+                    doc.root(graph, node, block);
+                }
+            }
+            Component::ObjectPropertyAssertion(ax) => {
+                let (OPEx::ObjectProperty(p), Individual::Anonymous(a)) = (&ax.ope, &ax.from) else {
+                    // On an inverse it is stated the other way round, without its
+                    // annotations: of a named individual in its own block, of an
+                    // anonymous one where it is.
+                    let OPEx::InverseObjectProperty(p) = &ax.ope else { continue };
+                    match &ax.to {
+                        _ if annotated => left_out.push(ac),
+                        Individual::Named(n) if n.0.as_ref() == graph => {}
+                        Individual::Named(_) => left_out.push(ac),
+                        Individual::Anonymous(y) => {
+                            let q = qname(p.0.as_ref(), prefixes);
+                            doc.edge(graph, y.0.as_ref(), AnonEdge::Property(individual_slot(&q, &ax.from, "        ")));
+                        }
+                    }
+                    continue;
+                };
+                let x = a.0.as_ref();
+                let q = qname(p.0.as_ref(), prefixes);
+                doc.edge(graph, x, AnonEdge::Property(individual_slot(&q, &ax.to, "        ")));
+                if annotated {
+                    let block = anon_reification(
+                        &anon_slot("owl:annotatedSource", x, "        "),
+                        p.0.as_ref(),
+                        &individual_target(&ax.to),
+                        &anns,
+                    );
+                    doc.root(graph, node, block);
+                }
+            }
+            Component::DataPropertyAssertion(ax) => {
+                let Individual::Anonymous(a) = &ax.from else { continue };
+                let x = a.0.as_ref();
+                let q = qname(ax.dp.0.as_ref(), prefixes);
+                doc.edge(graph, x, AnonEdge::Property(render_literal_tag(&q, &ax.to, 8)));
+                if annotated {
+                    let block = anon_reification(
+                        &anon_slot("owl:annotatedSource", x, "        "),
+                        ax.dp.0.as_ref(),
+                        &render_literal_tag("owl:annotatedTarget", &ax.to, 8),
+                        &anns,
+                    );
+                    doc.root(graph, node, block);
+                }
+            }
+            Component::NegativeObjectPropertyAssertion(ax) => {
+                let Individual::Anonymous(a) = &ax.from else { continue };
+                let block = negative_assertion(
+                    &anon_slot("owl:sourceIndividual", a.0.as_ref(), "        "),
+                    &assertion_property(&ax.ope),
+                    &individual_slot("owl:targetIndividual", &ax.to, "        "),
+                    &anns,
+                );
+                doc.root(graph, node, block);
+            }
+            Component::NegativeDataPropertyAssertion(ax) => {
+                let Individual::Anonymous(a) = &ax.from else { continue };
+                let block = negative_assertion(
+                    &anon_slot("owl:sourceIndividual", a.0.as_ref(), "        "),
+                    &format!("        <owl:assertionProperty rdf:resource=\"{}\"/>\n", esc_attr(ax.dp.0.as_ref())),
+                    &render_literal_tag("owl:targetValue", &ax.to, 8),
+                    &anns,
+                );
+                doc.root(graph, node, block);
+            }
+            Component::AnnotationAssertion(ax) => {
+                let horned_owl::model::AnnotationSubject::AnonymousIndividual(a) = &ax.subject else { continue };
+                let x = a.0.as_ref();
+                let p = ax.ann.ap.0.as_ref();
+                doc.edge(graph, x, AnonEdge::Property(render_ann(p, &ax.ann.av, prefixes)));
+                if annotated {
+                    let target = match &ax.ann.av {
+                        AnnotationValue::AnonymousIndividual(v) => {
+                            format!("        <owl:annotatedTarget rdf:nodeID=\"genid{}\"/>\n", doc.node_id(v.0.as_ref()))
+                        }
+                        av => render_target(av),
+                    };
+                    let block = anon_reification(&anon_slot("owl:annotatedSource", x, "        "), p, &target, &anns);
+                    doc.root(graph, node, block);
+                }
+            }
+            Component::SameIndividual(_) | Component::DifferentIndividuals(_) => {
+                let (members, pred, same) = match &ac.component {
+                    Component::SameIndividual(s) => (&s.0, "http://www.w3.org/2002/07/owl#sameAs", true),
+                    Component::DifferentIndividuals(d) => (&d.0, "http://www.w3.org/2002/07/owl#differentFrom", false),
+                    _ => unreachable!(),
+                };
+                if !same && members.len() > 2 {
+                    // An `owl:AllDifferent` node of the graph that reaches it: the
+                    // general axiom's own, or another's root.
+                    if *graph != format!("{GENERAL_GRAPH}{key}") {
+                        let named: Vec<String> = slot_members(members).into_iter().flatten().collect();
+                        doc.root(graph, node, render_all_different(&named, &anns));
+                    }
+                    continue;
+                }
+                let pairs = crate::io::genid::individual_pair_list(members, &ac.ann, same);
+                let host = members.iter().min_by(|a, b| crate::io::owlfunc::cmp_individual(a, b));
+                let q = qname(pred, prefixes);
+                for (i, (a, b)) in pairs.iter().enumerate() {
+                    match a {
+                        Individual::Anonymous(x) => {
+                            doc.edge(graph, x.0.as_ref(), AnonEdge::Property(individual_slot(&q, b, "        ")))
+                        }
+                        // A named member's pair is stated in the block of the
+                        // first member, or in a root block of that member's
+                        // graph: the axiom has to be in that graph.
+                        Individual::Named(_) => {
+                            let host_graph = match host {
+                                Some(Individual::Named(h)) => h.0.as_ref() == graph,
+                                _ => false,
+                            };
+                            if !host_graph {
+                                left_out.push(ac);
+                            }
+                        }
+                    }
+                    if annotated {
+                        let source = match a {
+                            Individual::Anonymous(x) => anon_slot("owl:annotatedSource", x.0.as_ref(), "        "),
+                            Individual::Named(n) => {
+                                format!("        <owl:annotatedSource rdf:resource=\"{}\"/>\n", esc_attr(n.0.as_ref()))
+                            }
+                        };
+                        let block = anon_reification(&source, pred, &individual_target(b), &anns);
+                        doc.root(graph, nodes.get(i).copied().unwrap_or(0), block);
+                    }
+                }
+            }
+            _ => {}
+        }
+        // The ontology's graph writes its own node and those annotating it.
+        if graph == HEADER_GRAPH && doc.roots.contains_key(HEADER_GRAPH) {
+            left_out.push(ac);
+            doc.roots.remove(HEADER_GRAPH);
+        }
+    }
+    // The axioms naming an anonymous individual as the object of a statement
+    // about a named subject, in the subject's graph.
+    for ac in model.ont.iter() {
+        if !names_anonymous(&ac.component) || g.is_reachable(axiom_identity(ac)) {
+            continue;
+        }
+        let nodes = g.anon_reif.get(&axiom_identity(ac)).cloned().unwrap_or_default();
+        let node = nodes.first().copied().unwrap_or(0);
+        let anns = node_annotations(ac, prefixes);
+        match &ac.component {
+            Component::ObjectPropertyAssertion(ax) => match (&ax.ope, &ax.from, &ax.to) {
+                (OPEx::ObjectProperty(p), Individual::Named(s), Individual::Anonymous(_)) => {
+                    if !ac.ann.is_empty() {
+                        let source = format!("        <owl:annotatedSource rdf:resource=\"{}\"/>\n", esc_attr(s.0.as_ref()));
+                        let block = anon_reification(&source, p.0.as_ref(), &individual_target(&ax.to), &anns);
+                        doc.root(s.0.as_ref(), node, block);
+                    }
+                }
+                (OPEx::InverseObjectProperty(_), _, _) => left_out.push(ac),
+                _ => {}
+            },
+            Component::NegativeObjectPropertyAssertion(ax) => {
+                if let (Individual::Named(s), Individual::Anonymous(_)) = (&ax.from, &ax.to) {
+                    let block = negative_assertion(
+                        &format!("        <owl:sourceIndividual rdf:resource=\"{}\"/>\n", esc_attr(s.0.as_ref())),
+                        &assertion_property(&ax.ope),
+                        &individual_slot("owl:targetIndividual", &ax.to, "        "),
+                        &anns,
+                    );
+                    doc.root(s.0.as_ref(), node, block);
+                }
+            }
+            Component::AnnotationAssertion(ax) => {
+                if let (horned_owl::model::AnnotationSubject::IRI(s), AnnotationValue::AnonymousIndividual(v)) =
+                    (&ax.subject, &ax.ann.av)
+                {
+                    if !ac.ann.is_empty() {
+                        let source = format!("        <owl:annotatedSource rdf:resource=\"{}\"/>\n", esc_attr(s.as_ref()));
+                        let target =
+                            format!("        <owl:annotatedTarget rdf:nodeID=\"genid{}\"/>\n", doc.node_id(v.0.as_ref()));
+                        let block = anon_reification(&source, ax.ann.ap.0.as_ref(), &target, &anns);
+                        doc.root(s.as_ref(), node, block);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // An individual a graph states something about and names as no statement's
+    // object is a root of that graph.
+    let mut own_roots: Vec<(String, String)> = doc
+        .edges
+        .keys()
+        .filter(|(graph, x)| doc.objects.get(&(graph.clone(), x.clone())).copied().unwrap_or(0) == 0)
+        .cloned()
+        .collect();
+    own_roots.sort();
+    for (graph, x) in own_roots {
+        let node = doc.node_id(&x);
+        doc.root(&graph, node, format!("    {ANON_SLOT}{ANON_ROOT}{ANON_SEP}{x}\n"));
+    }
+    // An individual named by id is defined once, by the first graph to name it
+    // by id: what any later graph states about it, where it names it by id too,
+    // would be written nowhere.
+    let position: HashMap<&str, usize> = g.graphs.iter().enumerate().map(|(i, k)| (k.as_str(), i)).rev().collect();
+    let mut first_by_id: HashMap<&str, usize> = HashMap::new();
+    for ((graph, x), n) in &doc.objects {
+        if *n > 0 && doc.by_id(graph, x) {
+            let p = position.get(graph.as_str()).copied().unwrap_or(usize::MAX);
+            let e = first_by_id.entry(x.as_str()).or_insert(p);
+            *e = (*e).min(p);
+        }
+    }
+    let lost: Vec<(String, String)> = doc
+        .edges
+        .keys()
+        .filter(|(graph, x)| {
+            doc.by_id(graph, x)
+                && doc.objects.get(&(graph.clone(), x.clone())).copied().unwrap_or(0) > 0
+                && first_by_id.get(x.as_str()).copied() < position.get(graph.as_str()).copied()
+        })
+        .cloned()
+        .collect();
+    for (graph, x) in lost {
+        for key in &g.anon_order {
+            if graph_of.get(key) == Some(&graph) {
+                if let Some(ac) = by_key.get(key) {
+                    if crate::io::genid::referenced_anonymous(ac).contains(&x) {
+                        left_out.push(ac);
+                    }
+                }
+            }
+        }
+    }
+    doc
 }
 
 /// Run `f` with the end of every rendered object marked (see `OBJECT_ENDS`).
@@ -877,13 +1632,14 @@ pub fn write_header_and_ontology<W: Write>(
     let close = if empty_ont { "/>" } else { ">" };
     // An ontology with no IRI is an ANONYMOUS node — the owl namespace serves as
     // xmlns/base default above, but must not become an `rdf:about`.
+    let mut ontology = String::new();
     if ont_iri.is_none() || oiri.is_empty() {
-        write!(w, "    <owl:Ontology{close}\n")?;
+        ontology.push_str(&format!("    <owl:Ontology{close}\n"));
     } else {
-        write!(w, "    <owl:Ontology rdf:about=\"{}\"{close}\n", esc_attr(&oiri))?;
+        ontology.push_str(&format!("    <owl:Ontology rdf:about=\"{}\"{close}\n", esc_attr(&oiri)));
     }
     if let Some(v) = &version_iri {
-        write!(w, "        <owl:versionIRI rdf:resource=\"{}\"/>\n", esc_attr(v))?;
+        ontology.push_str(&format!("        <owl:versionIRI rdf:resource=\"{}\"/>\n", esc_attr(v)));
     }
     // Imports are ordered as IRIs, which is namespace-then-remainder and not the
     // plain string order: the split falls before the longest NCName suffix, so
@@ -892,15 +1648,16 @@ pub fn write_header_and_ontology<W: Write>(
     // `…/components/` sibling rather than first.
     imports.sort_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
     for im in &imports {
-        write!(w, "        <owl:imports rdf:resource=\"{}\"/>\n", esc_attr(im))?;
+        ontology.push_str(&format!("        <owl:imports rdf:resource=\"{}\"/>\n", esc_attr(im)));
     }
     ont_anns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
     for (p, av) in &ont_anns {
-        write!(w, "{}", render_ann(p, av, prefixes))?;
+        ontology.push_str(&render_ann(p, av, prefixes));
     }
     if !empty_ont {
-        write!(w, "    </owl:Ontology>\n")?;
+        ontology.push_str("    </owl:Ontology>\n");
     }
+    write!(w, "{}", resolve_anon(crate::io::genid::HEADER_GRAPH, &ontology))?;
 
     let _ = RDFS_COMMENT;
     Ok(ont_iri)
@@ -966,20 +1723,24 @@ fn write_root_blocks<W: Write>(
     }
     blocks.sort_by(|a, b| iri_key(a.0).cmp(&iri_key(b.0)));
     for (member, body) in blocks {
-        write_entity(w, "rdf:Description", member, &body, anon_roots)?;
+        write_entity(w, host, "rdf:Description", member, &body, anon_roots)?;
     }
     Ok(())
 }
 
-fn write_entity<W: Write>(w: &mut W, elem: &str, iri: &str, body: &str, after: &str) -> Result<()> {
+fn write_entity<W: Write>(w: &mut W, graph: &str, elem: &str, iri: &str, body: &str, after: &str) -> Result<()> {
     write!(w, "    \n\n\n")?;
     write!(w, "    <!-- {} -->\n\n", esc_comment(iri))?;
-    if body.is_empty() {
-        write!(w, "    <{elem} rdf:about=\"{}\"/>\n", esc_attr(iri))?;
+    let block = if body.is_empty() {
+        format!("    <{elem} rdf:about=\"{}\"/>\n", esc_attr(iri))
     } else {
-        write!(w, "    <{elem} rdf:about=\"{}\">\n{body}    </{elem}>\n", esc_attr(iri))?;
+        format!("    <{elem} rdf:about=\"{}\">\n{body}    </{elem}>\n", esc_attr(iri))
+    };
+    if anon_doc_active() {
+        write!(w, "{}", resolve_anon(graph, &format!("{block}{after}")))?;
+    } else {
+        write!(w, "{block}{after}")?;
     }
-    write!(w, "{after}")?;
     end_object(w)
 }
 
@@ -1175,14 +1936,19 @@ fn order_reifs_by_genid(reifs: &str, reif: Option<&Vec<(String, u64)>>) -> Strin
 fn keyed_blocks(reifs: &str, reif: &[(String, u64)]) -> Vec<(Option<u64>, usize, String)> {
     // A block opens at every line that starts an element at the top level,
     // except a node defined by id, which follows the block that names it.
-    let mut blocks: Vec<String> = Vec::new();
+    // A block after a line naming its node is that node.
+    let mut blocks: Vec<(Option<u64>, String)> = Vec::new();
     for line in reifs.split_inclusive('\n') {
+        if let Some(node) = line.strip_prefix(ROOT_KEY) {
+            blocks.push((node.trim_end().parse().ok(), String::new()));
+            continue;
+        }
         let opens = line.starts_with("    <")
             && !line.starts_with("    </")
             && !line.split_once('>').is_some_and(|(open, _)| open.contains(" rdf:nodeID=\""));
         match blocks.last_mut() {
-            Some(b) if !opens => b.push_str(line),
-            _ => blocks.push(line.to_string()),
+            Some((_, b)) if !opens || b.is_empty() => b.push_str(line),
+            _ => blocks.push((None, line.to_string())),
         }
     }
     // Per-signature queue of genids in creation order.
@@ -1194,9 +1960,11 @@ fn keyed_blocks(reifs: &str, reif: &[(String, u64)]) -> Vec<(Option<u64>, usize,
     blocks
         .into_iter()
         .enumerate()
-        .map(|(i, b)| {
-            let sig = reif_signature(&b);
-            let key = by_sig.get_mut(sig.as_str()).and_then(|q| q.pop_front());
+        .map(|(i, (node, b))| {
+            let key = node.or_else(|| {
+                let sig = reif_signature(&b);
+                by_sig.get_mut(sig.as_str()).and_then(|q| q.pop_front())
+            });
             (key, i, b)
         })
         .collect()
@@ -1232,19 +2000,25 @@ fn sorted_blocks(blocks: Vec<(Option<u64>, usize, String)>) -> String {
 /// returned, by id, to be defined after the first root that names it. The
 /// nodes so stated are added to `stated`.
 fn order_roots(
+    graph: &str,
     reifs: &str,
     reif: Option<&Vec<(String, u64)>>,
     nested: &HashMap<u64, crate::io::genid::NestedAnnotations>,
     stated: &mut HashSet<u64>,
     prefixes: &[(String, String)],
 ) -> (String, Vec<(String, String)>) {
-    let Some(reif) = reif else { return (reifs.to_string(), Vec::new()) };
+    let reifs = format!("{reifs}{}", anon_root_blocks(graph));
+    let reif = match reif {
+        Some(reif) => reif.as_slice(),
+        None if reifs.contains(ROOT_KEY) => &[],
+        None => return (reifs, Vec::new()),
+    };
     if reifs.is_empty() {
         return (String::new(), Vec::new());
     }
     let mut blocks = Vec::new();
     let mut defs = Vec::new();
-    for (key, i, block) in keyed_blocks(reifs, reif) {
+    for (key, i, block) in keyed_blocks(&reifs, reif) {
         match key.and_then(|g| nested.get(&g).map(|n| (g, n))) {
             Some((g, n)) => {
                 stated.insert(g);
@@ -1577,6 +2351,7 @@ fn render_ce(ce: &CE<RcStr>, indent: usize, g: &Genids) -> String {
                 Individual::Named(n) => {
                     format!("{pad2}<owl:hasValue rdf:resource=\"{}\"/>\n", esc_attr(n.0.as_ref()))
                 }
+                Individual::Anonymous(a) if anon_doc_active() => anon_slot("owl:hasValue", a.0.as_ref(), &pad2),
                 Individual::Anonymous(a) => {
                     let id = a.0.as_ref();
                     if ANON_REPEATED.with(|r| r.borrow().contains(id)) {
@@ -1613,7 +2388,7 @@ fn render_ce(ce: &CE<RcStr>, indent: usize, g: &Genids) -> String {
                         "{pad3}<rdf:Description rdf:about=\"{}\"/>\n",
                         esc_attr(n.0.as_ref())
                     )),
-                    Individual::Anonymous(a) => s.push_str(&anonymous_object(a.0.as_ref(), &pad3)),
+                    Individual::Anonymous(a) => s.push_str(&anon_item(a.0.as_ref(), &pad3)),
                 }
             }
             s.push_str(&format!("{pad2}</owl:oneOf>\n{pad}</owl:Class>\n"));
@@ -2798,6 +3573,21 @@ fn render_all_disjoint_properties(members: &[(Option<String>, String)], anns: &s
 
 /// An individual list in render order — named individuals by IRI, then the
 /// anonymous ones (`None`).
+/// [`sorted_members`] with each anonymous member as its slot's mark and id,
+/// after the named ones in node order.
+fn slot_members(inds: &[horned_owl::model::Individual<RcStr>]) -> Vec<Option<String>> {
+    let mut v: Vec<Option<String>> = inds
+        .iter()
+        .map(|i| match i {
+            horned_owl::model::Individual::Named(n) => Some(n.0.as_ref().to_string()),
+            horned_owl::model::Individual::Anonymous(a) => Some(format!("{ANON_SLOT}{}", a.0.as_ref())),
+        })
+        .collect();
+    v.sort_by(|a, b| identity_key(a).cmp(&identity_key(b)));
+    v.dedup();
+    v
+}
+
 fn sorted_members(inds: &[horned_owl::model::Individual<RcStr>]) -> Vec<Option<String>> {
     let mut v: Vec<Option<String>> = inds
         .iter()
@@ -2811,6 +3601,15 @@ fn sorted_members(inds: &[horned_owl::model::Individual<RcStr>]) -> Vec<Option<S
 }
 
 /// Sort key for a member of an individual list: named first, by IRI.
+/// [`member_key`] of an identity edge's object, an anonymous member, written
+/// by its slot, after the named ones in node order.
+fn identity_key(m: &Option<String>) -> (u8, (&str, &str)) {
+    match m {
+        Some(x) if x.starts_with(ANON_SLOT) => (1, (x.as_str(), "")),
+        _ => member_key(m),
+    }
+}
+
 fn member_key(m: &Option<String>) -> (u8, (&str, &str)) {
     match m {
         Some(iri) => (0, iri_key(iri)),
@@ -2821,13 +3620,16 @@ fn member_key(m: &Option<String>) -> (u8, (&str, &str)) {
 /// An `owl:AllDifferent` / `owl:distinctMembers` block for a `DifferentIndividuals`
 /// axiom, members sorted by IRI.
 fn render_all_different(members: &[String], anns: &str) -> String {
-    let mut ms: Vec<&String> = members.iter().collect();
-    ms.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
+    let mut ms: Vec<Option<String>> = members.iter().cloned().map(Some).collect();
+    ms.sort_by(|a, b| identity_key(a).cmp(&identity_key(b)));
     let mut s = String::from("    <rdf:Description>\n");
     s.push_str("        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#AllDifferent\"/>\n");
     s.push_str("        <owl:distinctMembers rdf:parseType=\"Collection\">\n");
-    for m in ms {
-        s.push_str(&format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(m)));
+    for m in ms.into_iter().flatten() {
+        match m.strip_prefix(ANON_SLOT) {
+            Some(x) => s.push_str(&anon_item(x, "            ")),
+            None => s.push_str(&format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(&m))),
+        }
     }
     s.push_str("        </owl:distinctMembers>\n");
     s.push_str(anns);
@@ -2913,7 +3715,7 @@ fn annotation_body(
             }
         }
         for (p, av, nested) in &sorted {
-            if !nested.is_empty() {
+            if !nested.is_empty() && !(anon_doc_active() && matches!(av, AnnotationValue::AnonymousIndividual(_))) {
                 after.push_str(&render_reification(iri, p, av, nested, prefixes));
             }
         }
@@ -2936,7 +3738,8 @@ pub(crate) fn try_save<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<Str
     let has_iri = model.ont.iter().any(|ac| {
         matches!(&ac.component, Component::OntologyID(id) if id.iri.is_some())
     });
-    if has_iri {
+    let anonymous = model.ont.iter().any(|ac| !crate::io::genid::referenced_anonymous(ac).is_empty());
+    if has_iri && !anonymous {
         return save_inner(model, w);
     }
     let mut buf: Vec<u8> = Vec::new();
@@ -2946,7 +3749,11 @@ pub(crate) fn try_save<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<Str
     }
     let doc = String::from_utf8(buf)
         .map_err(|e| anyhow::anyhow!("RDF/XML output is not valid UTF-8: {e}"))?;
-    w.write_all(strip_default_owl_prefix(&doc).as_bytes())?;
+    if anonymous && doc.contains([ANON_SLOT, ANON_SEP, ROOT_KEY]) {
+        bail!("RDF/XML writer: an anonymous individual was not written");
+    }
+    let doc = if has_iri { doc } else { strip_default_owl_prefix(&doc) };
+    w.write_all(doc.as_bytes())?;
     Ok(unstated)
 }
 
@@ -2960,6 +3767,13 @@ pub(crate) fn warn_unstated(format: &str, unstated: &[String]) {
 }
 
 fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<String>> {
+    struct AnonReset;
+    impl Drop for AnonReset {
+        fn drop(&mut self) {
+            ANON_DOC.with(|d| *d.borrow_mut() = None);
+        }
+    }
+    let _anon_reset = AnonReset;
     // Which datatype this document's untyped literals key as; it decides their
     // sort position against typed ones (see `plain_datatype`).
     PLAIN_TYPED.with(|c| c.set(model.plain_literals_typed));
@@ -3408,6 +4222,24 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // The axioms of shapes this layout cannot state, in whole or with their
     // annotations. Any one of them stops the write before its first byte.
     let mut left_out: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
+    // Anonymous individuals are written from the model unless the document's
+    // own blocks for them are replayed.
+    let anon_model = !genid_pass.anon_ids.is_empty()
+        && model.anon_hash_capacity == 0
+        && crate::io::anon_individual_order(
+            &model.owl_anon_blocks,
+            model.anon_alloc_base,
+            model.anon_hash_capacity,
+            model.anon_imports_end,
+        )
+        .is_empty();
+    if anon_model {
+        // The placeholders the statements are built with need the nodes first.
+        let ids = AnonDoc { ids: genid_pass.anon_ids.clone(), ..Default::default() };
+        ANON_DOC.with(|d| *d.borrow_mut() = Some(ids));
+        let doc = build_anon_doc(model, &genid_pass, &prefixes, &mut left_out);
+        ANON_DOC.with(|d| *d.borrow_mut() = Some(doc));
+    }
     let annotated = |ac: &AnnotatedComponent<RcStr>| !ac.ann.is_empty();
     // An anonymous individual that is also an object somewhere is stated where it
     // is the object, with everything said about it nested there; this layout
@@ -3700,11 +4532,16 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 disjoint_union.entry(du.0 .0.as_ref().to_string()).or_default().push((items, named, ax_anns(ac)));
             }
             Component::DifferentIndividuals(di) => {
-                let members = sorted_members(&di.0);
+                let members = if anon_model { slot_members(&di.0) } else { sorted_members(&di.0) };
+                let slot = |m: &Option<String>| m.as_ref().is_some_and(|x| x.starts_with(ANON_SLOT));
                 match (members.len(), members.first()) {
-                    // A pair whose first member is named becomes one edge on it.
+                    // A pair of anonymous individuals is stated where the first
+                    // of them is.
+                    (2, Some(first)) if slot(first) => {}
+                    // …and a pair whose first member is named becomes one edge
+                    // on it, its reification a root of its graph.
                     (2, Some(Some(subject))) => {
-                        if annotated(ac) {
+                        if annotated(ac) && !slot(&members[1]) {
                             match &members[1] {
                                 Some(object) => edge_reifs.entry(subject.clone()).or_default().push((
                                     "http://www.w3.org/2002/07/owl#differentFrom",
@@ -3725,7 +4562,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                             left_out.push(ac);
                         }
                         let named: Vec<String> = members.into_iter().flatten().collect();
-                        if !named.is_empty() {
+                        let identity = crate::io::genid::axiom_identity(ac);
+                        let own_graph = format!("{}{identity}", crate::io::genid::GENERAL_GRAPH);
+                        let elsewhere = anon_model && genid_pass.anon_home.get(&identity).is_some_and(|g| *g != own_graph);
+                        if !named.is_empty() && !elsewhere {
                             gci_blocks.push((ac, render_all_different(&named, &node_annotations(ac, &prefixes))));
                         }
                     }
@@ -3739,6 +4579,31 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 // a longer sameness of named members each of its pairs.
                 let all_named = members.iter().all(Option::is_some);
                 let named_pair = members.len() == 2 && all_named;
+                // A pair with an anonymous member is the anonymous individuals':
+                // stated where its first member is, an edge on it when that is
+                // named.
+                if anon_model && !all_named {
+                    let members = slot_members(&si.0);
+                    let Some(Some(host)) = members.first().filter(|m| m.as_ref().is_some_and(|h| !h.starts_with(ANON_SLOT)))
+                    else {
+                        continue;
+                    };
+                    ind_identity.entry(host.clone()).or_default().push(("owl:sameAs", members[1].clone()));
+                    // Every other named member is a root block of the host's
+                    // graph holding the pair it is the subject of.
+                    for (i, m) in members.iter().enumerate().skip(1) {
+                        let Some(m) = m.as_ref().filter(|m| !m.starts_with(ANON_SLOT)) else { continue };
+                        let body = match members.get(i + 1).and_then(|n| n.clone()) {
+                            Some(next) => match next.strip_prefix(ANON_SLOT) {
+                                Some(x) => anon_slot("owl:sameAs", x, "        "),
+                                None => format!("        <owl:sameAs rdf:resource=\"{}\"/>\n", esc_attr(&next)),
+                            },
+                            None => String::new(),
+                        };
+                        root_blocks.entry(host.clone()).or_default().push((m.clone(), body));
+                    }
+                    continue;
+                }
                 if (annotated(ac) && !all_named)
                     || members.first().is_some_and(Option::is_none)
                     || (members.len() > 2 && members.iter().any(Option::is_none))
@@ -3858,6 +4723,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                             } else {
                                 let reifs: String = (0..members.len() - 1).map(|i| chain.reif(i, &prefixes)).collect();
                                 let (roots, mut defs) = order_roots(
+                                    "",
                                     &reifs,
                                     reif_genids.get("__general__"),
                                     &genid_pass.nested,
@@ -3961,11 +4827,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             Component::ClassAssertion(ca) => {
                 if match &ca.i {
                     Individual::Named(_) => false,
-                    Individual::Anonymous(a) => annotated(ac) || nested_anon(a.0.as_ref()),
+                    Individual::Anonymous(a) => !anon_model && (annotated(ac) || nested_anon(a.0.as_ref())),
                 } {
                     left_out.push(ac);
                 }
                 match (&ca.i, &ca.ce) {
+                    (Individual::Anonymous(_), _) if anon_model => {}
                     (Individual::Named(i), CE::Class(c)) => {
                         let (i, c) = (i.0.as_ref().to_string(), c.0.as_ref().to_string());
                         if annotated(ac) {
@@ -3998,8 +4865,17 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     OPE::ObjectProperty(p) => (p, &opa.from, &opa.to),
                     OPE::InverseObjectProperty(p) => (p, &opa.to, &opa.from),
                 };
-                if !matches!((from, to), (Individual::Named(_), Individual::Named(_))) {
+                if !anon_model && !matches!((from, to), (Individual::Named(_), Individual::Named(_))) {
                     left_out.push(ac);
+                }
+                // A named individual's assertion of an anonymous one, the
+                // object written where the individual's graph writes it.
+                if let (true, Individual::Named(s), Individual::Anonymous(o)) = (anon_model, from, to) {
+                    ind_props.entry(s.0.as_ref().to_string()).or_default().push((
+                        p.0.as_ref().to_string(),
+                        o.0.as_ref().to_string(),
+                        Some(ANON_SLOT.to_string()),
+                    ));
                 }
                 if let (Individual::Named(s), Individual::Named(o)) = (from, to) {
                     ind_props.entry(s.0.as_ref().to_string()).or_default().push((
@@ -4018,7 +4894,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::DataPropertyAssertion(dpa) => {
-                if !matches!(dpa.from, Individual::Named(_)) {
+                if !anon_model && !matches!(dpa.from, Individual::Named(_)) {
                     left_out.push(ac);
                 }
                 if let Individual::Named(s) = &dpa.from {
@@ -4097,7 +4973,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             // data ones, each by property and then by target.
             // Its annotations are statements of that node, after its terms.
             Component::NegativeObjectPropertyAssertion(n) => {
-                if !matches!((&n.from, &n.to), (Individual::Named(_), Individual::Named(_))) {
+                if !anon_model && !matches!((&n.from, &n.to), (Individual::Named(_), Individual::Named(_))) {
                     left_out.push(ac);
                 }
                 if let (Individual::Named(src), Individual::Named(tgt)) = (&n.from, &n.to) {
@@ -4129,7 +5005,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::NegativeDataPropertyAssertion(n) => {
-                if !matches!(n.from, Individual::Named(_)) {
+                if !anon_model && !matches!(n.from, Individual::Named(_)) {
                     left_out.push(ac);
                 }
                 if let Individual::Named(src) = &n.from {
@@ -4417,10 +5293,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     .map(|a| (a.ap.0.as_ref().to_string(), a.av.clone()))
                     .collect();
                 let entry = (aa.ann.ap.0.as_ref().to_string(), aa.ann.av.clone(), nested);
-                if (annotated(ac)
-                    && (matches!(aa.subject, horned_owl::model::AnnotationSubject::AnonymousIndividual(_))
-                        || matches!(aa.ann.av, AnnotationValue::AnonymousIndividual(_))))
-                    || matches!(&aa.subject, horned_owl::model::AnnotationSubject::AnonymousIndividual(a) if nested_anon(a.0.as_ref()))
+                if !anon_model
+                    && ((annotated(ac)
+                        && (matches!(aa.subject, horned_owl::model::AnnotationSubject::AnonymousIndividual(_))
+                            || matches!(aa.ann.av, AnnotationValue::AnonymousIndividual(_))))
+                        || matches!(&aa.subject, horned_owl::model::AnnotationSubject::AnonymousIndividual(a) if nested_anon(a.0.as_ref())))
                 {
                     left_out.push(ac);
                 }
@@ -4428,6 +5305,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     horned_owl::model::AnnotationSubject::IRI(s) => {
                         ann_assertions.entry(s.as_ref().to_string()).or_default().push(entry);
                     }
+                    horned_owl::model::AnnotationSubject::AnonymousIndividual(_) if anon_model => {}
                     horned_owl::model::AnnotationSubject::AnonymousIndividual(a) => {
                         anon_ind.entry(a.0.as_ref().to_string()).or_default().push(entry);
                     }
@@ -4437,7 +5315,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         }
     }
     if !left_out.is_empty() {
-        left_out.dedup_by(|a, b| std::ptr::eq(*a, *b));
+        let mut seen: HashSet<*const AnnotatedComponent<RcStr>> = HashSet::new();
+        left_out.retain(|ac| seen.insert(*ac as *const _));
         return Ok(left_out.iter().map(|ac| crate::io::owlfunc::render_component_line(ac)).collect());
     }
     let ont_iri = write_header_and_ontology(model, &prefixes, w)?;
@@ -4707,6 +5586,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
         }
         let (after, defs) = order_roots(
+            iri,
             &format!("{ap_reif}{after}{}{}", type_reifs(iri), edge_reif_blocks(iri)),
             reif_genids.get(iri),
             &genid_pass.nested,
@@ -4722,7 +5602,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         } else {
             "owl:AnnotationProperty"
         };
-        write_entity(w, elem, iri, &body, &after)?;
+        write_entity(w, iri, elem, iri, &body, &after)?;
     }
 
     // Datatypes.
@@ -4760,6 +5640,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
         }
         let (roots, defs) = order_roots(
+            iri,
             &format!("{def_reif}{ann_after}{}", type_reifs(iri)),
             reif_genids.get(iri),
             &genid_pass.nested,
@@ -4767,7 +5648,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             prefixes,
         );
         let after = place_defs(&format!("{defs_after}{roots}"), Some(&defs));
-        write_entity(w, "rdfs:Datatype", iri, &body, &after)?;
+        write_entity(w, iri, "rdfs:Datatype", iri, &body, &after)?;
     }
     // A datatype's block uses the `rdfs:Datatype` element, not an `owl:` one; it
     // is passed to `write_entity` as the element name, like every other section's.
@@ -4919,6 +5800,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         }
         let inverse_roots: String = inv_roots.get(iri).into_iter().flatten().map(String::as_str).collect();
         let (anon_roots, mut root_defs) = order_roots(
+            iri,
             &format!(
                 "{dr_reif}{chain_reif}{ann_after}{}{}{inverse_blocks}{inverse_roots}{}",
                 type_reifs(iri),
@@ -4932,7 +5814,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         );
         root_defs.extend(chain_defs.get(iri).into_iter().flatten().cloned());
         let after = place_defs(&format!("{defs}{anon_roots}"), Some(&root_defs));
-        write_entity(w, "owl:ObjectProperty", iri, &body, &after)?;
+        write_entity(w, iri, "owl:ObjectProperty", iri, &body, &after)?;
         write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
     }
 
@@ -5008,6 +5890,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             body.push_str(&abody);
             let (anon_roots, root_defs) = order_roots(
+                iri,
                 &format!(
                     "{dr_reif}{ann_after}{}{}{}",
                     type_reifs(iri),
@@ -5020,7 +5903,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 prefixes,
             );
             let after = place_defs(&format!("{dr_defs}{anon_roots}"), Some(&root_defs));
-            write_entity(w, "owl:DatatypeProperty", iri, &body, &after)?;
+            write_entity(w, iri, "owl:DatatypeProperty", iri, &body, &after)?;
             write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
         }
     }
@@ -5457,6 +6340,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             rest = after_q;
         }
         let (reifs, mut root_defs) = order_roots(
+            iri,
             &format!(
                 "{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{union_reif}{key_reif}{ann_reif}{}{}",
                 type_reifs(iri),
@@ -5488,7 +6372,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         } else {
             "rdf:Description"
         };
-        write_entity(w, elem, iri, &body, &after)?;
+        write_entity(w, iri, elem, iri, &body, &after)?;
         write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
     }
     // owl:Thing is a built-in class, and an UNDECLARED entity carrying only
@@ -5572,9 +6456,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             // …then the identity edges, ahead of every assertion and annotation.
             if let Some(edges) = ind_identity.get(iri) {
                 let mut edges = edges.clone();
-                edges.sort_by(|a, b| a.0.cmp(b.0).then_with(|| member_key(&a.1).cmp(&member_key(&b.1))));
+                edges.sort_by(|a, b| a.0.cmp(b.0).then_with(|| identity_key(&a.1).cmp(&identity_key(&b.1))));
                 for (pred, obj) in edges {
                     match obj {
+                        Some(o) if o.starts_with(ANON_SLOT) => {
+                            body.push_str(&anon_slot(pred, &o[ANON_SLOT.len_utf8()..], "        "))
+                        }
                         Some(o) => body.push_str(&format!(
                             "        <{pred} rdf:resource=\"{}\"/>\n",
                             esc_attr(&o)
@@ -5590,9 +6477,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             if let Some(props) = ind_props.get(iri) {
                 // Object assertions before data ones, each by property and then
                 // by value — a literal in literal order.
+                let anon = ANON_SLOT.to_string();
+                let is_data = |lit: &Option<String>| lit.as_ref().is_some_and(|l| *l != anon);
                 let value_key = |(_, v, lit): &IndProp| -> (String, String, String) {
                     match lit {
                         None => (v.clone(), String::new(), String::new()),
+                        Some(l) if *l == anon => (format!("{}{v}", char::MAX), String::new(), String::new()),
                         Some(attrs) => match (between(attrs, "rdf:datatype=\"", "\""), between(attrs, "xml:lang=\"", "\"")) {
                             (Some(dt), _) => literal_parts_key(v, "", &crate::io::unescape_attr(dt)),
                             (None, Some(lang)) => literal_parts_key(v, lang, RDF_PLAIN_LITERAL),
@@ -5602,8 +6492,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 };
                 let mut props = props.clone();
                 props.sort_by(|a, b| {
-                    a.2.is_some()
-                        .cmp(&b.2.is_some())
+                    is_data(&a.2)
+                        .cmp(&is_data(&b.2))
                         .then_with(|| iri_key(&a.0).cmp(&iri_key(&b.0)))
                         .then_with(|| value_key(a).cmp(&value_key(b)))
                 });
@@ -5611,6 +6501,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 for (p, v, lit) in props {
                     let q = qname(&p, prefixes);
                     match lit {
+                        Some(l) if l == anon => body.push_str(&anon_slot(&q, &v, "        ")),
                         Some(attrs) => {
                             body.push_str(&format!("        <{q}{attrs}>{}</{q}>\n", esc(&v)))
                         }
@@ -5645,6 +6536,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             let (anon_roots, root_defs) = order_roots(
+                iri,
                 &format!(
                     "{ce_type_reif}{ann_after}{}{prop_reifs}{}{negs}{}",
                     type_reifs(iri),
@@ -5657,7 +6549,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 prefixes,
             );
             let after = place_defs(&format!("{type_defs}{anon_roots}"), Some(&root_defs));
-            write_entity(w, &elem, iri, &body, &after)?;
+            write_entity(w, iri, &elem, iri, &body, &after)?;
             write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
         }
     }
@@ -5687,6 +6579,16 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // `remove --axioms external` able to drop these blocks (it clears
     // `owl_anon_blocks`, and EFO's `efo-base.owl` is exactly that) without them
     // coming back through the model.
+    // An anonymous individual every statement naming which is about it is a
+    // graph of its own, its roots its node and the reifications and negative
+    // assertions about it.
+    if anon_model {
+        for x in &genid_pass.anon_roots {
+            let graph = format!("{}{x}", crate::io::genid::ANON_GRAPH);
+            let (roots, defs) = order_roots(&graph, "", None, &genid_pass.nested, &mut stated_nested, prefixes);
+            write!(w, "{}", resolve_anon(&graph, &place_defs(&roots, Some(&defs))))?;
+        }
+    }
     if anon_blocks.is_empty() && model.anon_hash_capacity == 0 {
         // Document order, from the labels scanned off the source — NOT the label's
         // own sort order, which is what a plain walk of the map would give. A
@@ -5753,11 +6655,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         for iri in &untyped {
             let (body, after) = annotation_body(iri, ann_assertions.get(*iri), None, prefixes);
             let (after, root_defs) =
-                order_roots(&after, reif_genids.get(*iri), &genid_pass.nested, &mut stated_nested, prefixes);
+                order_roots(iri, &after, reif_genids.get(*iri), &genid_pass.nested, &mut stated_nested, prefixes);
             let after = place_defs(&after, Some(&root_defs));
             // rdf:Description block, no per-entity comment or separators.
-            write!(w, "    <rdf:Description rdf:about=\"{}\">\n{body}    </rdf:Description>\n", esc_attr(iri))?;
-            write!(w, "{after}")?;
+            let block = format!("    <rdf:Description rdf:about=\"{}\">\n{body}    </rdf:Description>\n", esc_attr(iri));
+            write!(w, "{}", resolve_anon(iri, &format!("{block}{after}")))?;
             end_object(w)?;
         }
     }
@@ -5772,9 +6674,27 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         gci_blocks.sort_by(|a, b| crate::io::genid::cmp_axiom(&a.0.component, &b.0.component));
         write_banner(w, "General axioms")?;
         for (ac, b) in &gci_blocks {
+            let identity = crate::io::genid::axiom_identity(ac);
+            let graph = format!("{}{identity}", crate::io::genid::GENERAL_GRAPH);
+            // The anonymous individuals the axiom reaches add their roots to
+            // its own.
+            if !anon_root_blocks(&graph).is_empty() {
+                let root = genid_pass.general_root.get(&identity).copied().unwrap_or(0);
+                let (roots, defs) = order_roots(
+                    &graph,
+                    &format!("{ROOT_KEY}{root}\n{b}"),
+                    None,
+                    &genid_pass.nested,
+                    &mut stated_nested,
+                    prefixes,
+                );
+                write!(w, "{}", resolve_anon(&graph, &place_defs(&roots, Some(&defs))))?;
+                end_object(w)?;
+                continue;
+            }
             // An axiom whose annotations carry annotations of their own is
             // named by id, after the roots those make.
-            let nodes = genid_pass.general_nested.get(&crate::io::genid::axiom_identity(ac));
+            let nodes = genid_pass.general_nested.get(&identity);
             match nodes.filter(|n| n.iter().any(|node| !stated_nested.contains(node))) {
                 Some(nodes) => {
                     let node = nodes[0];
@@ -5787,9 +6707,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         .map(|(id, root)| (Some(id), 0, root))
                         .collect();
                     let roots = sorted_blocks(roots);
-                    write!(w, "{}", place_defs(&roots, Some(&vec![(gid.clone(), inject_nodeid(b, &gid))])))?;
+                    let text = place_defs(&roots, Some(&vec![(gid.clone(), inject_nodeid(b, &gid))]));
+                    write!(w, "{}", resolve_anon(&graph, &text))?;
                 }
-                None => write!(w, "{b}")?,
+                None => write!(w, "{}", resolve_anon(&graph, b))?,
             }
             end_object(w)?;
         }
@@ -5847,6 +6768,7 @@ fn swrl_iarg_slot(tag: &str, arg: &horned_owl::model::IArgument<RcStr>, indent: 
     use horned_owl::model::{IArgument, Individual};
     let pad = " ".repeat(indent);
     match arg {
+        IArgument::Individual(Individual::Anonymous(a)) if anon_doc_active() => anon_slot(tag, a.0.as_ref(), &pad),
         IArgument::Individual(Individual::Anonymous(a)) => {
             format!("{pad}<{tag}>\n{}{pad}</{tag}>\n", anonymous_object(a.0.as_ref(), &format!("{pad}    ")))
         }
@@ -6216,6 +7138,7 @@ fn write_rules<W: Write>(
             None => blocks.push((Some(*id), i, b)),
         }
     }
-    write!(w, "{}", place_defs(&sorted_blocks(blocks), Some(&defs)))?;
+    let text = place_defs(&sorted_blocks(blocks), Some(&defs));
+    write!(w, "{}", resolve_anon(crate::io::genid::RULES_GRAPH, &text))?;
     Ok(())
 }

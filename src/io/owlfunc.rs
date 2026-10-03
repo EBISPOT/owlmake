@@ -962,7 +962,7 @@ impl<'a> Renderer<'a> {
     fn individual(&mut self, i: &Individual<RcStr>) {
         match i {
             Individual::Named(n) => self.iri(n.0.as_ref()),
-            Individual::Anonymous(a) => self.w(&format!("_:{}", a.0.as_ref())),
+            Individual::Anonymous(a) => self.w(&anonymous_label(a.0.as_ref())),
         }
     }
 
@@ -1140,7 +1140,7 @@ impl<'a> Renderer<'a> {
         match &a.av {
             AnnotationValue::Literal(l) => self.literal(l),
             AnnotationValue::IRI(i) => self.iri(i.as_ref()),
-            AnnotationValue::AnonymousIndividual(x) => self.w(&format!("_:{}", x.0.as_ref())),
+            AnnotationValue::AnonymousIndividual(x) => self.w(&anonymous_label(x.0.as_ref())),
         }
         self.w(")");
     }
@@ -1342,7 +1342,7 @@ impl<'a> Renderer<'a> {
                 match &ax.subject {
                     AnnotationSubject::IRI(i) => self.iri(i.as_ref()),
                     AnnotationSubject::AnonymousIndividual(a) => {
-                        self.w(&format!("_:{}", a.0.as_ref()))
+                        self.w(&anonymous_label(a.0.as_ref()))
                     }
                 }
                 self.w(" ");
@@ -1350,7 +1350,7 @@ impl<'a> Renderer<'a> {
                     AnnotationValue::Literal(l) => self.literal(l),
                     AnnotationValue::IRI(i) => self.iri(i.as_ref()),
                     AnnotationValue::AnonymousIndividual(x) => {
-                        self.w(&format!("_:{}", x.0.as_ref()))
+                        self.w(&anonymous_label(x.0.as_ref()))
                     }
                 }
                 self.w(")");
@@ -1414,6 +1414,16 @@ fn escape_str(s: &str) -> String {
 /// An ontology annotation is written the way the header writes it,
 /// `Annotation(<property> <value>)`: on its own line there is no `Ontology(` for
 /// it to sit inside, and the axiom renderer passes it over for that reason.
+/// An anonymous individual's node id as functional syntax writes it: with its
+/// `_:`, whether or not the id carries one.
+fn anonymous_label(id: &str) -> String {
+    if id.starts_with("_:") {
+        id.to_string()
+    } else {
+        format!("_:{id}")
+    }
+}
+
 pub(crate) fn render_component_line(ac: &AnnotatedComponent<RcStr>) -> String {
     let labels = std::collections::HashMap::new();
     let mut r = Renderer { out: String::new(), labels: &labels, focused: None };

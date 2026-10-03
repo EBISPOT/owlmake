@@ -31,6 +31,15 @@ use crate::model::Model;
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 
+/// The key of the ontology header's graph.
+pub const HEADER_GRAPH: &str = "\u{1}header";
+/// The prefix of the key of an anonymous individual's own graph.
+pub const ANON_GRAPH: &str = "\u{1}anon\u{1}";
+/// The prefix of the key of a general axiom's graph, before its identity.
+pub const GENERAL_GRAPH: &str = "\u{1}general\u{1}";
+/// The key of the rules' graph.
+pub const RULES_GRAPH: &str = "\u{1}rules";
+
 // annotatedProperty IRIs for edge reifications, matching the writer's output.
 const P_SUBCLASS: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 const P_EQUIV: &str = "http://www.w3.org/2002/07/owl#equivalentClass";
@@ -493,6 +502,55 @@ pub struct Genids {
     /// The `axiom_identity` of the axiom being numbered, when its annotations
     /// carry annotations of their own.
     cur_axiom: Option<u64>,
+    /// The axioms about each anonymous individual, in the order they are
+    /// numbered where it is first reached: those it is the subject of — a class
+    /// assertion, a property assertion or negative assertion, a sameness or
+    /// difference it is a member of — then the annotation assertions about it.
+    anon_axioms: HashMap<String, Vec<(u64, AnnotatedComponent<RcStr>)>>,
+    /// The `axiom_identity` of every axiom in `anon_axioms`.
+    reachable: std::collections::HashSet<u64>,
+    /// Those of them already numbered.
+    reached: std::collections::HashSet<u64>,
+    /// The anonymous individuals being reached, innermost last.
+    reaching: Vec<String>,
+    /// For each axiom in `anon_axioms` (by `axiom_identity`), the graph it is
+    /// numbered in: the graph that first reaches its individual.
+    pub anon_home: HashMap<u64, String>,
+    /// The axioms of `anon_home`, in the order they were numbered.
+    pub anon_order: Vec<u64>,
+    /// The node of each anonymous individual.
+    pub anon_ids: HashMap<String, u64>,
+    /// For each axiom that names an anonymous individual (by
+    /// `axiom_identity`), the nodes of its reifications, or of the negative
+    /// assertion or `owl:AllDifferent` it is, in order.
+    pub anon_reif: HashMap<u64, Vec<u64>>,
+    /// Whether anonymous individuals are numbered from the model: their axioms
+    /// are reached from the graphs that name them, and the anonymous section
+    /// states the rest.
+    model_anon: bool,
+    /// Whether any axiom names an anonymous individual.
+    anon_present: bool,
+    /// The graph being numbered: an entity's IRI, [`HEADER_GRAPH`],
+    /// [`ANON_GRAPH`] and an individual, [`GENERAL_GRAPH`] and an axiom's
+    /// identity, or [`RULES_GRAPH`].
+    pub cur_graph: String,
+    /// The graphs, in the order they are numbered and written.
+    pub graphs: Vec<String>,
+    /// For each graph and anonymous individual, how many of the graph's
+    /// statements have the individual as their object.
+    pub anon_objects: HashMap<(String, String), u32>,
+    /// The first node of each general axiom, by its `axiom_identity`: the
+    /// root of its graph.
+    pub general_root: HashMap<u64, u64>,
+    /// The node of the class expression of each annotated class assertion of
+    /// an anonymous class about an anonymous individual, by its
+    /// `axiom_identity`.
+    pub anon_ce: HashMap<u64, u64>,
+    /// The axiom being numbered, when it names an anonymous individual.
+    cur_anon_axiom: Option<u64>,
+    /// The anonymous individuals that are graphs of their own, in the order
+    /// the anonymous section states them.
+    pub anon_roots: Vec<String>,
     /// The nodes annotated annotations have taken, in the order numbered.
     annotation_nodes: Vec<u64>,
 }
@@ -512,6 +570,36 @@ pub struct NestedAnnotations {
 }
 
 impl Genids {
+    /// The axioms about anonymous individuals that no graph reached.
+    pub fn unreached(&self) -> impl Iterator<Item = u64> + '_ {
+        self.reachable.iter().copied().filter(|k| !self.reached.contains(k))
+    }
+
+    /// Whether the axiom `key` is about an anonymous individual, and numbered
+    /// where the individual is first reached.
+    pub fn is_reachable(&self, key: u64) -> bool {
+        self.reachable.contains(&key)
+    }
+
+    /// Start numbering the graph `key`.
+    fn begin_graph(&mut self, key: String) {
+        self.graphs.push(key.clone());
+        self.cur_graph = key;
+    }
+
+    /// A statement of the current graph has the individual `i` as its object.
+    fn object(&mut self, i: &Individual<RcStr>) {
+        if let Individual::Anonymous(a) = i {
+            self.object_anon(a.0.as_ref());
+        }
+    }
+
+    fn object_anon(&mut self, x: &str) {
+        if self.model_anon {
+            *self.anon_objects.entry((self.cur_graph.clone(), x.to_string())).or_default() += 1;
+        }
+    }
+
     /// The next id for an anonymous node.
     fn fresh(&mut self) -> u64 {
         let v = self.counter;
@@ -564,8 +652,27 @@ impl Genids {
     /// An anonymous individual's node, taken where the individual first appears.
     fn translate_anonymous(&mut self, id: &str) {
         if self.seen_anon.insert(id.to_string()) {
-            self.fresh();
+            let node = self.fresh();
+            self.anon_ids.insert(id.to_string(), node);
         }
+    }
+
+    /// Reach the anonymous individual `x` in the graph being numbered: every
+    /// axiom about it not yet numbered is numbered here, but `from`, the axiom
+    /// that reached it.
+    fn reach(&mut self, x: &str, from: Option<u64>) {
+        if self.reaching.iter().any(|r| r == x) {
+            return;
+        }
+        let Some(axioms) = self.anon_axioms.get(x).cloned() else { return };
+        self.reaching.push(x.to_string());
+        let owner = self.cur_owner.clone();
+        for (key, ac) in &axioms {
+            if Some(*key) != from {
+                self.translate_axiom(&owner, ac);
+            }
+        }
+        self.reaching.pop();
     }
 
     /// An RDF list of class expressions — cells built from the LAST sorted element
@@ -918,6 +1025,10 @@ impl Genids {
                 let id = self.fresh();
                 self.translate_ope(ope);
                 self.translate_individual(i);
+                self.object(i);
+                if let Individual::Anonymous(a) = i {
+                    self.reach(a.0.as_ref(), None);
+                }
                 Some(id)
             }
             CE::ObjectHasSelf(ope) => {
@@ -954,6 +1065,16 @@ impl Genids {
             CE::ObjectOneOf(inds) => {
                 let id = self.fresh();
                 self.translate_ind_list(inds);
+                let mut members: Vec<&Individual<RcStr>> = inds.iter().collect();
+                members.sort_by(|a, b| cmp_individual(a, b));
+                for m in &members {
+                    self.object(m);
+                }
+                for m in members {
+                    if let Individual::Anonymous(a) = m {
+                        self.reach(a.0.as_ref(), None);
+                    }
+                }
                 Some(id)
             }
             // Data restrictions: the restriction node, then the DATA RANGE, which
@@ -1070,6 +1191,12 @@ impl Genids {
         // gets a node; nested annotations reify the annotation itself.
         if let AnnotationValue::AnonymousIndividual(a) = &anno.av {
             self.translate_anonymous(a.0.as_ref());
+            self.object_anon(a.0.as_ref());
+            if !anno.ann.is_empty() {
+                // …and the target of the annotation's own node.
+                self.object_anon(a.0.as_ref());
+            }
+            self.reach(a.0.as_ref(), None);
         }
         // An annotation CAN carry its own annotations — horned's `Annotation` has an
         // `ann` set — and each nesting level reifies as a further `owl:Annotation`
@@ -1084,6 +1211,12 @@ impl Genids {
     /// The annotations of the reified axiom `node`, recording those that carry
     /// annotations of their own for the writer.
     fn translate_node_annotations(&mut self, node: u64, anns: &std::collections::BTreeSet<Annotation<RcStr>>) {
+        if let Some(axiom) = self.cur_anon_axiom {
+            let nodes = self.anon_reif.entry(axiom).or_default();
+            if nodes.last() != Some(&node) {
+                nodes.push(node);
+            }
+        }
         let mark = self.annotation_nodes.len();
         self.translate_annotations(anns);
         if self.annotation_nodes.len() > mark {
@@ -1208,6 +1341,61 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         ..Default::default()
     };
 
+    // Anonymous individuals are numbered from the model unless the document's
+    // own blocks for them are replayed.
+    let anon_blocks = crate::io::anon_individual_order(
+        &model.owl_anon_blocks,
+        model.anon_alloc_base,
+        model.anon_hash_capacity,
+        model.anon_imports_end,
+    );
+    g.model_anon = anon_blocks.is_empty() && model.anon_hash_capacity == 0;
+    g.anon_present = model.ont.iter().any(|ac| names_anonymous(&ac.component));
+    if g.model_anon && g.anon_present {
+        // The axioms each anonymous individual is reached with: those it is the
+        // subject of, and the samenesses and differences it is a member of, in
+        // axiom order; then the annotation assertions about it.
+        let mut own: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
+        let mut about: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
+        for ac in model.ont.iter() {
+            let anon = |i: &Individual<RcStr>| match i {
+                Individual::Anonymous(a) => Some(a.0.as_ref().to_string()),
+                Individual::Named(_) => None,
+            };
+            let subjects: Vec<String> = match &ac.component {
+                Component::ClassAssertion(ax) => anon(&ax.i).into_iter().collect(),
+                Component::ObjectPropertyAssertion(ax) => anon(&ax.from).into_iter().collect(),
+                Component::DataPropertyAssertion(ax) => anon(&ax.from).into_iter().collect(),
+                Component::NegativeObjectPropertyAssertion(ax) => anon(&ax.from).into_iter().collect(),
+                Component::NegativeDataPropertyAssertion(ax) => anon(&ax.from).into_iter().collect(),
+                Component::SameIndividual(ax) => ax.0.iter().filter_map(anon).collect(),
+                Component::DifferentIndividuals(ax) => ax.0.iter().filter_map(anon).collect(),
+                Component::AnnotationAssertion(ax) => {
+                    if let AnnotationSubject::AnonymousIndividual(a) = &ax.subject {
+                        about.entry(a.0.as_ref().to_string()).or_default().push(ac);
+                    }
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
+            for x in subjects {
+                own.entry(x).or_default().push(ac);
+            }
+        }
+        let individuals: std::collections::BTreeSet<String> = own.keys().chain(about.keys()).cloned().collect();
+        for x in individuals {
+            let mut axioms = own.remove(&x).unwrap_or_default();
+            axioms.sort_by(|a, b| cmp_annotated_axiom(a, b));
+            axioms.dedup_by(|a, b| std::ptr::eq(*a, *b));
+            let mut assertions = about.remove(&x).unwrap_or_default();
+            assertions.sort_by(|a, b| cmp_annotated_axiom(a, b));
+            let list: Vec<(u64, AnnotatedComponent<RcStr>)> =
+                axioms.into_iter().chain(assertions).map(|ac| (axiom_identity(ac), ac.clone())).collect();
+            g.reachable.extend(list.iter().map(|(k, _)| *k));
+            g.anon_axioms.insert(x, list);
+        }
+    }
+
     // Bucket components by owning entity IRI and by section kind.
     let mut by_entity: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
     let mut ann_props: Vec<String> = Vec::new();
@@ -1322,6 +1510,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
     ont_anns.sort_by(|a, b| {
         crate::io::owlrdf::ann_key(a.ap.0.as_ref(), &a.av).cmp(&crate::io::owlrdf::ann_key(b.ap.0.as_ref(), &b.av))
     });
+    g.begin_graph(HEADER_GRAPH.to_string());
     for oa in ont_anns {
         let mark = g.annotation_nodes.len();
         g.translate_annotation(oa);
@@ -1358,6 +1547,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
                     eprintln!("[start] {iri} {}", g.counter);
                 }
                 g.cur_owner = iri.clone();
+                g.begin_graph(iri.clone());
                 g.intern.clear();
                 g.graph_seq += 1;
                 g.sub_sigs.clear();
@@ -1438,12 +1628,6 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
     // the blocks in.
     g.cur_owner = "__anon_individuals__".to_string();
     {
-        let anon_blocks = crate::io::anon_individual_order(
-            &model.owl_anon_blocks,
-            model.anon_alloc_base,
-            model.anon_hash_capacity,
-            model.anon_imports_end,
-        );
         if !anon_blocks.is_empty() {
             // Replayed verbatim from the source: the block text is the body, so
             // only the individual's own node is numbered here.
@@ -1452,42 +1636,54 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
                 g.graph_seq += 1;
                 g.fresh();
             }
-        } else if model.anon_hash_capacity == 0 {
-            // The individuals the writer gives a block here: the subjects of
-            // anonymous class assertions and annotation assertions.
-            let mut by_ind: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
-            for ac in model.ont.iter() {
-                match &ac.component {
-                    Component::AnnotationAssertion(aa) => {
-                        if let AnnotationSubject::AnonymousIndividual(a) = &aa.subject {
-                            by_ind.entry(a.0.as_ref().to_string()).or_default().push(ac);
-                        }
-                    }
-                    Component::ClassAssertion(ca) => {
-                        if let (Individual::Anonymous(a), CE::Class(_)) = (&ca.i, &ca.ce) {
-                            by_ind.entry(a.0.as_ref().to_string()).or_default().push(ac);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+        } else if g.model_anon {
+            // An individual that every statement naming it is about is a graph
+            // of its own, of those statements, in node order. A difference of
+            // more than two, or of two of which it is the second, is passed
+            // over.
             let pos = |id: &str| {
                 let bare = id.strip_prefix("_:").unwrap_or(id);
                 model.anon_doc_order.iter().position(|l| l == bare).unwrap_or(usize::MAX)
             };
-            let mut ids: Vec<&String> = by_ind.keys().collect();
+            let mut naming: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
+            for ac in model.ont.iter() {
+                for x in referenced_anonymous(ac) {
+                    naming.entry(x).or_default().push(ac);
+                }
+            }
+            let mut ids: Vec<String> = naming.keys().cloned().collect();
             ids.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.cmp(b)));
-            for id in ids {
+            for x in ids {
+                let mut refs = naming[&x].clone();
+                refs.sort_by(|a, b| cmp_annotated_axiom(a, b));
+                refs.dedup_by(|a, b| std::ptr::eq(*a, *b));
+                let mut axioms = Vec::new();
+                let mut root = true;
+                for ac in refs {
+                    if let Component::DifferentIndividuals(d) = &ac.component {
+                        let first = d.0.iter().min_by(|a, b| cmp_individual(a, b));
+                        if d.0.len() != 2 || !matches!(first, Some(Individual::Anonymous(a)) if a.0.as_ref() == x) {
+                            continue;
+                        }
+                    }
+                    if axiom_subject(&ac.component).as_deref() != Some(x.as_str()) {
+                        root = false;
+                        break;
+                    }
+                    axioms.push(ac);
+                }
+                if !root {
+                    continue;
+                }
+                g.begin_graph(format!("{ANON_GRAPH}{x}"));
                 g.intern.clear();
                 g.graph_seq += 1;
-                g.translate_anonymous(id);
-                let mut axioms = by_ind[id].clone();
-                axioms.sort_by(|a, b| cmp_annotated_axiom(a, b));
+                let before = g.anon_order.len();
                 for ac in axioms {
-                    if !ac.ann.is_empty() {
-                        g.fresh();
-                        g.translate_annotations(&ac.ann);
-                    }
+                    g.translate_axiom("__anon_individuals__", ac);
+                }
+                if g.anon_order.len() > before {
+                    g.anon_roots.push(x);
                 }
             }
         }
@@ -1533,6 +1729,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
                 eprintln!("[start] {iri} {}", g.counter);
             }
             g.cur_owner = iri.clone();
+            g.begin_graph(iri.clone());
             g.intern.clear();
             g.graph_seq += 1;
             g.sub_sigs.clear();
@@ -1554,11 +1751,13 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
     general.sort_by(|a, b| cmp_axiom(&a.component, &b.component));
     g.cur_owner = "__general__".to_string();
     for ac in general {
+        g.begin_graph(format!("{GENERAL_GRAPH}{}", axiom_identity(ac)));
         g.intern.clear();
         g.graph_seq += 1;
         g.sub_sigs.clear();
         g.eq_sigs.clear();
         let start = g.counter;
+        g.general_root.insert(axiom_identity(ac), start);
         g.translate_axiom("__general__", ac);
         let nodes: Vec<u64> = (start..g.counter).filter(|n| g.nested.contains_key(n)).collect();
         if !nodes.is_empty() {
@@ -1579,6 +1778,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             _ => unreachable!(),
         });
         g.cur_owner = "__rules__".to_string();
+        g.begin_graph(RULES_GRAPH.to_string());
         g.intern.clear();
         g.graph_seq += 1;
         for ac in rules {
@@ -1613,6 +1813,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         };
         let owner = sup.0.as_ref().to_string();
         g.cur_owner = owner.clone();
+        g.begin_graph(owner.clone());
         g.cur_axiom = ac.ann.iter().any(|a| !a.ann.is_empty()).then(|| axiom_identity(ac));
         g.intern.clear();
         g.graph_seq += 1;
@@ -1705,6 +1906,30 @@ impl Genids {
     /// Translate one axiom, assigning genids to its anonymous nodes and, for an
     /// annotated axiom with an anonymous CE object, recording the shared genid.
     fn translate_axiom(&mut self, owner: &str, ac: &AnnotatedComponent<RcStr>) {
+        // An axiom about an anonymous individual is numbered once, in the graph
+        // that first reaches it.
+        let anon_key = (self.anon_present && names_anonymous(&ac.component)).then(|| axiom_identity(ac));
+        if let Some(key) = anon_key.filter(|k| self.reachable.contains(k)) {
+            if !self.reached.insert(key) {
+                return;
+            }
+            self.anon_home.insert(key, self.cur_graph.clone());
+            self.anon_order.push(key);
+        }
+        let outer = std::mem::replace(&mut self.cur_anon_axiom, anon_key);
+        self.translate_axiom_nodes(owner, ac);
+        self.cur_anon_axiom = None;
+        // …and, its own statements made, reaches the anonymous individuals it
+        // names.
+        if let Some(key) = anon_key {
+            for x in reached_individuals(&ac.component) {
+                self.reach(&x, Some(key));
+            }
+        }
+        self.cur_anon_axiom = outer;
+    }
+
+    fn translate_axiom_nodes(&mut self, owner: &str, ac: &AnnotatedComponent<RcStr>) {
         // An axiom in which one anonymous structure appears twice is copied
         // whole before it is translated, so nothing in it is the object another
         // axiom holds, whatever the record says.
@@ -1980,8 +2205,19 @@ impl Genids {
                 self.translate_individual(&ax.i);
                 if ac.ann.is_empty() {
                     self.translate_ce(&ax.ce);
-                } else if let Some(id) = self.single_triple_ce_reif(None, &ax.ce, &ac.ann, false, Some(P_TYPE)) {
-                    self.record_shared(owner, &ax.ce, id);
+                } else {
+                    // The reification's source.
+                    self.object(&ax.i);
+                    let named = matches!(ax.i, Individual::Named(_));
+                    if let Some(id) =
+                        self.single_triple_ce_reif(None, &ax.ce, &ac.ann, false, named.then_some(P_TYPE))
+                    {
+                        if named {
+                            self.record_shared(owner, &ax.ce, id);
+                        } else if let Some(axiom) = self.cur_anon_axiom {
+                            self.anon_ce.insert(axiom, id);
+                        }
+                    }
                 }
             }
             // Property assertions are single triples, an assertion on an inverse
@@ -1994,12 +2230,15 @@ impl Genids {
                 };
                 self.translate_individual(from);
                 self.translate_individual(to);
+                self.object(to);
                 // The assertion stated the other way round is a new axiom without
                 // the annotations, so only an assertion on a named property
                 // reifies.
                 if !ac.ann.is_empty() && matches!(ax.ope, OPE::ObjectProperty(_)) {
+                    self.object(from);
+                    self.object(to);
                     let rid = self.fresh();
-                    if let Individual::Named(o) = to {
+                    if let (Individual::Named(_), Individual::Named(o)) = (from, to) {
                         let p = ope_owner(&ax.ope);
                         let sig = format!(
                             "{}\u{1}R\u{1}{}",
@@ -2014,13 +2253,16 @@ impl Genids {
             Component::DataPropertyAssertion(ax) => {
                 self.translate_individual(&ax.from);
                 if !ac.ann.is_empty() {
+                    self.object(&ax.from);
                     let rid = self.fresh();
-                    let sig = format!(
-                        "{}\u{1}L\u{1}{}",
-                        crate::io::owlrdf::esc_attr(ax.dp.0.as_ref()),
-                        crate::io::owlrdf::esc(ax.to.literal())
-                    );
-                    self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
+                    if matches!(ax.from, Individual::Named(_)) {
+                        let sig = format!(
+                            "{}\u{1}L\u{1}{}",
+                            crate::io::owlrdf::esc_attr(ax.dp.0.as_ref()),
+                            crate::io::owlrdf::esc(ax.to.literal())
+                        );
+                        self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
+                    }
                     self.translate_node_annotations(rid, &ac.ann);
                 }
             }
@@ -2028,7 +2270,9 @@ impl Genids {
             // its annotations.
             Component::NegativeObjectPropertyAssertion(ax) => {
                 let id = self.fresh();
-                if let Individual::Named(o) = &ax.to {
+                self.object(&ax.from);
+                self.object(&ax.to);
+                if let (Individual::Named(_), Individual::Named(o)) = (&ax.from, &ax.to) {
                     // An inverse property is nested, so the block names none.
                     let prop = ope_named(&ax.ope).map(|p| crate::io::owlrdf::esc_attr(&p)).unwrap_or_default();
                     let sig = format!("NPA\u{1}{prop}\u{1}R\u{1}{}", crate::io::owlrdf::esc_attr(o.0.as_ref()));
@@ -2041,12 +2285,15 @@ impl Genids {
             }
             Component::NegativeDataPropertyAssertion(ax) => {
                 let id = self.fresh();
-                let sig = format!(
-                    "NPA\u{1}{}\u{1}L\u{1}{}",
-                    crate::io::owlrdf::esc_attr(ax.dp.0.as_ref()),
-                    crate::io::owlrdf::esc(ax.to.literal())
-                );
-                self.reif.entry(self.cur_owner.clone()).or_default().push((sig, id));
+                self.object(&ax.from);
+                if matches!(ax.from, Individual::Named(_)) {
+                    let sig = format!(
+                        "NPA\u{1}{}\u{1}L\u{1}{}",
+                        crate::io::owlrdf::esc_attr(ax.dp.0.as_ref()),
+                        crate::io::owlrdf::esc(ax.to.literal())
+                    );
+                    self.reif.entry(self.cur_owner.clone()).or_default().push((sig, id));
+                }
                 self.translate_individual(&ax.from);
                 self.translate_node_annotations(id, &ac.ann);
             }
@@ -2101,18 +2348,35 @@ impl Genids {
             Component::AnnotationAssertion(ax) => {
                 // An anonymous subject or value is a node of its own; an annotated
                 // assertion reifies to an owl:Axiom node. Record its (property ⊕
-                // value) signature so the writer can order the block.
-                if let AnnotationSubject::AnonymousIndividual(a) = &ax.subject {
-                    self.translate_anonymous(a.0.as_ref());
+                // value) signature so the writer can order the block, unless it
+                // names an anonymous individual: that block is ordered by its node
+                // (`anon_reif`).
+                let anon_subject = match &ax.subject {
+                    AnnotationSubject::AnonymousIndividual(a) => Some(a.0.as_ref()),
+                    AnnotationSubject::IRI(_) => None,
+                };
+                let anon_value = match &ax.ann.av {
+                    AnnotationValue::AnonymousIndividual(a) => Some(a.0.as_ref()),
+                    _ => None,
+                };
+                if let Some(x) = anon_subject {
+                    self.translate_anonymous(x);
                 }
-                if let AnnotationValue::AnonymousIndividual(a) = &ax.ann.av {
-                    self.translate_anonymous(a.0.as_ref());
+                if let Some(x) = anon_value {
+                    self.translate_anonymous(x);
+                    self.object_anon(x);
                 }
                 if !ac.ann.is_empty() {
+                    // The reification's source and target.
+                    for x in anon_subject.into_iter().chain(anon_value) {
+                        self.object_anon(x);
+                    }
                     let rid = self.fresh();
-                    let prop = crate::io::owlrdf::esc_attr(ax.ann.ap.0.as_ref());
-                    let sig = format!("{prop}\u{1}{}", ann_value_tsig(&ax.ann.av));
-                    self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
+                    if anon_subject.is_none() && anon_value.is_none() {
+                        let prop = crate::io::owlrdf::esc_attr(ax.ann.ap.0.as_ref());
+                        let sig = format!("{prop}\u{1}{}", ann_value_tsig(&ax.ann.av));
+                        self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
+                    }
                     self.translate_node_annotations(rid, &ac.ann);
                 }
             }
@@ -2198,6 +2462,9 @@ impl Genids {
                 if ax.0.len() > 2 {
                     let node = self.fresh();
                     self.translate_individual_list(&ax.0);
+                    for m in &ax.0 {
+                        self.object(m);
+                    }
                     self.translate_node_annotations(node, &ac.ann);
                 } else {
                     self.individual_pairs(&ax.0, &ac.ann, false, "http://www.w3.org/2002/07/owl#differentFrom");
@@ -2349,34 +2616,20 @@ impl Genids {
         consecutive: bool,
         pred: &str,
     ) {
-        let mut sorted: Vec<&Individual<RcStr>> = members.iter().collect();
-        sorted.sort_by(|a, b| cmp_individual(a, b));
-        sorted.dedup();
-        let mut pairs: Vec<(&Individual<RcStr>, &Individual<RcStr>)> = if consecutive || sorted.len() == 2 {
-            sorted.windows(2).map(|w| (w[0], w[1])).collect()
-        } else {
-            Vec::new()
-        };
-        // A sameness of three or more is its consecutive pairs, taken in the
-        // order of a hash set of those pairs.
-        if pairs.len() > 1 {
-            let hashes: Vec<i32> = pairs
-                .iter()
-                .map(|(a, b)| {
-                    let pair = Component::SameIndividual(horned_owl::model::SameIndividual(vec![(*a).clone(), (*b).clone()]));
-                    crate::owlapi_hash::axiom_hash(&pair, anns).unwrap_or(0)
-                })
-                .collect();
-            let order = crate::owlapi_hash::hashset_order(&hashes);
-            pairs = order.into_iter().map(|i| pairs[i]).collect();
-        }
+        let pairs = individual_pair_list(members, anns, consecutive);
         let mut first = None;
         for (a, b) in pairs {
             self.translate_individual(a);
             self.translate_individual(b);
+            self.object(b);
             if !anns.is_empty() {
+                self.object(a);
+                self.object(b);
                 let rid = self.fresh();
-                if let Individual::Named(o) = b {
+                if let Some(axiom) = self.cur_anon_axiom {
+                    self.anon_reif.entry(axiom).or_default().push(rid);
+                }
+                if let (Individual::Named(_), Individual::Named(o)) = (a, b) {
                     let sig = format!("{pred}\u{1}R\u{1}{}", crate::io::owlrdf::esc_attr(o.0.as_ref()));
                     self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
                 }
@@ -2415,6 +2668,7 @@ impl Genids {
         let iarg = |g: &mut Self, a: &IArgument<RcStr>| {
             if let IArgument::Individual(i) = a {
                 g.translate_individual(i);
+                g.object(i);
             }
         };
         match atom {
@@ -2963,6 +3217,197 @@ pub fn ce_sig(ce: &CE<RcStr>) -> String {
 /// [`ce_sig`] for a data range.
 pub fn dr_sig(dr: &horned_owl::model::DataRange<RcStr>) -> String {
     format!("{dr:?}")
+}
+
+/// Does `c` name an anonymous individual, anywhere but in its annotations?
+pub(crate) fn names_anonymous(c: &Component<RcStr>) -> bool {
+    let mut found = Vec::new();
+    component_anonymous(c, &mut found);
+    !found.is_empty()
+}
+
+/// The anonymous individuals `ac` names, its annotations included, each once.
+pub(crate) fn referenced_anonymous(ac: &AnnotatedComponent<RcStr>) -> Vec<String> {
+    fn anns(a: &std::collections::BTreeSet<Annotation<RcStr>>, out: &mut Vec<String>) {
+        for x in a {
+            if let AnnotationValue::AnonymousIndividual(i) = &x.av {
+                out.push(i.0.as_ref().to_string());
+            }
+            anns(&x.ann, out);
+        }
+    }
+    let mut out = Vec::new();
+    component_anonymous(&ac.component, &mut out);
+    anns(&ac.ann, &mut out);
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|x| seen.insert(x.clone()));
+    out
+}
+
+/// The anonymous individuals in `c`'s terms and class expressions.
+fn component_anonymous(c: &Component<RcStr>, out: &mut Vec<String>) {
+    use horned_owl::model::{Atom, IArgument};
+    fn ind(i: &Individual<RcStr>, out: &mut Vec<String>) {
+        if let Individual::Anonymous(a) = i {
+            out.push(a.0.as_ref().to_string());
+        }
+    }
+    fn ce(c: &CE<RcStr>, out: &mut Vec<String>) {
+        match c {
+            CE::ObjectHasValue { i, .. } => ind(i, out),
+            CE::ObjectOneOf(v) => v.iter().for_each(|i| ind(i, out)),
+            _ => sub_expressions(c).into_iter().for_each(|s| ce(s, out)),
+        }
+    }
+    fn iarg(a: &IArgument<RcStr>, out: &mut Vec<String>) {
+        if let IArgument::Individual(i) = a {
+            ind(i, out);
+        }
+    }
+    match c {
+        Component::ClassAssertion(ax) => {
+            ind(&ax.i, out);
+            ce(&ax.ce, out);
+        }
+        Component::ObjectPropertyAssertion(ax) => {
+            ind(&ax.from, out);
+            ind(&ax.to, out);
+        }
+        Component::NegativeObjectPropertyAssertion(ax) => {
+            ind(&ax.from, out);
+            ind(&ax.to, out);
+        }
+        Component::DataPropertyAssertion(ax) => ind(&ax.from, out),
+        Component::NegativeDataPropertyAssertion(ax) => ind(&ax.from, out),
+        Component::SameIndividual(ax) => ax.0.iter().for_each(|i| ind(i, out)),
+        Component::DifferentIndividuals(ax) => ax.0.iter().for_each(|i| ind(i, out)),
+        Component::AnnotationAssertion(ax) => {
+            if let AnnotationSubject::AnonymousIndividual(a) = &ax.subject {
+                out.push(a.0.as_ref().to_string());
+            }
+            if let AnnotationValue::AnonymousIndividual(a) = &ax.ann.av {
+                out.push(a.0.as_ref().to_string());
+            }
+        }
+        Component::OntologyAnnotation(oa) => {
+            if let AnnotationValue::AnonymousIndividual(a) = &oa.0.av {
+                out.push(a.0.as_ref().to_string());
+            }
+        }
+        Component::Rule(r) => {
+            for atom in r.body.iter().chain(r.head.iter()) {
+                match atom {
+                    Atom::ClassAtom { pred, arg } => {
+                        ce(pred, out);
+                        iarg(arg, out);
+                    }
+                    Atom::ObjectPropertyAtom { args, .. } => {
+                        iarg(&args.0, out);
+                        iarg(&args.1, out);
+                    }
+                    Atom::SameIndividualAtom(a, b) | Atom::DifferentIndividualsAtom(a, b) => {
+                        iarg(a, out);
+                        iarg(b, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        other => component_class_expressions(other).into_iter().for_each(|x| ce(x, out)),
+    }
+}
+
+/// The anonymous individual an individual axiom is about, when it is one: a
+/// class assertion's individual, an assertion's subject, an annotation
+/// assertion's subject, and the first member of a sameness or difference.
+fn axiom_subject(c: &Component<RcStr>) -> Option<String> {
+    let anon = |i: &Individual<RcStr>| match i {
+        Individual::Anonymous(a) => Some(a.0.as_ref().to_string()),
+        Individual::Named(_) => None,
+    };
+    match c {
+        Component::ClassAssertion(ax) => anon(&ax.i),
+        Component::ObjectPropertyAssertion(ax) => anon(&ax.from),
+        Component::DataPropertyAssertion(ax) => anon(&ax.from),
+        Component::NegativeObjectPropertyAssertion(ax) => anon(&ax.from),
+        Component::NegativeDataPropertyAssertion(ax) => anon(&ax.from),
+        Component::SameIndividual(ax) => ax.0.iter().min_by(|a, b| cmp_individual(a, b)).and_then(anon),
+        Component::DifferentIndividuals(ax) => ax.0.iter().min_by(|a, b| cmp_individual(a, b)).and_then(anon),
+        Component::AnnotationAssertion(ax) => match &ax.subject {
+            AnnotationSubject::AnonymousIndividual(a) => Some(a.0.as_ref().to_string()),
+            AnnotationSubject::IRI(_) => None,
+        },
+        _ => None,
+    }
+}
+
+/// The anonymous individuals an axiom reaches once its own statements are
+/// made, in the order it reaches them: a class assertion's individual; an
+/// object property assertion's object, then its subject, as it is stated of
+/// the named property; a negative assertion's subject, then an object
+/// assertion's object; an annotation assertion's value; and every member of a
+/// sameness, or of a difference of more than two.
+pub(crate) fn reached_individuals(c: &Component<RcStr>) -> Vec<String> {
+    let anon = |i: &Individual<RcStr>| match i {
+        Individual::Anonymous(a) => Some(a.0.as_ref().to_string()),
+        Individual::Named(_) => None,
+    };
+    let sorted = |v: &[Individual<RcStr>]| -> Vec<String> {
+        let mut m: Vec<&Individual<RcStr>> = v.iter().collect();
+        m.sort_by(|a, b| cmp_individual(a, b));
+        m.dedup();
+        m.into_iter().filter_map(anon).collect()
+    };
+    match c {
+        Component::ClassAssertion(ax) => anon(&ax.i).into_iter().collect(),
+        Component::ObjectPropertyAssertion(ax) => {
+            let (s, o) = match ax.ope {
+                OPE::ObjectProperty(_) => (&ax.from, &ax.to),
+                OPE::InverseObjectProperty(_) => (&ax.to, &ax.from),
+            };
+            [o, s].into_iter().filter_map(anon).collect()
+        }
+        Component::NegativeObjectPropertyAssertion(ax) => [&ax.from, &ax.to].into_iter().filter_map(anon).collect(),
+        Component::NegativeDataPropertyAssertion(ax) => anon(&ax.from).into_iter().collect(),
+        Component::AnnotationAssertion(ax) => match &ax.ann.av {
+            AnnotationValue::AnonymousIndividual(a) => vec![a.0.as_ref().to_string()],
+            _ => Vec::new(),
+        },
+        Component::SameIndividual(ax) => sorted(&ax.0),
+        Component::DifferentIndividuals(ax) if ax.0.len() > 2 => sorted(&ax.0),
+        _ => Vec::new(),
+    }
+}
+
+/// The statements a sameness (`consecutive`) or a difference of `members` is
+/// written as: the consecutive pairs of its members in order, or, for a
+/// difference, its two members; a sameness of three or more takes its pairs in
+/// the order of a hash set of them.
+pub(crate) fn individual_pair_list<'a>(
+    members: &'a [Individual<RcStr>],
+    anns: &std::collections::BTreeSet<Annotation<RcStr>>,
+    consecutive: bool,
+) -> Vec<(&'a Individual<RcStr>, &'a Individual<RcStr>)> {
+    let mut sorted: Vec<&Individual<RcStr>> = members.iter().collect();
+    sorted.sort_by(|a, b| cmp_individual(a, b));
+    sorted.dedup();
+    let mut pairs: Vec<(&Individual<RcStr>, &Individual<RcStr>)> = if consecutive || sorted.len() == 2 {
+        sorted.windows(2).map(|w| (w[0], w[1])).collect()
+    } else {
+        Vec::new()
+    };
+    if pairs.len() > 1 {
+        let hashes: Vec<i32> = pairs
+            .iter()
+            .map(|(a, b)| {
+                let pair = Component::SameIndividual(horned_owl::model::SameIndividual(vec![(*a).clone(), (*b).clone()]));
+                crate::owlapi_hash::axiom_hash(&pair, anns).unwrap_or(0)
+            })
+            .collect();
+        let order = crate::owlapi_hash::hashset_order(&hashes);
+        pairs = order.into_iter().map(|i| pairs[i]).collect();
+    }
+    pairs
 }
 
 #[cfg(test)]

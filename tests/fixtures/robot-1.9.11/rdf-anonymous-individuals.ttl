@@ -1,0 +1,255 @@
+@prefix : <http://example.org/anon#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix anon: <http://example.org/anon#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/anon> .
+
+<http://example.org/anon> rdf:type owl:Ontology ;
+                           anon:note [ rdf:type anon:A ;
+                                       anon:d "header"
+                                     ] .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/anon#note
+anon:note rdf:type owl:AnnotationProperty .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/anon#p
+anon:p rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/anon#q
+anon:q rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/anon#d
+anon:d rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/anon#A
+anon:A rdf:type owl:Class ;
+       rdfs:subClassOf [ rdf:type owl:Restriction ;
+                         owl:onProperty anon:p ;
+                         owl:hasValue _:genid3
+                       ] ;
+       anon:note [ rdfs:label "note"
+                 ] .
+
+_:genid3 rdf:type anon:B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid3 ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget anon:B ;
+   rdfs:comment "typed"
+ ] .
+
+
+###  http://example.org/anon#B
+anon:B rdf:type owl:Class ;
+       rdfs:subClassOf [ rdf:type owl:Class ;
+                         owl:oneOf ( anon:i
+                                     _:genid8
+                                   )
+                       ] ;
+       anon:note _:genid10 .
+
+_:genid8 rdf:type anon:C .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource anon:B ;
+   owl:annotatedProperty anon:note ;
+   owl:annotatedTarget _:genid10 ;
+   rdfs:comment "on"
+ ] .
+
+
+###  http://example.org/anon#C
+anon:C rdf:type owl:Class ;
+       rdfs:subClassOf anon:D ,
+                       [ rdf:type owl:Class ;
+                         owl:oneOf ( anon:j
+                                     _:genid8
+                                   )
+                       ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource anon:C ;
+   owl:annotatedProperty rdfs:subClassOf ;
+   owl:annotatedTarget anon:D ;
+   anon:note _:genid13
+ ] .
+
+_:genid13 rdf:type anon:A .
+
+
+###  http://example.org/anon#D
+anon:D rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/anon#i
+anon:i rdf:type owl:NamedIndividual ;
+       owl:sameAs anon:k ;
+       anon:p _:genid18 ;
+       anon:q _:genid21 .
+
+_:genid18 anon:q [ rdf:type anon:D
+                  ] .
+
+_:genid21 anon:d 3 .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual _:genid18 ;
+   owl:assertionProperty anon:p ;
+   owl:targetIndividual anon:k
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource anon:i ;
+   owl:annotatedProperty anon:q ;
+   owl:annotatedTarget _:genid21 ;
+   rdfs:comment "annotated"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid21 ;
+   owl:annotatedProperty anon:d ;
+   owl:annotatedTarget 3 ;
+   rdfs:comment "pulled"
+ ] .
+
+
+###  http://example.org/anon#k
+anon:k owl:sameAs [ ] .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual _:genid18 ;
+   owl:assertionProperty anon:p ;
+   owl:targetIndividual anon:k
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource anon:i ;
+   owl:annotatedProperty anon:q ;
+   owl:annotatedTarget _:genid21 ;
+   rdfs:comment "annotated"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid21 ;
+   owl:annotatedProperty anon:d ;
+   owl:annotatedTarget 3 ;
+   rdfs:comment "pulled"
+ ] .
+
+
+###  http://example.org/anon#j
+anon:j rdf:type owl:NamedIndividual ;
+       owl:sameAs [ rdf:type anon:A
+                  ] ;
+       anon:q [ rdf:type anon:A
+              ] .
+
+
+###  http://example.org/anon#k
+anon:k rdf:type owl:NamedIndividual ;
+       owl:differentFrom _:genid26 .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource anon:k ;
+   owl:annotatedProperty owl:differentFrom ;
+   owl:annotatedTarget _:genid26 ;
+   rdfs:comment "apart"
+ ] .
+
+
+[ rdf:type owl:AllDifferent ;
+  owl:distinctMembers ( anon:i
+                        anon:j
+                        [ rdf:type anon:B
+                        ]
+                      )
+] .
+
+[ rdf:type anon:A ,
+            owl:Thing
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ rdf:type _:genid35
+                       ] ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid35 ;
+   rdfs:comment "root"
+ ] .
+
+_:genid35 rdf:type owl:Restriction ;
+           owl:onProperty anon:p ;
+           owl:someValuesFrom anon:B .
+
+_:genid37 anon:p _:genid38 ;
+           anon:q _:genid38 .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual [ ] ;
+owl:assertionProperty anon:d ;
+owl:targetValue "5"
+] .
+
+[ rdf:type owl:Annotation ;
+   owl:annotatedSource _:genid42 ;
+   owl:annotatedProperty rdfs:comment ;
+   owl:annotatedTarget "deep" ;
+   rdfs:label "nested"
+ ] .
+
+_:genid42 rdf:type owl:Axiom ;
+           owl:annotatedSource [ rdf:type anon:C
+                               ] ;
+           owl:annotatedProperty rdf:type ;
+           owl:annotatedTarget anon:C ;
+           rdfs:comment "deep" .
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Restriction ;
+   owl:onProperty anon:q ;
+   owl:hasValue _:genid45 ;
+   rdfs:subClassOf anon:D
+ ] .
+
+_:genid45 rdf:type anon:C .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid45 ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget anon:C ;
+   rdfs:comment "general"
+ ] .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

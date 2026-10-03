@@ -3879,6 +3879,25 @@ fn annotations_of_annotations_are_written_as_robot_writes_them() {
     }
 }
 
+/// Anonymous individuals are written as ROBOT 1.9.11 writes them, in RDF/XML
+/// and in Turtle: each individual's statements are made in the first graph to
+/// reach it — an entity's, the ontology's, a general axiom's, or its own in the
+/// anonymous section — nested where it is an object, or named by id and
+/// defined after the first block naming it when the document names it twice or
+/// the graph names it as the object of two statements. Its reifications and
+/// negative assertions are roots of that graph; an `owl:AllDifferent` reached
+/// first from one of its members is too.
+#[test]
+fn anonymous_individuals_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-anonymous-individuals.ofn", &format!("rdf-anonymous-individuals.{ext}"), &[]),
+            fixture_text(&format!("rdf-anonymous-individuals.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
 /// An annotated chain whose super-property is an inverse is stated of the
 /// inverse's node, the nested source of its reification, with no warning.
 #[test]
@@ -3979,10 +3998,11 @@ fn an_axiom_between_a_property_and_an_earlier_inverse_is_stated() {
 
 /// A document holding an axiom the RDF layout cannot state is written in full
 /// through the plain RDF mapping, with a warning naming the axiom. An anonymous
-/// individual that is both a class expression's value and the subject of a class
-/// assertion is one such: written as two blocks, the assertion would hold of a
-/// different node. In RDF/XML and in Turtle, the value the restriction names is
-/// the node typed by the assertion.
+/// individual named by id is defined once, by the first graph to name it, and a
+/// class assertion about it that a later graph makes would be written nowhere:
+/// here `:i`'s difference from it names it first, and `:j`'s assertion reaches
+/// its type. In RDF/XML and in Turtle, the node `:i` differs from is the one
+/// `:j` and `:k` assert and the assertion types.
 #[test]
 fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     use oxigraph::io::{RdfFormat, RdfParser};
@@ -3992,7 +4012,8 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     std::fs::write(
         &src,
         "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
-         SubClassOf(:A ObjectHasValue(:p _:x))\nClassAssertion(:B _:x)\n)\n",
+         DifferentIndividuals(:i _:x)\nObjectPropertyAssertion(:p :j _:x)\n\
+         ObjectPropertyAssertion(:q :k _:x)\nClassAssertion(:B _:x)\n)\n",
     )
     .unwrap();
     for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
@@ -4009,10 +4030,8 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
         store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
         let joined = SparqlEvaluator::new()
             .parse_query(
-                "PREFIX owl: <http://www.w3.org/2002/07/owl#> \
-                 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
-                 ASK { <http://example.org/a#A> rdfs:subClassOf ?r . ?r owl:hasValue ?x . \
-                       ?x a <http://example.org/a#B> }",
+                "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX : <http://example.org/a#> \
+                 ASK { :i owl:differentFrom ?x . :j :p ?x . :k :q ?x . ?x a :B }",
             )
             .unwrap()
             .on_store(&store)
@@ -4058,7 +4077,8 @@ fn line_based_rdf_is_the_same_on_every_run() {
         &src,
         "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
          SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n\
-         SubClassOf(:A ObjectHasValue(:p _:x))\nClassAssertion(:B _:x)\n)\n",
+         DifferentIndividuals(:i _:x)\nObjectPropertyAssertion(:p :j _:x)\n\
+         ObjectPropertyAssertion(:q :k _:x)\nClassAssertion(:B _:x)\n)\n",
     )
     .unwrap();
     for ext in ["nt", "ttl"] {
