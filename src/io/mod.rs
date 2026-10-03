@@ -504,7 +504,7 @@ fn sniff(bytes: &[u8]) -> Option<Format> {
         .take(4096)
         .map(|&b| b as char)
         .collect::<String>();
-    let trimmed = head.trim_start();
+    let trimmed = skip_comment_lines(&head);
     // A leading `<` is usually XML, but Turtle/N-Triples subjects are also
     // angle-bracketed IRIs — `<http://identifiers.org/hgnc/915> <…> "B2MR" .` is
     // exactly what `query --format ttl` writes when the constructed graph declares
@@ -526,6 +526,11 @@ fn sniff(bytes: &[u8]) -> Option<Format> {
     if trimmed.starts_with("Prefix(") || trimmed.starts_with("Ontology(") {
         return Some(Format::Functional);
     }
+    // Manchester syntax opens with its prefix declarations or its ontology
+    // frame, whatever the file is called.
+    if trimmed.starts_with("Prefix:") || trimmed.starts_with("Ontology:") {
+        return Some(Format::Manchester);
+    }
     if trimmed.starts_with("format-version:")
         || trimmed.starts_with("[Term]")
         || trimmed.starts_with("[Typedef]")
@@ -540,6 +545,16 @@ fn sniff(bytes: &[u8]) -> Option<Format> {
         return Some(Format::Turtle);
     }
     None
+}
+
+/// `text` from its first line that is neither blank nor a `#` comment, the
+/// comment of Turtle, N-Triples, functional and Manchester syntax.
+fn skip_comment_lines(text: &str) -> &str {
+    let mut rest = text.trim_start();
+    while rest.starts_with('#') {
+        rest = rest.split_once('\n').map_or("", |(_, next)| next).trim_start();
+    }
+    rest
 }
 
 /// Does `trimmed` open with an RDF term (`<IRI>`) rather than an XML tag? An

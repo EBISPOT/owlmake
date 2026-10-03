@@ -3948,6 +3948,30 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     let _ = std::fs::remove_file(&src);
 }
 
+/// A document is read in the syntax its content is in, whatever the file is
+/// called, and comment lines before its first statement do not hide it. ROBOT's
+/// `asserted-equiv.owl` example is Manchester syntax, and is written as ROBOT
+/// 1.9.11 writes it.
+#[test]
+fn a_manchester_document_named_owl_is_read_as_manchester() {
+    assert_eq!(
+        convert_fixture("manchester-document.owl", "manchester-document.rdf.owl", &[]),
+        fixture_text("manchester-document.robot.owl")
+    );
+    assert_eq!(
+        convert_fixture("manchester-document.owl", "manchester-document.ttl", &[]),
+        fixture_text("manchester-document.robot.ttl")
+    );
+    let src = tmp("commented-manchester.owl");
+    let out = tmp("commented-manchester.rdf.owl");
+    std::fs::write(&src, format!("# A comment\n\n{}", fixture_text("manchester-document.owl"))).unwrap();
+    let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("manchester-document.robot.owl"));
+    let _ = std::fs::remove_file(&src);
+    let _ = std::fs::remove_file(&out);
+}
+
 /// Line-based RDF is the same bytes on every run: N-Triples, and Turtle for a
 /// document the layout cannot state. Each blank node takes its label from the
 /// order the mapping first names it, and the triples are sorted.
