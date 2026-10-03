@@ -478,6 +478,37 @@ pub struct Genids {
     /// range crossing a power of ten rotates the whole section — which is why the
     /// writer cannot order the rules without first running this pass.
     pub rule_ids: Vec<u64>,
+    /// Every reified axiom node whose annotations carry annotations of their
+    /// own, with those annotations and the `owl:Annotation` nodes they take.
+    pub nested: HashMap<u64, NestedAnnotations>,
+    /// The ontology's annotations that carry annotations of their own, each
+    /// with the `owl:Annotation` nodes it takes.
+    pub ontology_nested: Vec<(Annotation<RcStr>, Vec<u64>)>,
+    /// For each general axiom some of whose nodes are in `nested`, by its
+    /// `axiom_identity`, those nodes.
+    pub general_nested: HashMap<u64, Vec<u64>>,
+    /// The `axiom_identity` of every axiom whose annotations of annotations
+    /// are in `nested`.
+    pub nested_axioms: std::collections::HashSet<u64>,
+    /// The `axiom_identity` of the axiom being numbered, when its annotations
+    /// carry annotations of their own.
+    cur_axiom: Option<u64>,
+    /// The nodes annotated annotations have taken, in the order numbered.
+    annotation_nodes: Vec<u64>,
+}
+
+/// The annotations on one node that carry annotations of their own: each
+/// such annotation is an `owl:Annotation` node, and `ids` are those nodes in
+/// the order they were numbered — an annotation before the ones on it, the
+/// annotations of a node in order.
+#[derive(Clone, Debug, Default)]
+pub struct NestedAnnotations {
+    pub anns: std::collections::BTreeSet<Annotation<RcStr>>,
+    pub ids: Vec<u64>,
+    /// The nodes of the later pairs of an axiom written as pairs, in order:
+    /// its pairs carry the same annotations, which are one set of nodes, each
+    /// annotating every pair.
+    pub sources: Vec<u64>,
 }
 
 impl Genids {
@@ -1011,7 +1042,7 @@ impl Genids {
         if let Some(id) = id {
             self.shared_seq.entry(owner.to_string()).or_default().push((dr_sig(dr), id));
         }
-        self.translate_annotations(anns);
+        self.translate_node_annotations(rid, anns);
     }
 
     /// Translate the annotations reified on an axiom/annotation node: each may
@@ -1044,8 +1075,45 @@ impl Genids {
         // `ann` set — and each nesting level reifies as a further `owl:Annotation`
         // node, so each one consumes an id.
         if !anno.ann.is_empty() {
-            self.fresh();
+            let id = self.fresh();
+            self.annotation_nodes.push(id);
             self.translate_annotations(&anno.ann);
+        }
+    }
+
+    /// The annotations of the reified axiom `node`, recording those that carry
+    /// annotations of their own for the writer.
+    fn translate_node_annotations(&mut self, node: u64, anns: &std::collections::BTreeSet<Annotation<RcStr>>) {
+        let mark = self.annotation_nodes.len();
+        self.translate_annotations(anns);
+        if self.annotation_nodes.len() > mark {
+            let ids = self.annotation_nodes.split_off(mark);
+            self.nested.insert(node, NestedAnnotations { anns: anns.clone(), ids, sources: Vec::new() });
+            if let Some(axiom) = self.cur_axiom {
+                self.nested_axioms.insert(axiom);
+            }
+        }
+    }
+
+    /// The annotations of the node `node` of one pair of an axiom written as
+    /// pairs. The pairs carry the same annotations, so the first pair numbers
+    /// the nodes of the annotated ones, and each later pair is one more source
+    /// of those nodes.
+    fn translate_pair_annotations(
+        &mut self,
+        first: &mut Option<u64>,
+        node: u64,
+        anns: &std::collections::BTreeSet<Annotation<RcStr>>,
+    ) {
+        match *first {
+            None => {
+                *first = Some(node);
+                self.translate_node_annotations(node, anns);
+            }
+            Some(f) => match self.nested.get_mut(&f) {
+                Some(n) => n.sources.push(node),
+                None => self.translate_annotations(anns),
+            },
         }
     }
 
@@ -1090,7 +1158,7 @@ impl Genids {
                     .or_default()
                     .push((format!("{prop}\u{1}{tsig}"), rid));
             }
-            self.translate_annotations(anns);
+            self.translate_node_annotations(rid, anns);
         }
         obj_id
     }
@@ -1242,10 +1310,24 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
     individuals.sort_by(by_iri);
     individuals.dedup();
 
-    // Ontology header: annotations on the ontology (rarely anonymous).
-    for ac in &ont_anns {
-        if let Component::OntologyAnnotation(oa) = &ac.component {
-            g.translate_annotation(&oa.0);
+    // Ontology header: annotations on the ontology (rarely anonymous), in
+    // the order the header states them.
+    let mut ont_anns: Vec<&Annotation<RcStr>> = ont_anns
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::OntologyAnnotation(oa) => Some(&oa.0),
+            _ => None,
+        })
+        .collect();
+    ont_anns.sort_by(|a, b| {
+        crate::io::owlrdf::ann_key(a.ap.0.as_ref(), &a.av).cmp(&crate::io::owlrdf::ann_key(b.ap.0.as_ref(), &b.av))
+    });
+    for oa in ont_anns {
+        let mark = g.annotation_nodes.len();
+        g.translate_annotation(oa);
+        if g.annotation_nodes.len() > mark {
+            let ids = g.annotation_nodes.split_off(mark);
+            g.ontology_nested.push((oa.clone(), ids));
         }
     }
 
@@ -1476,7 +1558,12 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         g.graph_seq += 1;
         g.sub_sigs.clear();
         g.eq_sigs.clear();
+        let start = g.counter;
         g.translate_axiom("__general__", ac);
+        let nodes: Vec<u64> = (start..g.counter).filter(|n| g.nested.contains_key(n)).collect();
+        if !nodes.is_empty() {
+            g.general_nested.insert(axiom_identity(ac), nodes);
+        }
     }
 
     // Rules run last, one graph for the whole section. A rule's own node comes
@@ -1498,7 +1585,8 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             if let Component::Rule(r) = &ac.component {
                 let id = g.fresh();
                 g.rule_ids.push(id);
-                g.translate_annotations(&ac.ann);
+                g.cur_axiom = ac.ann.iter().any(|a| !a.ann.is_empty()).then(|| axiom_identity(ac));
+                g.translate_node_annotations(id, &ac.ann);
                 g.translate_atom_list(&r.body);
                 g.translate_atom_list(&r.head);
             }
@@ -1525,6 +1613,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         };
         let owner = sup.0.as_ref().to_string();
         g.cur_owner = owner.clone();
+        g.cur_axiom = ac.ann.iter().any(|a| !a.ann.is_empty()).then(|| axiom_identity(ac));
         g.intern.clear();
         g.graph_seq += 1;
         let head = g.translate_ope_list(chain);
@@ -1542,7 +1631,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             g.reif.entry(owner.clone()).or_default().push((format!("~{pred}\u{1}N\u{1}genid{head}"), rid));
         }
         g.reif.entry(owner).or_default().push((format!("~{pred}\u{1}C\u{1}{members}"), rid));
-        g.translate_annotations(&ac.ann);
+        g.translate_node_annotations(rid, &ac.ann);
     }
 
     g
@@ -1636,6 +1725,7 @@ impl Genids {
         // other arm must start clean.
         self.span_pending = None;
         self.cross_pending = None;
+        self.cur_axiom = ac.ann.iter().any(|a| !a.ann.is_empty()).then(|| axiom_identity(ac));
         match &ac.component {
             Component::SubClassOf(ax) => {
                 let sub = if matches!(ax.sub, CE::Class(_)) {
@@ -1830,6 +1920,7 @@ impl Genids {
                             crate::owlapi_hash::axiom_hash(&pair, &ac.ann).unwrap_or(0)
                         })
                         .collect();
+                    let mut first = None;
                     for i in crate::owlapi_hash::hashset_order(&hashes) {
                         let rid = self.fresh();
                         let sig = format!(
@@ -1837,7 +1928,7 @@ impl Genids {
                             crate::io::owlrdf::esc_attr(members[i + 1].0.as_ref())
                         );
                         self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
-                        self.translate_annotations(&ac.ann);
+                        self.translate_pair_annotations(&mut first, rid, &ac.ann);
                     }
                 }
             }
@@ -1846,9 +1937,9 @@ impl Genids {
                     self.pairwise_ce(owner, &ax.0, &ac.ann, Some(P_DISJOINT));
                 } else {
                     // AllDisjointClasses: node, then members list, then anns.
-                    self.fresh();
+                    let node = self.fresh();
                     self.translate_ce_list(&ax.0, false);
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(node, &ac.ann);
                 }
             }
             Component::DisjointUnion(ax) => {
@@ -1873,7 +1964,7 @@ impl Genids {
                     let pred = "http://www.w3.org/2002/07/owl#disjointUnionOf";
                     self.record_list(owner, pred, &members, head, rid);
                     self.reif.entry(self.cur_owner.clone()).or_default().push((format!("{pred}\u{1}C\u{1}{members}"), rid));
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(rid, &ac.ann);
                 }
             }
             // `P rdfs:range C` / `P rdfs:domain C`: the SUBJECT is the property
@@ -1917,7 +2008,7 @@ impl Genids {
                         );
                         self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
                     }
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(rid, &ac.ann);
                 }
             }
             Component::DataPropertyAssertion(ax) => {
@@ -1930,7 +2021,7 @@ impl Genids {
                         crate::io::owlrdf::esc(ax.to.literal())
                     );
                     self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(rid, &ac.ann);
                 }
             }
             // A negative assertion is a node of its own, carrying its terms and
@@ -1946,7 +2037,7 @@ impl Genids {
                 self.translate_individual(&ax.from);
                 self.translate_ope(&ax.ope);
                 self.translate_individual(&ax.to);
-                self.translate_annotations(&ac.ann);
+                self.translate_node_annotations(id, &ac.ann);
             }
             Component::NegativeDataPropertyAssertion(ax) => {
                 let id = self.fresh();
@@ -1957,7 +2048,7 @@ impl Genids {
                 );
                 self.reif.entry(self.cur_owner.clone()).or_default().push((sig, id));
                 self.translate_individual(&ax.from);
-                self.translate_annotations(&ac.ann);
+                self.translate_node_annotations(id, &ac.ann);
             }
             Component::ObjectPropertyRange(ax) => self.property_class(owner, &ax.ope, P_RANGE, &ax.ce, &ac.ann),
             Component::ObjectPropertyDomain(ax) => self.property_class(owner, &ax.ope, P_DOMAIN, &ax.ce, &ac.ann),
@@ -1995,7 +2086,7 @@ impl Genids {
                         let pred = "http://www.w3.org/2002/07/owl#propertyChainAxiom";
                         self.record_list(owner, pred, &members, head, rid);
                         self.reif.entry(self.cur_owner.clone()).or_default().push((format!("{pred}\u{1}C\u{1}{members}"), rid));
-                        self.translate_annotations(&ac.ann);
+                        self.translate_node_annotations(rid, &ac.ann);
                     }
                 } else {
                     // `sub rdfs:subPropertyOf super`. Either side may be an
@@ -2022,7 +2113,7 @@ impl Genids {
                     let prop = crate::io::owlrdf::esc_attr(ax.ann.ap.0.as_ref());
                     let sig = format!("{prop}\u{1}{}", ann_value_tsig(&ax.ann.av));
                     self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(rid, &ac.ann);
                 }
             }
             // `P rdfs:range <data range>` / `rdfs:domain`: the range may be a whole
@@ -2077,26 +2168,26 @@ impl Genids {
                     let pred = "http://www.w3.org/2002/07/owl#hasKey";
                     self.record_list(owner, pred, &members, head, rid);
                     self.reif.entry(self.cur_owner.clone()).or_default().push((format!("{pred}\u{1}C\u{1}{members}"), rid));
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(rid, &ac.ann);
                 }
             }
             // `AllDisjointProperties`: the axiom's node, then its members list.
             Component::DisjointObjectProperties(ax) if ax.0.len() > 2 => {
-                self.fresh();
+                let node = self.fresh();
                 let mut members: Vec<&OPE<RcStr>> = ax.0.iter().collect();
                 members.sort_by(|a, b| crate::io::owlfunc::cmp_ope(a, b));
                 for m in members.iter().rev() {
                     self.fresh_cell();
                     self.translate_ope(m);
                 }
-                self.translate_annotations(&ac.ann);
+                self.translate_node_annotations(node, &ac.ann);
             }
             Component::DisjointDataProperties(ax) if ax.0.len() > 2 => {
-                self.fresh();
+                let node = self.fresh();
                 for _ in &ax.0 {
                     self.fresh_cell();
                 }
-                self.translate_annotations(&ac.ann);
+                self.translate_node_annotations(node, &ac.ann);
             }
             // A `DifferentIndividuals` of three or more members is one
             // `owl:AllDifferent` node carrying an `owl:distinctMembers` list, so it
@@ -2105,9 +2196,9 @@ impl Genids {
             // nothing but the reification node an annotated axiom needs.
             Component::DifferentIndividuals(ax) => {
                 if ax.0.len() > 2 {
-                    self.fresh();
+                    let node = self.fresh();
                     self.translate_individual_list(&ax.0);
-                    self.translate_annotations(&ac.ann);
+                    self.translate_node_annotations(node, &ac.ann);
                 } else {
                     self.individual_pairs(&ax.0, &ac.ann, false, "http://www.w3.org/2002/07/owl#differentFrom");
                 }
@@ -2133,7 +2224,7 @@ impl Genids {
                         if let Some(sig) = edge_reif_sig(&ac.component) {
                             self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
                         }
-                        self.translate_annotations(&ac.ann);
+                        self.translate_node_annotations(rid, &ac.ann);
                     }
                 }
             }
@@ -2224,7 +2315,7 @@ impl Genids {
                     (None, None) => String::new(),
                 };
                 self.reif.entry(owner_graph).or_default().push((format!("~{pred}\u{1}{target}"), rid));
-                self.translate_annotations(anns);
+                self.translate_node_annotations(rid, anns);
             }
             (None, false) => {
                 let rid = self.fresh();
@@ -2241,7 +2332,7 @@ impl Genids {
                 if let Some(sig) = sig {
                     self.reif.entry(owner_graph).or_default().push((sig, rid));
                 }
-                self.translate_annotations(anns);
+                self.translate_node_annotations(rid, anns);
             }
             (None, true) => {}
         }
@@ -2279,6 +2370,7 @@ impl Genids {
             let order = crate::owlapi_hash::hashset_order(&hashes);
             pairs = order.into_iter().map(|i| pairs[i]).collect();
         }
+        let mut first = None;
         for (a, b) in pairs {
             self.translate_individual(a);
             self.translate_individual(b);
@@ -2288,7 +2380,7 @@ impl Genids {
                     let sig = format!("{pred}\u{1}R\u{1}{}", crate::io::owlrdf::esc_attr(o.0.as_ref()));
                     self.reif.entry(self.cur_owner.clone()).or_default().push((sig, rid));
                 }
-                self.translate_annotations(anns);
+                self.translate_pair_annotations(&mut first, rid, anns);
             }
         }
     }
@@ -2373,6 +2465,7 @@ impl Genids {
     /// anonymous member's id is recorded under `NARY⊕sig` for the writer.
     fn chain_ce(&mut self, owner: &str, members: &[&CE<RcStr>], anns: &std::collections::BTreeSet<Annotation<RcStr>>) {
         let record = self.record_operands;
+        let mut first = None;
         let first_anon = !matches!(members[0], CE::Class(_));
         if first_anon {
             self.record_operands = record;
@@ -2407,7 +2500,7 @@ impl Genids {
             // The first member, anonymous, is nested in its reification.
             let nested = if i == 0 && first_anon { "~" } else { "" };
             self.reif.entry(self.cur_owner.clone()).or_default().push((format!("{nested}{P_EQUIV}\u{1}{target}"), rid));
-            self.translate_annotations(anns);
+            self.translate_pair_annotations(&mut first, rid, anns);
             // The host's own pair is found as a binary equivalence's target is.
             if i == 0 && !first_anon {
                 if let Some(id) = id {
@@ -2429,6 +2522,7 @@ impl Genids {
             OPE::ObjectProperty(_) => None,
         };
         let first_anon = node(self, members[0]).is_some();
+        let mut first = None;
         for i in 0..members.len() - 1 {
             let object = members[i + 1];
             let id = node(self, object);
@@ -2445,7 +2539,7 @@ impl Genids {
                 .entry(self.cur_owner.clone())
                 .or_default()
                 .push((format!("{nested}{P_EQUIV_PROPERTY}\u{1}{target}"), rid));
-            self.translate_annotations(anns);
+            self.translate_pair_annotations(&mut first, rid, anns);
         }
     }
 

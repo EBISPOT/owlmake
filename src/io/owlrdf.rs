@@ -1108,7 +1108,8 @@ pub(crate) fn reif_signature(block: &str) -> String {
     } else if let Some(v) = between(block, "<owl:annotatedTarget rdf:nodeID=\"", "\"") {
         format!("N\u{1}{v}")
     } else if block.contains("<owl:annotatedTarget rdf:parseType=\"Collection\">") {
-        let coll = between(block, "rdf:parseType=\"Collection\">", "</owl:annotatedTarget>").unwrap_or("");
+        let coll =
+            between(block, "<owl:annotatedTarget rdf:parseType=\"Collection\">", "</owl:annotatedTarget>").unwrap_or("");
         let mut members = String::new();
         let mut rest = coll;
         while let Some(v) = between(rest, "rdf:about=\"", "\"") {
@@ -1138,6 +1139,22 @@ fn qname_iri(tag: &str) -> String {
     }
 }
 
+/// Whether the layout states the annotations of annotations `ac` carries: on
+/// the ontology, or on an axiom among `numbered` (by `axiom_identity`), with
+/// every annotated annotation's value named or a literal.
+fn nested_annotations_stated(ac: &AnnotatedComponent<RcStr>, numbered: &HashSet<u64>) -> bool {
+    fn stated(anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>) -> bool {
+        anns.iter().all(|a| {
+            a.ann.is_empty() || (!matches!(a.av, AnnotationValue::AnonymousIndividual(_)) && stated(&a.ann))
+        })
+    }
+    let nested = |anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>| anns.iter().any(|a| !a.ann.is_empty());
+    match &ac.component {
+        Component::OntologyAnnotation(oa) => !nested(&oa.0.ann) || stated(&BTreeSet::from([oa.0.clone()])),
+        _ => !nested(&ac.ann) || (numbered.contains(&crate::io::genid::axiom_identity(ac)) && stated(&ac.ann)),
+    }
+}
+
 /// Order reification `owl:Axiom` blocks as root anonymous nodes: they are emitted
 /// sorted on the blank node IRI `_:genidN` — a LEXICOGRAPHIC string sort, so a
 /// digit-length boundary (genid99999 → genid100000) reorders the blocks. `reif`
@@ -1150,6 +1167,12 @@ fn order_reifs_by_genid(reifs: &str, reif: Option<&Vec<(String, u64)>>) -> Strin
     if reifs.is_empty() {
         return String::new();
     }
+    sorted_blocks(keyed_blocks(reifs, reif))
+}
+
+/// The top-level blocks of `reifs`, each with the node id `reif` gives its
+/// signature, and its place in `reifs`.
+fn keyed_blocks(reifs: &str, reif: &[(String, u64)]) -> Vec<(Option<u64>, usize, String)> {
     // A block opens at every line that starts an element at the top level,
     // except a node defined by id, which follows the block that names it.
     let mut blocks: Vec<String> = Vec::new();
@@ -1168,24 +1191,30 @@ fn order_reifs_by_genid(reifs: &str, reif: Option<&Vec<(String, u64)>>) -> Strin
     for (sig, g) in reif {
         by_sig.entry(sig.as_str()).or_default().push_back(*g);
     }
-    // Sort key: the `genidN` remainder compared lexicographically, so shorter
-    // numbers with a larger leading digit can sort after longer ones.
-    //
-    // NOT a numeric compare, though `NodeID.nextAnonymousIRI` counting from
-    // `Integer.MAX_VALUE` makes that look right: padding these to a fixed width
-    // (i.e. ordering numerically) takes `uberon_import.owl` from 34 differing
-    // lines to 110. The lexicographic shape is reproducing something real; the
-    // residual on that file is two subjects whose reification blocks OWLAPI
-    // orders differently, and it is NOT this.
-    let mut keyed: Vec<(Option<String>, usize, String)> = Vec::with_capacity(blocks.len());
-    for (i, b) in blocks.into_iter().enumerate() {
-        let sig = reif_signature(&b);
-        let key = by_sig
-            .get_mut(sig.as_str())
-            .and_then(|q| q.pop_front())
-            .map(|g| format!("genid{g}"));
-        keyed.push((key, i, b));
-    }
+    blocks
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let sig = reif_signature(&b);
+            let key = by_sig.get_mut(sig.as_str()).and_then(|q| q.pop_front());
+            (key, i, b)
+        })
+        .collect()
+}
+
+/// `blocks` in node-id order, joined. The order is the `genidN` string's,
+/// compared lexicographically, so shorter numbers with a larger leading digit
+/// sort after longer ones; a block with no id keeps its place after the rest.
+///
+/// NOT a numeric compare, though `NodeID.nextAnonymousIRI` counting from
+/// `Integer.MAX_VALUE` makes that look right: padding these to a fixed width
+/// (i.e. ordering numerically) takes `uberon_import.owl` from 34 differing
+/// lines to 110. The lexicographic shape is reproducing something real; the
+/// residual on that file is two subjects whose reification blocks OWLAPI
+/// orders differently, and it is NOT this.
+fn sorted_blocks(blocks: Vec<(Option<u64>, usize, String)>) -> String {
+    let mut keyed: Vec<(Option<String>, usize, String)> =
+        blocks.into_iter().map(|(g, i, b)| (g.map(|g| format!("genid{g}")), i, b)).collect();
     keyed.sort_by(|a, b| match (&a.0, &b.0) {
         (Some(x), Some(y)) => x.cmp(y),
         (Some(_), None) => std::cmp::Ordering::Less,
@@ -1195,6 +1224,115 @@ fn order_reifs_by_genid(reifs: &str, reif: Option<&Vec<(String, u64)>>) -> Strin
     keyed.into_iter().map(|(_, _, b)| b).collect()
 }
 
+/// As `order_reifs_by_genid`, for a graph whose reified axioms may have
+/// annotations that carry annotations of their own (`nested`, by the axiom's
+/// node). Such an axiom's node is named by id, and the roots of the graph in
+/// its place are the `owl:Annotation` nodes of its annotations (see
+/// `annotation_roots`), each ordered by its own id. The axiom's block itself is
+/// returned, by id, to be defined after the first root that names it. The
+/// nodes so stated are added to `stated`.
+fn order_roots(
+    reifs: &str,
+    reif: Option<&Vec<(String, u64)>>,
+    nested: &HashMap<u64, crate::io::genid::NestedAnnotations>,
+    stated: &mut HashSet<u64>,
+    prefixes: &[(String, String)],
+) -> (String, Vec<(String, String)>) {
+    let Some(reif) = reif else { return (reifs.to_string(), Vec::new()) };
+    if reifs.is_empty() {
+        return (String::new(), Vec::new());
+    }
+    let mut blocks = Vec::new();
+    let mut defs = Vec::new();
+    for (key, i, block) in keyed_blocks(reifs, reif) {
+        match key.and_then(|g| nested.get(&g).map(|n| (g, n))) {
+            Some((g, n)) => {
+                stated.insert(g);
+                let gid = format!("genid{g}");
+                defs.push((gid.clone(), inject_nodeid(&block, &gid)));
+                for (id, root) in annotation_roots(g, n, prefixes) {
+                    blocks.push((Some(id), i, root));
+                }
+            }
+            // A later pair's node is named by the roots of the first pair's.
+            None => match key.filter(|g| nested.values().any(|n| n.sources.contains(g))) {
+                Some(g) => {
+                    stated.insert(g);
+                    let gid = format!("genid{g}");
+                    defs.push((gid.clone(), inject_nodeid(&block, &gid)));
+                }
+                None => blocks.push((key, i, block)),
+            },
+        }
+    }
+    (sorted_blocks(blocks), defs)
+}
+
+/// The `owl:Annotation` nodes the annotations on the node `node` make, as
+/// roots of its graph, with their ids. Each annotation that is annotated is a
+/// node of its own whose source is what it annotates — `node`, by id, or the
+/// annotation it is on, nested — and the roots are those none of whose own
+/// annotations is annotated.
+fn annotation_roots(
+    node: u64,
+    nested: &crate::io::genid::NestedAnnotations,
+    prefixes: &[(String, String)],
+) -> Vec<(u64, String)> {
+    let mut ids = nested.ids.iter().copied();
+    let mut roots = Vec::new();
+    let source = format!("        <owl:annotatedSource rdf:nodeID=\"genid{node}\"/>\n");
+    // The later pairs of an axiom written as pairs annotate the same nodes.
+    let more: String =
+        nested.sources.iter().map(|n| format!("        <owl:annotatedSource rdf:nodeID=\"genid{n}\"/>\n")).collect();
+    annotation_nodes(&nested.anns, &source, &more, &mut ids, &mut roots, prefixes);
+    roots
+}
+
+/// The roots among the nodes of `anns`, whose source is `source` and, after
+/// their own annotations, `more`. The nodes take `ids` in order: an annotation
+/// before those on it.
+fn annotation_nodes(
+    anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>,
+    source: &str,
+    more: &str,
+    ids: &mut impl Iterator<Item = u64>,
+    roots: &mut Vec<(u64, String)>,
+    prefixes: &[(String, String)],
+) {
+    let mut sorted: Vec<&horned_owl::model::Annotation<RcStr>> = anns.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.ap.0
+            .as_ref()
+            .cmp(b.ap.0.as_ref())
+            .then_with(|| crate::io::owlfunc::cmp_annotation_value(&a.av, &b.av))
+    });
+    for a in sorted {
+        if a.ann.is_empty() {
+            continue;
+        }
+        let Some(id) = ids.next() else { return };
+        let mut own: Vec<(String, AnnotationValue<RcStr>)> =
+            a.ann.iter().map(|x| (x.ap.0.as_ref().to_string(), x.av.clone())).collect();
+        own.sort_by_key(|x| ann_key(&x.0, &x.1));
+        let mut node = format!(
+            "    <owl:Annotation>\n{source}        <owl:annotatedProperty rdf:resource=\"{}\"/>\n{}",
+            esc_attr(a.ap.0.as_ref()),
+            render_target(&a.av)
+        );
+        for (p, av) in &own {
+            node.push_str(&render_ann(p, av, prefixes));
+        }
+        node.push_str(more);
+        node.push_str("    </owl:Annotation>\n");
+        if a.ann.iter().any(|x| !x.ann.is_empty()) {
+            let inner: String = node.split_inclusive('\n').map(|line| format!("        {line}")).collect();
+            let source = format!("        <owl:annotatedSource>\n{inner}        </owl:annotatedSource>\n");
+            annotation_nodes(&a.ann, &source, "", ids, roots, prefixes);
+        } else {
+            roots.push((id, node));
+        }
+    }
+}
 
 /// Order two annotation lists the way reified `owl:Axiom` blocks sort when the
 /// axioms differ only in their annotations: elementwise on (property IRI,
@@ -3209,6 +3347,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let mut chain_defs: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     let mut chain_nested: HashMap<(String, String), String> = HashMap::new();
     let mut chain_tail: HashMap<String, String> = HashMap::new();
+    // The axiom nodes whose annotations' annotations have been stated.
+    let mut stated_nested: HashSet<u64> = HashSet::new();
+    let has_ontology_iri =
+        model.ont.iter().any(|ac| matches!(&ac.component, Component::OntologyID(id) if id.iri.is_some()));
     #[allow(clippy::type_complexity)]
     let mut op_chains: BTreeMap<String, Vec<(Vec<OPE<RcStr>>, Vec<(String, AnnotationValue<RcStr>)>)>> =
         BTreeMap::new();
@@ -3273,10 +3415,15 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let anon_objects = anonymous_objects(model);
     let nested_anon = |i: &str| anon_objects.contains(i);
     for ac in model.ont.iter() {
-        // An annotation of an annotation is not stated, on an axiom or on the
-        // ontology.
-        let nested = |anns: &BTreeSet<horned_owl::model::Annotation<RcStr>>| anns.iter().any(|a| !a.ann.is_empty());
-        if nested(&ac.ann) || matches!(&ac.component, Component::OntologyAnnotation(oa) if !oa.0.ann.is_empty()) {
+        // An annotation of an annotation is stated on the ontology, and on an
+        // axiom the numbering pass numbered its nodes for. Its value is named or
+        // a literal.
+        if !nested_annotations_stated(ac, &genid_pass.nested_axioms) {
+            left_out.push(ac);
+        }
+        // …and the ontology's are stated of its IRI, so an ontology with none
+        // cannot carry them.
+        if matches!(&ac.component, Component::OntologyAnnotation(oa) if !oa.0.ann.is_empty()) && !has_ontology_iri {
             left_out.push(ac);
         }
         match &ac.component {
@@ -3710,8 +3857,15 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                                 chain.nested(0, 4)
                             } else {
                                 let reifs: String = (0..members.len() - 1).map(|i| chain.reif(i, &prefixes)).collect();
-                                let defs: Vec<(String, String)> = (1..members.len()).filter_map(|i| chain.def(i)).collect();
-                                place_defs(&order_reifs_by_genid(&reifs, reif_genids.get("__general__")), Some(&defs))
+                                let (roots, mut defs) = order_roots(
+                                    &reifs,
+                                    reif_genids.get("__general__"),
+                                    &genid_pass.nested,
+                                    &mut stated_nested,
+                                    &prefixes,
+                                );
+                                defs.extend((1..members.len()).filter_map(|i| chain.def(i)));
+                                place_defs(&roots, Some(&defs))
                             };
                             gci_blocks.push((ac, block));
                         }
@@ -4287,6 +4441,47 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         return Ok(left_out.iter().map(|ac| crate::io::owlfunc::render_component_line(ac)).collect());
     }
     let ont_iri = write_header_and_ontology(model, &prefixes, w)?;
+    // An annotation of the ontology that is annotated is a node of its own
+    // after the ontology's, whose source is the ontology. The nodes come in the
+    // order a hash set of the header's triples holds their `owl:annotatedSource`
+    // triples: by bucket, then as they were added.
+    let mut ontology_nested: Vec<&(horned_owl::model::Annotation<RcStr>, Vec<u64>)> =
+        genid_pass.ontology_nested.iter().collect();
+    if let (Some(iri), true) = (&ont_iri, ontology_nested.len() > 1) {
+        fn triples(a: &horned_owl::model::Annotation<RcStr>) -> usize {
+            1 + if a.ann.is_empty() { 0 } else { 4 + a.ann.iter().map(triples).sum::<usize>() }
+        }
+        let header: usize = 1 + model
+            .ont
+            .iter()
+            .map(|ac| match &ac.component {
+                Component::OntologyID(id) => usize::from(id.viri.is_some()),
+                Component::Import(_) => 1,
+                Component::OntologyAnnotation(oa) => triples(&oa.0),
+                _ => 0,
+            })
+            .sum::<usize>();
+        let cap = crate::owlapi_hash::java_hashset_capacity(header) as u32;
+        let pred = crate::owlapi_hash::iri_hash("http://www.w3.org/2002/07/owl#annotatedSource");
+        let object = crate::owlapi_hash::iri_hash(iri);
+        let bucket = |node: u64| {
+            let subject = crate::owlapi_hash::java_string_hash(&format!("_:genid{node}"));
+            let h = subject.wrapping_mul(37).wrapping_add(pred.wrapping_mul(17)).wrapping_add(object) as u32;
+            (h ^ (h >> 16)) & (cap - 1)
+        };
+        ontology_nested.sort_by_key(|(_, ids)| (bucket(ids[0]), ids[0]));
+    }
+    for (a, ids) in ontology_nested {
+        let source = match &ont_iri {
+            Some(iri) => format!("        <owl:annotatedSource rdf:resource=\"{}\"/>\n", esc_attr(iri)),
+            None => String::new(),
+        };
+        let mut roots = Vec::new();
+        annotation_nodes(&BTreeSet::from([a.clone()]), &source, "", &mut ids.iter().copied(), &mut roots, &prefixes);
+        for (_, root) in roots {
+            write!(w, "{root}")?;
+        }
+    }
 
     // The per-kind entity sections are driven by the ontology's SIGNATURE, not by
     // its `Declaration` axioms, so an entity that is only *referenced* still gets a
@@ -4511,10 +4706,14 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
         }
-        let after = order_reifs_by_genid(
+        let (after, defs) = order_roots(
             &format!("{ap_reif}{after}{}{}", type_reifs(iri), edge_reif_blocks(iri)),
             reif_genids.get(iri),
+            &genid_pass.nested,
+            &mut stated_nested,
+            prefixes,
         );
+        let after = place_defs(&after, Some(&defs));
         // An undeclared BUILT-IN property has no `rdf:type` triple in the graph —
         // one is never synthesised for a built-in — so its block is an untyped
         // `rdf:Description`, not `owl:AnnotationProperty`.
@@ -4560,11 +4759,14 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
         }
-        let mut after = defs_after;
-        after.push_str(&order_reifs_by_genid(
+        let (roots, defs) = order_roots(
             &format!("{def_reif}{ann_after}{}", type_reifs(iri)),
             reif_genids.get(iri),
-        ));
+            &genid_pass.nested,
+            &mut stated_nested,
+            prefixes,
+        );
+        let after = place_defs(&format!("{defs_after}{roots}"), Some(&defs));
         write_entity(w, "rdfs:Datatype", iri, &body, &after)?;
     }
     // A datatype's block uses the `rdfs:Datatype` element, not an `owl:` one; it
@@ -4716,7 +4918,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
         }
         let inverse_roots: String = inv_roots.get(iri).into_iter().flatten().map(String::as_str).collect();
-        let anon_roots = order_reifs_by_genid(
+        let (anon_roots, mut root_defs) = order_roots(
             &format!(
                 "{dr_reif}{chain_reif}{ann_after}{}{}{inverse_blocks}{inverse_roots}{}",
                 type_reifs(iri),
@@ -4724,8 +4926,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 chain_roots.get(iri).map_or("", String::as_str)
             ),
             reif_genids.get(iri),
+            &genid_pass.nested,
+            &mut stated_nested,
+            prefixes,
         );
-        let after = place_defs(&format!("{defs}{anon_roots}"), chain_defs.get(iri));
+        root_defs.extend(chain_defs.get(iri).into_iter().flatten().cloned());
+        let after = place_defs(&format!("{defs}{anon_roots}"), Some(&root_defs));
         write_entity(w, "owl:ObjectProperty", iri, &body, &after)?;
         write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
     }
@@ -4801,7 +5007,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             body.push_str(&abody);
-            let anon_roots = order_reifs_by_genid(
+            let (anon_roots, root_defs) = order_roots(
                 &format!(
                     "{dr_reif}{ann_after}{}{}{}",
                     type_reifs(iri),
@@ -4809,8 +5015,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     chain_roots.get(iri).map_or("", String::as_str)
                 ),
                 reif_genids.get(iri),
+                &genid_pass.nested,
+                &mut stated_nested,
+                prefixes,
             );
-            write_entity(w, "owl:DatatypeProperty", iri, &body, &format!("{dr_defs}{anon_roots}"))?;
+            let after = place_defs(&format!("{dr_defs}{anon_roots}"), Some(&root_defs));
+            write_entity(w, "owl:DatatypeProperty", iri, &body, &after)?;
             write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
         }
     }
@@ -5246,15 +5456,19 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             rest = after_q;
         }
-        let reifs = order_reifs_by_genid(
+        let (reifs, mut root_defs) = order_roots(
             &format!(
                 "{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{union_reif}{key_reif}{ann_reif}{}{}",
                 type_reifs(iri),
                 chain_roots.get(iri).map_or("", String::as_str)
             ),
             reif_genids.get(iri),
+            &genid_pass.nested,
+            &mut stated_nested,
+            prefixes,
         );
-        let after = place_defs(&format!("{anon_defs}{list_defs}{reifs}"), chain_defs.get(iri));
+        root_defs.extend(chain_defs.get(iri).into_iter().flatten().cloned());
+        let after = place_defs(&format!("{anon_defs}{list_defs}{reifs}"), Some(&root_defs));
         let anon_roots = reifs;
         // Element choice, as for annotation properties above: the
         // `rdf:type owl:Class` triple is written only when nothing else supplies
@@ -5430,7 +5644,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     negs.push_str(&block);
                 }
             }
-            let anon_roots = order_reifs_by_genid(
+            let (anon_roots, root_defs) = order_roots(
                 &format!(
                     "{ce_type_reif}{ann_after}{}{prop_reifs}{}{negs}{}",
                     type_reifs(iri),
@@ -5438,8 +5652,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     chain_roots.get(iri).map_or("", String::as_str)
                 ),
                 reif_genids.get(iri),
+                &genid_pass.nested,
+                &mut stated_nested,
+                prefixes,
             );
-            let after = format!("{type_defs}{anon_roots}");
+            let after = place_defs(&format!("{type_defs}{anon_roots}"), Some(&root_defs));
             write_entity(w, &elem, iri, &body, &after)?;
             write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
         }
@@ -5535,7 +5752,9 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         write_banner(w, "Annotations")?;
         for iri in &untyped {
             let (body, after) = annotation_body(iri, ann_assertions.get(*iri), None, prefixes);
-            let after = order_reifs_by_genid(&after, reif_genids.get(*iri));
+            let (after, root_defs) =
+                order_roots(&after, reif_genids.get(*iri), &genid_pass.nested, &mut stated_nested, prefixes);
+            let after = place_defs(&after, Some(&root_defs));
             // rdf:Description block, no per-entity comment or separators.
             write!(w, "    <rdf:Description rdf:about=\"{}\">\n{body}    </rdf:Description>\n", esc_attr(iri))?;
             write!(w, "{after}")?;
@@ -5552,8 +5771,26 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         // alongside.
         gci_blocks.sort_by(|a, b| crate::io::genid::cmp_axiom(&a.0.component, &b.0.component));
         write_banner(w, "General axioms")?;
-        for (_, b) in &gci_blocks {
-            write!(w, "{b}")?;
+        for (ac, b) in &gci_blocks {
+            // An axiom whose annotations carry annotations of their own is
+            // named by id, after the roots those make.
+            let nodes = genid_pass.general_nested.get(&crate::io::genid::axiom_identity(ac));
+            match nodes.filter(|n| n.iter().any(|node| !stated_nested.contains(node))) {
+                Some(nodes) => {
+                    let node = nodes[0];
+                    let n = &genid_pass.nested[&node];
+                    stated_nested.insert(node);
+                    stated_nested.extend(n.sources.iter().copied());
+                    let gid = format!("genid{node}");
+                    let roots: Vec<(Option<u64>, usize, String)> = annotation_roots(node, n, prefixes)
+                        .into_iter()
+                        .map(|(id, root)| (Some(id), 0, root))
+                        .collect();
+                    let roots = sorted_blocks(roots);
+                    write!(w, "{}", place_defs(&roots, Some(&vec![(gid.clone(), inject_nodeid(b, &gid))])))?;
+                }
+                None => write!(w, "{b}")?,
+            }
             end_object(w)?;
         }
     }
@@ -5561,8 +5798,18 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // Rules run after the general axioms — the `Rules` banner, then every SWRL
     // variable as a bare typed `rdf:Description` in first-appearance order across
     // the rules, then the rules themselves.
-    write_rules(model, &prefixes, &genid_pass.rule_ids, w)?;
+    write_rules(model, prefixes, &genid_pass.rule_ids, &genid_pass.nested, &mut stated_nested, w)?;
 
+    // Every axiom whose annotations' annotations the layout states has been
+    // written with them.
+    let unstated = genid_pass
+        .nested
+        .iter()
+        .flat_map(|(node, n)| std::iter::once(node).chain(n.sources.iter()))
+        .find(|n| !stated_nested.contains(n));
+    if let Some(node) = unstated {
+        bail!("RDF/XML writer: the annotations of the annotations on node genid{node} were not written");
+    }
     write!(w, "</rdf:RDF>\n\n\n\n")?;
     let banner_version = if model.owlapi_456 { "4.5.6" } else { "4.5.29" };
     write!(w, "<!-- Generated by the OWL API (version {banner_version}) https://github.com/owlcs/owlapi -->\n\n")?;
@@ -5885,6 +6132,8 @@ fn write_rules<W: Write>(
     model: &Model,
     prefixes: &[(String, String)],
     rule_ids: &[u64],
+    nested: &HashMap<u64, crate::io::genid::NestedAnnotations>,
+    stated: &mut HashSet<u64>,
     w: &mut W,
 ) -> Result<()> {
     let mut rules: Vec<(&horned_owl::model::Rule<RcStr>, &AnnotatedComponent<RcStr>)> = model
@@ -5919,9 +6168,6 @@ fn write_rules<W: Write>(
             rules.len()
         );
     }
-    let ids: Vec<String> = rule_ids.iter().map(|id| format!("genid{id}")).collect();
-    let mut order: Vec<usize> = (0..rules.len()).collect();
-    order.sort_by(|a, b| ids[*a].cmp(&ids[*b]));
 
     let mut vars: Vec<String> = Vec::new();
     for (r, _) in &rules {
@@ -5939,24 +6185,37 @@ fn write_rules<W: Write>(
         write!(w, "    </rdf:Description>\n")?;
     }
 
-    for i in order {
-        let (r, ac) = &rules[i];
-        write!(w, "    <rdf:Description>\n")?;
+    // A rule whose annotations carry annotations of their own is named by id,
+    // after the first of the roots those make, which take its place.
+    let mut blocks: Vec<(Option<u64>, usize, String)> = Vec::new();
+    let mut defs: Vec<(String, String)> = Vec::new();
+    for (i, ((r, ac), id)) in rules.iter().zip(rule_ids).enumerate() {
+        let mut b = String::from("    <rdf:Description>\n");
         // A rule's own annotations come FIRST, before its `rdf:type` — RO labels
         // and comments every rule it ships.
         let mut anns: Vec<_> = ac.ann.iter().collect();
         anns.sort_by(|a, b| ann_key(a.ap.0.as_ref(), &a.av).cmp(&ann_key(b.ap.0.as_ref(), &b.av)));
         for a in anns {
-            write!(w, "{}", render_ann(a.ap.0.as_ref(), &a.av, prefixes))?;
+            b.push_str(&render_ann(a.ap.0.as_ref(), &a.av, prefixes));
         }
-        write!(w, "        <rdf:type rdf:resource=\"{SWRL}Imp\"/>\n")?;
-        write!(w, "        <swrl:body>\n")?;
-        write!(w, "{}", swrl_atom_list(&r.body, 12))?;
-        write!(w, "        </swrl:body>\n")?;
-        write!(w, "        <swrl:head>\n")?;
-        write!(w, "{}", swrl_atom_list(&r.head, 12))?;
-        write!(w, "        </swrl:head>\n")?;
-        write!(w, "    </rdf:Description>\n")?;
+        b.push_str(&format!("        <rdf:type rdf:resource=\"{SWRL}Imp\"/>\n"));
+        b.push_str("        <swrl:body>\n");
+        b.push_str(&swrl_atom_list(&r.body, 12));
+        b.push_str("        </swrl:body>\n");
+        b.push_str("        <swrl:head>\n");
+        b.push_str(&swrl_atom_list(&r.head, 12));
+        b.push_str("        </swrl:head>\n");
+        b.push_str("    </rdf:Description>\n");
+        match nested.get(id) {
+            Some(n) => {
+                stated.insert(*id);
+                let gid = format!("genid{id}");
+                defs.push((gid.clone(), inject_nodeid(&b, &gid)));
+                blocks.extend(annotation_roots(*id, n, prefixes).into_iter().map(|(root_id, root)| (Some(root_id), i, root)));
+            }
+            None => blocks.push((Some(*id), i, b)),
+        }
     }
+    write!(w, "{}", place_defs(&sorted_blocks(blocks), Some(&defs)))?;
     Ok(())
 }

@@ -3860,6 +3860,25 @@ fn equivalences_and_samenesses_of_three_or_more_are_written_as_robot_writes_them
     }
 }
 
+/// Annotations of annotations are stated as ROBOT 1.9.11 states them, in
+/// RDF/XML and in Turtle: each annotated annotation is an `owl:Annotation` node
+/// whose source is what it annotates, the roots of the graph are those whose own
+/// annotations are not annotated, and the axiom's node is named by id after the
+/// first of them. The pairs of a sameness share one set of such nodes, and the
+/// ontology's come after its header in the order of a hash set of its triples.
+/// The annotated axioms are on classes, individuals and an undeclared IRI, and
+/// two are general axioms.
+#[test]
+fn annotations_of_annotations_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-nested-annotations.ofn", &format!("rdf-nested-annotations.{ext}"), &[]),
+            fixture_text(&format!("rdf-nested-annotations.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
 /// An annotated chain whose super-property is an inverse is stated of the
 /// inverse's node, the nested source of its reification, with no warning.
 #[test]
