@@ -1,0 +1,336 @@
+@prefix : <http://example.org/v#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/v> .
+
+<http://example.org/v> rdf:type owl:Ontology .
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/v#p
+:p rdf:type owl:ObjectProperty ;
+   owl:equivalentProperty [ owl:inverseOf :t
+                          ] ;
+   rdfs:subPropertyOf :q ;
+   owl:inverseOf [ owl:inverseOf :s
+                 ] ;
+   owl:propertyDisjointWith [ owl:inverseOf :r
+                            ] ;
+   rdfs:label "p" .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty rdfs:label ;
+   owl:annotatedTarget "p" ;
+   rdfs:comment "label"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "named sub"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :p ;
+                         rdf:type owl:FunctionalProperty
+                       ] ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget owl:FunctionalProperty ;
+   rdfs:comment "functional inverse"
+ ] .
+
+[ owl:inverseOf :p ;
+   rdf:type owl:TransitiveProperty
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :p ;
+                         rdfs:domain :A
+                       ] ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget :A ;
+   rdfs:comment "inverse domain"
+ ] .
+
+[ owl:inverseOf :p ;
+   rdfs:range :B
+ ] .
+
+
+###  http://example.org/v#q
+:q rdf:type owl:ObjectProperty ;
+   owl:equivalentProperty _:genid12 ;
+   owl:inverseOf _:genid16 .
+
+_:genid12 owl:inverseOf :r .
+
+_:genid16 owl:inverseOf :t .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid12 ;
+   rdfs:comment "equivalent to inverse"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :q ;
+                         rdfs:subPropertyOf :s
+                       ] ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget :s ;
+   rdfs:comment "inverse sub"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:inverseOf ;
+   owl:annotatedTarget _:genid16 ;
+   rdfs:comment "inverse of inverse"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :q ;
+                         rdfs:range _:genid19
+                       ] ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid19 ;
+   rdfs:comment "inverse range"
+ ] .
+
+_:genid19 rdf:type owl:Restriction ;
+           owl:onProperty :r ;
+           owl:someValuesFrom :C .
+
+
+###  http://example.org/v#r
+:r rdf:type owl:ObjectProperty ;
+   rdfs:subPropertyOf [ owl:inverseOf :t
+                      ] ;
+   owl:propertyDisjointWith _:genid25 .
+
+_:genid25 owl:inverseOf :s .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :r ;
+                         rdfs:subPropertyOf _:genid23
+                       ] ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget _:genid23 ;
+   rdfs:comment "inverse sub inverse"
+ ] .
+
+_:genid23 owl:inverseOf :t .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :r ;
+   owl:annotatedProperty owl:propertyDisjointWith ;
+   owl:annotatedTarget _:genid25 ;
+   rdfs:comment "disjoint from inverse"
+ ] .
+
+
+###  http://example.org/v#s
+:s rdf:type owl:ObjectProperty ;
+   rdfs:subPropertyOf _:genid30 .
+
+_:genid30 owl:inverseOf :t .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :s ;
+                         owl:equivalentProperty _:genid28
+                       ] ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid28 ;
+   rdfs:comment "inverse equivalents"
+ ] .
+
+_:genid28 owl:inverseOf :t .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget _:genid30 ;
+   rdfs:comment "sub of inverse"
+ ] .
+
+
+###  http://example.org/v#t
+:t rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/v#d
+:d rdf:type owl:DatatypeProperty .
+
+
+###  http://example.org/v#e
+:e rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/v#A
+:A rdf:type owl:Class ;
+   owl:hasKey ( :q
+                :r
+                [ owl:inverseOf :p
+                ]
+                :d
+                :e
+              ) .
+
+
+###  http://example.org/v#B
+:B rdf:type owl:Class ;
+   owl:hasKey _:genid39 .
+
+_:genid39 rdf:type rdf:List ;
+           rdf:first :r ;
+           rdf:rest ( :d
+                    ) .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:hasKey ;
+   owl:annotatedTarget _:genid39 ;
+   rdfs:comment "key"
+ ] .
+
+
+###  http://example.org/v#C
+:C rdf:type owl:Class ;
+   owl:disjointUnionOf _:genid42 .
+
+_:genid42 rdf:type rdf:List ;
+           rdf:first :D ;
+           rdf:rest ( :E
+                    ) .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :C ;
+   owl:annotatedProperty owl:disjointUnionOf ;
+   owl:annotatedTarget _:genid42 ;
+   rdfs:comment "union"
+ ] .
+
+
+###  http://example.org/v#D
+:D rdf:type owl:Class ;
+   owl:disjointUnionOf ( :E
+                         [ owl:intersectionOf ( :A
+                                                :B
+                                              ) ;
+                           rdf:type owl:Class
+                         ]
+                         [ rdf:type owl:Restriction ;
+                           owl:onProperty :p ;
+                           owl:someValuesFrom :A
+                         ]
+                       ) .
+
+
+###  http://example.org/v#E
+:E rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/v#i
+:i rdf:type owl:NamedIndividual .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual :i ;
+   owl:assertionProperty :p ;
+   owl:targetIndividual :j ;
+   rdfs:comment "negative"
+ ] .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual :i ;
+   owl:assertionProperty :p ;
+   owl:targetIndividual :j ;
+   rdfs:comment "negative again"
+ ] .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual :i ;
+   owl:assertionProperty [ owl:inverseOf :q
+                         ] ;
+   owl:targetIndividual :j
+ ] .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual :i ;
+   owl:assertionProperty [ owl:inverseOf :r
+                         ] ;
+   owl:targetIndividual :j ;
+   rdfs:comment "negative inverse"
+ ] .
+
+[ rdf:type owl:NegativePropertyAssertion ;
+   owl:sourceIndividual :i ;
+   owl:assertionProperty :d ;
+   owl:targetValue 1 ;
+   rdfs:comment "negative data"
+ ] .
+
+
+###  http://example.org/v#j
+:j rdf:type owl:NamedIndividual .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ rdf:type owl:Restriction ;
+                        owl:onProperty :t ;
+                        owl:someValuesFrom :C ;
+                        owl:equivalentClass _:genid59
+                      ] ;
+  owl:annotatedProperty owl:equivalentClass ;
+  owl:annotatedTarget _:genid59 ;
+  rdfs:comment "counter"
+] .
+
+_:genid59 rdf:type owl:Restriction ;
+           owl:onProperty :t ;
+           owl:allValuesFrom :C .
+
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ rdf:type owl:Restriction ;
+                        owl:onProperty :p ;
+                        owl:someValuesFrom :B ;
+                        owl:hasKey _:genid65
+                      ] ;
+  owl:annotatedProperty owl:hasKey ;
+  owl:annotatedTarget _:genid65 ;
+  rdfs:comment "anonymous key"
+] .
+
+_:genid65 rdf:type rdf:List ;
+           rdf:first :q ;
+           rdf:rest ( [ owl:inverseOf :p
+                      ]
+                      :d
+                    ) .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

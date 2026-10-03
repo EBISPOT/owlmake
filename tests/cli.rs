@@ -3821,6 +3821,86 @@ fn individual_axioms_are_written_as_robot_writes_them() {
     }
 }
 
+/// Axioms about inverse properties, keys, disjoint unions and annotated negative
+/// assertions are stated where ROBOT 1.9.11 states them, in RDF/XML and in
+/// Turtle. An annotated axiom about an inverse reifies with the inverse's node
+/// nested as its source; a named property's annotated edge to an inverse names
+/// the inverse by id; a key's inverse member is nested in its list; an
+/// annotated key or disjoint union reifies with its list as the target, a list
+/// Turtle names by id. The closing general axiom's node id pins the numbering
+/// of every node before it.
+#[test]
+fn inverse_property_axioms_keys_and_unions_are_written_as_robot_writes_them() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("rdf-inverse-axioms.ofn", &format!("rdf-inverse-axioms.{ext}"), &[]),
+            fixture_text(&format!("rdf-inverse-axioms.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// An equivalence, inverse or disjointness between a named property and an
+/// inverse whose property comes first in IRI order is stated of the named
+/// property, with no warning, annotations and all, and reads back whole.
+#[test]
+fn an_axiom_between_a_property_and_an_earlier_inverse_is_stated() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let src = tmp("inverse-first.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/w#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/w>\nDeclaration(ObjectProperty(:p))\nDeclaration(ObjectProperty(:q))\n\
+         Declaration(ObjectProperty(:r))\nEquivalentObjectProperties(:q ObjectInverseOf(:p))\n\
+         InverseObjectProperties(Annotation(rdfs:comment \"inverse\") :q ObjectInverseOf(:p))\n\
+         DisjointObjectProperties(:r ObjectInverseOf(:p))\n)\n",
+    )
+    .unwrap();
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("inverse-first.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let text = std::fs::read(&out).unwrap();
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
+        let holds = |pattern: &str| {
+            let query = format!(
+                "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                 PREFIX : <http://example.org/w#> ASK {{ {pattern} }}"
+            );
+            let answer = SparqlEvaluator::new().parse_query(&query).unwrap().on_store(&store).execute().unwrap();
+            matches!(answer, QueryResults::Boolean(true))
+        };
+        for pattern in [
+            ":q owl:equivalentProperty ?x . ?x owl:inverseOf :p",
+            ":r owl:propertyDisjointWith ?x . ?x owl:inverseOf :p",
+            ":q owl:inverseOf ?x . ?x owl:inverseOf :p . ?a owl:annotatedSource :q ; owl:annotatedProperty owl:inverseOf ; \
+             owl:annotatedTarget ?x ; rdfs:comment \"inverse\"",
+        ] {
+            assert!(holds(pattern), "{ext}: {pattern}\n{}", String::from_utf8_lossy(&text));
+        }
+        // Read back, the document holds the three axioms.
+        let back = tmp(&format!("inverse-first-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let read = std::fs::read_to_string(&back).unwrap();
+        for axiom in [
+            "EquivalentObjectProperties(:q ObjectInverseOf(:p))",
+            "InverseObjectProperties(Annotation(rdfs:comment \"inverse\") :q ObjectInverseOf(:p))",
+            "DisjointObjectProperties(:r ObjectInverseOf(:p))",
+        ] {
+            assert!(read.contains(axiom), "{ext}: {axiom}\n{read}");
+        }
+        let _ = std::fs::remove_file(&back);
+        let _ = std::fs::remove_file(&out);
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
 /// A document holding an axiom the RDF layout cannot state is written in full
 /// through the plain RDF mapping, with a warning naming the axiom. An anonymous
 /// individual that is both a class expression's value and the subject of a class

@@ -1066,6 +1066,20 @@ fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<&'a str> {
 /// document, so a generated block can be matched to the source state recorded
 /// under its signature (the genid a block's nested nodes were numbered with).
 pub(crate) fn reif_signature(block: &str) -> String {
+    // An inverse property's own block: the triple after its `owl:inverseOf`.
+    if let Some(rest) = block.strip_prefix("    <rdf:Description>\n        <owl:inverseOf rdf:resource=\"") {
+        let line = rest.split('\n').nth(1).unwrap_or("").trim_start();
+        let tag = line.trim_start_matches('<').split([' ', '>', '/']).next().unwrap_or("");
+        let target = match between(line, "rdf:resource=\"", "\"") {
+            Some(v) => format!("R\u{1}{v}"),
+            None => "A\u{1}".to_string(),
+        };
+        return format!("INV\u{1}{}\u{1}{target}", qname_iri(tag));
+    }
+    // A reification whose source is a node nested in it.
+    if block.contains("<owl:annotatedSource>\n") {
+        return format!("~{}", reif_signature(&block.replacen("<owl:annotatedSource>\n", "", 1)));
+    }
     // A negative assertion's node: its property, then its target.
     if block.contains(NEG_PA) {
         let prop = between(block, "<owl:assertionProperty rdf:resource=\"", "\"").unwrap_or("");
@@ -1104,6 +1118,16 @@ pub(crate) fn reif_signature(block: &str) -> String {
     format!("{prop}\u{1}{tsig}")
 }
 
+/// The IRI of a predicate the layout writes by qualified name.
+fn qname_iri(tag: &str) -> String {
+    match tag.split_once(':') {
+        Some(("rdf", local)) => format!("{RDF_NS}{local}"),
+        Some(("rdfs", local)) => format!("http://www.w3.org/2000/01/rdf-schema#{local}"),
+        Some(("owl", local)) => format!("http://www.w3.org/2002/07/owl#{local}"),
+        _ => tag.to_string(),
+    }
+}
+
 /// Order reification `owl:Axiom` blocks as root anonymous nodes: they are emitted
 /// sorted on the blank node IRI `_:genidN` — a LEXICOGRAPHIC string sort, so a
 /// digit-length boundary (genid99999 → genid100000) reorders the blocks. `reif`
@@ -1116,10 +1140,13 @@ fn order_reifs_by_genid(reifs: &str, reif: Option<&Vec<(String, u64)>>) -> Strin
     if reifs.is_empty() {
         return String::new();
     }
-    // A block opens at every line that starts an element at the top level.
+    // A block opens at every line that starts an element at the top level,
+    // except a node defined by id, which follows the block that names it.
     let mut blocks: Vec<String> = Vec::new();
     for line in reifs.split_inclusive('\n') {
-        let opens = line.starts_with("    <") && !line.starts_with("    </");
+        let opens = line.starts_with("    <")
+            && !line.starts_with("    </")
+            && !line.split_once('>').is_some_and(|(open, _)| open.contains(" rdf:nodeID=\""));
         match blocks.last_mut() {
             Some(b) if !opens => b.push_str(line),
             _ => blocks.push(line.to_string()),
@@ -1505,6 +1532,223 @@ fn render_chain_link(ope: &OPE<RcStr>) -> String {
             esc_attr(p.0.as_ref())
         ),
     }
+}
+
+/// An n-ary equivalence as consecutive pairs of its ordered `members`, all in
+/// the first member's graph: the first keeps its own pair as an edge, and each
+/// later member is a root block after it, holding the edge to the next.
+fn consecutive_pairs(
+    members: &[String],
+    tag: &str,
+    edges: &mut BTreeMap<String, Vec<String>>,
+    roots: &mut BTreeMap<String, Vec<(String, String)>>,
+) {
+    let Some(host) = members.first() else { return };
+    if let Some(second) = members.get(1) {
+        edges.entry(host.clone()).or_default().push(second.clone());
+    }
+    for (i, member) in members.iter().enumerate().skip(1) {
+        let body = members
+            .get(i + 1)
+            .map(|next| format!("        <{tag} rdf:resource=\"{}\"/>\n", esc_attr(next)))
+            .unwrap_or_default();
+        roots.entry(host.clone()).or_default().push((member.clone(), body));
+    }
+}
+
+/// The first id the numbering pass recorded under `sig` that no earlier
+/// lookup has taken.
+fn seq_id(seq: Option<&Vec<(String, u64)>>, sig: &str, taken: &mut std::collections::HashSet<u64>) -> Option<u64> {
+    let id = seq?.iter().find(|(s, id)| s == sig && !taken.contains(id))?.1;
+    taken.insert(id);
+    Some(id)
+}
+
+/// An inverse property's node defined by id: its `owl:inverseOf` alone.
+fn inverse_node_def(gid: &str, inverse_of: &str) -> String {
+    format!(
+        "    <rdf:Description rdf:nodeID=\"{gid}\">\n        <owl:inverseOf rdf:resource=\"{}\"/>\n    </rdf:Description>\n",
+        esc_attr(inverse_of)
+    )
+}
+
+/// The reification of an annotated axiom about an inverse property. Its source
+/// is the inverse's node, nested, holding the axiom's triple (`triple`, at
+/// indent 16).
+fn inverse_source_reif(
+    inverse_of: &str,
+    triple: &str,
+    pred: &str,
+    target: &str,
+    anns: &[(String, AnnotationValue<RcStr>)],
+    prefixes: &[(String, String)],
+) -> String {
+    let mut s = String::from("    <owl:Axiom>\n        <owl:annotatedSource>\n            <rdf:Description>\n");
+    s.push_str(&format!("                <owl:inverseOf rdf:resource=\"{}\"/>\n", esc_attr(inverse_of)));
+    s.push_str(triple);
+    s.push_str("            </rdf:Description>\n        </owl:annotatedSource>\n");
+    s.push_str(&format!("        <owl:annotatedProperty rdf:resource=\"{pred}\"/>\n"));
+    s.push_str(target);
+    let mut ns: Vec<&(String, AnnotationValue<RcStr>)> = anns.iter().collect();
+    ns.sort_by_key(|a| ann_key(&a.0, &a.1));
+    for (p, av) in ns {
+        s.push_str(&render_ann(p, av, prefixes));
+    }
+    s.push_str("    </owl:Axiom>\n");
+    s
+}
+
+/// The object of an object property axiom's triple.
+#[derive(Clone, Copy)]
+enum EdgeObject<'a> {
+    Property(&'a OPE<RcStr>),
+    Class(&'a CE<RcStr>),
+    Type(&'static str),
+}
+
+/// The triple an object property axiom with an inverse property in it is
+/// stated as: its subject, its predicate (as written, and as an IRI), the
+/// rank its kind takes among a property's axioms, and its object. An
+/// equivalence, inverse or disjointness is stated of its first member in
+/// order, named properties first. `None` for an axiom with no inverse in it.
+fn inverse_edge(c: &Component<RcStr>) -> Option<(&OPE<RcStr>, &'static str, &'static str, u8, EdgeObject<'_>)> {
+    fn inverse(o: &OPE<RcStr>) -> bool {
+        matches!(o, OPE::InverseObjectProperty(_))
+    }
+    fn pair<'a>(
+        a: &'a OPE<RcStr>,
+        b: &'a OPE<RcStr>,
+        tag: &'static str,
+        pred: &'static str,
+        rank: u8,
+    ) -> Option<(&'a OPE<RcStr>, &'static str, &'static str, u8, EdgeObject<'a>)> {
+        let key = |o: &'a OPE<RcStr>| match o {
+            OPE::ObjectProperty(p) => (false, iri_key(p.0.as_ref())),
+            OPE::InverseObjectProperty(p) => (true, iri_key(p.0.as_ref())),
+        };
+        let (s, o) = if key(a) > key(b) { (b, a) } else { (a, b) };
+        (inverse(s) || inverse(o)).then_some((s, tag, pred, rank, EdgeObject::Property(o)))
+    }
+    fn typed<'a>(
+        ope: &'a OPE<RcStr>,
+        class: &'static str,
+    ) -> Option<(&'a OPE<RcStr>, &'static str, &'static str, u8, EdgeObject<'a>)> {
+        inverse(ope).then_some((ope, "rdf:type", P_RDF_TYPE, 15 + char_axiom_rank(class), EdgeObject::Type(class)))
+    }
+    match c {
+        Component::EquivalentObjectProperties(ax) if ax.0.len() == 2 => {
+            pair(&ax.0[0], &ax.0[1], "owl:equivalentProperty", P_EQUIV_PROPERTY, 12)
+        }
+        Component::SubObjectPropertyOf(ax) => match &ax.sub {
+            horned_owl::model::SubObjectPropertyExpression::ObjectPropertyExpression(sub) => (inverse(sub)
+                || inverse(&ax.sup))
+            .then_some((sub, "rdfs:subPropertyOf", P_SUB_PROPERTY, 13, EdgeObject::Property(&ax.sup))),
+            horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(_) => None,
+        },
+        Component::InverseObjectProperties(ax) => pair(&ax.0, &ax.1, "owl:inverseOf", P_INVERSE_OF, 14),
+        Component::FunctionalObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#FunctionalProperty"),
+        Component::InverseFunctionalObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#InverseFunctionalProperty"),
+        Component::SymmetricObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#SymmetricProperty"),
+        Component::AsymmetricObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#AsymmetricProperty"),
+        Component::TransitiveObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#TransitiveProperty"),
+        Component::ReflexiveObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#ReflexiveProperty"),
+        Component::IrreflexiveObjectProperty(ax) => typed(&ax.0, "http://www.w3.org/2002/07/owl#IrreflexiveProperty"),
+        Component::ObjectPropertyDomain(ax) => {
+            inverse(&ax.ope).then_some((&ax.ope, "rdfs:domain", P_DOMAIN, 22, EdgeObject::Class(&ax.ce)))
+        }
+        Component::ObjectPropertyRange(ax) => {
+            inverse(&ax.ope).then_some((&ax.ope, "rdfs:range", P_RANGE, 23, EdgeObject::Class(&ax.ce)))
+        }
+        Component::DisjointObjectProperties(ax) if ax.0.len() == 2 => {
+            pair(&ax.0[0], &ax.0[1], "owl:propertyDisjointWith", P_PROPERTY_DISJOINT, 24)
+        }
+        _ => None,
+    }
+}
+
+/// Whether a list an annotated axiom names twice — as the object of its triple
+/// and as its reification's target — is one node named by id and defined after
+/// the block (Turtle), rather than a collection written in both places
+/// (RDF/XML).
+fn named_lists() -> bool {
+    OBJECT_ENDS.with(|c| c.get())
+}
+
+/// A list named by id and defined on its own: its first item, then the rest as
+/// a collection. `items` are collection items, at indent 12.
+fn list_def(gid: &str, items: &[String]) -> String {
+    let mut s = format!("    <rdf:List rdf:nodeID=\"{gid}\">\n");
+    if let Some(first) = items.first() {
+        match first.strip_prefix("            <rdf:Description rdf:about=\"").and_then(|r| r.strip_suffix("\"/>\n")) {
+            Some(iri) => s.push_str(&format!("        <rdf:first rdf:resource=\"{iri}\"/>\n")),
+            None => s.push_str(&format!("        <rdf:first>\n{first}        </rdf:first>\n")),
+        }
+    }
+    if items.len() > 1 {
+        s.push_str("        <rdf:rest rdf:parseType=\"Collection\">\n");
+        s.push_str(&items[1..].concat());
+        s.push_str("        </rdf:rest>\n");
+    } else {
+        s.push_str(&format!("        <rdf:rest rdf:resource=\"{RDF_NS}nil\"/>\n"));
+    }
+    s.push_str("    </rdf:List>\n");
+    s
+}
+
+/// A list as the object of `tag` and as an annotated target: by id when it is
+/// named (its definition added to `defs`), else a collection in both places.
+fn list_slots(tag: &str, items: &[String], gid: Option<&str>, defs: &mut String) -> (String, String) {
+    match gid {
+        Some(g) => {
+            defs.push_str(&list_def(g, items));
+            (
+                format!("        <{tag} rdf:nodeID=\"{g}\"/>\n"),
+                format!("        <owl:annotatedTarget rdf:nodeID=\"{g}\"/>\n"),
+            )
+        }
+        None => {
+            let items = items.concat();
+            (
+                format!("        <{tag} rdf:parseType=\"Collection\">\n{items}        </{tag}>\n"),
+                format!("        <owl:annotatedTarget rdf:parseType=\"Collection\">\n{items}        </owl:annotatedTarget>\n"),
+            )
+        }
+    }
+}
+
+/// The named members of a list, as the numbering pass records the list by.
+fn list_members<'a>(named: impl Iterator<Item = &'a str>) -> String {
+    named.map(|iri| format!("{}\u{2}", esc_attr(iri))).collect()
+}
+
+/// A key's properties as the items of its collection: the object properties,
+/// then the inverse ones, then the data properties, each by IRI. Also the named
+/// ones, as the numbering pass records the list by.
+fn render_key_members(k: &horned_owl::model::HasKey<RcStr>) -> (Vec<String>, String) {
+    use horned_owl::model::PropertyExpression as PE;
+    let mut members: Vec<(u8, &str)> = k
+        .vpe
+        .iter()
+        .filter_map(|pe| match pe {
+            PE::ObjectPropertyExpression(OPE::ObjectProperty(p)) => Some((0, p.0.as_ref())),
+            PE::ObjectPropertyExpression(OPE::InverseObjectProperty(p)) => Some((1, p.0.as_ref())),
+            PE::DataProperty(d) => Some((2, d.0.as_ref())),
+            PE::AnnotationProperty(_) => None,
+        })
+        .collect();
+    members.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| iri_key(a.1).cmp(&iri_key(b.1))));
+    members.dedup();
+    let items = members
+        .iter()
+        .map(|(rank, iri)| match rank {
+            1 => format!(
+                "            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n",
+                esc_attr(iri)
+            ),
+            _ => format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(iri)),
+        })
+        .collect();
+    (items, list_members(members.iter().filter(|(rank, _)| *rank != 1).map(|(_, iri)| *iri)))
 }
 
 /// A literal as an element with the given tag, at `indent` spaces — the same
@@ -2212,10 +2456,15 @@ fn render_all_disjoint(members: &[CE<RcStr>], g: &Genids, anns: &str) -> String 
 
 /// An axiom's annotations as statements of the node that stands for it, in
 /// annotation order.
-fn node_annotations(ac: &AnnotatedComponent<RcStr>, prefixes: &[(String, String)]) -> String {
+/// An axiom's annotations, in the order they are written.
+fn sorted_anns(ac: &AnnotatedComponent<RcStr>) -> Vec<(String, AnnotationValue<RcStr>)> {
     let mut anns = ax_anns(ac);
     anns.sort_by_key(|a| ann_key(&a.0, &a.1));
-    anns.iter().map(|(p, av)| render_ann(p, av, prefixes)).collect()
+    anns
+}
+
+fn node_annotations(ac: &AnnotatedComponent<RcStr>, prefixes: &[(String, String)]) -> String {
+    sorted_anns(ac).iter().map(|(p, av)| render_ann(p, av, prefixes)).collect()
 }
 
 /// An `owl:AllDisjointProperties` block for a disjointness of three or more
@@ -2661,7 +2910,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     #[allow(clippy::type_complexity)]
     let mut disjoint_reif: BTreeMap<String, Vec<(String, String, Vec<(String, AnnotationValue<RcStr>)>)>> =
         BTreeMap::new();
-    let mut disjoint_union: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
+    // Per class, each disjoint union's collection items, its named members and
+    // the axiom's annotations.
+    #[allow(clippy::type_complexity)]
+    let mut disjoint_union: BTreeMap<String, Vec<(Vec<String>, String, Vec<(String, AnnotationValue<RcStr>)>)>> =
+        BTreeMap::new();
     // `rdf:type` of a named individual — `ClassAssertion(C, i)`, rendered as the
     // first child of the `<owl:NamedIndividual>` element, before the annotations;
     // IAO's curation-status individuals are all typed this way.
@@ -2707,12 +2960,20 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let mut sub_ann_prop: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut sub_obj_prop: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut sub_data_prop: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    // …and the ones whose SUPER is an inverse expression. A named object property
-    // ranks before an inverse one, so these render after the named supers.
-    // `op_name` returns `None` for an inverse, so without this map
-    // `SubObjectPropertyOf(RO_0002378, inverse(RO_0002376))` would be dropped from
-    // `mirror/ro.owl` altogether.
-    let mut sub_obj_prop_inv: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // A named object property's edges to an inverse property, which is a node of
+    // its own, written after the edges of the same kind to named properties:
+    // the edge's rank among the property's axioms, its predicate, the property
+    // the inverse names, and, for an annotated axiom, the node's id and its
+    // definition when the definition follows this property's block.
+    type InverseEdge = (u8, &'static str, String, Option<(String, String)>);
+    let mut op_edge_inv: BTreeMap<String, Vec<InverseEdge>> = BTreeMap::new();
+    // The reification blocks of annotated axioms over inverse properties, keyed
+    // by the property whose graph holds them, each followed by the definitions
+    // it names by id.
+    let mut inv_roots: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // The ids already given out from the numbering pass's records, so two
+    // axioms over the same terms take one each.
+    let mut taken_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
     let mut inverse_of: BTreeMap<String, Vec<String>> = BTreeMap::new();
     // Domain/range values carry their axiom annotations so an annotated one can be
     // reified (`<owl:Axiom>` with `rdfs:domain`/`rdfs:range` as annotatedProperty),
@@ -2749,12 +3010,19 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     let mut dp_equiv: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut dp_disjoint: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut dp_char: BTreeMap<String, Vec<&'static str>> = BTreeMap::new();
-    let mut has_key: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
+    // Per class, each key's collection items, its named members and the axiom's
+    // annotations.
+    #[allow(clippy::type_complexity)]
+    let mut has_key: BTreeMap<String, Vec<(Vec<String>, String, Vec<(String, AnnotationValue<RcStr>)>)>> =
+        BTreeMap::new();
     type DataRangeAnns = (horned_owl::model::DataRange<RcStr>, Vec<(String, AnnotationValue<RcStr>)>);
     let mut datatype_defs: BTreeMap<String, Vec<DataRangeAnns>> = BTreeMap::new();
     // Keyed by source individual: (0 for an object assertion, 1 for a data one;
-    // then the property and target), and the block itself.
-    let mut neg_assertions: BTreeMap<String, Vec<(u8, String, String)>> = BTreeMap::new();
+    // then the property and target), the block itself, and the axiom's
+    // annotations, which order two assertions of the same terms.
+    #[allow(clippy::type_complexity)]
+    let mut neg_assertions: BTreeMap<String, Vec<(u8, String, String, Vec<(String, AnnotationValue<RcStr>)>)>> =
+        BTreeMap::new();
     // An n-ary `SameIndividual` or equivalence splits into CONSECUTIVE pairs, and
     // every pair is rendered in the FIRST member's graph. The first member keeps
     // its own pair in its block; each later member is a ROOT of that graph and
@@ -2827,16 +3095,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // gives each such statement a block of its own instead.
     let anon_objects = anonymous_objects(model);
     let nested_anon = |i: &str| anon_objects.contains(i);
-    // A key is stated by property name only.
-    let key_is_named = |k: &horned_owl::model::HasKey<RcStr>| {
-        k.vpe.iter().all(|pe| {
-            matches!(
-                pe,
-                horned_owl::model::PropertyExpression::ObjectPropertyExpression(OPE::ObjectProperty(_))
-                    | horned_owl::model::PropertyExpression::DataProperty(_)
-            )
-        })
-    };
     for ac in model.ont.iter() {
         // An annotation of an annotation is not stated, on an axiom or on the
         // ontology.
@@ -2845,6 +3103,116 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             left_out.push(ac);
         }
         match &ac.component {
+            // An object property axiom with an inverse property in it.
+            c if inverse_edge(c).is_some() => {
+                let Some((subject, tag, pred, rank, object)) = inverse_edge(c) else { unreachable!() };
+                match (subject, object) {
+                    // A named subject's edge to an inverse: the inverse is nested
+                    // in the edge, or, when the axiom is annotated, named by id.
+                    // The axiom is numbered in the graph of the first of the two
+                    // properties, which holds the reification; a sub-property axiom
+                    // in its sub-property's.
+                    (OPE::ObjectProperty(a), EdgeObject::Property(OPE::InverseObjectProperty(b))) => {
+                        let (a, b) = (a.0.as_ref().to_string(), b.0.as_ref().to_string());
+                        let mut node = None;
+                        if annotated(ac) {
+                            let owner = if pred == P_SUB_PROPERTY || iri_key(&a) <= iri_key(&b) { &a } else { &b };
+                            match seq_id(shared_seq.get(owner), &format!("INV\u{1}{pred}\u{1}{b}"), &mut taken_ids) {
+                                Some(id) => {
+                                    let gid = format!("genid{id}");
+                                    let def = inverse_node_def(&gid, &b);
+                                    let target = format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n");
+                                    let reif = edge_reif(&a, pred, &target, &ax_anns(ac), &prefixes);
+                                    // The definition follows the first block to name the
+                                    // node: the subject's own, or the reification when
+                                    // that comes first.
+                                    if *owner == a {
+                                        inv_roots.entry(owner.clone()).or_default().push(reif);
+                                        node = Some((gid, def));
+                                    } else {
+                                        inv_roots.entry(owner.clone()).or_default().push(format!("{reif}{def}"));
+                                        node = Some((gid, String::new()));
+                                    }
+                                }
+                                None => left_out.push(ac),
+                            }
+                        }
+                        op_edge_inv.entry(a).or_default().push((rank, tag, b, node));
+                    }
+                    // An inverse subject is a node of its own: unannotated, a block
+                    // of its own after the property it names; annotated, the nested
+                    // source of the reification, with an object that is not named
+                    // given an id and defined after it.
+                    (OPE::InverseObjectProperty(p), object) => {
+                        let p = p.0.as_ref().to_string();
+                        if !annotated(ac) {
+                            let part = match object {
+                                EdgeObject::Property(OPE::ObjectProperty(o)) => {
+                                    format!("        <{tag} rdf:resource=\"{}\"/>\n", esc_attr(o.0.as_ref()))
+                                }
+                                EdgeObject::Property(OPE::InverseObjectProperty(o)) => format!(
+                                    "        <{tag}>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </{tag}>\n",
+                                    esc_attr(o.0.as_ref())
+                                ),
+                                EdgeObject::Type(t) => format!("        <{tag} rdf:resource=\"{t}\"/>\n"),
+                                EdgeObject::Class(ce) => render_prop_ce(tag, ce, &no_g),
+                            };
+                            op_inv.entry(p).or_default().push((rank, part));
+                        } else {
+                            let named = match object {
+                                EdgeObject::Property(OPE::ObjectProperty(o)) => Some(o.0.as_ref().to_string()),
+                                EdgeObject::Type(t) => Some(t.to_string()),
+                                EdgeObject::Class(CE::Class(c)) => Some(c.0.as_ref().to_string()),
+                                _ => None,
+                            };
+                            let parts = match (named, object) {
+                                (Some(o), _) => Some((
+                                    format!("                <{tag} rdf:resource=\"{}\"/>\n", esc_attr(&o)),
+                                    format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(&o)),
+                                    String::new(),
+                                )),
+                                (None, EdgeObject::Property(OPE::InverseObjectProperty(o))) => seq_id(
+                                    shared_seq.get(&p),
+                                    &format!("INV\u{1}{pred}\u{1}{}", o.0.as_ref()),
+                                    &mut taken_ids,
+                                )
+                                .map(|id| {
+                                    let gid = format!("genid{id}");
+                                    let def = inverse_node_def(&gid, o.0.as_ref());
+                                    (gid, def)
+                                })
+                                .map(|(gid, def)| {
+                                    (
+                                        format!("                <{tag} rdf:nodeID=\"{gid}\"/>\n"),
+                                        format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"),
+                                        def,
+                                    )
+                                }),
+                                (None, EdgeObject::Class(ce)) if !inline_anon() => {
+                                    seq_id(shared_seq.get(&p), &crate::io::genid::ce_sig(ce), &mut taken_ids).map(|id| {
+                                        let gid = format!("genid{id}");
+                                        (
+                                            format!("                <{tag} rdf:nodeID=\"{gid}\"/>\n"),
+                                            format!("        <owl:annotatedTarget rdf:nodeID=\"{gid}\"/>\n"),
+                                            inject_nodeid(&render_ce(ce, 4, &no_g), &gid),
+                                        )
+                                    })
+                                }
+                                _ => None,
+                            };
+                            match parts {
+                                Some((triple, target, def)) => {
+                                    let reif = inverse_source_reif(&p, &triple, pred, &target, &ax_anns(ac), &prefixes);
+                                    inv_roots.entry(p).or_default().push(format!("{reif}{def}"));
+                                }
+                                None => left_out.push(ac),
+                            }
+                        }
+                    }
+                    // `inverse_edge` names no other shape.
+                    _ => left_out.push(ac),
+                }
+            }
             Component::DeclareAnnotationProperty(d) => {
                 let iri = d.0 .0.as_ref().to_string();
                 if !ac.ann.is_empty() {
@@ -2988,18 +3356,24 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::DisjointUnion(du) => {
-                if annotated(ac) || du.1.iter().any(|c| !matches!(c, CE::Class(_))) {
-                    left_out.push(ac);
-                }
-                let members: Vec<String> = du
-                    .1
+                let mut members: Vec<&CE<RcStr>> = du.1.iter().collect();
+                members.sort_by(|a, b| match (a, b) {
+                    (CE::Class(x), CE::Class(y)) => iri_key(x.0.as_ref()).cmp(&iri_key(y.0.as_ref())),
+                    _ => crate::io::owlfunc::cmp_ce(a, b),
+                });
+                members.dedup();
+                let items: Vec<String> = members
                     .iter()
-                    .filter_map(|c| match c {
-                        CE::Class(c) => Some(c.0.as_ref().to_string()),
-                        _ => None,
+                    .map(|m| match m {
+                        CE::Class(c) => format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(c.0.as_ref())),
+                        _ => render_ce(m, 12, &no_g),
                     })
                     .collect();
-                disjoint_union.entry(du.0 .0.as_ref().to_string()).or_default().push(members);
+                let named = list_members(members.iter().filter_map(|m| match m {
+                    CE::Class(c) => Some(c.0.as_ref()),
+                    _ => None,
+                }));
+                disjoint_union.entry(du.0 .0.as_ref().to_string()).or_default().push((items, named, ax_anns(ac)));
             }
             Component::DifferentIndividuals(di) => {
                 let members = sorted_members(&di.0);
@@ -3149,48 +3523,35 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             Component::SubObjectPropertyOf(s) => match &s.sub {
                 horned_owl::model::SubObjectPropertyExpression::ObjectPropertyExpression(sub) => {
-                    // An annotated axiom over an inverse reifies a node of its own.
-                    if annotated(ac) && !matches!((sub, &s.sup), (OPE::ObjectProperty(_), OPE::ObjectProperty(_))) {
-                        left_out.push(ac);
-                    }
-                    if let Some(sub) = op_name(sub) {
-                        match &s.sup {
-                            OPE::ObjectProperty(p) => {
-                                let sup = p.0.as_ref().to_string();
-                                if annotated(ac) {
-                                    edge_reifs.entry(sub.clone()).or_default().push((P_SUB_PROPERTY, sup.clone(), ax_anns(ac)));
-                                }
-                                sub_obj_prop.entry(sub).or_default().push(sup)
-                            }
-                            OPE::InverseObjectProperty(p) => sub_obj_prop_inv
-                                .entry(sub)
-                                .or_default()
-                                .push(p.0.as_ref().to_string()),
+                    if let (Some(sub), Some(sup)) = (op_name(sub), op_name(&s.sup)) {
+                        if annotated(ac) {
+                            edge_reifs.entry(sub.clone()).or_default().push((P_SUB_PROPERTY, sup.clone(), ax_anns(ac)));
                         }
-                    } else if let OPE::InverseObjectProperty(inv) = sub {
-                        // The sub-property is an inverse: the axiom hangs off that
-                        // anonymous node, with the super in its own slot.
-                        let sup = match &s.sup {
-                            OPE::ObjectProperty(p) => format!(
-                                "        <rdfs:subPropertyOf rdf:resource=\"{}\"/>\n",
-                                esc_attr(p.0.as_ref())
-                            ),
-                            OPE::InverseObjectProperty(p) => format!(
-                                "        <rdfs:subPropertyOf>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </rdfs:subPropertyOf>\n",
-                                esc_attr(p.0.as_ref())
-                            ),
-                        };
-                        op_inv.entry(inv.0.as_ref().to_string()).or_default().push((13, sup));
+                        sub_obj_prop.entry(sub).or_default().push(sup)
                     }
                 }
-                horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(chain) => {
-                    if let Some(sup) = op_name(&s.sup) {
+                horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(chain) => match &s.sup {
+                    OPE::ObjectProperty(sup) => {
                         let links: Vec<OPE<RcStr>> = chain.clone();
                         let anns: Vec<(String, AnnotationValue<RcStr>)> =
                             ac.ann.iter().map(|a| (a.ap.0.as_ref().to_string(), a.av.clone())).collect();
-                        op_chains.entry(sup).or_default().push((links, anns));
+                        op_chains.entry(sup.0.as_ref().to_string()).or_default().push((links, anns));
                     }
-                }
+                    // A chain whose super-property is an inverse is stated of that
+                    // inverse's node, a block of its own.
+                    OPE::InverseObjectProperty(sup) => {
+                        if annotated(ac) {
+                            left_out.push(ac);
+                        }
+                        let links: String = chain.iter().map(render_chain_link).collect();
+                        op_inv.entry(sup.0.as_ref().to_string()).or_default().push((
+                            25,
+                            format!(
+                                "        <owl:propertyChainAxiom rdf:parseType=\"Collection\">\n{links}        </owl:propertyChainAxiom>\n"
+                            ),
+                        ));
+                    }
+                },
             },
             Component::InverseObjectProperties(iop) => {
                 if let (Some(a), Some(b)) = (op_name(&iop.0), op_name(&iop.1)) {
@@ -3199,8 +3560,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         edge_reifs.entry(a.clone()).or_default().push((P_INVERSE_OF, b.clone(), ax_anns(ac)));
                     }
                     inverse_of.entry(a).or_default().push(b);
-                } else {
-                    left_out.push(ac);
                 }
             }
             Component::ClassAssertion(ca) => {
@@ -3293,34 +3652,16 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     }
                 }
             }
-            Component::ObjectPropertyDomain(d) => match &d.ope {
-                OPE::ObjectProperty(p) => {
+            Component::ObjectPropertyDomain(d) => {
+                if let OPE::ObjectProperty(p) = &d.ope {
                     op_domain.entry(p.0.as_ref().to_string()).or_default().push((d.ce.clone(), ax_anns(ac)))
                 }
-                OPE::InverseObjectProperty(p) => {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv
-                        .entry(p.0.as_ref().to_string())
-                        .or_default()
-                        .push((22, render_prop_ce("rdfs:domain", &d.ce, &no_g)));
-                }
-            },
-            Component::ObjectPropertyRange(r) => match &r.ope {
-                OPE::ObjectProperty(p) => {
+            }
+            Component::ObjectPropertyRange(r) => {
+                if let OPE::ObjectProperty(p) = &r.ope {
                     op_range.entry(p.0.as_ref().to_string()).or_default().push((r.ce.clone(), ax_anns(ac)))
                 }
-                OPE::InverseObjectProperty(p) => {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv
-                        .entry(p.0.as_ref().to_string())
-                        .or_default()
-                        .push((23, render_prop_ce("rdfs:range", &r.ce, &no_g)));
-                }
-            },
+            }
             Component::SubDataPropertyOf(sp) => {
                 let (sub, sup) = (sp.sub.0.as_ref().to_string(), sp.sup.0.as_ref().to_string());
                 if annotated(ac) {
@@ -3358,32 +3699,41 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             // A negative assertion is its own anonymous node, written after the
             // block of the individual it is about: object assertions first, then
             // data ones, each by property and then by target.
+            // Its annotations are statements of that node, after its terms.
             Component::NegativeObjectPropertyAssertion(n) => {
-                if annotated(ac)
-                    || !matches!(
-                        (&n.from, &n.to, &n.ope),
-                        (Individual::Named(_), Individual::Named(_), OPE::ObjectProperty(_))
-                    )
-                {
+                if !matches!((&n.from, &n.to), (Individual::Named(_), Individual::Named(_))) {
                     left_out.push(ac);
                 }
-                if let (Individual::Named(src), Individual::Named(tgt), Some(p)) =
-                    (&n.from, &n.to, op_name(&n.ope))
-                {
+                if let (Individual::Named(src), Individual::Named(tgt)) = (&n.from, &n.to) {
+                    // An inverse property is a node of its own, nested in the slot.
+                    let (key, prop) = match &n.ope {
+                        OPE::ObjectProperty(p) => (
+                            p.0.as_ref().to_string(),
+                            format!("        <owl:assertionProperty rdf:resource=\"{}\"/>\n", esc_attr(p.0.as_ref())),
+                        ),
+                        OPE::InverseObjectProperty(p) => (
+                            format!("\u{1}{}", p.0.as_ref()),
+                            format!(
+                                "        <owl:assertionProperty>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </owl:assertionProperty>\n",
+                                esc_attr(p.0.as_ref())
+                            ),
+                        ),
+                    };
                     neg_assertions.entry(src.0.as_ref().to_string()).or_default().push((
                         0,
-                        format!("{p}\u{0}{}", tgt.0.as_ref()),
+                        format!("{key}\u{0}{}", tgt.0.as_ref()),
                         format!(
-                            "    <rdf:Description>\n        <rdf:type rdf:resource=\"{NEG_PA}\"/>\n        <owl:sourceIndividual rdf:resource=\"{}\"/>\n        <owl:assertionProperty rdf:resource=\"{}\"/>\n        <owl:targetIndividual rdf:resource=\"{}\"/>\n    </rdf:Description>\n",
+                            "    <rdf:Description>\n        <rdf:type rdf:resource=\"{NEG_PA}\"/>\n        <owl:sourceIndividual rdf:resource=\"{}\"/>\n{prop}        <owl:targetIndividual rdf:resource=\"{}\"/>\n{}    </rdf:Description>\n",
                             esc_attr(src.0.as_ref()),
-                            esc_attr(&p),
-                            esc_attr(tgt.0.as_ref())
+                            esc_attr(tgt.0.as_ref()),
+                            node_annotations(ac, &prefixes)
                         ),
+                        sorted_anns(ac),
                     ));
                 }
             }
             Component::NegativeDataPropertyAssertion(n) => {
-                if annotated(ac) || !matches!(n.from, Individual::Named(_)) {
+                if !matches!(n.from, Individual::Named(_)) {
                     left_out.push(ac);
                 }
                 if let Individual::Named(src) = &n.from {
@@ -3391,48 +3741,42 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         1,
                         format!("{}\u{0}{}", n.dp.0.as_ref(), n.to.literal()),
                         format!(
-                            "    <rdf:Description>\n        <rdf:type rdf:resource=\"{NEG_PA}\"/>\n        <owl:sourceIndividual rdf:resource=\"{}\"/>\n        <owl:assertionProperty rdf:resource=\"{}\"/>\n{}    </rdf:Description>\n",
+                            "    <rdf:Description>\n        <rdf:type rdf:resource=\"{NEG_PA}\"/>\n        <owl:sourceIndividual rdf:resource=\"{}\"/>\n        <owl:assertionProperty rdf:resource=\"{}\"/>\n{}{}    </rdf:Description>\n",
                             esc_attr(src.0.as_ref()),
                             esc_attr(n.dp.0.as_ref()),
-                            render_literal_tag("owl:targetValue", &n.to, 8)
+                            render_literal_tag("owl:targetValue", &n.to, 8),
+                            node_annotations(ac, &prefixes)
                         ),
+                        sorted_anns(ac),
                     ));
                 }
             }
             Component::EquivalentObjectProperties(e) => {
-                if e.0.len() != 2
-                    || matches!(e.0[0], OPE::ObjectProperty(_)) != matches!(e.0[1], OPE::ObjectProperty(_))
-                    || (annotated(ac) && matches!(e.0[0], OPE::InverseObjectProperty(_)))
-                {
-                    left_out.push(ac);
-                }
-                if e.0.len() == 2 {
-                    let mut members: Vec<&OPE<RcStr>> = e.0.iter().collect();
-                    members.sort_by(|a, b| crate::io::owlfunc::cmp_ope(a, b));
-                    match (members[0], members[1]) {
-                        (OPE::ObjectProperty(a), OPE::ObjectProperty(b)) => {
-                            let (a, b) = (a.0.as_ref().to_string(), b.0.as_ref().to_string());
-                            if annotated(ac) {
-                                edge_reifs.entry(a.clone()).or_default().push((P_EQUIV_PROPERTY, b.clone(), ax_anns(ac)));
-                            }
-                            op_equiv.entry(a).or_default().push(b);
-                        }
-                        (OPE::InverseObjectProperty(a), OPE::InverseObjectProperty(b)) => {
-                            op_inv.entry(a.0.as_ref().to_string()).or_default().push((
-                                12,
-                                format!(
-                                    "        <owl:equivalentProperty>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </owl:equivalentProperty>\n",
-                                    esc_attr(b.0.as_ref())
-                                ),
-                            ));
-                        }
-                        _ => {}
+                if e.0.len() > 2 {
+                    let mut named: Vec<String> = e.0.iter().filter_map(op_name).collect();
+                    if annotated(ac) || named.len() != e.0.len() {
+                        left_out.push(ac);
+                    } else {
+                        named.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
+                        consecutive_pairs(&named, "owl:equivalentProperty", &mut op_equiv, &mut root_blocks);
                     }
+                } else if let (Some(a), Some(b)) = (op_name(&e.0[0]), op_name(&e.0[1])) {
+                    let (a, b) = ordered(a, b);
+                    if annotated(ac) {
+                        edge_reifs.entry(a.clone()).or_default().push((P_EQUIV_PROPERTY, b.clone(), ax_anns(ac)));
+                    }
+                    op_equiv.entry(a).or_default().push(b);
                 }
             }
             Component::EquivalentDataProperties(e) => {
-                if e.0.len() != 2 {
-                    left_out.push(ac);
+                if e.0.len() > 2 {
+                    if annotated(ac) {
+                        left_out.push(ac);
+                    } else {
+                        let mut members: Vec<String> = e.0.iter().map(|d| d.0.as_ref().to_string()).collect();
+                        members.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
+                        consecutive_pairs(&members, "owl:equivalentProperty", &mut dp_equiv, &mut root_blocks);
+                    }
                 } else {
                     let (a, b) = ordered(e.0[0].0.as_ref().to_string(), e.0[1].0.as_ref().to_string());
                     if annotated(ac) {
@@ -3466,55 +3810,39 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             Component::HasKey(k) if !matches!(k.ce, CE::Class(_)) && ac.ann.is_empty() => {
                 // On an anonymous class the key is one more statement of the
                 // expression's own node, which stands as a general axiom.
-                if !key_is_named(k) {
-                    left_out.push(ac);
-                }
-                let mut ops: Vec<String> = Vec::new();
-                let mut dps: Vec<String> = Vec::new();
-                for pe in &k.vpe {
-                    match pe {
-                        horned_owl::model::PropertyExpression::ObjectPropertyExpression(o) => {
-                            if let Some(n) = op_name(o) {
-                                ops.push(n);
-                            }
-                        }
-                        horned_owl::model::PropertyExpression::DataProperty(d) => dps.push(d.0.as_ref().to_string()),
-                        horned_owl::model::PropertyExpression::AnnotationProperty(_) => {}
-                    }
-                }
-                ops.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
-                dps.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
-                let mut key = String::from("        <owl:hasKey rdf:parseType=\"Collection\">\n");
-                for p in ops.iter().chain(dps.iter()) {
-                    key.push_str(&format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(p)));
-                }
-                key.push_str("        </owl:hasKey>\n");
+                let key = format!(
+                    "        <owl:hasKey rdf:parseType=\"Collection\">\n{}        </owl:hasKey>\n",
+                    render_key_members(k).0.concat()
+                );
                 gci_blocks.push((ac, insert_before_close(&render_ce(&k.ce, 4, &no_g), &key)));
             }
-            Component::HasKey(k) => {
-                if annotated(ac) || !key_is_named(k) {
-                    left_out.push(ac);
+            Component::HasKey(k) => match &k.ce {
+                CE::Class(c) => {
+                    let (items, members) = render_key_members(k);
+                    has_key.entry(c.0.as_ref().to_string()).or_default().push((items, members, ax_anns(ac)))
                 }
-                if let CE::Class(c) = &k.ce {
-                    let mut ops: Vec<String> = Vec::new();
-                    let mut dps: Vec<String> = Vec::new();
-                    for pe in &k.vpe {
-                        match pe {
-                            horned_owl::model::PropertyExpression::ObjectPropertyExpression(o) => {
-                                if let Some(n) = op_name(o) {
-                                    ops.push(n);
-                                }
-                            }
-                            horned_owl::model::PropertyExpression::DataProperty(d) => {
-                                dps.push(d.0.as_ref().to_string())
-                            }
-                            horned_owl::model::PropertyExpression::AnnotationProperty(_) => {}
-                        }
-                    }
-                    ops.extend(dps);
-                    has_key.entry(c.0.as_ref().to_string()).or_default().push(ops);
+                // An annotated key on an anonymous class reifies with the
+                // expression, stating the key, as its nested source.
+                _ => {
+                    let (items, members) = render_key_members(k);
+                    let pred = "http://www.w3.org/2002/07/owl#hasKey";
+                    let gid = named_lists()
+                        .then(|| seq_id(shared_seq.get("__general__"), &format!("LIST\u{1}{pred}\u{1}{members}"), &mut taken_ids))
+                        .flatten()
+                        .map(|id| format!("genid{id}"));
+                    let mut defs = String::new();
+                    let (edge, target) = list_slots("owl:hasKey", &items, gid.as_deref(), &mut defs);
+                    let edge: String = edge.lines().map(|line| format!("        {line}\n")).collect();
+                    let source = insert_before_close(&render_ce(&k.ce, 12, &no_g), &edge);
+                    gci_blocks.push((
+                        ac,
+                        format!(
+                            "    <owl:Axiom>\n        <owl:annotatedSource>\n{source}        </owl:annotatedSource>\n        <owl:annotatedProperty rdf:resource=\"{pred}\"/>\n{target}{}    </owl:Axiom>\n{defs}",
+                            node_annotations(ac, &prefixes)
+                        ),
+                    ));
                 }
-            }
+            },
             // A datatype's definition hangs off its own block as an
             // `owl:equivalentClass` naming the data range.
             Component::DatatypeDefinition(d) => {
@@ -3532,8 +3860,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                             edge_reifs.entry(a.clone()).or_default().push((P_PROPERTY_DISJOINT, b.clone(), ax_anns(ac)));
                         }
                         op_disjoint.entry(a).or_default().push(b);
-                    } else {
-                        left_out.push(ac);
                     }
                 } else {
                     // Stated of a property an inverse member names, not as a
@@ -3553,17 +3879,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::FunctionalObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        15,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#FunctionalProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#FunctionalProperty");
                     if !ac.ann.is_empty() {
@@ -3575,17 +3890,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::InverseFunctionalObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        16,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#InverseFunctionalProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#InverseFunctionalProperty");
                     if !ac.ann.is_empty() {
@@ -3597,17 +3901,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::TransitiveObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        19,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#TransitiveProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#TransitiveProperty");
                     if !ac.ann.is_empty() {
@@ -3619,17 +3912,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::SymmetricObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        17,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#SymmetricProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#SymmetricProperty");
                     if !ac.ann.is_empty() {
@@ -3641,17 +3923,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::AsymmetricObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        18,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#AsymmetricProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#AsymmetricProperty");
                     if !ac.ann.is_empty() {
@@ -3663,17 +3934,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::ReflexiveObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        20,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#ReflexiveProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#ReflexiveProperty");
                     if !ac.ann.is_empty() {
@@ -3685,17 +3945,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::IrreflexiveObjectProperty(p) => {
-                if let OPE::InverseObjectProperty(inv) = &p.0 {
-                    if annotated(ac) {
-                        left_out.push(ac);
-                    }
-                    op_inv.entry(inv.0.as_ref().to_string()).or_default().push((
-                        21,
-                        format!(
-                            "        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#IrreflexiveProperty\"/>\n"
-                        ),
-                    ));
-                }
                 if let Some(n) = op_name(&p.0) {
                     op_char.entry(n.clone()).or_default().push("http://www.w3.org/2002/07/owl#IrreflexiveProperty");
                     if !ac.ann.is_empty() {
@@ -3835,7 +4084,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 || sub_ann_prop.contains_key(iri)
                 || sub_obj_prop.contains_key(iri)
                 || sub_data_prop.contains_key(iri)
-                || sub_obj_prop_inv.contains_key(iri)
+                || op_edge_inv.contains_key(iri)
                 || inverse_of.contains_key(iri)
                 || ap_domain.contains_key(iri)
                 || ap_range.contains_key(iri)
@@ -4028,24 +4277,43 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     }
     for iri in &obj_props {
         let mut body = String::new();
+        // The definitions of the nodes this block names by id, in the order it
+        // first names them; they follow the block.
+        let mut defs = String::new();
+        // The edges of one kind to inverse properties, after those to named
+        // ones: nested, or named by id when the axiom is annotated.
+        let inverse_edges = |rank: u8, body: &mut String, defs: &mut String| {
+            let mut edges: Vec<&InverseEdge> =
+                op_edge_inv.get(iri).into_iter().flatten().filter(|e| e.0 == rank).collect();
+            edges.sort_by(|a, b| iri_key(&a.2).cmp(&iri_key(&b.2)).then_with(|| a.3.is_some().cmp(&b.3.is_some())));
+            for (_, tag, inverse_of, node) in edges {
+                match node {
+                    Some((gid, def)) => {
+                        body.push_str(&format!("        <{tag} rdf:nodeID=\"{gid}\"/>\n"));
+                        defs.push_str(def);
+                    }
+                    None => body.push_str(&format!(
+                        "        <{tag}>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </{tag}>\n",
+                        esc_attr(inverse_of)
+                    )),
+                }
+            }
+        };
         // Logical axioms first, in the order a property block takes them:
         // equivalentProperty, subPropertyOf, inverseOf, the `rdf:type`
         // characteristics, domain, range, propertyDisjointWith.
         for eq in sorted_res(&op_equiv, iri) {
             body.push_str(&format!("        <owl:equivalentProperty rdf:resource=\"{}\"/>\n", esc_attr(&eq)));
         }
+        inverse_edges(12, &mut body, &mut defs);
         for sup in sorted_res(&sub_obj_prop, iri) {
             body.push_str(&format!("        <rdfs:subPropertyOf rdf:resource=\"{}\"/>\n", esc_attr(&sup)));
         }
-        for sup in sorted_res(&sub_obj_prop_inv, iri) {
-            body.push_str(&format!(
-                "        <rdfs:subPropertyOf>\n            <rdf:Description>\n                <owl:inverseOf rdf:resource=\"{}\"/>\n            </rdf:Description>\n        </rdfs:subPropertyOf>\n",
-                esc_attr(&sup)
-            ));
-        }
+        inverse_edges(13, &mut body, &mut defs);
         for inv in sorted_res(&inverse_of, iri) {
             body.push_str(&format!("        <owl:inverseOf rdf:resource=\"{}\"/>\n", esc_attr(&inv)));
         }
+        inverse_edges(14, &mut body, &mut defs);
         // Characteristic `rdf:type`s (Transitive/Symmetric/…) render after
         // subPropertyOf/inverseOf and before domain/range.
         if let Some(chars) = op_char.get(iri) {
@@ -4066,7 +4334,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         // straight after the property. Ids come from the numbering pass in the
         // order it allocated them; an inline-anon document numbers nothing, and
         // nests a copy of the expression in both places instead.
-        let mut dr_defs = String::new();
         let mut seq_pos = 0usize;
         for (tag, prop, vals) in [
             ("rdfs:domain", P_DOMAIN, op_domain.get(iri)),
@@ -4087,7 +4354,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         format!("        <owl:annotatedTarget rdf:resource=\"{}\"/>\n", esc_attr(c.0.as_ref()))
                     }
                     (_, Some(g)) => {
-                        dr_defs.push_str(&inject_nodeid(&render_ce(ce, 4, &no_g), g));
+                        defs.push_str(&inject_nodeid(&render_ce(ce, 4, &no_g), g));
                         format!("        <owl:annotatedTarget rdf:nodeID=\"{g}\"/>\n")
                     }
                     (_, None) => format!(
@@ -4101,6 +4368,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         for dj in sorted_res(&op_disjoint, iri) {
             body.push_str(&format!("        <owl:propertyDisjointWith rdf:resource=\"{}\"/>\n", esc_attr(&dj)));
         }
+        inverse_edges(24, &mut body, &mut defs);
         let mut chain_reif = String::new();
         if let Some(chains) = op_chains.get(iri) {
             let mut cs = chains.clone();
@@ -4109,48 +4377,50 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                     .cmp(&b.0.iter().map(|s| iri_key(chain_link_iri(s))).collect::<Vec<_>>())
             });
             for (chain, anns) in cs {
-                body.push_str("        <owl:propertyChainAxiom rdf:parseType=\"Collection\">\n");
-                for link in &chain {
-                    body.push_str(&render_chain_link(link));
-                }
-                body.push_str("        </owl:propertyChainAxiom>\n");
                 // An annotated chain axiom reifies with the chain as the target.
+                let pred = "http://www.w3.org/2002/07/owl#propertyChainAxiom";
+                let items: Vec<String> = chain.iter().map(render_chain_link).collect();
+                let members = list_members(chain.iter().filter_map(|link| match link {
+                    OPE::ObjectProperty(p) => Some(p.0.as_ref()),
+                    OPE::InverseObjectProperty(_) => None,
+                }));
+                let gid = (!anns.is_empty() && named_lists())
+                    .then(|| seq_id(shared_seq.get(iri), &format!("LIST\u{1}{pred}\u{1}{members}"), &mut taken_ids))
+                    .flatten()
+                    .map(|id| format!("genid{id}"));
+                let (edge, target) = list_slots("owl:propertyChainAxiom", &items, gid.as_deref(), &mut defs);
+                body.push_str(&edge);
                 if !anns.is_empty() {
-                    chain_reif.push_str("    <owl:Axiom>\n");
-                    chain_reif.push_str(&format!("        <owl:annotatedSource rdf:resource=\"{}\"/>\n", esc_attr(iri)));
-                    chain_reif.push_str("        <owl:annotatedProperty rdf:resource=\"http://www.w3.org/2002/07/owl#propertyChainAxiom\"/>\n");
-                    chain_reif.push_str("        <owl:annotatedTarget rdf:parseType=\"Collection\">\n");
-                    for link in &chain {
-                        chain_reif.push_str(&render_chain_link(link));
-                    }
-                    chain_reif.push_str("        </owl:annotatedTarget>\n");
-                    let mut ns: Vec<&(String, AnnotationValue<RcStr>)> = anns.iter().collect();
-                    ns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
-                    for (p, av) in ns {
-                        chain_reif.push_str(&render_ann(p, av, prefixes));
-                    }
-                    chain_reif.push_str("    </owl:Axiom>\n");
+                    chain_reif.push_str(&edge_reif(iri, pred, &target, &anns, prefixes));
                 }
             }
         }
         let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
         body.push_str(&abody);
-        let mut after = dr_defs;
-        after.push_str(&order_reifs_by_genid(
-            &format!("{dr_reif}{chain_reif}{ann_after}{}{}", type_reifs(iri), edge_reif_blocks(iri)),
-            reif_genids.get(iri),
-        ));
+        // The inverse of this property, as the subject of an unannotated axiom:
+        // a block of its own for each axiom.
+        let mut inverse_blocks = String::new();
         if let Some(parts) = op_inv.get(iri) {
             let mut ps = parts.clone();
             ps.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
             for (_, part) in ps {
-                after.push_str(&format!(
+                inverse_blocks.push_str(&format!(
                     "    <rdf:Description>\n        <owl:inverseOf rdf:resource=\"{}\"/>\n{part}    </rdf:Description>\n",
                     esc_attr(iri)
                 ));
             }
         }
-        write_entity(w, "owl:ObjectProperty", iri, &body, &after)?;
+        let inverse_roots: String = inv_roots.get(iri).into_iter().flatten().map(String::as_str).collect();
+        let anon_roots = order_reifs_by_genid(
+            &format!(
+                "{dr_reif}{chain_reif}{ann_after}{}{}{inverse_blocks}{inverse_roots}",
+                type_reifs(iri),
+                edge_reif_blocks(iri)
+            ),
+            reif_genids.get(iri),
+        );
+        write_entity(w, "owl:ObjectProperty", iri, &body, &format!("{defs}{anon_roots}"))?;
+        write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
     }
 
     // Data properties.
@@ -4224,12 +4494,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             body.push_str(&abody);
-            let mut after = dr_defs;
-            after.push_str(&order_reifs_by_genid(
+            let anon_roots = order_reifs_by_genid(
                 &format!("{dr_reif}{ann_after}{}{}", type_reifs(iri), edge_reif_blocks(iri)),
                 reif_genids.get(iri),
-            ));
-            write_entity(w, "owl:DatatypeProperty", iri, &body, &after)?;
+            );
+            write_entity(w, "owl:DatatypeProperty", iri, &body, &format!("{dr_defs}{anon_roots}"))?;
+            write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
         }
     }
 
@@ -4571,31 +4841,48 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             body.push_str(&render_prop_ce("owl:disjointWith", dj, &no_g));
         }
+        // An annotated disjoint union is reified with its collection as the
+        // target.
+        let mut union_reif = String::new();
+        // The lists an annotated union or key names by id, defined after the
+        // block.
+        let mut list_defs = String::new();
+        let mut list_id = |pred: &str, members: &str, anns: &[(String, AnnotationValue<RcStr>)]| {
+            (!anns.is_empty() && named_lists())
+                .then(|| seq_id(shared_seq.get(iri), &format!("LIST\u{1}{pred}\u{1}{members}"), &mut taken_ids))
+                .flatten()
+                .map(|id| format!("genid{id}"))
+        };
         if let Some(unions) = disjoint_union.get(iri) {
-            let mut us = unions.clone();
-            for u in &mut us {
-                u.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
-            }
-            us.sort();
-            for u in us {
-                body.push_str("        <owl:disjointUnionOf rdf:parseType=\"Collection\">\n");
-                for m in u {
-                    body.push_str(&format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(&m)));
+            #[allow(clippy::type_complexity)]
+            let mut us: Vec<&(Vec<String>, String, Vec<(String, AnnotationValue<RcStr>)>)> = unions.iter().collect();
+            us.sort_by(|a, b| a.0.cmp(&b.0));
+            for (items, members, anns) in us {
+                let pred = "http://www.w3.org/2002/07/owl#disjointUnionOf";
+                let gid = list_id(pred, members, anns);
+                let (edge, target) = list_slots("owl:disjointUnionOf", items, gid.as_deref(), &mut list_defs);
+                body.push_str(&edge);
+                if !anns.is_empty() {
+                    union_reif.push_str(&edge_reif(iri, pred, &target, anns, prefixes));
                 }
-                body.push_str("        </owl:disjointUnionOf>\n");
             }
         }
         // A key is one `owl:hasKey` collection per axiom, after the class's other
         // logical axioms and before its annotations.
+        // An annotated key is reified with its collection as the target.
+        let mut key_reif = String::new();
         if let Some(keys) = has_key.get(iri) {
-            let mut ks = keys.clone();
-            ks.sort();
-            for props in ks {
-                body.push_str("        <owl:hasKey rdf:parseType=\"Collection\">\n");
-                for p in props {
-                    body.push_str(&format!("            <rdf:Description rdf:about=\"{}\"/>\n", esc_attr(&p)));
+            #[allow(clippy::type_complexity)]
+            let mut ks: Vec<&(Vec<String>, String, Vec<(String, AnnotationValue<RcStr>)>)> = keys.iter().collect();
+            ks.sort_by(|a, b| a.0.cmp(&b.0));
+            for (items, members, anns) in ks {
+                let pred = "http://www.w3.org/2002/07/owl#hasKey";
+                let gid = list_id(pred, members, anns);
+                let (edge, target) = list_slots("owl:hasKey", items, gid.as_deref(), &mut list_defs);
+                body.push_str(&edge);
+                if !anns.is_empty() {
+                    key_reif.push_str(&edge_reif(iri, pred, &target, anns, prefixes));
                 }
-                body.push_str("        </owl:hasKey>\n");
             }
         }
         let (abody, ann_reif) = annotation_body(iri, entity_anns(iri), frame_orders.get(iri.as_str()), prefixes);
@@ -4640,10 +4927,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             rest = after_q;
         }
         let reifs = order_reifs_by_genid(
-            &format!("{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{ann_reif}{}", type_reifs(iri)),
+            &format!("{equiv_reif}{sub_reif}{dj_anon_reif}{dj_reif}{union_reif}{key_reif}{ann_reif}{}", type_reifs(iri)),
             reif_genids.get(iri),
         );
-        let after = format!("{anon_defs}{reifs}");
+        let after = format!("{anon_defs}{list_defs}{reifs}");
         let anon_roots = reifs;
         // Element choice, as for annotation properties above: the
         // `rdf:type owl:Class` triple is written only when nothing else supplies
@@ -4814,8 +5101,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             let mut negs = String::new();
             if let Some(ns) = neg_assertions.get(iri) {
                 let mut ns = ns.clone();
-                ns.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-                for (_, _, block) in ns {
+                ns.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| cmp_ann_list(&a.3, &b.3)));
+                for (_, _, block, _) in ns {
                     negs.push_str(&block);
                 }
             }

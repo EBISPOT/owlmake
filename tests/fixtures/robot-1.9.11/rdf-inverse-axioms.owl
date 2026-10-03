@@ -1,0 +1,450 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/v#"
+     xml:base="http://example.org/v"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/v"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/v#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/v#p">
+        <owl:equivalentProperty>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#t"/>
+            </rdf:Description>
+        </owl:equivalentProperty>
+        <rdfs:subPropertyOf rdf:resource="http://example.org/v#q"/>
+        <owl:inverseOf>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#s"/>
+            </rdf:Description>
+        </owl:inverseOf>
+        <owl:propertyDisjointWith>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#r"/>
+            </rdf:Description>
+        </owl:propertyDisjointWith>
+        <rdfs:label>p</rdfs:label>
+    </owl:ObjectProperty>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>p</owl:annotatedTarget>
+        <rdfs:comment>label</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subPropertyOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/v#q"/>
+        <rdfs:comment>named sub</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+                <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#type"/>
+        <owl:annotatedTarget rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+        <rdfs:comment>functional inverse</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#TransitiveProperty"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+                <rdfs:domain rdf:resource="http://example.org/v#A"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#domain"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/v#A"/>
+        <rdfs:comment>inverse domain</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+        <rdfs:range rdf:resource="http://example.org/v#B"/>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/v#q -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/v#q">
+        <owl:equivalentProperty rdf:nodeID="genid12"/>
+        <owl:inverseOf rdf:nodeID="genid16"/>
+    </owl:ObjectProperty>
+    <rdf:Description rdf:nodeID="genid12">
+        <owl:inverseOf rdf:resource="http://example.org/v#r"/>
+    </rdf:Description>
+    <rdf:Description rdf:nodeID="genid16">
+        <owl:inverseOf rdf:resource="http://example.org/v#t"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid12"/>
+        <rdfs:comment>equivalent to inverse</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#q"/>
+                <rdfs:subPropertyOf rdf:resource="http://example.org/v#s"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subPropertyOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/v#s"/>
+        <rdfs:comment>inverse sub</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#inverseOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid16"/>
+        <rdfs:comment>inverse of inverse</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#q"/>
+                <rdfs:range rdf:nodeID="genid19"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#range"/>
+        <owl:annotatedTarget rdf:nodeID="genid19"/>
+        <rdfs:comment>inverse range</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid19">
+        <owl:onProperty rdf:resource="http://example.org/v#r"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/v#C"/>
+    </owl:Restriction>
+    
+
+
+    <!-- http://example.org/v#r -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/v#r">
+        <rdfs:subPropertyOf>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#t"/>
+            </rdf:Description>
+        </rdfs:subPropertyOf>
+        <owl:propertyDisjointWith rdf:nodeID="genid25"/>
+    </owl:ObjectProperty>
+    <rdf:Description rdf:nodeID="genid25">
+        <owl:inverseOf rdf:resource="http://example.org/v#s"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#r"/>
+                <rdfs:subPropertyOf rdf:nodeID="genid23"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subPropertyOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid23"/>
+        <rdfs:comment>inverse sub inverse</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description rdf:nodeID="genid23">
+        <owl:inverseOf rdf:resource="http://example.org/v#t"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#r"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#propertyDisjointWith"/>
+        <owl:annotatedTarget rdf:nodeID="genid25"/>
+        <rdfs:comment>disjoint from inverse</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/v#s -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/v#s">
+        <rdfs:subPropertyOf rdf:nodeID="genid30"/>
+    </owl:ObjectProperty>
+    <rdf:Description rdf:nodeID="genid30">
+        <owl:inverseOf rdf:resource="http://example.org/v#t"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#s"/>
+                <owl:equivalentProperty rdf:nodeID="genid28"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid28"/>
+        <rdfs:comment>inverse equivalents</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description rdf:nodeID="genid28">
+        <owl:inverseOf rdf:resource="http://example.org/v#t"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subPropertyOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid30"/>
+        <rdfs:comment>sub of inverse</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/v#t -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/v#t"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/v#d -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/v#d"/>
+    
+
+
+    <!-- http://example.org/v#e -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/v#e"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/v#A -->
+
+    <owl:Class rdf:about="http://example.org/v#A">
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#q"/>
+            <rdf:Description rdf:about="http://example.org/v#r"/>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+            </rdf:Description>
+            <rdf:Description rdf:about="http://example.org/v#d"/>
+            <rdf:Description rdf:about="http://example.org/v#e"/>
+        </owl:hasKey>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/v#B -->
+
+    <owl:Class rdf:about="http://example.org/v#B">
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#r"/>
+            <rdf:Description rdf:about="http://example.org/v#d"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#B"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#hasKey"/>
+        <owl:annotatedTarget rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#r"/>
+            <rdf:Description rdf:about="http://example.org/v#d"/>
+        </owl:annotatedTarget>
+        <rdfs:comment>key</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/v#C -->
+
+    <owl:Class rdf:about="http://example.org/v#C">
+        <owl:disjointUnionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#D"/>
+            <rdf:Description rdf:about="http://example.org/v#E"/>
+        </owl:disjointUnionOf>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/v#C"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointUnionOf"/>
+        <owl:annotatedTarget rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#D"/>
+            <rdf:Description rdf:about="http://example.org/v#E"/>
+        </owl:annotatedTarget>
+        <rdfs:comment>union</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/v#D -->
+
+    <owl:Class rdf:about="http://example.org/v#D">
+        <owl:disjointUnionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#E"/>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/v#A"/>
+                    <rdf:Description rdf:about="http://example.org/v#B"/>
+                </owl:intersectionOf>
+            </owl:Class>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/v#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/v#A"/>
+            </owl:Restriction>
+        </owl:disjointUnionOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/v#E -->
+
+    <owl:Class rdf:about="http://example.org/v#E"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/v#i -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/v#i"/>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:resource="http://example.org/v#i"/>
+        <owl:assertionProperty rdf:resource="http://example.org/v#p"/>
+        <owl:targetIndividual rdf:resource="http://example.org/v#j"/>
+        <rdfs:comment>negative</rdfs:comment>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:resource="http://example.org/v#i"/>
+        <owl:assertionProperty rdf:resource="http://example.org/v#p"/>
+        <owl:targetIndividual rdf:resource="http://example.org/v#j"/>
+        <rdfs:comment>negative again</rdfs:comment>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:resource="http://example.org/v#i"/>
+        <owl:assertionProperty>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#q"/>
+            </rdf:Description>
+        </owl:assertionProperty>
+        <owl:targetIndividual rdf:resource="http://example.org/v#j"/>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:resource="http://example.org/v#i"/>
+        <owl:assertionProperty>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#r"/>
+            </rdf:Description>
+        </owl:assertionProperty>
+        <owl:targetIndividual rdf:resource="http://example.org/v#j"/>
+        <rdfs:comment>negative inverse</rdfs:comment>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:resource="http://example.org/v#i"/>
+        <owl:assertionProperty rdf:resource="http://example.org/v#d"/>
+        <owl:targetValue rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1</owl:targetValue>
+        <rdfs:comment>negative data</rdfs:comment>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/v#j -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/v#j"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/v#t"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/v#C"/>
+                <owl:equivalentClass rdf:nodeID="genid59"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid59"/>
+        <rdfs:comment>counter</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid59">
+        <owl:onProperty rdf:resource="http://example.org/v#t"/>
+        <owl:allValuesFrom rdf:resource="http://example.org/v#C"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/v#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/v#B"/>
+                <owl:hasKey rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/v#q"/>
+                    <rdf:Description>
+                        <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+                    </rdf:Description>
+                    <rdf:Description rdf:about="http://example.org/v#d"/>
+                </owl:hasKey>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#hasKey"/>
+        <owl:annotatedTarget rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/v#q"/>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/v#p"/>
+            </rdf:Description>
+            <rdf:Description rdf:about="http://example.org/v#d"/>
+        </owl:annotatedTarget>
+        <rdfs:comment>anonymous key</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+
