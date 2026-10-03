@@ -89,6 +89,7 @@ pub mod genid;
 pub mod obo;
 pub mod obograph;
 pub mod ofncache;
+pub mod frame_twins;
 pub mod owlfunc;
 pub mod owlapi_ttl;
 pub mod owlrdf;

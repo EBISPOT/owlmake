@@ -1183,6 +1183,10 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         }
     }
 
+    // A class frame holding a plain/`xsd:string` twin numbers its annotation
+    // assertions in the order the frame writes them (see `io::frame_twins`).
+    let frame_orders = crate::io::frame_twins::assertion_orders(model);
+
     // Entities in render order; each entity's axioms by axiom-type index, then
     // per-type field order.
     for section in [
@@ -1196,6 +1200,11 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         for iri in section.iter() {
             if let Some(mut axioms) = by_entity.remove(iri) {
                 axioms.sort_by(|a, b| cmp_axiom(&a.component, &b.component));
+                let assertion = |ac: &&AnnotatedComponent<RcStr>| matches!(ac.component, Component::AnnotationAssertion(_));
+                if let Some(order) = frame_orders.get(iri.as_str()).filter(|_| axioms.iter().any(assertion)) {
+                    axioms.retain(|ac| !assertion(ac));
+                    axioms.extend(order.iter().copied());
+                }
                 g.entity_start.insert(iri.clone(), g.counter);
                 if g.subtree_debug {
                     eprintln!("[start] {iri} {}", g.counter);

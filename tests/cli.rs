@@ -4006,3 +4006,36 @@ fn export_parents_sizes_the_superclass_set_with_owl_thing() {
         std::fs::read_to_string(fixtures.join("thing-sizes.owltools.tsv")).unwrap()
     );
 }
+
+/// A class frame that states one xref twice — as a plain literal from an
+/// imported mapping, with provenance, and as `xsd:string` from the OBO edit file
+/// — writes it once, where the first of the two sorts. The frame's order is a
+/// red-black tree's listing sorted by a run-merging sort. Under the frame's
+/// comparison each of the two copies follows the other, so which comes first
+/// turns on the frame's other axioms. With the full stanza
+/// (`twin.obo`) the MESH xref stands in its alphabetical place after FMA; cut
+/// down to its xrefs (`twin-cut.obo`) it stands first. The expected documents
+/// are ROBOT 1.9.10's (ODK v1.6.1), the same three times over each.
+#[test]
+fn a_twice_stated_xref_stands_where_the_frame_sorts_its_first_copy() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xref-twins");
+    for variant in ["twin", "twin-cut"] {
+        let out = tmp(&format!("{variant}.owl"));
+        let run = bin()
+            .arg("merge")
+            .arg("--catalog")
+            .arg(fixtures.join("catalog-v001.xml"))
+            .arg("-i")
+            .arg(fixtures.join(format!("{variant}.obo")))
+            .args(["expand", "--no-expand-term", "http://purl.obolibrary.org/obo/RO_0002175", "-o"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            std::fs::read_to_string(fixtures.join(format!("{variant}.robot.owl"))).unwrap(),
+            "{variant}"
+        );
+    }
+}
