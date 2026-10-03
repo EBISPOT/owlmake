@@ -516,19 +516,6 @@ fn filter_core(
         out.format_prefixes_cleared = true;
         out.owl_genid_refs = model.owl_genid_refs;
         out.owl_label_order = model.owl_label_order;
-        // `owl_anon_blocks` is NOT carried, for the reason `extract` does not
-        // carry it: it is verbatim source text the writer replays
-        // unconditionally, and a filter is a subset — so a block may describe an
-        // anonymous individual the filter has just dropped. Replaying it then
-        // emits an `<rdf:Description>` with no subject at all, which is not
-        // well-formed RDF/XML: owlmake's own reader rejects the file it just
-        // wrote, and where the block's predicates were the only users of their
-        // namespaces the header does not declare those prefixes either.
-        //
-        // EFO's `components/efo_hancestro.owl` is the case — `filter --term-file`
-        // followed by two term-based `remove`s — and it came out with fourteen
-        // subject-less blocks of obsolescence records for terms the chain had
-        // removed.
         out.closure_ann_ns = model.closure_ann_ns;
         out.closure_declared = model.closure_declared;
         out.shared_anon = model.shared_anon;

@@ -25,22 +25,6 @@ pub type Onto = SetOntology<RcStr>;
 /// Component-mapped ontology, required by horned-owl's serializers.
 pub type CmOnto = ComponentMappedOntology<RcStr, RcAnnotatedComponent>;
 
-/// One verbatim `<rdf:Description>` block, with the position of the blank node
-/// allocated for it as the document is read.
-///
-/// The position is document-relative; `Model::anon_alloc_base` carries the rest,
-/// and `offset` says whether this block is even entitled to it — see
-/// `Model::anon_imports_end`.
-#[derive(Clone, Debug)]
-pub struct AnonBlock {
-    /// Byte offset of the block in its source document.
-    pub offset: u64,
-    /// How many blank nodes this document allocated BEFORE this block's own.
-    pub alloc: u64,
-    /// The block, exactly as the source wrote it.
-    pub text: String,
-}
-
 /// A loaded document as a functional write's banners see it.
 #[derive(Clone, Debug)]
 pub struct BannerDoc {
@@ -272,53 +256,14 @@ pub struct Model {
     /// why MONDO's `filtered.owl`/`reasoned.owl` have no stubs while
     /// `mondo-base.owl` — built by `remove --select imports` — has exactly two.
     pub closure_declared: std::collections::HashSet<String>,
-    /// Verbatim bare `<rdf:Description>` blocks (anonymous-individual annotation
-    /// assertions — EFO obsolescence records) scanned from the source, which
-    /// horned's RDF reader discards. Passed through unchanged in the Individuals
-    /// section. Empty otherwise.
-    pub owl_anon_blocks: Vec<AnonBlock>,
-    /// Blank nodes the documents merged INTO this one consumed from the global
-    /// blank-node counter before this document's own parse reached its blocks.
-    ///
-    /// An `owl:imports` is loaded at the moment its triple streams past, and an
-    /// ontology header sits at the top of the file — so by the time the parse
-    /// reaches anything else, every import has been read and has taken its share of
-    /// the counter. That offset is what decides the ORDER the anonymous
-    /// individuals come out in (see `io::anon_individual_order`), so it has to
-    /// accumulate as the closure is merged.
-    pub anon_alloc_base: u64,
-    /// How many blank nodes THIS document's own parse consumed. Added to a merge
-    /// target's `anon_alloc_base`, since the counter is global across the closure
-    /// and every import is parsed before the importing document's body is reached.
-    pub anon_alloc_total: u64,
-
-    /// The capacity of the hash table whose iteration order decides which anonymous
-    /// individual is re-minted first — the table of literal triples keyed by
-    /// subject, sized by how many distinct subjects ever carried a literal triple
-    /// (start 16, load factor 0.75, double on overflow). It is a property of the
-    /// DOCUMENT, like `anon_alloc_total`, so it travels with the model rather than
-    /// being re-derived at write time. Zero means "not an RDF/XML source", and the
-    /// writer falls back to a mask above any real count.
-    pub anon_hash_capacity: u64,
-
     /// Anonymous-individual node labels in the order the SOURCE DOCUMENT first
     /// mentions them. An anonymous individual is re-minted the first time it is
     /// asked for and the set renders sorted by the minted id, so for a
     /// functional-syntax document — where the parser meets them in document order
     /// — the rendered order IS document order. The model is a set and cannot
-    /// recover that, so it is scanned off the text like the RDF/XML counts.
+    /// recover that, so it is scanned off the text.
     pub anon_doc_order: Vec<String>,
 
-    /// Byte offset just past the document's LAST `owl:imports`, or 0 when it
-    /// declares none.
-    ///
-    /// An import is loaded at the moment its triple streams past, so the closure's
-    /// blank nodes are allocated at that point — not unconditionally before the
-    /// document's own. A node allocated EARLIER in the document than the imports
-    /// declaration is numbered without them. Every real ontology puts its header
-    /// first, so this is all-or-nothing in practice; recorded because the
-    /// alternative is being silently wrong on a document that does not.
-    pub anon_imports_end: u64,
     /// True when this model's untyped literals are `xsd:string` rather than
     /// `rdf:PlainLiteral` — which changes the RDF/XML writer's ordering.
     ///
@@ -450,12 +395,7 @@ impl Model {
             owl_label_order: std::collections::HashMap::new(),
             closure_ann_ns: Vec::new(),
             closure_declared: std::collections::HashSet::new(),
-            owl_anon_blocks: Vec::new(),
-            anon_alloc_base: 0,
-            anon_alloc_total: 0,
-            anon_hash_capacity: 0,
             anon_doc_order: Vec::new(),
-            anon_imports_end: 0,
             plain_literals_typed: false,
             owlapi_456: false,
             materialised_declarations: std::collections::HashSet::new(),
@@ -493,12 +433,7 @@ impl Model {
             owl_label_order: std::collections::HashMap::new(),
             closure_ann_ns: Vec::new(),
             closure_declared: std::collections::HashSet::new(),
-            owl_anon_blocks: Vec::new(),
-            anon_alloc_base: 0,
-            anon_alloc_total: 0,
-            anon_hash_capacity: 0,
             anon_doc_order: Vec::new(),
-            anon_imports_end: 0,
             plain_literals_typed: false,
             owlapi_456: false,
             materialised_declarations: std::collections::HashSet::new(),
@@ -539,12 +474,7 @@ impl Model {
         self.owl_label_order = other.owl_label_order.clone();
         self.closure_ann_ns = other.closure_ann_ns.clone();
         self.closure_declared = other.closure_declared.clone();
-        self.owl_anon_blocks = other.owl_anon_blocks.clone();
-        self.anon_alloc_base = other.anon_alloc_base;
-        self.anon_alloc_total = other.anon_alloc_total;
-        self.anon_hash_capacity = other.anon_hash_capacity;
         self.anon_doc_order = other.anon_doc_order.clone();
-        self.anon_imports_end = other.anon_imports_end;
         self.plain_literals_typed = other.plain_literals_typed;
         self.owlapi_456 = other.owlapi_456;
         self.materialised_declarations = other.materialised_declarations.clone();
@@ -620,12 +550,7 @@ impl Clone for Model {
         m.owl_label_order = self.owl_label_order.clone();
         m.closure_ann_ns = self.closure_ann_ns.clone();
         m.closure_declared = self.closure_declared.clone();
-        m.owl_anon_blocks = self.owl_anon_blocks.clone();
-        m.anon_alloc_base = self.anon_alloc_base;
-        m.anon_alloc_total = self.anon_alloc_total;
-        m.anon_hash_capacity = self.anon_hash_capacity;
         m.anon_doc_order = self.anon_doc_order.clone();
-        m.anon_imports_end = self.anon_imports_end;
         m.plain_literals_typed = self.plain_literals_typed;
         m.owlapi_456 = self.owlapi_456;
         m.materialised_declarations = self.materialised_declarations.clone();

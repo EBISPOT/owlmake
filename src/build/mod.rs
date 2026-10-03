@@ -6601,13 +6601,9 @@ fn apply_op(
             // one file; owlmake loads `$<` to start the chain and then reaches this
             // op with `$<` still listed as an input, so merging it again would read
             // it twice. The axioms and prefixes survive that (both go into sets),
-            // but the blank-node accounting does not: `carry_shared_anon` adds the
-            // secondary's `anon_alloc_total` to the target's `anon_alloc_base`, so
-            // the file's own allocations would be added to its own base and every
-            // anonymous individual numbered from the wrong origin. EFO's
-            // `build/efo.owl` would order its fourteen obsolescence blocks at base
-            // 641861 (= 588211 imports + efo-edit's own 53650) instead of 588211.
-            // Compared canonically: the chain resolves `$<` through `resolve_input`
+            // but an RDF/XML or Turtle parse numbers its anonymous individuals from
+            // the run's counter, so a second read would add a second copy of each
+            // under new ids. Compared canonically: the chain resolves `$<` through `resolve_input`
             // (which may hand back an OFN cache) and this op through
             // `resolve_repo_file`, so the two spellings of one file need not match.
             let threaded = pipeline_input.and_then(|p| p.canonicalize().ok());
@@ -7565,13 +7561,13 @@ pub(crate) fn merge_file_into(model: &mut crate::model::Model, path: &Path) -> R
     merge_file_into_as(model, path, MergeRole::Input)
 }
 
-/// What a merged file IS to the target, which decides whether its blank-node
-/// allocations move the target's base — see `cmd::merge::charge_import_allocations`.
+/// What a merged file IS to the target, which decides whether it is one more
+/// document a functional write's banners draw their labels from.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MergeRole {
-    /// A secondary `--input`: parsed AFTER the primary, so it charges nothing.
+    /// A secondary `--input`: opened on its own, it labels nothing by itself.
     Input,
-    /// A member of the import closure: parsed from the header, so it charges.
+    /// A member of the import closure: opened with the document.
     Import,
 }
 
@@ -7630,9 +7626,6 @@ pub(crate) fn merge_loaded_into_as(
         let _ = model.prefixes.add_prefix(prefix, ns);
     }
     crate::cmd::merge::carry_shared_anon(model, other);
-    if role == MergeRole::Import {
-        crate::cmd::merge::charge_import_allocations(model, other);
-    }
     Ok(())
 }
 

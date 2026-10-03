@@ -444,24 +444,6 @@ pub(crate) fn carry_shared_anon(merged: &mut Model, other: &Model) {
     }
 }
 
-/// Charge an IMPORT's blank-node allocations to the importing document's base.
-///
-/// Blank-node ids come from one counter shared by the whole load, and an
-/// `owl:imports` is loaded as its triple streams — from the ontology header, so
-/// before the importing document's body. Everything the closure consumes therefore
-/// shifts the parse-time ids of the target's own anonymous individuals, which is
-/// what orders them.
-///
-/// Deliberately separate from `carry_shared_anon`: a secondary `--input` is not
-/// an import. The primary ontology is loaded first and the others are merged into
-/// it, so the primary's own nodes are numbered from its own closure alone.
-/// Charging a secondary here as if it were an import would number the primary's
-/// blocks from the secondary's total too, and two blocks a few allocations apart
-/// flip order on a single extra allocation.
-pub(crate) fn charge_import_allocations(merged: &mut Model, other: &Model) {
-    merged.anon_alloc_base += other.anon_alloc_total;
-}
-
 /// The named entities `model` declares (deduped, sorted).
 pub(crate) fn declared_entities(model: &Model) -> Vec<String> {
     let mut entities: Vec<String> = Vec::new();

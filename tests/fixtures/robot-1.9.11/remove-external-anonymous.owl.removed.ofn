@@ -1,0 +1,28 @@
+Prefix(:=<http://example.org/x#>)
+Prefix(x:=<http://example.org/x/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/x>
+
+Declaration(Class(x:E_1))
+Declaration(ObjectProperty(x:E_10))
+Declaration(DataProperty(x:E_11))
+Declaration(NamedIndividual(x:E_20))
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: x:E_20 (x:E_20)
+
+ObjectPropertyAssertion(x:E_10 x:E_20 _:genid2147483655)
+
+
+)

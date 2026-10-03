@@ -688,18 +688,6 @@ pub fn remove_with(
         }
         std::fs::write("/tmp/om_span_groups.txt", out).ok();
     }
-    // `--axioms external` takes the verbatim anonymous-subject blocks with it.
-    // Those are annotation assertions horned-owl's RDF reader drops, replayed as
-    // text by the writer, so no axiom predicate can reach them — but an
-    // anonymous-subject assertion has an anonymous subject, which is in no base
-    // namespace, so every one of them is external and must go with the rest.
-    // EFO's `efo-base.owl` is `remove --base-iri …/EFO_ --axioms external`: leaving
-    // the replay in place would give it a whole `Individuals` section — 95 lines of
-    // obsolescence records for OBA terms — in a file that is meant to hold only
-    // EFO's own axioms.
-    if rm_external {
-        kept.owl_anon_blocks.clear();
-    }
     kept.span_shared.extend(span_shared);
     kept.cross_shared.extend(cross_add_out);
     Ok(kept)
@@ -1533,6 +1521,14 @@ fn is_external(comp: &Component<horned_owl::model::RcStr>, base: &[String]) -> b
             return !sub_sig.iter().any(|iri| internal(iri));
         }
     }
+    // An assertion about an anonymous individual has that individual as its
+    // subject, and an anonymous individual is in no base namespace. Falling
+    // through to the whole-signature test would keep it whenever the class or
+    // property it names is internal, and EFO's `efo-base.owl` would carry the
+    // obsolescence records it states about anonymous individuals.
+    if anonymous_subject(comp) {
+        return true;
+    }
     // The subjects are a SET, and the axiom is internal when ANY of them is. For
     // the n-ary axioms — disjoint/equivalent classes and properties — every member
     // is a subject, so an axiom that mentions one internal term is kept however the
@@ -1643,12 +1639,28 @@ fn subject_iri(comp: &Component<horned_owl::model::RcStr>) -> Option<String> {
         // CCN cell-set individuals carry an external `ClassAssertion`, which the
         // base strips along with the individual's declaration (the RDF writer only
         // re-declares it because the assertion keeps it in the signature). A named
-        // individual is the subject; an anonymous one has no determinable subject.
+        // individual is the subject; an anonymous one is no IRI (`anonymous_subject`).
         C::ClassAssertion(ax) => match &ax.i {
             horned_owl::model::Individual::Named(n) => Some(n.0.to_string()),
             horned_owl::model::Individual::Anonymous(_) => None,
         },
         _ => None,
+    }
+}
+
+/// Whether `comp` is an assertion about an anonymous individual.
+fn anonymous_subject(comp: &Component<horned_owl::model::RcStr>) -> bool {
+    use horned_owl::model::{AnnotationSubject, Component as C, Individual};
+    let anonymous =
+        |i: &Individual<horned_owl::model::RcStr>| matches!(i, Individual::Anonymous(_));
+    match comp {
+        C::ClassAssertion(ax) => anonymous(&ax.i),
+        C::ObjectPropertyAssertion(ax) => anonymous(&ax.from),
+        C::DataPropertyAssertion(ax) => anonymous(&ax.from),
+        C::AnnotationAssertion(ax) => {
+            matches!(ax.subject, AnnotationSubject::AnonymousIndividual(_))
+        }
+        _ => false,
     }
 }
 

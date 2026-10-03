@@ -3807,11 +3807,10 @@ fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<String>> {
         if want.is_empty() || name.contains(&want) {
             eprintln!(
                 "model[{name}]: shared_anon={} owl_genid_refs={} \
-owl_anon_blocks={} closure_declared={} closure_ann_ns={} materialised_decls={} \
+closure_declared={} closure_ann_ns={} materialised_decls={} \
 idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared={} axioms={}",
                 model.shared_anon.len(),
                 model.owl_genid_refs.len(),
-                model.owl_anon_blocks.len(),
                 model.closure_declared.len(),
                 model.closure_ann_ns.len(),
                 model.materialised_declarations.len(),
@@ -4220,17 +4219,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // The axioms of shapes this layout cannot state, in whole or with their
     // annotations. Any one of them stops the write before its first byte.
     let mut left_out: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
-    // Anonymous individuals are written from the model unless the document's
-    // own blocks for them are replayed.
-    let anon_model = !genid_pass.anon_ids.is_empty()
-        && model.anon_hash_capacity == 0
-        && crate::io::anon_individual_order(
-            &model.owl_anon_blocks,
-            model.anon_alloc_base,
-            model.anon_hash_capacity,
-            model.anon_imports_end,
-        )
-        .is_empty();
+    // Anonymous individuals are written from the model.
+    let anon_model = !genid_pass.anon_ids.is_empty();
     if anon_model {
         // The placeholders the statements are built with need the nodes first.
         let ids = AnonDoc { ids: genid_pass.anon_ids.clone(), ..Default::default() };
@@ -6385,16 +6375,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // individuals, rendered as bare `rdf:Description` blocks after them.
     individuals.sort_by(|a, b| iri_key(a).cmp(&iri_key(b)));
     individuals.dedup();
-    // Gate the banner on what will actually be WRITTEN, not on what was
-    // collected: the `owl:inverseOf` blocks below are skipped, so a document whose
-    // only captured blocks are those would otherwise get an Individuals banner
-    // with nothing under it (EFO's `hp_import.owl`).
-    let anon_blocks: Vec<&String> = crate::io::anon_individual_order(
-        &model.owl_anon_blocks,
-        model.anon_alloc_base,
-        model.anon_hash_capacity,
-        model.anon_imports_end,
-    );
     // The banner belongs to NAMED individuals only. Each section header comes from
     // the corresponding entity list, and the anonymous-individual pass — which runs
     // afterwards — writes none: a document whose only individuals are anonymous
@@ -6566,35 +6546,11 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             write_root_blocks(w, iri, &root_blocks, &anon_roots)?;
         }
     }
-    // Anonymous-individual annotation blocks (obsolescence records) that horned's
-    // reader drops — passed through verbatim in source order. OUTSIDE the banner
-    // gate above: anonymous individuals are their own pass, and run whether or not
-    // any NAMED individual put a header there. The `owl:inverseOf` blocks are
-    // already filtered out: those are not individuals, they are rendered inline
-    // within their property chains / class frames, and the input scan mis-collects
-    // them as anon blocks.
-    for b in &anon_blocks {
-        write!(w, "{b}")?;
-    }
-    // …and when there is no verbatim text to replay, render them from the MODEL.
-    //
-    // An anonymous individual reaching the output only as scanned source text
-    // would be lost by everything that is not an RDF/XML parse: `om convert -i
-    // x.ofn -o y.owl` would write zero `<rdf:Description>` blocks while still
-    // holding both `AnnotationAssertion(… _:a "…")` axioms, as would every build
-    // step fed by the `.ofn` intermediate cache. They must round-trip instead: over
-    // a three-individual `.ofn`, three blocks in document order, which is what the
-    // functional parser's ascending `_:genid` ids sort to, and what this `BTreeMap`
-    // over horned's zero-padded node ids reproduces.
-    //
-    // Gated on `anon_hash_capacity`, which only an RDF/XML parse sets. That keeps
-    // the two paths from ever both firing — and, specifically, keeps
-    // `remove --axioms external` able to drop these blocks (it clears
-    // `owl_anon_blocks`, and EFO's `efo-base.owl` is exactly that) without them
-    // coming back through the model.
-    // An anonymous individual every statement naming which is about it is a
-    // graph of its own, its roots its node and the reifications and negative
-    // assertions about it.
+    // Anonymous individuals are their own pass, OUTSIDE the banner gate above:
+    // they run whether or not any NAMED individual put a header there. An
+    // anonymous individual every statement naming which is about it is a graph
+    // of its own, its roots its node and the reifications and negative
+    // assertions about it, in the order the numbering pass met them.
     if anon_model {
         for x in &genid_pass.anon_roots {
             let graph = format!("{}{x}", crate::io::genid::ANON_GRAPH);
@@ -6602,11 +6558,12 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             write!(w, "{}", resolve_anon(&graph, &place_defs(&roots, Some(&defs))))?;
         }
     }
-    if anon_blocks.is_empty() && model.anon_hash_capacity == 0 {
-        // Document order, from the labels scanned off the source — NOT the label's
-        // own sort order, which is what a plain walk of the map would give. A
-        // `.ofn` naming `_:zzz`, `_:aaa`, `_:mmm` in that order renders in that
-        // order; anything the scan did not see keeps a stable place after them.
+    {
+        // What the numbering pass did not number, in document order, from the
+        // labels scanned off the source — NOT the label's own sort order, which
+        // is what a plain walk of the map would give. A `.ofn` naming `_:zzz`,
+        // `_:aaa`, `_:mmm` in that order renders in that order; anything the scan
+        // did not see keeps a stable place after them.
         let pos = |id: &str| {
             let bare = id.strip_prefix("_:").unwrap_or(id);
             model

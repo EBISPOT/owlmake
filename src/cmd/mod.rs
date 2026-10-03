@@ -534,8 +534,6 @@ pub(crate) fn resolve_import_closure(
                 model.imported_components.insert(c);
             }
         }
-        // This one IS an import, so its allocations move the importer's base.
-        crate::cmd::merge::charge_import_allocations(model, &imported);
         merged_any = true;
         if crate::progress::verbosity() >= 1 {
             status!("imports: merged import <{iri}> from {source}");

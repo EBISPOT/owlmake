@@ -263,8 +263,8 @@ fn the_scratch_directory_is_resolved_once() {
 /// `internal: uncovered step reached executor: ── new invocation`.
 ///
 /// That is one of three instances of the same shape in a single night — the
-/// boundary rule implemented on `Op::Merge` alone, `owl_anon_blocks`
-/// invalidation implemented in `extract` and `remove` but not `filter`, and this
+/// boundary rule implemented on `Op::Merge` alone, the invalidation of replayed
+/// source blocks implemented in `extract` and `remove` but not `filter`, and this
 /// — so the guard is worth more than the one variant it names. A rule that holds
 /// of a family has to be checked against the family, because the compiler cannot:
 /// a catch-all arm satisfies exhaustiveness while handling nothing.

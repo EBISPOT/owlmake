@@ -524,10 +524,6 @@ pub struct Genids {
     /// `axiom_identity`), the nodes of its reifications, or of the negative
     /// assertion or `owl:AllDifferent` it is, in order.
     pub anon_reif: HashMap<u64, Vec<u64>>,
-    /// Whether anonymous individuals are numbered from the model: their axioms
-    /// are reached from the graphs that name them, and the anonymous section
-    /// states the rest.
-    model_anon: bool,
     /// Whether any axiom names an anonymous individual.
     anon_present: bool,
     /// The graph being numbered: an entity's IRI, [`HEADER_GRAPH`],
@@ -595,9 +591,7 @@ impl Genids {
     }
 
     fn object_anon(&mut self, x: &str) {
-        if self.model_anon {
-            *self.anon_objects.entry((self.cur_graph.clone(), x.to_string())).or_default() += 1;
-        }
+        *self.anon_objects.entry((self.cur_graph.clone(), x.to_string())).or_default() += 1;
     }
 
     /// The next id for an anonymous node.
@@ -1341,17 +1335,11 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         ..Default::default()
     };
 
-    // Anonymous individuals are numbered from the model unless the document's
-    // own blocks for them are replayed.
-    let anon_blocks = crate::io::anon_individual_order(
-        &model.owl_anon_blocks,
-        model.anon_alloc_base,
-        model.anon_hash_capacity,
-        model.anon_imports_end,
-    );
-    g.model_anon = anon_blocks.is_empty() && model.anon_hash_capacity == 0;
+    // Anonymous individuals are numbered from the model: their axioms are
+    // reached from the graphs that name them, and the anonymous section states
+    // the rest.
     g.anon_present = model.ont.iter().any(|ac| names_anonymous(&ac.component));
-    if g.model_anon && g.anon_present {
+    if g.anon_present {
         // The axioms each anonymous individual is reached with: those it is the
         // subject of, and the samenesses and differences it is a member of, in
         // axiom order; then the annotation assertions about it.
@@ -1628,63 +1616,53 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
     // the blocks in.
     g.cur_owner = "__anon_individuals__".to_string();
     {
-        if !anon_blocks.is_empty() {
-            // Replayed verbatim from the source: the block text is the body, so
-            // only the individual's own node is numbered here.
-            for _ in &anon_blocks {
-                g.intern.clear();
-                g.graph_seq += 1;
-                g.fresh();
+        // An individual that every statement naming it is about is a graph
+        // of its own, of those statements, in node order. A difference of
+        // more than two, or of two of which it is the second, is passed
+        // over.
+        let pos = |id: &str| {
+            let bare = id.strip_prefix("_:").unwrap_or(id);
+            model.anon_doc_order.iter().position(|l| l == bare).unwrap_or(usize::MAX)
+        };
+        let mut naming: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
+        for ac in model.ont.iter() {
+            for x in referenced_anonymous(ac) {
+                naming.entry(x).or_default().push(ac);
             }
-        } else if g.model_anon {
-            // An individual that every statement naming it is about is a graph
-            // of its own, of those statements, in node order. A difference of
-            // more than two, or of two of which it is the second, is passed
-            // over.
-            let pos = |id: &str| {
-                let bare = id.strip_prefix("_:").unwrap_or(id);
-                model.anon_doc_order.iter().position(|l| l == bare).unwrap_or(usize::MAX)
-            };
-            let mut naming: HashMap<String, Vec<&AnnotatedComponent<RcStr>>> = HashMap::new();
-            for ac in model.ont.iter() {
-                for x in referenced_anonymous(ac) {
-                    naming.entry(x).or_default().push(ac);
+        }
+        let mut ids: Vec<String> = naming.keys().cloned().collect();
+        ids.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.cmp(b)));
+        for x in ids {
+            let mut refs = naming[&x].clone();
+            refs.sort_by(|a, b| cmp_annotated_axiom(a, b));
+            refs.dedup_by(|a, b| std::ptr::eq(*a, *b));
+            let mut axioms = Vec::new();
+            let mut root = true;
+            for ac in refs {
+                if let Component::DifferentIndividuals(d) = &ac.component {
+                    let first = d.0.iter().min_by(|a, b| cmp_individual(a, b));
+                    if d.0.len() != 2 || !matches!(first, Some(Individual::Anonymous(a)) if a.0.as_ref() == x) {
+                        continue;
+                    }
                 }
+                if axiom_subject(&ac.component).as_deref() != Some(x.as_str()) {
+                    root = false;
+                    break;
+                }
+                axioms.push(ac);
             }
-            let mut ids: Vec<String> = naming.keys().cloned().collect();
-            ids.sort_by(|a, b| pos(a).cmp(&pos(b)).then_with(|| a.cmp(b)));
-            for x in ids {
-                let mut refs = naming[&x].clone();
-                refs.sort_by(|a, b| cmp_annotated_axiom(a, b));
-                refs.dedup_by(|a, b| std::ptr::eq(*a, *b));
-                let mut axioms = Vec::new();
-                let mut root = true;
-                for ac in refs {
-                    if let Component::DifferentIndividuals(d) = &ac.component {
-                        let first = d.0.iter().min_by(|a, b| cmp_individual(a, b));
-                        if d.0.len() != 2 || !matches!(first, Some(Individual::Anonymous(a)) if a.0.as_ref() == x) {
-                            continue;
-                        }
-                    }
-                    if axiom_subject(&ac.component).as_deref() != Some(x.as_str()) {
-                        root = false;
-                        break;
-                    }
-                    axioms.push(ac);
-                }
-                if !root {
-                    continue;
-                }
-                g.begin_graph(format!("{ANON_GRAPH}{x}"));
-                g.intern.clear();
-                g.graph_seq += 1;
-                let before = g.anon_order.len();
-                for ac in axioms {
-                    g.translate_axiom("__anon_individuals__", ac);
-                }
-                if g.anon_order.len() > before {
-                    g.anon_roots.push(x);
-                }
+            if !root {
+                continue;
+            }
+            g.begin_graph(format!("{ANON_GRAPH}{x}"));
+            g.intern.clear();
+            g.graph_seq += 1;
+            let before = g.anon_order.len();
+            for ac in axioms {
+                g.translate_axiom("__anon_individuals__", ac);
+            }
+            if g.anon_order.len() > before {
+                g.anon_roots.push(x);
             }
         }
     }

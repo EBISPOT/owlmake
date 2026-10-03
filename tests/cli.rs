@@ -3917,6 +3917,73 @@ fn anonymous_individuals_in_annotations_of_annotations_are_written_as_robot_writ
     }
 }
 
+/// A document read from RDF/XML or Turtle writes its anonymous individuals
+/// from the model, as ROBOT 1.9.11 writes the document it reads: one typed
+/// `owl:Thing` and a class, as the value of an entity's annotation, of an
+/// axiom's, of an annotated annotation and of the ontology's, as the object of
+/// assertions, of a value restriction in a general axiom and of an assertion on
+/// an inverse property, and in an annotated difference; and the shapes of
+/// `read-anonymous` and `rdf-individual-axioms`.
+#[test]
+fn anonymous_individuals_read_from_rdf_are_written_as_robot_writes_them() {
+    for name in ["rdf-anonymous-rewrite", "read-anonymous", "rdf-individual-axioms"] {
+        for src in ["owl", "ttl"] {
+            assert_eq!(
+                convert_fixture(&format!("{name}.{src}"), &format!("{name}-{src}.owl"), &[]),
+                fixture_text(&format!("{name}.owl")),
+                "{name}.{src} to RDF/XML"
+            );
+        }
+    }
+    for (src, expected) in [("owl", "rdf-anonymous-rewrite.owl.ttl"), ("ttl", "rdf-anonymous-rewrite.ttl")] {
+        assert_eq!(
+            convert_fixture(&format!("rdf-anonymous-rewrite.{src}"), &format!("rdf-anonymous-rewrite-{src}.ttl"), &[]),
+            fixture_text(expected),
+            "rdf-anonymous-rewrite.{src} to Turtle"
+        );
+    }
+}
+
+/// `remove --axioms external` removes every assertion about an anonymous
+/// individual, which is in no base namespace whatever the class or property
+/// the assertion names, and keeps an assertion about an internal individual
+/// whose object is anonymous: as ROBOT 1.9.11 removes them from the document
+/// in functional syntax and in RDF/XML. Read from RDF/XML, the individual it
+/// keeps is numbered as owlmake's reader numbers it.
+#[test]
+fn assertions_about_anonymous_individuals_are_external() {
+    fn unlabelled(text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(at) = rest.find("_:genid") {
+            out.push_str(&rest[..at + "_:".len()]);
+            rest = rest[at + "_:genid".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+        }
+        out + rest
+    }
+    for (src, expected) in [
+        ("ofn", "remove-external-anonymous.removed.ofn"),
+        ("owl", "remove-external-anonymous.owl.removed.ofn"),
+    ] {
+        let out = tmp(&format!("remove-external-anonymous-{src}.ofn"));
+        let run = bin()
+            .args(["remove", "-i"])
+            .arg(robot_fixture(&format!("remove-external-anonymous.{src}")))
+            .args(["--base-iri", "http://example.org/x/E_", "--axioms", "external", "-o"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        if src == "ofn" {
+            assert_eq!(text, fixture_text(expected), "{src}");
+        } else {
+            assert_eq!(unlabelled(&text), unlabelled(&fixture_text(expected)), "{src}");
+        }
+    }
+}
+
 /// The annotations of an assertion on an inverse property reify the
 /// statement of the named property it is, with no warning, annotations of
 /// annotations and anonymous values included, and the document reads back

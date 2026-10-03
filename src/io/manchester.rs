@@ -43,7 +43,6 @@ pub fn load<R: BufRead>(mut reader: R, cfg: ParserConfiguration<RcStr>) -> Resul
     // The document's `Prefix:` declarations are its format prefixes, which a
     // write in another format carries over.
     model.rdf_prefixes = declared;
-    model.anon_alloc_total = labels.len() as u64;
     model.anon_doc_order = labels;
     Ok(model)
 }

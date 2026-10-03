@@ -433,24 +433,11 @@ fn build_output(
         ));
     }
     let mut out = Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes));
-    carry_subset_meta(&mut out, model);
+    // A module is a subset of the source, so the source's blank-node identity
+    // evidence still describes the axioms it keeps; without it the numbering
+    // pass has nothing but structural equality to go on.
+    out.carry_meta_from(model);
     out
-}
-
-/// Carry the source state a MODULE inherits. A module is a subset of the source,
-/// so the source's blank-node identity evidence still describes the axioms it
-/// keeps; without it the numbering pass has nothing but structural equality to go
-/// on.
-///
-/// `owl_anon_blocks` is deliberately NOT carried: it is verbatim source text
-/// replayed unconditionally by the writer, and a subset may well have dropped the
-/// individuals it describes. Carrying it would give a module like EFO's
-/// `obi_import.owl` an `Individuals` section for anonymous individuals the
-/// extraction removed.
-fn carry_subset_meta(out: &mut Model, src: &Model) {
-    let blocks = std::mem::take(&mut out.owl_anon_blocks);
-    out.carry_meta_from(src);
-    out.owl_anon_blocks = blocks;
 }
 
 /// Apply the post-extraction options to an assembled module: individual
@@ -597,7 +584,7 @@ fn post_process(
         // Setting `-O` rebuilds the ontology set; it must not also discard the
         // carried state (blank-node sharing, reification order, prefixes) that the
         // module reached here with.
-        carry_subset_meta(&mut module, &carried);
+        module.carry_meta_from(&carried);
     }
 
     module
