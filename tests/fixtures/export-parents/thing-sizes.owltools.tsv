@@ -1,0 +1,14 @@
+ClassID	ClassLabel	BFO_0000050 part of ID	BFO_0000050 part of Label
+X:0000001	first whole		
+X:0000474	second whole		
+X:0000900	part	X:0000474|X:0000001	second whole|first whole
+X:0000901	ancestor 1		
+X:0000902	ancestor 2		
+X:0000903	ancestor 3		
+X:0000904	ancestor 4		
+X:0000905	ancestor 5		
+X:0000906	ancestor 6		
+X:0000907	ancestor 7		
+X:0000908	ancestor 8		
+X:0000909	ancestor 9		
+X:0000910	ancestor 10		

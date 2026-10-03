@@ -176,6 +176,12 @@ fn apply_metadata(ms: &mut MappingSet, map: serde_yaml::Mapping) {
 
 // ───────────────────────────── TSV/CSV writing ──────────────────────────────
 
+/// The licence a [`MetaStyle::Java`] set states when it carries none.
+const JAVA_DEFAULT_LICENSE: &str = "https://w3id.org/sssom/license/all-rights-reserved";
+
+/// The columns a [`MetaStyle::Java`] table of an empty set is written with.
+const EMPTY_SET_COLUMNS: [&str; 4] = ["subject_id", "predicate_id", "object_id", "mapping_justification"];
+
 /// Which SSSOM/TSV header convention to write. Mapping sets in circulation use
 /// two, and a build both writes new sets and reads back sets of either shape.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -227,6 +233,13 @@ pub fn write_table_styled(
         ms.sort_columns();
         ms.sort_rows();
     }
+    // A set written in the Java convention always states a licence: one the set
+    // does not carry is written as all rights reserved.
+    if style == MetaStyle::Java {
+        ms.metadata
+            .entry("license".into())
+            .or_insert_with(|| serde_yaml::Value::String(JAVA_DEFAULT_LICENSE.into()));
+    }
 
     // Header: metadata + curie_map, dumped as YAML.
     let mut pairs: Vec<(String, serde_yaml::Value)> =
@@ -275,9 +288,14 @@ pub fn write_table_styled(
         }
     }
 
-    // Body.
+    // Body. A set with no mappings has no columns of its own; the Java convention
+    // still writes the four required ones, so the table reads back as a table.
     let cols = &ms.columns;
-    out.push_str(&cols.join(&sep.to_string()));
+    if cols.is_empty() && style == MetaStyle::Java {
+        out.push_str(&EMPTY_SET_COLUMNS.join(&sep.to_string()));
+    } else {
+        out.push_str(&cols.join(&sep.to_string()));
+    }
     out.push('\n');
     for m in &ms.mappings {
         let row: Vec<String> = cols

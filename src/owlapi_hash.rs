@@ -309,11 +309,21 @@ pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
             let mut inds: Vec<&Individual<RcStr>> = v.iter().collect();
             inds.sort_by(|x, y| ind_cmp(x, y));
             inds.dedup_by(|x, y| ind_cmp(x, y) == Ordering::Equal);
-            let sum = inds.iter().fold(0i32, |acc, i| acc.wrapping_add(ind_hash(i)));
+            let sum = inds.iter().map(|i| ind_hash(i)).fold(0i32, |acc, h| acc.wrapping_add(h));
             tag(P_OBJ_ONE_OF, &[sum])
         }
-        // Data ranges do not appear in the axioms these orders decide.
-        _ => 0,
+        CE::DataSomeValuesFrom { dp, dr } => tag(2689, &[data_property_hash(dp), data_range_hash(dr)]),
+        CE::DataAllValuesFrom { dp, dr } => tag(2371, &[data_property_hash(dp), data_range_hash(dr)]),
+        CE::DataHasValue { dp, l } => tag(2749, &[data_property_hash(dp), literal_hash(l)]),
+        CE::DataExactCardinality { n, dp, dr } => {
+            tag(2437, &[data_property_hash(dp), *n as i32, data_range_hash(dr)])
+        }
+        CE::DataMaxCardinality { n, dp, dr } => {
+            tag(2539, &[data_property_hash(dp), *n as i32, data_range_hash(dr)])
+        }
+        CE::DataMinCardinality { n, dp, dr } => {
+            tag(2621, &[data_property_hash(dp), *n as i32, data_range_hash(dr)])
+        }
     }
 }
 
@@ -446,6 +456,156 @@ fn annotation_cmp(a: &Annotation<RcStr>, b: &Annotation<RcStr>) -> Ordering {
     })
 }
 
+/// The hash of an axiom's annotation set: 0 when it has none, else the list
+/// hash of its annotations in OWLAPI order.
+fn axiom_annotations_hash(anns: &std::collections::BTreeSet<Annotation<RcStr>>) -> i32 {
+    if anns.is_empty() {
+        return 0;
+    }
+    let mut sorted: Vec<&Annotation<RcStr>> = anns.iter().collect();
+    sorted.sort_by(|a, b| annotation_cmp(a, b));
+    list_hash(&sorted.iter().map(|a| annotation_hash(a)).collect::<Vec<i32>>())
+}
+
+fn data_property_hash(dp: &horned_owl::model::DataProperty<RcStr>) -> i32 {
+    tag(4073, &[iri_hash(dp.0.as_ref())])
+}
+
+fn datatype_hash(iri: &str) -> i32 {
+    tag(P_DATATYPE, &[iri_hash(iri)])
+}
+
+fn data_range_hash(dr: &horned_owl::model::DataRange<RcStr>) -> i32 {
+    match dr {
+        horned_owl::model::DataRange::Datatype(d) => datatype_hash(d.0.as_ref()),
+        _ => 0,
+    }
+}
+
+/// The hashes of a set's members, distinct and in OWLAPI order, as a list hash.
+fn sorted_list_hash<T>(items: &[T], hash: impl Fn(&T) -> i32, cmp: impl Fn(&T, &T) -> Ordering) -> i32 {
+    let mut refs: Vec<&T> = items.iter().collect();
+    refs.sort_by(|a, b| cmp(a, b));
+    refs.dedup_by(|a, b| cmp(a, b) == Ordering::Equal);
+    list_hash(&refs.iter().map(|x| hash(x)).collect::<Vec<i32>>())
+}
+
+fn swrl_iarg_hash(a: &horned_owl::model::IArgument<RcStr>) -> i32 {
+    match a {
+        horned_owl::model::IArgument::Individual(i) => tag(5189, &[ind_hash(i)]),
+        horned_owl::model::IArgument::Variable(v) => tag(5099, &[iri_hash(v.0.as_ref())]),
+    }
+}
+
+fn swrl_darg_hash(a: &horned_owl::model::DArgument<RcStr>) -> i32 {
+    match a {
+        horned_owl::model::DArgument::Literal(l) => tag(5281, &[literal_hash(l)]),
+        horned_owl::model::DArgument::Variable(v) => tag(5099, &[iri_hash(v.0.as_ref())]),
+    }
+}
+
+fn swrl_atom_hash(atom: &horned_owl::model::Atom<RcStr>) -> i32 {
+    use horned_owl::model::Atom;
+    match atom {
+        Atom::ClassAtom { pred, arg } => tag(4663, &[swrl_iarg_hash(arg), ce_hash(pred)]),
+        Atom::DataRangeAtom { pred, arg } => tag(4759, &[swrl_darg_hash(arg), data_range_hash(pred)]),
+        Atom::ObjectPropertyAtom { pred, args } => {
+            tag(4861, &[swrl_iarg_hash(&args.0), swrl_iarg_hash(&args.1), ope_hash(pred)])
+        }
+        Atom::DataPropertyAtom { pred, args } => {
+            tag(4943, &[swrl_darg_hash(&args.0), swrl_darg_hash(&args.1), data_property_hash(pred)])
+        }
+        Atom::BuiltInAtom { pred, args } => tag(
+            5009,
+            &[list_hash(&args.iter().map(swrl_darg_hash).collect::<Vec<i32>>()), iri_hash(pred.as_ref())],
+        ),
+        Atom::DifferentIndividualsAtom(a, b) => tag(5393, &[swrl_iarg_hash(a), swrl_iarg_hash(b)]),
+        Atom::SameIndividualAtom(a, b) => tag(5449, &[swrl_iarg_hash(a), swrl_iarg_hash(b)]),
+    }
+}
+
+/// `OWLAxiom.hashCode()` for a logical axiom or a declaration: the axiom
+/// kind's prime tag over its components and its annotation set. `None` for a
+/// component that is neither.
+pub fn axiom_hash(
+    c: &horned_owl::model::Component<RcStr>,
+    anns: &std::collections::BTreeSet<Annotation<RcStr>>,
+) -> Option<i32> {
+    use horned_owl::model::{Component as C, SubObjectPropertyExpression as SOPE};
+    let a = axiom_annotations_hash(anns);
+    let ces = |v: &[CE<RcStr>]| list_hash(&sorted_distinct(v).iter().map(|c| ce_hash(c)).collect::<Vec<i32>>());
+    let opes = |v: &[OPE<RcStr>]| sorted_list_hash(v, ope_hash, |x, y| ope_cmp(x, y));
+    let inds = |v: &[Individual<RcStr>]| sorted_list_hash(v, ind_hash, |x, y| ind_cmp(x, y));
+    let dps = |v: &[horned_owl::model::DataProperty<RcStr>]| {
+        sorted_list_hash(v, data_property_hash, |x, y| iri_cmp(x.0.as_ref(), y.0.as_ref()))
+    };
+    Some(match c {
+        C::DeclareClass(x) => tag(353, &[tag(P_CLASS, &[iri_hash(x.0.as_ref())]), a]),
+        C::DeclareObjectProperty(x) => tag(353, &[tag(P_OBJECT_PROPERTY, &[iri_hash(x.0.as_ref())]), a]),
+        C::DeclareDataProperty(x) => tag(353, &[data_property_hash(&x.0), a]),
+        C::DeclareNamedIndividual(x) => tag(353, &[tag(P_NAMED_INDIVIDUAL, &[iri_hash(x.0.as_ref())]), a]),
+        C::DeclareAnnotationProperty(x) => tag(353, &[tag(P_ANNOTATION_PROPERTY, &[iri_hash(x.0.as_ref())]), a]),
+        C::DeclareDatatype(x) => tag(353, &[datatype_hash(x.0.as_ref()), a]),
+        C::SubClassOf(x) => tag(2063, &[ce_hash(&x.sub), ce_hash(&x.sup), a]),
+        C::EquivalentClasses(x) => tag(P_EQUIVALENT_CLASSES, &[ces(&x.0), a]),
+        C::DisjointClasses(x) => tag(467, &[ces(&x.0), a]),
+        C::DisjointUnion(x) => tag(661, &[tag(P_CLASS, &[iri_hash((x.0).0.as_ref())]), ces(&x.1), a]),
+        C::SubObjectPropertyOf(x) => match &x.sub {
+            SOPE::ObjectPropertyExpression(sub) => tag(1823, &[ope_hash(sub), ope_hash(&x.sup), a]),
+            SOPE::ObjectPropertyChain(chain) => tag(
+                1597,
+                &[list_hash(&chain.iter().map(ope_hash).collect::<Vec<i32>>()), ope_hash(&x.sup), a],
+            ),
+        },
+        C::EquivalentObjectProperties(x) => tag(947, &[opes(&x.0), a]),
+        C::DisjointObjectProperties(x) => tag(607, &[opes(&x.0), a]),
+        C::InverseObjectProperties(x) => {
+            1229i32
+                .wrapping_mul(MULT)
+                .wrapping_add(ope_hash(&x.0))
+                .wrapping_add(ope_hash(&x.1))
+                .wrapping_mul(MULT)
+                .wrapping_add(a)
+        }
+        C::ObjectPropertyDomain(x) => tag(1663, &[ope_hash(&x.ope), ce_hash(&x.ce), a]),
+        C::ObjectPropertyRange(x) => tag(1741, &[ope_hash(&x.ope), ce_hash(&x.ce), a]),
+        C::FunctionalObjectProperty(x) => tag(1087, &[ope_hash(&x.0), a]),
+        C::InverseFunctionalObjectProperty(x) => tag(1153, &[ope_hash(&x.0), a]),
+        C::ReflexiveObjectProperty(x) => tag(1901, &[ope_hash(&x.0), a]),
+        C::IrreflexiveObjectProperty(x) => tag(1297, &[ope_hash(&x.0), a]),
+        C::SymmetricObjectProperty(x) => tag(2131, &[ope_hash(&x.0), a]),
+        C::AsymmetricObjectProperty(x) => tag(37, &[ope_hash(&x.0), a]),
+        C::TransitiveObjectProperty(x) => tag(2221, &[ope_hash(&x.0), a]),
+        C::SubDataPropertyOf(x) => tag(283, &[data_property_hash(&x.sub), data_property_hash(&x.sup), a]),
+        C::EquivalentDataProperties(x) => tag(877, &[dps(&x.0), a]),
+        C::DisjointDataProperties(x) => tag(547, &[dps(&x.0), a]),
+        C::DataPropertyDomain(x) => tag(179, &[data_property_hash(&x.dp), ce_hash(&x.ce), a]),
+        C::DataPropertyRange(x) => tag(233, &[data_property_hash(&x.dp), data_range_hash(&x.dr), a]),
+        C::FunctionalDataProperty(x) => tag(1019, &[data_property_hash(&x.0), a]),
+        C::SameIndividual(x) => tag(1993, &[inds(&x.0), a]),
+        C::DifferentIndividuals(x) => tag(419, &[inds(&x.0), a]),
+        C::ClassAssertion(x) => tag(73, &[ind_hash(&x.i), ce_hash(&x.ce), a]),
+        C::ObjectPropertyAssertion(x) => tag(1523, &[ind_hash(&x.from), ope_hash(&x.ope), ind_hash(&x.to), a]),
+        C::NegativeObjectPropertyAssertion(x) => {
+            tag(1453, &[ind_hash(&x.from), ope_hash(&x.ope), ind_hash(&x.to), a])
+        }
+        C::DataPropertyAssertion(x) => {
+            tag(127, &[ind_hash(&x.from), data_property_hash(&x.dp), literal_hash(&x.to), a])
+        }
+        C::NegativeDataPropertyAssertion(x) => {
+            tag(1381, &[ind_hash(&x.from), data_property_hash(&x.dp), literal_hash(&x.to), a])
+        }
+        C::Rule(r) => {
+            // A rule's body and head are insertion-ordered sets, hashed as sets.
+            let atoms = |v: &[horned_owl::model::Atom<RcStr>]| {
+                v.iter().map(swrl_atom_hash).fold(0i32, |acc, h| acc.wrapping_add(h))
+            };
+            tag(4591, &[atoms(&r.body), atoms(&r.head)])
+        }
+        _ => return None,
+    })
+}
+
 /// `OWLEquivalentClassesAxiom.hashCode()`: the prime tag over the sorted
 /// distinct member list hash and the annotation hash (0 when unannotated,
 /// sorted list hash otherwise).
@@ -463,6 +623,121 @@ pub fn equivalent_classes_hash(
         list_hash(&hs)
     };
     tag(P_EQUIVALENT_CLASSES, &[list_hash(&member_hashes), ann_hash])
+}
+
+/// The hash of a named individual.
+pub fn named_individual_hash(iri: &str) -> i32 {
+    tag(P_NAMED_INDIVIDUAL, &[iri_hash(iri)])
+}
+
+/// The hash of a named object property.
+pub fn object_property_hash(iri: &str) -> i32 {
+    tag(P_OBJECT_PROPERTY, &[iri_hash(iri)])
+}
+
+/// The capacities a Trove 3 hash table takes, in the order its source lists
+/// them; [`trove_next_prime`] searches them sorted.
+const TROVE_PRIMES: [i32; 245] = [
+    i32::MAX,
+    5, 11, 23, 47, 97, 197, 397, 797, 1597, 3203, 6421, 12853, 25717, 51437, 102877, 205759,
+    411527, 823117, 1646237, 3292489, 6584983, 13169977, 26339969, 52679969, 105359939,
+    210719881, 421439783, 842879579, 1685759167,
+    433, 877, 1759, 3527, 7057, 14143, 28289, 56591, 113189, 226379, 452759, 905551, 1811107,
+    3622219, 7244441, 14488931, 28977863, 57955739, 115911563, 231823147, 463646329, 927292699,
+    1854585413,
+    953, 1907, 3821, 7643, 15287, 30577, 61169, 122347, 244703, 489407, 978821, 1957651, 3915341,
+    7830701, 15661423, 31322867, 62645741, 125291483, 250582987, 501165979, 1002331963,
+    2004663929,
+    1039, 2081, 4177, 8363, 16729, 33461, 66923, 133853, 267713, 535481, 1070981, 2141977, 4283963,
+    8567929, 17135863, 34271747, 68543509, 137087021, 274174111, 548348231, 1096696463,
+    31, 67, 137, 277, 557, 1117, 2237, 4481, 8963, 17929, 35863, 71741, 143483, 286973, 573953,
+    1147921, 2295859, 4591721, 9183457, 18366923, 36733847, 73467739, 146935499, 293871013,
+    587742049, 1175484103,
+    599, 1201, 2411, 4831, 9677, 19373, 38747, 77509, 155027, 310081, 620171, 1240361, 2480729,
+    4961459, 9922933, 19845871, 39691759, 79383533, 158767069, 317534141, 635068283, 1270136683,
+    311, 631, 1277, 2557, 5119, 10243, 20507, 41017, 82037, 164089, 328213, 656429, 1312867,
+    2625761, 5251529, 10503061, 21006137, 42012281, 84024581, 168049163, 336098327, 672196673,
+    1344393353,
+    3, 7, 17, 37, 79, 163, 331, 673, 1361, 2729, 5471, 10949, 21911, 43853, 87719, 175447, 350899,
+    701819, 1403641, 2807303, 5614657, 11229331, 22458671, 44917381, 89834777, 179669557,
+    359339171, 718678369, 1437356741,
+    43, 89, 179, 359, 719, 1439, 2879, 5779, 11579, 23159, 46327, 92657, 185323, 370661, 741337,
+    1482707, 2965421, 5930887, 11861791, 23723597, 47447201, 94894427, 189788857, 379577741,
+    759155483, 1518310967,
+    379, 761, 1523, 3049, 6101, 12203, 24407, 48817, 97649, 195311, 390647, 781301, 1562611,
+    3125257, 6250537, 12501169, 25002389, 50004791, 100009607, 200019221, 400038451, 800076929,
+    1600153859,
+];
+
+/// The smallest Trove capacity at least `desired`.
+fn trove_next_prime(desired: i64) -> usize {
+    static SORTED: std::sync::OnceLock<Vec<i32>> = std::sync::OnceLock::new();
+    let sorted = SORTED.get_or_init(|| {
+        let mut v = TROVE_PRIMES.to_vec();
+        v.sort_unstable();
+        v
+    });
+    let i = sorted.partition_point(|&p| (p as i64) < desired);
+    sorted[i.min(sorted.len() - 1)] as usize
+}
+
+/// The iteration order of a Trove 3 `THashSet` filled by one `addAll` per batch,
+/// each batch's elements in the order given as `(hash, key)`; an element equal
+/// to one already held is not added again.
+///
+/// The table is open-addressed over a prime capacity with load factor 0.5,
+/// starting from room for ten. Before a batch it grows, if the batch could
+/// overfill it, to the prime for `(batch + held) / 0.5 + 1`; past the load
+/// factor it grows to the prime for twice its capacity. Growing reinserts from
+/// the last slot down. A collision probes backwards by `1 + hash % (capacity -
+/// 2)`, and iteration runs from the last slot to the first.
+pub fn trove_set_order<K: Clone + PartialEq>(batches: &[Vec<(i32, K)>]) -> Vec<K> {
+    // Where `key` lands in `slots`, or `None` when an equal key is held.
+    fn insert<K: PartialEq>(slots: &mut [Option<(i32, K)>], hash: i32, key: K) -> Option<usize> {
+        let h = (hash & 0x7fff_ffff) as usize;
+        let len = slots.len();
+        let mut index = h % len;
+        let probe = 1 + h % (len - 2);
+        loop {
+            match &slots[index] {
+                None => {
+                    slots[index] = Some((hash, key));
+                    return Some(index);
+                }
+                Some((_, held)) if *held == key => return None,
+                Some(_) => {
+                    index = if index >= probe { index - probe } else { index + len - probe };
+                }
+            }
+        }
+    }
+    fn rehash<K: PartialEq>(slots: &mut Vec<Option<(i32, K)>>, capacity: usize) {
+        let old = std::mem::replace(slots, (0..capacity).map(|_| None).collect());
+        for (hash, key) in old.into_iter().rev().flatten() {
+            insert(slots, hash, key);
+        }
+    }
+    // `min(capacity - 1, ⌊capacity × 0.5⌋)` elements before the table grows.
+    let max_size = |capacity: usize| (capacity - 1).min(capacity / 2);
+
+    let mut slots: Vec<Option<(i32, K)>> = (0..trove_next_prime(20)).map(|_| None).collect();
+    let mut size = 0usize;
+    for batch in batches {
+        if batch.len() + size > max_size(slots.len()) {
+            let want = (size as i64 + 1).max(2 * (batch.len() + size) as i64 + 1);
+            rehash(&mut slots, trove_next_prime(want));
+        }
+        for (hash, key) in batch {
+            if insert(&mut slots, *hash, key.clone()).is_some() {
+                size += 1;
+                if size > max_size(slots.len()) {
+                    let doubled = trove_next_prime(2 * slots.len() as i64);
+                    rehash(&mut slots, doubled);
+                }
+            }
+        }
+    }
+    slots.into_iter().rev().flatten().map(|(_, k)| k).collect()
 }
 
 /// The capacity a `java.util.HashSet` ends at after inserting `n` elements
@@ -580,6 +855,34 @@ pub fn class_node_order(iris: &[String]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every logical axiom kind and declaration hashes exactly as OWLAPI 4.5.29
+    /// hashes it: the fixture's expected values are `OWLAxiom.hashCode()` as
+    /// printed by OWLAPI over the same document.
+    #[test]
+    fn axiom_hashes_are_owlapis() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/owlapi-hash");
+        let model = crate::io::load(&dir.join("axioms.ofn")).unwrap();
+        let mut ours: Vec<(i32, String)> = model
+            .ont
+            .iter()
+            .filter_map(|ac| axiom_hash(&ac.component, &ac.ann).map(|h| (h, format!("{:?}", ac.component))))
+            .collect();
+        ours.sort();
+        let want: Vec<i32> = std::fs::read_to_string(dir.join("axioms.java-hashes"))
+            .unwrap()
+            .lines()
+            .map(|l| l.trim().parse().unwrap())
+            .collect();
+        let missing: Vec<&i32> = want.iter().filter(|h| !ours.iter().any(|(o, _)| o == *h)).collect();
+        let extra: Vec<&(i32, String)> = ours.iter().filter(|(o, _)| !want.contains(o)).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty() && ours.len() == want.len(),
+            "OWLAPI hashes with no match: {missing:?}\nours with no match:\n{}",
+            extra.iter().map(|(h, d)| format!("  {h}  {}", &d[..d.len().min(160)])).collect::<Vec<_>>().join("\n")
+        );
+    }
+
     use super::*;
     use horned_owl::model::Build;
 

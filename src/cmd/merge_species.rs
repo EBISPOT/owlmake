@@ -368,7 +368,7 @@ fn merge_one(
 
     // Keyed by the axiom's identity; the first record is the one that counts,
     // because the first insertion of an axiom is the object the ontology keeps.
-    let mut shared_recs: HashMap<u64, Vec<(u64, u64)>> = HashMap::new();
+    let mut shared_recs: HashMap<u64, Vec<crate::model::SharedNode>> = HashMap::new();
     let tr = Translator {
         used: Default::default(),
         b: &b,
@@ -532,7 +532,7 @@ fn remove_translated(model: &mut Model, a: &AnnotatedComponent<Str>) {
 fn insert_translated(
     model: &mut Model,
     a: AnnotatedComponent<Str>,
-    recs: &mut HashMap<u64, Vec<(u64, u64)>>,
+    recs: &mut HashMap<u64, Vec<crate::model::SharedNode>>,
 ) {
     let id = crate::io::genid::axiom_identity(&a);
     if model.ont.insert(a) {
@@ -549,17 +549,17 @@ struct Translator<'a> {
     ex_map: &'a HashMap<String, CE<Str>>,
     extended: bool,
     /// The defining expressions substituted into the axiom being translated
-    /// (`Model::shared_occurrences` values, keyed by signature hash with the
-    /// merged class as the group): each is the one object its class's
-    /// equivalence held, carried into every axiom the translation puts it in.
-    used: std::cell::RefCell<HashMap<u64, u64>>,
+    /// (`Model::shared_occurrences` values, with the merged class as the
+    /// group): each is the one object its class's equivalence held, carried
+    /// into every axiom the translation puts it in.
+    used: std::cell::RefCell<Vec<crate::model::SharedNode>>,
 }
 
 impl Translator<'_> {
     /// Record which substituted defining expressions `ac` holds, and start the
     /// count afresh for the next axiom.
-    fn record_shared(&self, ac: &AnnotatedComponent<Str>, recs: &mut HashMap<u64, Vec<(u64, u64)>>) {
-        let used: Vec<(u64, u64)> = self.used.borrow_mut().drain().collect();
+    fn record_shared(&self, ac: &AnnotatedComponent<Str>, recs: &mut HashMap<u64, Vec<crate::model::SharedNode>>) {
+        let used: Vec<crate::model::SharedNode> = self.used.borrow_mut().drain(..).collect();
         if !used.is_empty() {
             recs.entry(crate::io::genid::axiom_identity(ac)).or_insert(used);
         }
@@ -705,19 +705,18 @@ impl Translator<'_> {
                 if must_be_equiv {
                     Some(match self.ex_map.get(iri) {
                         Some(ex) => {
-                            // The expression and every anonymous node inside it
-                            // are one object each across every axiom they reach;
-                            // a node inside is grouped under its class and its
-                            // own structure.
-                            let g = crate::io::anon_sig_hash(iri);
+                            // The expression is one object across every axiom it
+                            // reaches, grouped under its class; every anonymous
+                            // node inside it is one object too, numbered under
+                            // the same group and its own structure.
+                            let node = crate::model::SharedNode {
+                                sig: crate::io::anon_sig_hash(&crate::io::genid::ce_sig(ex)),
+                                group: crate::io::anon_sig_hash(iri),
+                                inside: false,
+                            };
                             let mut used = self.used.borrow_mut();
-                            used.insert(crate::io::anon_sig_hash(&crate::io::genid::ce_sig(ex)), g);
-                            for d in crate::io::genid::anonymous_descendants(ex) {
-                                let s = crate::io::genid::ce_sig(d);
-                                used.insert(
-                                    crate::io::anon_sig_hash(&s),
-                                    crate::io::anon_sig_hash(&format!("{iri}\u{1}{s}")),
-                                );
+                            if !used.contains(&node) {
+                                used.push(node);
                             }
                             ex.clone()
                         }

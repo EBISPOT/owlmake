@@ -2295,6 +2295,7 @@ fn nested_key(nested: &[(String, AnnotationValue<RcStr>)]) -> Vec<AnnKey> {
 fn annotation_body(
     iri: &str,
     anns: Option<&Vec<Ann>>,
+    frame_order: Option<&Vec<Ann>>,
     prefixes: &[(String, String)],
 ) -> (String, String) {
     let mut body = String::new();
@@ -2306,6 +2307,12 @@ fn annotation_body(
                 .cmp(&ann_key(&b.0, &b.1))
                 .then_with(|| nested_key(&a.2).cmp(&nested_key(&b.2)))
         });
+        // A frame with a plain/`xsd:string` twin writes its assertions in its own
+        // order (see [`crate::io::frame_twins`]), and a triple two of them state
+        // stands where the first of them does.
+        if let Some(order) = frame_order {
+            sorted = order.clone();
+        }
         // The plain annotation triple is emitted once per distinct (property,
         // value) — RDF triples are a set — even when several axioms assert it with
         // different reified annotations, and even when the axioms differ in a way
@@ -2318,12 +2325,8 @@ fn annotation_body(
         // of the copies is reified: an annotated axiom's triple stands where
         // that axiom sorts, which for a plain literal is ahead of every
         // `xsd:string` one. UBERON's mapping component asserts an xref the edit
-        // file also carries, with provenance on its copy, and the released
-        // artefact lists that xref ahead of the edit file's alphabetical run in
-        // 418 of 431 frames. The other 13 keep the alphabetical place: the
-        // reference sorts the two copies with a comparison that is not
-        // symmetric, so its answer depends on the order a hash set hands them
-        // over in, and that order is not reproduced here.
+        // file also carries, with provenance on its copy; such a class frame
+        // takes its order from `frame_order` instead.
         //
         // Two lines are the same triple unless the value is an ANONYMOUS
         // individual: its node identity is not printed — every one renders as the
@@ -2342,7 +2345,9 @@ fn annotation_body(
         let reified: Vec<bool> = sorted.iter().map(|(_, _, nested)| !nested.is_empty()).collect();
         for (i, line) in lines.iter().enumerate() {
             let twins = || (0..lines.len()).filter(|&j| j != i && keys[j] == keys[i]);
-            let keep = if reified[i] {
+            let keep = if frame_order.is_some() {
+                !twins().any(|j| j < i)
+            } else if reified[i] {
                 // The first reified copy speaks for all.
                 !twins().any(|j| j < i && reified[j])
             } else {
@@ -2408,6 +2413,24 @@ fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<String>> {
     let repeated: std::collections::HashSet<String> =
         anonymous_appearances(model).into_iter().filter(|(_, n)| *n > 1).map(|(id, _)| id).collect();
     ANON_REPEATED.with(|r| *r.borrow_mut() = repeated);
+    // The class frames holding a plain/`xsd:string` twin, each with its
+    // annotation assertions in the order it writes them; read after the datatype
+    // key above is set, which they are ordered by.
+    let frame_orders: std::collections::HashMap<String, Vec<Ann>> = crate::io::frame_twins::assertion_orders(model)
+        .into_iter()
+        .map(|(subject, acs)| {
+            let anns = acs
+                .into_iter()
+                .filter_map(|ac| match &ac.component {
+                    Component::AnnotationAssertion(aa) => {
+                        Some((aa.ann.ap.0.as_ref().to_string(), aa.ann.av.clone(), ax_anns(ac)))
+                    }
+                    _ => None,
+                })
+                .collect();
+            (subject, anns)
+        })
+        .collect();
     // Debug: dump genid pre-pass results for a window of ids
     // (OM_GENID_DEBUG="lo:hi").
     // `OM_MODEL_DEBUG=<substring>`: report the carried-metadata state of the model
@@ -3907,7 +3930,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         write_banner(w, "Annotation properties")?;
     }
     for iri in &ann_props {
-        let (mut body, after) = annotation_body(iri, entity_anns(iri), prefixes);
+        let (mut body, after) = annotation_body(iri, entity_anns(iri), None, prefixes);
         // For an annotation property, SubAnnotationPropertyOf renders after the
         // annotation assertions (unlike a class's SubClassOf, which comes first).
         for sup in sorted_res(&sub_ann_prop, iri) {
@@ -3960,7 +3983,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         write_banner(w, "Datatypes")?;
     }
     for iri in &datatypes {
-        let (abody, ann_after) = annotation_body(iri, entity_anns(iri), prefixes);
+        let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
         let mut body = String::new();
         let mut defs_after = String::new();
         let mut def_reif = String::new();
@@ -4110,7 +4133,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
         }
-        let (abody, ann_after) = annotation_body(iri, entity_anns(iri), prefixes);
+        let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
         body.push_str(&abody);
         let mut after = dr_defs;
         after.push_str(&order_reifs_by_genid(
@@ -4199,7 +4222,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             for dj in sorted_res(&dp_disjoint, iri) {
                 body.push_str(&format!("        <owl:propertyDisjointWith rdf:resource=\"{}\"/>\n", esc_attr(&dj)));
             }
-            let (abody, ann_after) = annotation_body(iri, entity_anns(iri), prefixes);
+            let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             body.push_str(&abody);
             let mut after = dr_defs;
             after.push_str(&order_reifs_by_genid(
@@ -4575,7 +4598,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 body.push_str("        </owl:hasKey>\n");
             }
         }
-        let (abody, ann_reif) = annotation_body(iri, entity_anns(iri), prefixes);
+        let (abody, ann_reif) = annotation_body(iri, entity_anns(iri), frame_orders.get(iri.as_str()), prefixes);
         body.push_str(&abody);
         // Reifications for annotated DisjointClasses edges on this class.
         let mut dj_reif = String::new();
@@ -4673,7 +4696,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     if !individuals.is_empty() {
         write_banner(w, "Individuals")?;
         for iri in &individuals {
-            let (abody, ann_after) = annotation_body(iri, entity_anns(iri), prefixes);
+            let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             let mut body = String::new();
             // The element names the individual's type where the LANGUAGE supplies
             // one — `owl:Thing` — and `owl:NamedIndividual` drops back to being an
@@ -4895,7 +4918,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     if !untyped.is_empty() {
         write_banner(w, "Annotations")?;
         for iri in &untyped {
-            let (body, after) = annotation_body(iri, ann_assertions.get(*iri), prefixes);
+            let (body, after) = annotation_body(iri, ann_assertions.get(*iri), None, prefixes);
             let after = order_reifs_by_genid(&after, reif_genids.get(*iri));
             // rdf:Description block, no per-entity comment or separators.
             write!(w, "    <rdf:Description rdf:about=\"{}\">\n{body}    </rdf:Description>\n", esc_attr(iri))?;

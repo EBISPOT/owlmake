@@ -1,0 +1,28 @@
+format-version: 1.2
+ontology: uberon/core
+import: http://purl.obolibrary.org/obo/uberon/components/mappings.owl
+
+[Term]
+id: UBERON:0000220
+name: atlanto-occipital joint
+def: "The Atlanto-occipital joint (articulation between the atlas and the occipital bone) consists of a pair of condyloid joints. The atlanto-occipital joint is a synovial joint. The ligaments connecting the bones are: Two Articular capsules; Posterior atlantoöccipital membrane; Anterior atlantoöccipital membrane; Lateral atlantoöccipital." [Wikipedia:Atlanto-occipital_joint]
+synonym: "articulatio atlanto-occipitalis" EXACT [FMA:24939]
+synonym: "articulatio atlantooccipitalis" RELATED OMO:0003011 [Wikipedia:Atlanto-occipital_joint]
+synonym: "atlanto occipital joint" EXACT []
+synonym: "atlantooccipital joint" EXACT []
+synonym: "craniovertebral joint" EXACT [FMA:24939]
+synonym: "occipito atlantal joint" EXACT []
+synonym: "occipito-atlantal joint" EXACT []
+xref: FMA:24939
+xref: MESH:D001269
+xref: NCIT:C32158
+xref: ncithesaurus:Atlanto-occipital_Joint-Atlanto
+xref: SCTID:361831006
+xref: UMLS:C0004169 {source="ncithesaurus:Atlanto-occipital_Joint"}
+xref: Wikipedia:Atlanto-occipital_joint
+intersection_of: UBERON:0002217 ! synovial joint
+intersection_of: connects UBERON:0001092 ! vertebral bone 1
+intersection_of: connects UBERON:0001676 ! occipital bone
+relationship: in_lateral_side_of UBERON:0006072 {source="FMA-abduced-lr"} ! cervical region of vertebral column
+relationship: part_of UBERON:0011138 ! postcranial axial skeletal system
+property_value: depiction "http://upload.wikimedia.org/wikipedia/commons/d/d4/Gray304.png" xsd:anyURI

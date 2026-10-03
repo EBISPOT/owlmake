@@ -568,6 +568,14 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         && !opts.create_new_ontology_with_annotations
         && opts.dump_unsatisfiable.is_none();
 
+    // The bottom node lists its members in the order the EL engine's index first
+    // names them, which is read off the model; a model released before
+    // saturation has its queue taken while it is still in hand.
+    let released_queue = if free_model && kind.is_builtin_el() {
+        Some(crate::reason::elk_order::class_queue(&model.ont))
+    } else {
+        None
+    };
     let mut model = Some(model);
     let cls = if free_model {
         let union_elim = kind == ReasonerKind::Owlmake;
@@ -638,8 +646,17 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         };
         log(&format!("There are {} unsatisfiable classes in the ontology.", unsat.len()));
         let names: Vec<String> = unsat.iter().map(|u| u.to_string()).collect();
-        for i in crate::owlapi_hash::class_node_order(&names) {
-            log(&format!("    unsatisfiable: {}", names[i]));
+        let listed: Vec<String> = if kind.is_builtin_el() {
+            let queue = match released_queue {
+                Some(q) => q,
+                None => crate::reason::elk_order::class_queue(&model.as_ref().expect("model kept").ont),
+            };
+            crate::reason::elk_order::bottom_node_order(&queue, &names)
+        } else {
+            crate::owlapi_hash::class_node_order(&names).into_iter().map(|i| names[i].clone()).collect()
+        };
+        for name in &listed {
+            log(&format!("    unsatisfiable: {name}"));
         }
         if let Some(path) = &opts.dump_unsatisfiable {
             dump_unsatisfiable_module(model.as_ref(), &unsat, path)?;
@@ -1710,7 +1727,7 @@ mod tests {
 }
 
 /// The moment a logged error is stamped with, `YYYY-MM-DD HH:MM:SS,mmm`.
-fn log_stamp() -> String {
+pub(crate) fn log_stamp() -> String {
     std::process::Command::new("date")
         .arg("+%Y-%m-%d %H:%M:%S,%3N")
         .output()

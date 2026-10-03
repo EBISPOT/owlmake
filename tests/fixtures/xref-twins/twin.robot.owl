@@ -1,0 +1,284 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://purl.obolibrary.org/obo/uberon/core.owl#"
+     xml:base="http://purl.obolibrary.org/obo/uberon/core.owl"
+     xmlns:obo="http://purl.obolibrary.org/obo/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:pav="http://purl.org/pav/"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:core="http://purl.obolibrary.org/obo/uberon/core#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:sssom="https://w3id.org/sssom/"
+     xmlns:oboInOwl="http://www.geneontology.org/formats/oboInOwl#">
+    <owl:Ontology rdf:about="http://purl.obolibrary.org/obo/uberon/core.owl">
+        <oboInOwl:hasOBOFormatVersion>1.2</oboInOwl:hasOBOFormatVersion>
+    </owl:Ontology>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/IAO_0000115 -->
+
+    <owl:AnnotationProperty rdf:about="http://purl.obolibrary.org/obo/IAO_0000115">
+        <rdfs:label>definition</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/uberon/core#depiction -->
+
+    <owl:AnnotationProperty rdf:about="http://purl.obolibrary.org/obo/uberon/core#depiction"/>
+    
+
+
+    <!-- http://purl.org/pav/authoredBy -->
+
+    <owl:AnnotationProperty rdf:about="http://purl.org/pav/authoredBy"/>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasDbXref -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasDbXref">
+        <rdfs:label>database_cross_reference</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasExactSynonym -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasExactSynonym">
+        <rdfs:label>has_exact_synonym</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion">
+        <rdfs:label>has_obo_format_version</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym">
+        <rdfs:label>has_related_synonym</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasSynonymType -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasSynonymType">
+        <rdfs:label>has_synonym_type</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#id -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#id">
+        <rdfs:label>id</rdfs:label>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#source -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#source"/>
+    
+
+
+    <!-- http://www.w3.org/2000/01/rdf-schema#label -->
+
+    <owl:AnnotationProperty rdf:about="http://www.w3.org/2000/01/rdf-schema#label"/>
+    
+
+
+    <!-- https://w3id.org/sssom/mapping_justification -->
+
+    <owl:AnnotationProperty rdf:about="https://w3id.org/sssom/mapping_justification"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/uberon/core#connects -->
+
+    <owl:ObjectProperty rdf:about="http://purl.obolibrary.org/obo/uberon/core#connects"/>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/uberon/core#in_lateral_side_of -->
+
+    <owl:ObjectProperty rdf:about="http://purl.obolibrary.org/obo/uberon/core#in_lateral_side_of"/>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/uberon/core#part_of -->
+
+    <owl:ObjectProperty rdf:about="http://purl.obolibrary.org/obo/uberon/core#part_of"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/UBERON_0000220 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/UBERON_0000220">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://purl.obolibrary.org/obo/UBERON_0002217"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://purl.obolibrary.org/obo/uberon/core#connects"/>
+                        <owl:someValuesFrom rdf:resource="http://purl.obolibrary.org/obo/UBERON_0001092"/>
+                    </owl:Restriction>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://purl.obolibrary.org/obo/uberon/core#connects"/>
+                        <owl:someValuesFrom rdf:resource="http://purl.obolibrary.org/obo/UBERON_0001676"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+        <rdfs:subClassOf rdf:nodeID="genid7"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://purl.obolibrary.org/obo/uberon/core#part_of"/>
+                <owl:someValuesFrom rdf:resource="http://purl.obolibrary.org/obo/UBERON_0011138"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <obo:IAO_0000115>The Atlanto-occipital joint (articulation between the atlas and the occipital bone) consists of a pair of condyloid joints. The atlanto-occipital joint is a synovial joint. The ligaments connecting the bones are: Two Articular capsules; Posterior atlantoöccipital membrane; Anterior atlantoöccipital membrane; Lateral atlantoöccipital.</obo:IAO_0000115>
+        <core:depiction rdf:datatype="http://www.w3.org/2001/XMLSchema#anyURI">http://upload.wikimedia.org/wikipedia/commons/d/d4/Gray304.png</core:depiction>
+        <oboInOwl:hasDbXref>FMA:24939</oboInOwl:hasDbXref>
+        <oboInOwl:hasDbXref>MESH:D001269</oboInOwl:hasDbXref>
+        <oboInOwl:hasDbXref>NCIT:C32158</oboInOwl:hasDbXref>
+        <oboInOwl:hasDbXref>SCTID:361831006</oboInOwl:hasDbXref>
+        <oboInOwl:hasDbXref>UMLS:C0004169</oboInOwl:hasDbXref>
+        <oboInOwl:hasDbXref>Wikipedia:Atlanto-occipital_joint</oboInOwl:hasDbXref>
+        <oboInOwl:hasDbXref>ncithesaurus:Atlanto-occipital_Joint-Atlanto</oboInOwl:hasDbXref>
+        <oboInOwl:hasExactSynonym>articulatio atlanto-occipitalis</oboInOwl:hasExactSynonym>
+        <oboInOwl:hasExactSynonym>atlanto occipital joint</oboInOwl:hasExactSynonym>
+        <oboInOwl:hasExactSynonym>atlantooccipital joint</oboInOwl:hasExactSynonym>
+        <oboInOwl:hasExactSynonym>craniovertebral joint</oboInOwl:hasExactSynonym>
+        <oboInOwl:hasExactSynonym>occipito atlantal joint</oboInOwl:hasExactSynonym>
+        <oboInOwl:hasExactSynonym>occipito-atlantal joint</oboInOwl:hasExactSynonym>
+        <oboInOwl:hasRelatedSynonym>articulatio atlantooccipitalis</oboInOwl:hasRelatedSynonym>
+        <oboInOwl:id>UBERON:0000220</oboInOwl:id>
+        <rdfs:label>atlanto-occipital joint</rdfs:label>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid7">
+        <owl:onProperty rdf:resource="http://purl.obolibrary.org/obo/uberon/core#in_lateral_side_of"/>
+        <owl:someValuesFrom rdf:resource="http://purl.obolibrary.org/obo/UBERON_0006072"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://purl.obolibrary.org/obo/IAO_0000115"/>
+        <owl:annotatedTarget>The Atlanto-occipital joint (articulation between the atlas and the occipital bone) consists of a pair of condyloid joints. The atlanto-occipital joint is a synovial joint. The ligaments connecting the bones are: Two Articular capsules; Posterior atlantoöccipital membrane; Anterior atlantoöccipital membrane; Lateral atlantoöccipital.</owl:annotatedTarget>
+        <oboInOwl:hasDbXref>Wikipedia:Atlanto-occipital_joint</oboInOwl:hasDbXref>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://www.geneontology.org/formats/oboInOwl#hasDbXref"/>
+        <owl:annotatedTarget>MESH:D001269</owl:annotatedTarget>
+        <pav:authoredBy rdf:resource="https://orcid.org/0000-0001-9439-5346"/>
+        <sssom:mapping_justification rdf:resource="https://w3id.org/semapv/vocab/ManualMappingCuration"/>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://www.geneontology.org/formats/oboInOwl#hasDbXref"/>
+        <owl:annotatedTarget>UMLS:C0004169</owl:annotatedTarget>
+        <oboInOwl:source>ncithesaurus:Atlanto-occipital_Joint</oboInOwl:source>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://www.geneontology.org/formats/oboInOwl#hasExactSynonym"/>
+        <owl:annotatedTarget>articulatio atlanto-occipitalis</owl:annotatedTarget>
+        <oboInOwl:hasDbXref>FMA:24939</oboInOwl:hasDbXref>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://www.geneontology.org/formats/oboInOwl#hasExactSynonym"/>
+        <owl:annotatedTarget>craniovertebral joint</owl:annotatedTarget>
+        <oboInOwl:hasDbXref>FMA:24939</oboInOwl:hasDbXref>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym"/>
+        <owl:annotatedTarget>articulatio atlantooccipitalis</owl:annotatedTarget>
+        <oboInOwl:hasDbXref>Wikipedia:Atlanto-occipital_joint</oboInOwl:hasDbXref>
+        <oboInOwl:hasSynonymType rdf:resource="http://purl.obolibrary.org/obo/OMO_0003011"/>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://purl.obolibrary.org/obo/UBERON_0000220"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid7"/>
+        <oboInOwl:source>FMA-abduced-lr</oboInOwl:source>
+    </owl:Axiom>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/UBERON_0001092 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/UBERON_0001092"/>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/UBERON_0001676 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/UBERON_0001676"/>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/UBERON_0002217 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/UBERON_0002217"/>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/UBERON_0006072 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/UBERON_0006072"/>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/UBERON_0011138 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/UBERON_0011138"/>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

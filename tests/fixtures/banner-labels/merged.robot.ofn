@@ -1,0 +1,38 @@
+Prefix(:=<http://example.org/A.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/A.owl>
+
+Declaration(Class(<http://example.org/E>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/E> (label10)
+
+AnnotationAssertion(rdfs:comment <http://example.org/E> "a0")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "a1")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b0")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b1")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b10")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b11")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b2")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b3")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b4")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b5")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b6")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b7")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b8")
+AnnotationAssertion(rdfs:comment <http://example.org/E> "b9")
+AnnotationAssertion(rdfs:label <http://example.org/E> "label10")
+AnnotationAssertion(rdfs:label <http://example.org/E> "label4")
+
+
+)
