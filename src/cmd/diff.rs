@@ -887,7 +887,7 @@ fn render_literal_md(
     l: &horned_owl::model::Literal<RcStr>,
     labels: &HashMap<String, String>,
 ) -> String {
-    use crate::util::html_escape::escape_html4;
+    use crate::html_escape::escape_html4;
     use horned_owl::model::Literal;
     const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
     const RDF_PLAIN_LITERAL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";

@@ -52,6 +52,7 @@ pub mod diff;
 pub mod dosdp;
 pub mod extract;
 pub mod hash_trie;
+pub mod html_escape;
 /// OBO ID-policy files (`<ont>-idranges.owl`) — parsing and checking, behind
 /// `om validate-id-ranges`.
 pub mod idpolicy;
@@ -77,6 +78,7 @@ pub mod sparql;
 // build, and tagging all run in the browser. (The `text-tagger` *command* that does
 // file/stdin I/O + gzip stays native; this is just the reusable library.)
 pub mod tag;
+pub mod tree_sort;
 pub mod ubergraph;
 // The embedded text-utility CLIs (sed/comm/grep) are a binary-only concern and
 // pull unix-only crates; excluded from the wasm core.

@@ -4,7 +4,7 @@
 //! A class frame orders its axioms in two steps. They go one at a time into a
 //! red-black search tree: the declaration, then the class's own axioms in hash-set
 //! order, then its annotation assertions in hash-set order. The tree's listing is
-//! then sorted ([`crate::util::tree_sort`]). The frame writes each axiom's triple
+//! then sorted ([`crate::tree_sort`]). The frame writes each axiom's triple
 //! in that order, and a triple already written keeps its place. The two twin
 //! assertions write the same triple, so it stands wherever the first of them
 //! sorts.
@@ -29,7 +29,7 @@ use horned_owl::model::{
 use crate::io::owlfunc::{cmp_annotation_value, cmp_ce, cmp_component};
 use crate::model::Model;
 use crate::owlapi_hash::{annotation_assertion_hash, axiom_hash, hashset_order_of, iri_cmp, subject_assertion_order};
-use crate::util::tree_sort::{run_merge_sort, tree_set_order};
+use crate::tree_sort::{run_merge_sort, tree_set_order};
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 
