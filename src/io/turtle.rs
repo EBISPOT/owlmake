@@ -3,11 +3,12 @@
 //! RDF/XML (which horned-owl reads and writes) via an in-memory store. Turtle
 //! output is laid out by `owlapi_ttl`, which falls back to [`save_plain`].
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 
 use anyhow::{anyhow, Result};
 use oxigraph::io::{RdfFormat, RdfParser, RdfSerializer};
-use oxigraph::model::GraphNameRef;
+use oxigraph::model::{BlankNode, GraphNameRef, NamedOrBlankNode, Term, Triple};
 use oxigraph::store::Store;
 
 use crate::io::Format;
@@ -25,28 +26,47 @@ pub fn save_plain<W: Write>(model: &Model, prefixes: &[(String, String)], writer
     save_lines(model, prefixes, writer, RdfFormat::Turtle)
 }
 
-/// Every triple of the model's RDF mapping, through the in-memory store.
-pub(crate) fn mapped_triples(model: &Model) -> Result<Store> {
+/// Every triple of the model's RDF mapping, each once, in a fixed order: a
+/// blank node is labelled by the order the mapping first names it, and the
+/// triples are sorted.
+pub(crate) fn mapped_triples(model: &Model) -> Result<Vec<Triple>> {
     let mut rdf = Vec::new();
     crate::io::write_to_ref(model, &mut rdf, Format::RdfXml)?;
-    let store = Store::new().map_err(|e| anyhow!("store: {e}"))?;
-    store
-        .load_from_slice(RdfParser::from_format(RdfFormat::RdfXml), &rdf)
-        .map_err(|e| anyhow!("loading triples: {e}"))?;
-    Ok(store)
+    let mut labels: HashMap<BlankNode, BlankNode> = HashMap::new();
+    let mut label = |node: BlankNode| {
+        let next = labels.len();
+        labels.entry(node).or_insert_with(|| BlankNode::new_unchecked(format!("b{next}"))).clone()
+    };
+    let mut triples = Vec::new();
+    for quad in RdfParser::from_format(RdfFormat::RdfXml).for_slice(&rdf) {
+        let quad = quad.map_err(|e| anyhow!("loading triples: {e}"))?;
+        let subject = match quad.subject {
+            NamedOrBlankNode::BlankNode(b) => NamedOrBlankNode::BlankNode(label(b)),
+            named => named,
+        };
+        let object = match quad.object {
+            Term::BlankNode(b) => Term::BlankNode(label(b)),
+            other => other,
+        };
+        triples.push(Triple::new(subject, quad.predicate, object));
+    }
+    triples.sort_by_cached_key(|t| t.to_string());
+    triples.dedup();
+    Ok(triples)
 }
 
 fn save_lines<W: Write>(model: &Model, prefixes: &[(String, String)], writer: &mut W, fmt: RdfFormat) -> Result<()> {
-    let store = mapped_triples(model)?;
     let mut serializer = RdfSerializer::from_format(fmt);
     for (name, ns) in prefixes {
         serializer = serializer
             .with_prefix(name.as_str(), ns.as_str())
             .map_err(|e| anyhow!("prefix {name}: <{ns}>: {e}"))?;
     }
-    store
-        .dump_graph_to_writer(GraphNameRef::DefaultGraph, serializer, writer)
-        .map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
+    let mut out = serializer.for_writer(writer);
+    for triple in &mapped_triples(model)? {
+        out.serialize_triple(triple).map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
+    }
+    out.finish().map_err(|e| anyhow!("serializing {fmt:?}: {e}"))?;
     Ok(())
 }
 

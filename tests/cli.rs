@@ -3868,6 +3868,36 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     let _ = std::fs::remove_file(&src);
 }
 
+/// Line-based RDF is the same bytes on every run: N-Triples, and Turtle for a
+/// document the layout cannot state. Each blank node takes its label from the
+/// order the mapping first names it, and the triples are sorted.
+#[test]
+fn line_based_rdf_is_the_same_on_every_run() {
+    let src = tmp("blank-nodes.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
+         SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n\
+         SubClassOf(:A ObjectHasValue(:p _:x))\nClassAssertion(:B _:x)\n)\n",
+    )
+    .unwrap();
+    for ext in ["nt", "ttl"] {
+        let runs: Vec<Vec<u8>> = (0..3)
+            .map(|i| {
+                let out = tmp(&format!("blank-nodes-{i}.{ext}"));
+                let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+                assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+                let text = std::fs::read(&out).unwrap();
+                let _ = std::fs::remove_file(&out);
+                text
+            })
+            .collect();
+        assert!(runs.iter().all(|r| *r == runs[0]), "{ext} differs between runs");
+        assert!(String::from_utf8_lossy(&runs[0]).contains("_:b0"), "{ext}: {}", String::from_utf8_lossy(&runs[0]));
+    }
+    let _ = std::fs::remove_file(&src);
+}
+
 /// `owltools … --run-reasoner -u` lists, after the unsatisfiable count, every
 /// direct superclass the reasoner infers that no `SubClassOf` asserts, and every
 /// named equivalence — each class as its id and quoted label, or its id twice
