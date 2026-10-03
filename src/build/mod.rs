@@ -3402,8 +3402,11 @@ fn run_cli_robot_step(
         // and takes no `--input`/`--output` of its own.
         "make",
     ];
+    // `explain` is never terminal, whatever it names: its own `--output` saves
+    // the ontology it was given, and the next command still receives its
+    // justifications.
     let terminal = TERMINAL_COMMANDS.contains(&name)
-        || args.iter().any(|a| a == "-o" || a == "--output");
+        || (name != "explain" && args.iter().any(|a| a == "-o" || a == "--output"));
 
     let piped_in = work.join(format!("{name}-chain-in.ofn"));
     crate::io::save_as(&mut model, &piped_in, crate::io::Format::Functional)?;
@@ -3478,8 +3481,6 @@ fn run_cli_robot_step(
     let piped_out = work.join(format!("{name}-chain-out.ofn"));
     if !terminal {
         let _ = std::fs::remove_file(&piped_out);
-        argv.push("--output".to_string());
-        argv.push(arg_path(&piped_out));
     }
 
     // The handed-over model is written as the root document alone: its
@@ -3495,6 +3496,17 @@ fn run_cli_robot_step(
                 argv.push(arg_path(&p));
             }
         }
+    }
+
+    // The model the command hands on is captured as its `--output` — except
+    // `explain`'s, which saves the ontology it was given: a `convert` after it
+    // writes what it hands on instead.
+    if !terminal {
+        if name == "explain" {
+            argv.push("convert".to_string());
+        }
+        argv.push("--output".to_string());
+        argv.push(arg_path(&piped_out));
     }
 
     recipe::run_owlmake_args(&argv, &repo.dir)
@@ -3767,7 +3779,7 @@ fn run_steps(
                 crate::io::reset_anon_counter();
                 match input.as_deref() {
                     Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
-                        model = crate::io::load_iri(first, None)?;
+                        model = crate::cmd::load_iri_via_catalog(first, None, catalog)?;
                         pipe = None;
                     }
                     Some(first) => {
@@ -3801,11 +3813,9 @@ fn run_steps(
                 // The documents the banners draw on survive a step that builds
                 // its result afresh.
                 let docs = model.banner_docs.clone();
-                let merged_labels = model.merged_input_labels.clone();
                 model = apply_op(repo, op, model, catalog, work, None, pipe.as_deref())?;
                 if model.banner_docs.is_empty() {
                     model.banner_docs = docs;
-                    model.merged_input_labels = merged_labels;
                 }
                 if let Some(t) = target {
                     dump_step(t, &model);
@@ -4914,7 +4924,6 @@ fn run_artefact(
                 &model.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&model).1.as_deref()),
-                &model.merged_input_labels,
                 &crate::cmd::rdfs_labels(&model),
             );
             crate::io::set_anon_counter(mark);
@@ -5027,7 +5036,6 @@ fn run_artefact(
                 &m.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&m).1.as_deref()),
-                &m.merged_input_labels,
                 &crate::cmd::rdfs_labels(&m),
             );
             crate::io::set_anon_counter(mark);
@@ -5105,7 +5113,7 @@ fn run_artefact(
                     // run-time failure on whichever repo has a recipe of that
                     // shape — `--input-iri` on an artefact's own pipeline.
                     Some(first) if first.starts_with("http://") || first.starts_with("https://") => {
-                        model = crate::io::load_iri(first, None)?;
+                        model = crate::cmd::load_iri_via_catalog(first, None, catalog)?;
                         threaded_from = None;
                     }
                     Some(first) => {
@@ -5218,11 +5226,9 @@ fn run_artefact(
         }
         let cl = if use_closure { closure.as_ref() } else { None };
         let docs = model.banner_docs.clone();
-        let merged_labels = model.merged_input_labels.clone();
         model = apply_op(repo, op, model, catalog, work, cl, threaded_from.as_deref())?;
         if model.banner_docs.is_empty() {
             model.banner_docs = docs;
-            model.merged_input_labels = merged_labels;
         }
         dump_step(&a.target, &model);
         write_step_output(repo, op, &mut model, Some(&a.target))?;
@@ -6616,7 +6622,7 @@ fn apply_op(
                 // here in the same list because it is an input like any other, and
                 // the plan has to NAME it either way.
                 if inp.starts_with("http://") || inp.starts_with("https://") {
-                    let other = crate::io::load_iri(inp, None)?;
+                    let other = crate::cmd::load_iri_via_catalog(inp, None, catalog)?;
                     crate::cmd::merge::merge_into(
                         &mut model,
                         &other,
@@ -6672,7 +6678,7 @@ fn apply_op(
                 // `-I/--input-iri`: the ontology to subtract is fetched, not
                 // opened — CL removes the taxon disjointness axioms this way.
                 Some(si) if si.starts_with("http://") || si.starts_with("https://") => {
-                    let other = crate::io::load_iri(si, None)?;
+                    let other = crate::cmd::load_iri_via_catalog(si, None, catalog)?;
                     unmerge_model(model, &other)
                 }
                 Some(si) => {
@@ -7192,14 +7198,13 @@ fn apply_op(
             // Recipe paths are relative to the ontology dir.
             let rp = |s: &str| repo.dir.join(s);
             let mut m = model;
-            // `--use-graphs true` loads the import closure as named graphs and
-            // makes the default graph their UNION, so the query sees the whole
-            // closure. The pipeline hands over the root ontology alone; union it
-            // in here, over the catalog the plan names.
+            // `--use-graphs true` loads the root and each ontology it imports as
+            // named graphs and makes the default graph their union. The pipeline
+            // hands over the root ontology alone: its closure is resolved here,
+            // over the catalog the plan names, recording where each import came
+            // from so the query can open it as a graph of its own.
             if *use_graphs {
-                if let Some(cl) = load_closure(repo, &m, catalog)? {
-                    m = union_with_closure(&m, &cl);
-                }
+                crate::cmd::resolve_import_closure(&mut m, catalog, &repo.dir)?;
             }
             // Updates (transform the model) + SELECTs (write result tables) in one
             // pass; owlmake's query engine handles both.
@@ -7229,7 +7234,7 @@ fn apply_op(
                     // writes TSV to a `.tsv` and CSV to a `.csv`. An extension that
                     // is not a result-format name — `$@.tmp` — resolves to CSV.
                     format: format.clone().unwrap_or_default(),
-                    use_graphs: None,
+                    use_graphs: Some(*use_graphs),
                     tdb: Some(*tdb),
                     keep_tdb_mappings: None,
                     tdb_directory: None,
@@ -7600,9 +7605,6 @@ pub(crate) fn merge_loaded_into_as(
     // only its axioms arrive: it labels nothing by itself.
     if matches!(role, MergeRole::Import) && !model.banner_docs.is_empty() {
         model.banner_docs.push(crate::cmd::banner_doc_of(other, false));
-    }
-    if matches!(role, MergeRole::Input) && !model.banner_docs.is_empty() {
-        model.merged_input_labels.push(std::sync::Arc::new(crate::cmd::rdfs_labels(other)));
     }
     let mut present = crate::cmd::merge::MergedAxioms::of(model);
     for ac in other.ont.iter() {

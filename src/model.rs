@@ -52,6 +52,52 @@ pub struct BannerDoc {
     pub root: bool,
 }
 
+/// An import of the closure inlined into a model: its IRI, the document it was
+/// read from (a path, or the IRI itself when fetched), and whether the root
+/// imports it directly.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportSource {
+    pub iri: String,
+    pub path: Option<std::path::PathBuf>,
+    pub direct: bool,
+}
+
+/// One recorded node of an axiom (`Model::shared_occurrences`): an anonymous
+/// expression in it that is one object with every other recorded occurrence
+/// of the same node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SharedNode {
+    /// The node's structure: the `anon_sig_hash` of its signature.
+    pub sig: u64,
+    /// The shared object the node belongs to — the merged class whose
+    /// defining expression it is, or lies inside.
+    pub group: u64,
+    /// Whether the node lies inside that object rather than being it.
+    pub inside: bool,
+}
+
+impl SharedNode {
+    /// The group the node itself is numbered under: the object's own group, or
+    /// for a node inside it, that group mixed with the node's structure — the
+    /// group every occurrence of that node inside that object shares.
+    pub fn node_group(&self) -> u64 {
+        if self.inside {
+            descendant_group(self.group, self.sig)
+        } else {
+            self.group
+        }
+    }
+}
+
+/// The group of the node with structure `sig` inside the shared object of
+/// group `group`.
+pub fn descendant_group(group: u64, sig: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (group, sig, "inside").hash(&mut h);
+    h.finish()
+}
+
 /// An ontology together with the prefix/namespace mapping used to render it.
 ///
 /// This is the value that flows between commands in a pipeline.
@@ -104,6 +150,10 @@ pub struct Model {
     /// imports. Recording the IRIs here lets a writer restore them rather than
     /// emitting a silently self-contained document.
     pub inlined_imports: Vec<String>,
+    /// Where each inlined import was read from, in the order they were
+    /// resolved — what a command that keeps every document of the closure as a
+    /// graph of its own reads them back from.
+    pub import_sources: Vec<ImportSource>,
     /// The components that inlining the closure CONTRIBUTED — every component an
     /// import added that the root did not already assert.
     ///
@@ -337,14 +387,7 @@ pub struct Model {
     /// fresh object, however equal its structure: a later pass that rebuilds an
     /// axiom copies it, and a rename rewrites it under a new identity that no
     /// record names.
-    pub shared_occurrences: std::collections::HashMap<u64, Vec<(u64, u64)>>,
-    /// The labels of each secondary input merged into this document, in merge
-    /// order (`cmd::rdfs_labels` of each as it was loaded). A document's own
-    /// entity index is settled when the document is first consulted, before
-    /// anything is merged into it, and a merged input's assertions join it
-    /// after the document's own — so a banner looks in the document as loaded
-    /// first, then in each merged input in turn.
-    pub merged_input_labels: Vec<std::sync::Arc<std::collections::HashMap<String, String>>>,
+    pub shared_occurrences: std::collections::HashMap<u64, Vec<SharedNode>>,
     /// True when this model came out of a step that built a BRAND-NEW ontology,
     /// so its document format carries no prefixes at all.
     ///
@@ -389,6 +432,7 @@ impl Model {
             shared_anon: std::collections::HashMap::new(),
             rdf_shared_anon: std::collections::HashMap::new(),
             inlined_imports: Vec::new(),
+            import_sources: Vec::new(),
             imported_components: Default::default(),
             rdf_blank_node_identity: false,
             owl_shared_owners: std::collections::HashMap::new(),
@@ -413,7 +457,6 @@ impl Model {
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
-            merged_input_labels: Vec::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -431,6 +474,7 @@ impl Model {
             shared_anon: std::collections::HashMap::new(),
             rdf_shared_anon: std::collections::HashMap::new(),
             inlined_imports: Vec::new(),
+            import_sources: Vec::new(),
             imported_components: Default::default(),
             rdf_blank_node_identity: false,
             owl_shared_owners: std::collections::HashMap::new(),
@@ -455,7 +499,6 @@ impl Model {
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
-            merged_input_labels: Vec::new(),
             format_prefixes_cleared: false,
             obo_source: false,
             obo_drop_untranslatable: false,
@@ -476,6 +519,7 @@ impl Model {
         self.shared_anon = other.shared_anon.clone();
         self.rdf_shared_anon = other.rdf_shared_anon.clone();
         self.inlined_imports = other.inlined_imports.clone();
+        self.import_sources = other.import_sources.clone();
         self.imported_components = other.imported_components.clone();
         self.rdf_blank_node_identity = other.rdf_blank_node_identity;
         self.owl_shared_owners = other.owl_shared_owners.clone();
@@ -500,7 +544,6 @@ impl Model {
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
         self.shared_occurrences = other.shared_occurrences.clone();
-        self.merged_input_labels = other.merged_input_labels.clone();
         self.format_prefixes_cleared = other.format_prefixes_cleared;
         self.obo_source = other.obo_source;
         self.obo_drop_untranslatable = other.obo_drop_untranslatable;
@@ -518,6 +561,7 @@ impl Model {
     pub fn detach_import_closure(&mut self) {
         self.inlined_imports.clear();
         self.imported_components.clear();
+        self.import_sources.clear();
         // The closure's declarations and annotation-property namespaces
         // described a document that still imported; once the closure's axioms
         // are the document's own, an entity the closure declared is declared
@@ -556,6 +600,7 @@ impl Clone for Model {
         m.shared_anon = self.shared_anon.clone();
         m.rdf_shared_anon = self.rdf_shared_anon.clone();
         m.inlined_imports = self.inlined_imports.clone();
+        m.import_sources = self.import_sources.clone();
         m.imported_components = self.imported_components.clone();
         m.owl_shared_owners = self.owl_shared_owners.clone();
         m.import_order = self.import_order.clone();
@@ -579,7 +624,6 @@ impl Clone for Model {
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
         m.shared_occurrences = self.shared_occurrences.clone();
-        m.merged_input_labels = self.merged_input_labels.clone();
         m.format_prefixes_cleared = self.format_prefixes_cleared;
         m.obo_drop_untranslatable = self.obo_drop_untranslatable;
         m

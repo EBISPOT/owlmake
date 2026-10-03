@@ -215,6 +215,22 @@ pub fn extract_with(
     post_process(out, model, seed, opts)
 }
 
+/// The ⊥⊤*-module of exactly the axioms `comps` for the seed IRIs, as indices
+/// into `comps`. Each seed IRI enters as every kind of entity `comps` use it as.
+pub(crate) fn star_module_indices(comps: &[Component<RcStr>], seed: &HashSet<String>) -> Vec<usize> {
+    let mut source_kinds: Sigma = Sigma::default();
+    for c in comps {
+        source_kinds.add_component(c);
+    }
+    let mut seed_sig = Sigma::default();
+    for iri in seed {
+        if let Some(&k) = source_kinds.0.get(iri) {
+            seed_sig.add(k, iri);
+        }
+    }
+    star_module(comps, &seed_sig, &all_indices(comps))
+}
+
 fn all_indices(comps: &[Component<RcStr>]) -> Vec<usize> {
     (0..comps.len()).collect()
 }

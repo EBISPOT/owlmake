@@ -15,9 +15,11 @@ use crate::model::Model;
 /// [`CommonArgs::apply`].
 #[derive(ClapArgs, Clone, Default)]
 pub struct CommonArgs {
-    /// Load the input ontology from an IRI instead of a file.
-    #[arg(short = 'I', long = "input-iri", value_name = "IRI")]
-    pub input_iri: Option<String>,
+    /// Load the input ontology from an IRI instead of a file. Repeatable: a
+    /// command that reads one input reads the first, and `merge` reads every
+    /// one, after its `--input` files.
+    #[arg(short = 'I', long = "input-iri", value_name = "IRI", action = clap::ArgAction::Append)]
+    pub input_iri: Vec<String>,
 
     /// Override the input parser format.
     #[arg(long = "input-format", value_name = "FORMAT")]
@@ -172,6 +174,43 @@ impl CommonArgs {
     }
 }
 
+/// Load an `-I/--input-iri` ontology. A catalog decides where an IRI is read
+/// from, for an input exactly as for an import: an IRI the catalog maps is the
+/// file it maps it to, and a mapped file that is missing is an error, never a
+/// fetch. Only an IRI the catalog does not map is fetched.
+pub(crate) fn load_iri_via_catalog(
+    iri: &str,
+    format: Option<&str>,
+    catalog: &std::collections::BTreeMap<String, std::path::PathBuf>,
+) -> Result<Model> {
+    match catalog_resolve(catalog, iri) {
+        Some(path) => io::load_with(&path, format)
+            .with_context(|| format!("loading {iri} from {}, where the catalog maps it", path.display())),
+        None => io::load_iri(iri, format),
+    }
+}
+
+/// The one ontology a single-input command reads: its `--input` file or its
+/// `-I/--input-iri`, the IRI read through `--catalog` when one is given. Naming
+/// more than one is an error.
+fn single_input(input: Option<&Path>, common: &CommonArgs) -> Result<(Model, String)> {
+    let fmt = common.input_format.as_deref();
+    let given = usize::from(input.is_some()) + common.input_iri.len();
+    if given > 1 {
+        bail!("only one --input or --input-iri may be given; `merge` combines several");
+    }
+    if let Some(iri) = common.input_iri.first() {
+        let catalog = match common.catalog.as_deref() {
+            Some(c) => parse_catalog(c).with_context(|| format!("reading catalog {}", c.display()))?,
+            None => Default::default(),
+        };
+        return Ok((load_iri_via_catalog(iri, fmt, &catalog)?, iri.clone()));
+    }
+    let path = input
+        .context("missing input: provide --input/--input-iri or pipe from a previous command")?;
+    Ok((io::load_with(path, fmt)?, path.display().to_string()))
+}
+
 /// Resolve the working model for a command: use the model piped from the previous
 /// chain step if present, otherwise load `--input` (or `--input-iri`). Honors the
 /// global `--input-format` override. Errors when no source exists.
@@ -180,15 +219,7 @@ pub fn take_or_load(piped: Option<Model>, input: Option<&Path>, common: &CommonA
     if let Some(model) = piped {
         return Ok(model);
     }
-    let fmt = common.input_format.as_deref();
-    let model = if let Some(iri) = &common.input_iri {
-        io::load_iri(iri, fmt).map(|m| (m, iri.clone()))?
-    } else {
-        let path = input
-            .context("missing input: provide --input/--input-iri or pipe from a previous command")?;
-        io::load_with(path, fmt).map(|m| (m, path.display().to_string()))?
-    };
-    let (mut model, src) = model;
+    let (mut model, src) = single_input(input, common)?;
     common.apply_catalog(&mut model, input)?;
     if crate::progress::verbosity() >= 1 {
         status!("loaded {}: {} axioms", src, model.ont.iter().count());
@@ -245,14 +276,7 @@ pub fn take_or_load_no_imports(
     if let Some(model) = piped {
         return Ok(model);
     }
-    let fmt = common.input_format.as_deref();
-    if let Some(iri) = &common.input_iri {
-        io::load_iri(iri, fmt)
-    } else {
-        let path = input
-            .context("missing input: provide --input/--input-iri or pipe from a previous command")?;
-        io::load_with(path, fmt)
-    }
+    single_input(input, common).map(|(model, _)| model)
 }
 
 /// Collect `entity IRI → rdfs:label` across the input's whole import closure, for
@@ -407,6 +431,7 @@ pub(crate) fn resolve_import_closure(
     let opts = crate::cmd::merge::MergeOptions::default();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: Vec<String> = imports_of(model);
+    let direct: std::collections::HashSet<String> = queue.iter().cloned().collect();
     // Say that this ran, and with how many imports, BEFORE resolving any. The
     // per-import lines below are printed only when there is something to print,
     // so their absence would otherwise be ambiguous between "this path resolves
@@ -433,6 +458,11 @@ pub(crate) fn resolve_import_closure(
                 continue;
             }
         }
+        model.import_sources.push(crate::model::ImportSource {
+            iri: iri.clone(),
+            path: path.clone(),
+            direct: direct.contains(&iri),
+        });
         let (imported, source) = match path {
             Some(path) => {
                 let m = crate::io::load(&path)
@@ -646,33 +676,17 @@ pub(crate) fn banner_doc_of(model: &Model, root: bool) -> crate::model::BannerDo
 /// document: the documents stand in the order a set of them is iterated in,
 /// keyed on each one's identity, and the first document with a label for an
 /// entity supplies it. The document being written is the root, under the
-/// identity it is written with (`root_iri`/`root_version`). Its labels are
-/// the ones it was loaded with (its entity index is settled when it is first
-/// consulted), then the labels of each input merged into it, in merge order,
-/// for entities it did not label itself, and finally its labels as it stands
-/// (`root_labels`) for anything a later step added. Every other document
-/// keeps the labels it was loaded with.
+/// identity it is written with (`root_iri`/`root_version`), and its labels are
+/// the ones it carries as written (`root_labels`): an entity's set of
+/// annotation assertions is sized by what the entity holds when the write
+/// asks for it, whatever it held when the document was loaded. Every other
+/// document keeps the labels it was loaded with.
 pub(crate) fn fold_banner_docs(
     docs: &[crate::model::BannerDoc],
     root_iri: Option<&str>,
     root_version: Option<&str>,
-    merged_input_labels: &[std::sync::Arc<std::collections::HashMap<String, String>>],
     root_labels: &std::collections::HashMap<String, String>,
 ) -> std::collections::HashMap<String, String> {
-    let mut root_effective: std::collections::HashMap<String, String> = docs
-        .iter()
-        .find(|d| d.root)
-        .map(|d| (*d.labels).clone())
-        .unwrap_or_default();
-    for labels in merged_input_labels {
-        for (subject, label) in labels.iter() {
-            root_effective.entry(subject.clone()).or_insert_with(|| label.clone());
-        }
-    }
-    for (subject, label) in root_labels {
-        root_effective.entry(subject.clone()).or_insert_with(|| label.clone());
-    }
-    let root_labels = &root_effective;
     let root_id = (root_iri.map(str::to_string), root_version.map(str::to_string));
     let mut seen: std::collections::HashSet<(Option<String>, Option<String>)> = Default::default();
     seen.insert(root_id.clone());
@@ -825,7 +839,7 @@ pub(crate) fn imports_of(model: &Model) -> Vec<String> {
 /// Parse an XML catalog file into an import-IRI → local-path map. Recognizes the
 /// `<uri name="IRI" uri="PATH"/>` entries curators and Protégé write; relative
 /// `uri` paths resolve against the catalog file's directory.
-fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::path::PathBuf>> {
+pub(crate) fn parse_catalog(path: &Path) -> Result<std::collections::BTreeMap<String, std::path::PathBuf>> {
     let text = std::fs::read_to_string(path)?;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut map = std::collections::BTreeMap::new();
@@ -901,6 +915,8 @@ fn attr(frag: &str, key: &str) -> Option<String> {
 }
 
 pub mod annotate;
+pub mod explain_blackbox;
+pub mod explain_markdown;
 pub mod babelon;
 pub mod babelon_tsv;
 pub mod collapse;

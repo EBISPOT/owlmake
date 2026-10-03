@@ -18,7 +18,7 @@
 //! preceding chain to obtain the in-flight ontology and hands it here, or on its
 //! own with `-i`/`-I`, in which case this module loads the ontology itself.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -357,7 +357,11 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
             ("set_id", &["--set-id"]),
         ],
     );
+    let started = std::time::Instant::now();
     let model = load_model(model, &opts)?;
+    // `-v` lowers the console's log level to warnings, so the duplicates this
+    // drops are reported, and so is how long the command took.
+    let verbose = args.iter().any(|a| matches!(a.as_str(), "-v" | "-vv" | "-vvv" | "--verbose"));
 
     // The bundled OBO context, with any `--prefix` declaration overriding it.
     let mut prefixes = xref_prefixes().clone();
@@ -413,11 +417,14 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
         .collect();
 
     let mut ms = MappingSet::new();
-    let mut used_prefixes: BTreeSet<String> = BTreeSet::new();
     // (subject IRI, predicate IRI, object IRI) alongside each row: the file is
     // ordered on the EXPANDED forms, which is why every `skos:` predicate
     // (`http://…`) precedes `semapv:crossSpeciesExactMatch` (`https://…`).
     let mut keyed: Vec<((String, String, String), super::Mapping)> = Vec::new();
+    // Each mapping's identity as the warnings order it: its hash as a record of
+    // the mapping's fields, and its subject and object identifiers.
+    let source_iri = ontology_iri(&model);
+    let mut identities: Vec<(i32, String, String)> = Vec::new();
 
     for ac in model.ont.iter() {
         if !root(ac) {
@@ -447,9 +454,6 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
         }) else {
             continue;
         };
-        used_prefixes.insert(pfx.to_string());
-        used_prefixes.insert(subject_prefix.clone());
-
         let mut m = super::Mapping::new();
         m.insert("subject_id".into(), format!("{subject_prefix}:{subject_local}"));
         if let Some(l) = labels.get(&subject_iri) {
@@ -458,6 +462,24 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
         m.insert("predicate_id".into(), predicate.clone());
         m.insert("object_id".into(), xref.clone());
         m.insert("mapping_justification".into(), "semapv:UnspecifiedMatching".into());
+        // Every row's subject comes from this ontology; the writer condenses the
+        // shared value into the set's `subject_source`, so a set with no rows
+        // states none.
+        if let Some(s) = &source_iri {
+            m.insert("subject_source".into(), s.clone());
+        }
+        identities.push((
+            mapping_record_hash(
+                &subject_iri,
+                labels.get(&subject_iri).map(String::as_str),
+                &expand_predicate(&predicate),
+                &format!("{object_ns}{local}"),
+                "https://w3id.org/semapv/vocab/UnspecifiedMatching",
+                source_iri.as_deref(),
+            ),
+            format!("{subject_prefix}:{subject_local}"),
+            xref.clone(),
+        ));
         let subject_ns = prefixes.get(&subject_prefix).cloned().unwrap_or_default();
         keyed.push((
             (
@@ -484,14 +506,15 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
     if opts.has("drop-duplicates") {
         ms.set_mapping_cardinality();
         drop_duplicates(&mut ms);
+        if verbose {
+            report_dropped_duplicates(&identities);
+        }
     }
 
-    // Set-level metadata: what the ontology says about itself. `subject_source`
-    // is metadata, not a column — every subject comes from the one ontology.
-    let source = ontology_iri(&model);
+    // Set-level metadata: what the ontology says about itself.
     if let Some(id) = opts.one("set_id") {
         ms.metadata.insert("mapping_set_id".into(), serde_yaml::Value::String(id.to_string()));
-    } else if let Some(s) = &source {
+    } else if let Some(s) = &source_iri {
         let stem = s.strip_suffix(".owl").unwrap_or(s);
         ms.metadata.insert(
             "mapping_set_id".into(),
@@ -501,14 +524,14 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
     if let Some(l) = ontology_annotation_iri(&model, "http://purl.org/dc/terms/license") {
         ms.metadata.insert("license".into(), serde_yaml::Value::String(l));
     }
-    if let Some(s) = &source {
-        ms.metadata.insert("subject_source".into(), serde_yaml::Value::String(s.clone()));
-    }
 
-    // curie_map: the prefixes the mappings actually use.
-    for p in &used_prefixes {
-        if let Some(ns) = prefixes.get(p) {
-            ms.curie_map.insert(p.clone(), ns.clone());
+    // curie_map: the prefixes of the rows written, so a prefix whose every
+    // cross-reference was dropped as a duplicate is not declared.
+    for m in &ms.mappings {
+        for id in [m.get("subject_id"), m.get("object_id")].into_iter().flatten() {
+            if let Some((p, ns)) = id.split_once(':').and_then(|(p, _)| prefixes.get_key_value(p)) {
+                ms.curie_map.insert(p.clone(), ns.clone());
+            }
         }
     }
     ms.recompute_columns();
@@ -525,7 +548,82 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
         None => print!("{tsv}"),
     }
     eprintln!("sssom:xref-extract: extracted {} mapping(s)", ms.mappings.len());
+    if verbose {
+        let ms_elapsed = started.elapsed().as_millis() as f64 / 1000.0;
+        let mut secs = format!("{ms_elapsed}");
+        if !secs.contains('.') {
+            secs.push_str(".0");
+        }
+        log_warn("org.obolibrary.robot.CommandManager", &format!("Subcommand Timing: sssom:xref-extract took {secs} seconds"));
+    }
     Ok(())
+}
+
+/// A warning on the console, in the log's line format.
+fn log_warn(logger: &str, msg: &str) {
+    let stamp = crate::cmd::reason::log_stamp();
+    crate::build::console_line(&format!("{stamp} WARN  {logger} - {msg}"));
+}
+
+/// The hash of an extracted mapping as a record of its forty-nine fields, of
+/// which an extracted mapping sets six: a null field counts 43, a set one its
+/// string hash, folded in field order with 59.
+fn mapping_record_hash(
+    subject: &str,
+    label: Option<&str>,
+    predicate: &str,
+    object: &str,
+    justification: &str,
+    source: Option<&str>,
+) -> i32 {
+    use crate::owlapi_hash::java_string_hash as jh;
+    let mut fields: [Option<i32>; 49] = [None; 49];
+    fields[3] = Some(jh(subject));
+    fields[4] = label.map(jh);
+    fields[6] = Some(jh(predicate));
+    fields[9] = Some(jh(object));
+    fields[12] = Some(jh(justification));
+    fields[21] = source.map(jh);
+    fields.iter().fold(1i32, |r, f| r.wrapping_mul(59).wrapping_add(f.unwrap_or(43)))
+}
+
+/// The warnings for the cross-references `--drop-duplicates` drops: one per
+/// cross-reference that several classes claim, naming them. The mappings stand
+/// in the order of the set of every extracted mapping, keyed by its record
+/// hash; the cross-references in the order of the table keyed by their names.
+fn report_dropped_duplicates(identities: &[(i32, String, String)]) {
+    let spread = |h: i32| {
+        let h = h as u32;
+        (h ^ (h >> 16)) as usize
+    };
+    let mut claims: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for (_, s, o) in identities {
+        claims.entry(o.as_str()).or_default().insert(s.as_str());
+    }
+    let cap = crate::owlapi_hash::java_hashset_capacity(identities.len());
+    let mut order: Vec<usize> = (0..identities.len()).collect();
+    order.sort_by_key(|&i| spread(identities[i].0) & (cap - 1));
+    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+    for i in order {
+        let (_, s, o) = &identities[i];
+        if claims.get(o.as_str()).is_none_or(|c| c.len() < 2) {
+            continue;
+        }
+        match groups.iter_mut().find(|(k, _)| *k == o.as_str()) {
+            Some((_, v)) => v.push(s.as_str()),
+            None => groups.push((o.as_str(), vec![s.as_str()])),
+        }
+    }
+    let key_cap = crate::owlapi_hash::java_hashset_capacity(groups.len());
+    let mut keys: Vec<usize> = (0..groups.len()).collect();
+    keys.sort_by_key(|&k| spread(crate::owlapi_hash::java_string_hash(groups[k].0)) & (key_cap - 1));
+    for k in keys {
+        let (object, subjects) = &groups[k];
+        log_warn(
+            "org.incenp.obofoundry.sssom.robot.XrefExtractCommand",
+            &format!("Cross-reference ignored: {object} mapped to {}", subjects.join(", ")),
+        );
+    }
 }
 
 /// SSSOM-Java's `standard_map`: the annotation property each mapping-metadata

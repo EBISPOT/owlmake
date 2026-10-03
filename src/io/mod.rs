@@ -89,6 +89,7 @@ pub mod genid;
 pub mod obo;
 pub mod obograph;
 pub mod ofncache;
+pub mod frame_twins;
 pub mod owlfunc;
 pub mod owlapi_ttl;
 pub mod owlrdf;
@@ -2527,13 +2528,7 @@ fn write_to_with<W: Write>(
             let labels = if !model.banner_docs.is_empty() {
                 let (iri, version) = crate::build::model_ontology_id(model);
                 let own = crate::cmd::rdfs_labels(model);
-                crate::cmd::fold_banner_docs(
-                    &model.banner_docs,
-                    iri.as_deref(),
-                    version.as_deref(),
-                    &model.merged_input_labels,
-                    &own,
-                )
+                crate::cmd::fold_banner_docs(&model.banner_docs, iri.as_deref(), version.as_deref(), &own)
             } else {
                 model.banner_labels.clone()
             };

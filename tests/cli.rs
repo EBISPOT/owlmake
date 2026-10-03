@@ -2752,10 +2752,16 @@ fn explain_derives_the_imported_plant_shape_under_elk_and_hermit() {
             let text = String::from_utf8_lossy(&out.stdout);
             assert!(text.contains("1 justification(s)"), "{reasoner} {sub}: {text}");
             if sub == "po:Tepal" {
+                // The justification ROBOT finds: Tepal is a perianth, a perianth is
+                // an organ part of a flower, and a flower is a structure part of a
+                // reproductive system — so a flower is one, and Tepal is part of
+                // one without leaning on part_of's transitivity.
+                assert!(text.contains("Justification 1 (6 axioms)"), "{reasoner}: {text}");
                 assert!(
-                    text.contains("TransitiveObjectProperty"),
-                    "the chain through the flower is part of the justification:\n{text}"
+                    text.contains("sup: Class(Class(IRI(\"http://x.org/po#Structure\"))), sub: Class(Class(IRI(\"http://x.org/po#Flower\")))"),
+                    "the imported Flower ⊑ Structure is part of the justification:\n{text}"
                 );
+                assert!(!text.contains("TransitiveObjectProperty"), "{reasoner}: {text}");
             }
             assert_eq!(
                 reasoner == "hermit",
@@ -3534,4 +3540,502 @@ fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
     let out = bin().args(["owltools", acyclic.to_str().unwrap(), "--list-cycles", "-f"]).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), "Number of cycles: 0\n");
     assert_eq!(out.status.code(), Some(0));
+}
+
+/// `owltools … --run-reasoner -u` lists, after the unsatisfiable count, every
+/// direct superclass the reasoner infers that no `SubClassOf` asserts, and every
+/// named equivalence — each class as its id and quoted label, or its id twice
+/// when it has none. The classes come in the order owltools 2020-04-06
+/// (OWLAPI 4.5.6, Trove 3.0.3) lists them, the same three times over: not
+/// IRI order.
+#[test]
+fn owltools_run_reasoner_lists_inferences_in_hash_set_order() {
+    let inp = tmp("run-reasoner.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://purl.obolibrary.org/obo/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://purl.obolibrary.org/obo/x.owl>\n\
+         Declaration(Class(:X_1))\n\
+         Declaration(Class(:X_2))\n\
+         Declaration(Class(:X_3))\n\
+         Declaration(Class(:X_4))\n\
+         Declaration(Class(:X_5))\n\
+         Declaration(Class(:X_6))\n\
+         Declaration(Class(:X_8))\n\
+         Declaration(Class(:X_9))\n\
+         Declaration(ObjectProperty(:BFO_0000050))\n\
+         AnnotationAssertion(rdfs:label :X_1 \"one\")\n\
+         AnnotationAssertion(rdfs:label :X_2 \"two\")\n\
+         AnnotationAssertion(rdfs:label :X_3 \"three\")\n\
+         AnnotationAssertion(rdfs:label :X_4 \"four\")\n\
+         AnnotationAssertion(rdfs:label :X_5 \"five\")\n\
+         AnnotationAssertion(rdfs:label :X_6 \"six\")\n\
+         AnnotationAssertion(rdfs:label :X_8 \"eight\")\n\
+         EquivalentClasses(:X_1 ObjectIntersectionOf(:X_2 ObjectSomeValuesFrom(:BFO_0000050 :X_3)))\n\
+         SubClassOf(:X_4 :X_2)\n\
+         EquivalentClasses(:X_5 :X_6)\n\
+         SubClassOf(:X_8 :X_2)\n\
+         SubClassOf(:X_8 ObjectSomeValuesFrom(:BFO_0000050 :X_3))\n\
+         SubClassOf(:X_9 :X_2)\n\
+         SubClassOf(:X_9 ObjectSomeValuesFrom(:BFO_0000050 :X_3))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = bin()
+        .args(["owltools", "--no-debug", inp.to_str().unwrap(), "--silence-elk", "--run-reasoner", "-r", "elk", "-u"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "NUMBER_OF_UNSATISFIABLE_CLASSES: 0\n\
+         all inferences\n\
+         Consistent? true\n\
+         INFERENCE: X:9 X:9 SubClassOf X:1 'one'\n\
+         INFERENCE: X:8 'eight' SubClassOf X:1 'one'\n\
+         INFERENCE: X:6 'six' EquivalentTo X:5 'five'\n\
+         INFERENCE: X:5 'five' EquivalentTo X:6 'six'\n\
+         INFERENCE: X:1 'one' SubClassOf X:2 'two'\n"
+    );
+}
+
+/// A `SELECT DISTINCT` over one pattern with only its predicate bound, and one
+/// over a UNION of single-pattern groups, come out in the order the graph
+/// answers them: each branch in turn from the index its bound terms select,
+/// each value at its first appearance. A literal and an IRI with the same text
+/// are two rows. The expected tables are ROBOT 1.9.10's (ODK v1.6.1), the same
+/// three times over.
+#[test]
+fn query_answers_predicate_scans_and_unions_in_index_order() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/query-order");
+    for (query, expected) in [("contributors.sparql", "contributors.robot.csv"), ("seed.sparql", "seed.robot.csv")] {
+        let out = tmp(expected);
+        let run = bin()
+            .args(["query", "-f", "csv", "-i"])
+            .arg(fixtures.join("contributors.ofn"))
+            .arg("--query")
+            .arg(fixtures.join(query))
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            std::fs::read_to_string(fixtures.join(expected)).unwrap(),
+            "{query}"
+        );
+    }
+}
+
+/// A functional write banners an entity with two labels by the one its
+/// annotation-assertion set yields first, and that set is sized by what the
+/// entity holds as written. `label4` precedes `label10` in a 16-slot table and
+/// follows it in a 32-slot one: merging twelve comments in takes E from 4
+/// assertions to 16, and extracting a module and stripping its comments takes
+/// it from 16 to 2. The expected documents are ROBOT 1.9.10's (ODK v1.6.1),
+/// the same three times over.
+#[test]
+fn banner_labels_follow_the_document_as_written() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/banner-labels");
+    let f = |name: &str| fixtures.join(name).to_str().unwrap().to_string();
+    let merged = tmp("banner-merged.ofn");
+    let run = bin()
+        .args(["merge", "-i", &f("two-labels.ofn"), "-i", &f("more-comments.ofn"), "convert", "-f", "ofn", "-o"])
+        .arg(&merged)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&merged).unwrap(),
+        std::fs::read_to_string(fixtures.join("merged.robot.ofn")).unwrap()
+    );
+
+    let extracted = tmp("banner-extracted.ofn");
+    let run = bin()
+        .args(["merge", "-i", &f("many-comments.ofn")])
+        .args(["extract", "--method", "BOT", "--term", "http://example.org/E", "--force", "true"])
+        .args(["--copy-ontology-annotations", "false"])
+        .args(["remove", "--term", "rdfs:label", "--term", "http://example.org/E"])
+        .args(["--select", "complement", "--select", "annotation-properties"])
+        .args(["convert", "-f", "ofn", "-o"])
+        .arg(&extracted)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&extracted).unwrap(),
+        std::fs::read_to_string(fixtures.join("extracted.robot.ofn")).unwrap()
+    );
+}
+
+/// `explain --output` saves the ontology the command was given; what it hands
+/// the next command is the ontology of its justifications. The expected
+/// document is ROBOT 1.9.10's (ODK v1.6.1) for the same command line: `D ⊑ E`
+/// explains nothing and is saved all the same.
+#[test]
+fn explain_output_saves_the_ontology_it_was_given() {
+    let inp = tmp("explain-output-in.ofn");
+    std::fs::write(
+        &inp,
+        "Prefix(:=<http://example.org/>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/inc.owl>\n\
+         Declaration(Class(:A))\n\
+         Declaration(Class(:B))\n\
+         Declaration(Class(:C))\n\
+         Declaration(Class(:D))\n\
+         Declaration(Class(:E))\n\
+         AnnotationAssertion(rdfs:label :A \"a\")\n\
+         SubClassOf(:A :B)\n\
+         SubClassOf(:A :C)\n\
+         DisjointClasses(:B :C)\n\
+         SubClassOf(:D :E)\n\
+         )\n",
+    )
+    .unwrap();
+    let out = tmp("explain-output-out.ofn");
+    let run = bin()
+        .args(["explain", "-i"])
+        .arg(&inp)
+        .args(["-M", "unsatisfiability", "-u", "all", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        "Prefix(:=<http://example.org/inc.owl#>)\n\
+         Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n\
+         Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\n\
+         Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)\n\
+         Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         \n\
+         \n\
+         Ontology(<http://example.org/inc.owl>\n\
+         \n\
+         Declaration(Class(<http://example.org/A>))\n\
+         Declaration(Class(<http://example.org/B>))\n\
+         Declaration(Class(<http://example.org/C>))\n\
+         Declaration(Class(<http://example.org/D>))\n\
+         Declaration(Class(<http://example.org/E>))\n\
+         \n\
+         \n\
+         ############################\n\
+         #   Classes\n\
+         ############################\n\
+         \n\
+         # Class: <http://example.org/A> (a)\n\
+         \n\
+         AnnotationAssertion(rdfs:label <http://example.org/A> \"a\")\n\
+         SubClassOf(<http://example.org/A> <http://example.org/B>)\n\
+         SubClassOf(<http://example.org/A> <http://example.org/C>)\n\
+         \n\
+         # Class: <http://example.org/B> (<http://example.org/B>)\n\
+         \n\
+         DisjointClasses(<http://example.org/B> <http://example.org/C>)\n\
+         \n\
+         # Class: <http://example.org/D> (<http://example.org/D>)\n\
+         \n\
+         SubClassOf(<http://example.org/D> <http://example.org/E>)\n\
+         \n\
+         \n\
+         )"
+    );
+}
+
+/// A markdown diff writes a literal as ROBOT 1.9.10's owl-diff renderer does
+/// (ODK v1.6.1): `xsd:decimal`, `xsd:integer` and `xsd:boolean` values bare,
+/// `xsd:float` with an `f`, every other value quoted with its text
+/// HTML-escaped — newlines, tabs and backslashes as they stand. Only the
+/// `Loaded from` lines, which name where each side was read, are not compared.
+#[test]
+fn markdown_diff_writes_literals_as_robot_does() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markdown-literals");
+    let out = tmp("markdown-literals.md");
+    let run = bin()
+        .args(["diff", "--labels", "true", "--left"])
+        .arg(fixtures.join("left.ofn"))
+        .arg("--right")
+        .arg(fixtures.join("right.ofn"))
+        .args(["-f", "markdown", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let comparable = |text: String| -> String {
+        text.lines().filter(|l| !l.starts_with("- Loaded from: ")).map(|l| format!("{l}\n")).collect()
+    };
+    assert_eq!(
+        comparable(std::fs::read_to_string(&out).unwrap()),
+        comparable(std::fs::read_to_string(fixtures.join("diff.robot.md")).unwrap())
+    );
+}
+
+/// `merge` reads every `--input` file, then every `-I/--input-iri`, and an IRI
+/// the catalog maps is read from the file it maps it to — `robot --catalog
+/// catalog-v001.xml merge -i uberon.owl -I <cl PURL>` merges the repo's own
+/// CL module, never a download. A command that reads one input refuses two.
+#[test]
+fn merge_reads_input_iris_after_its_files_through_the_catalog() {
+    let dir = tmp("mergeiri");
+    std::fs::create_dir_all(dir.join("imports")).unwrap();
+    std::fs::write(
+        dir.join("a.ofn"),
+        "Prefix(:=<http://x.org/>)\nOntology(<http://x.org/a>\nDeclaration(Class(<http://x.org/A>))\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("imports/b.ofn"),
+        "Prefix(:=<http://x.org/>)\nOntology(<http://x.org/b>\nDeclaration(Class(<http://x.org/B>))\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://example.invalid/b.owl\" uri=\"imports/b.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    let out = dir.join("merged.ofn");
+    let status = bin()
+        .current_dir(&dir)
+        .args(["merge", "--catalog", "catalog-v001.xml", "-i", "a.ofn", "-I", "http://example.invalid/b.owl", "-o"])
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(status.success(), "merge with a catalog-mapped -I failed");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.contains("Ontology(<http://x.org/a>"), "the first --input is the primary:\n{text}");
+    assert!(text.contains("Declaration(Class(<http://x.org/A>))"), "the --input file was not merged:\n{text}");
+    assert!(text.contains("Declaration(Class(<http://x.org/B>))"), "the -I input was not merged:\n{text}");
+
+    // A mapped file that is missing is an error, never a download.
+    std::fs::remove_file(dir.join("imports/b.ofn")).unwrap();
+    let status = bin()
+        .current_dir(&dir)
+        .args(["merge", "--catalog", "catalog-v001.xml", "-i", "a.ofn", "-I", "http://example.invalid/b.owl", "-o"])
+        .arg(&out)
+        .status()
+        .unwrap();
+    assert!(!status.success(), "a catalog entry naming a missing file must fail");
+
+    // One input only, for a command that reads one.
+    let status = bin()
+        .current_dir(&dir)
+        .args(["convert", "-i", "a.ofn", "-I", "http://example.invalid/b.owl", "-o"])
+        .arg(dir.join("c.ofn"))
+        .status()
+        .unwrap();
+    assert!(!status.success(), "convert accepted both --input and --input-iri");
+}
+
+
+/// `--explanation` writes the markdown report: the justification as a tree grown
+/// from the entailment's subject, each axiom in Manchester syntax with every
+/// entity a `[label](IRI)` link, then the axiom impact summary tagging each
+/// axiom with the ontology it comes from. The expected text is ROBOT 1.9.10's
+/// report for the same command.
+#[test]
+fn explain_writes_the_markdown_report() {
+    let root = plant_import_fixture("plant-md");
+    let catalog = root.with_file_name("catalog-v001.xml");
+    let md = root.with_file_name("tepal.md");
+    let status = bin()
+        .args(["explain", "-i"])
+        .arg(&root)
+        .arg("--catalog")
+        .arg(&catalog)
+        .args(["--prefix", "po: http://x.org/po#", "--prefix", "rs: http://x.org/root#"])
+        .args(["--axiom", "po:Tepal SubClassOf rs:ReproSystem", "--explanation"])
+        .arg(&md)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), "## [Tepal](http://x.org/po#Tepal) SubClassOf [ReproSystem](http://x.org/root#ReproSystem) ##
+
+  - [Tepal](http://x.org/po#Tepal) SubClassOf [Perianth](http://x.org/po#Perianth)
+    - [Perianth](http://x.org/po#Perianth) EquivalentTo [Organ](http://x.org/po#Organ) and ([part_of](http://x.org/po#part_of) some [Flower](http://x.org/po#Flower))
+      - [Flower](http://x.org/po#Flower) SubClassOf [part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem)
+        - [ReproSystem](http://x.org/root#ReproSystem) EquivalentTo [Structure](http://x.org/po#Structure) and ([part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem))
+      - [Organ](http://x.org/po#Organ) SubClassOf [Structure](http://x.org/po#Structure)
+      - [Flower](http://x.org/po#Flower) SubClassOf [Structure](http://x.org/po#Structure)
+
+# Axiom Impact 
+## Axioms used 1 times
+- [Perianth](http://x.org/po#Perianth) EquivalentTo [Organ](http://x.org/po#Organ) and ([part_of](http://x.org/po#part_of) some [Flower](http://x.org/po#Flower)) [po]
+- [ReproSystem](http://x.org/root#ReproSystem) EquivalentTo [Structure](http://x.org/po#Structure) and ([part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem)) [root]
+- [Flower](http://x.org/po#Flower) SubClassOf [Structure](http://x.org/po#Structure) [po]
+- [Flower](http://x.org/po#Flower) SubClassOf [part_of](http://x.org/po#part_of) some [ReproSystem](http://x.org/root#ReproSystem) [root]
+- [Organ](http://x.org/po#Organ) SubClassOf [Structure](http://x.org/po#Structure) [po]
+- [Tepal](http://x.org/po#Tepal) SubClassOf [Perianth](http://x.org/po#Perianth) [po]
+
+
+
+# Ontologies used: 
+- root (http://x.org/root)
+- po (http://x.org/po)
+");
+}
+
+
+/// Under `--use-graphs` the root and the ontology it imports are named graphs,
+/// and the query's default graph is their union: a pattern is answered graph by
+/// graph, in the order the union holds the graphs, and a triple both graphs
+/// assert is counted where it is first found. The expected rows are ROBOT
+/// 1.9.10's (three runs, identical).
+#[test]
+fn query_use_graphs_answers_graph_by_graph() {
+    let dir = tmp("usegraphs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("root.ofn"), "Prefix(:=<http://x.org/root#>)
+Prefix(o:=<http://www.geneontology.org/formats/oboInOwl#>)
+Ontology(<http://x.org/root>
+Import(<http://x.org/imp>)
+Declaration(Class(:L))
+Declaration(Class(:M))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(AnnotationProperty(o:hasDbXref))
+SubClassOf(:C :L)
+SubClassOf(:D :M)
+AnnotationAssertion(o:hasDbXref :L \"R:L1\")
+AnnotationAssertion(o:hasDbXref :L \"R:L2\")
+AnnotationAssertion(o:hasDbXref :C \"R:C1\")
+AnnotationAssertion(o:hasDbXref :C \"R:C2\")
+AnnotationAssertion(o:hasDbXref :D \"R:D1\")
+)
+").unwrap();
+    std::fs::write(dir.join("imp.ofn"), "Prefix(:=<http://x.org/root#>)
+Prefix(o:=<http://www.geneontology.org/formats/oboInOwl#>)
+Ontology(<http://x.org/imp>
+Declaration(AnnotationProperty(o:hasDbXref))
+AnnotationAssertion(o:hasDbXref :L \"I:L1\")
+AnnotationAssertion(o:hasDbXref :C \"I:C1\")
+AnnotationAssertion(o:hasDbXref :C \"R:C2\")
+AnnotationAssertion(o:hasDbXref :D \"I:D1\")
+)
+").unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         <uri name=\"http://x.org/imp\" uri=\"imp.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("q.sparql"), "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX oboInOwl: <http://www.geneontology.org/formats/oboInOwl#>
+SELECT DISTINCT ?xref WHERE {
+  { ?sub rdfs:subClassOf* <http://x.org/root#L> . }
+  UNION
+  { ?sub rdfs:subClassOf* <http://x.org/root#M> . }
+  ?sub oboInOwl:hasDbXref ?xref .
+}
+").unwrap();
+    let status = bin()
+        .current_dir(&dir)
+        .args(["--catalog", "catalog-v001.xml", "query", "-i", "root.ofn", "--use-graphs", "true", "--query", "q.sparql", "out.tsv"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read_to_string(dir.join("out.tsv")).unwrap(), "?xref
+\"I:L1\"
+\"R:L2\"
+\"R:L1\"
+\"R:C2\"
+\"I:C1\"
+\"R:C1\"
+\"I:D1\"
+\"R:D1\"
+");
+}
+
+/// `reason` lists unsatisfiable classes in the order the reasoner's bottom node
+/// iterates them. The node is a concurrent hash table keyed on each IRI's string
+/// hash and filled in the order the classes were queued, and the listing copies
+/// it through three hash sets of classes. `bottom-order.ofn` has 263
+/// unsatisfiable classes, 159 of them in groups that collide in both tables, so
+/// the listing turns on the queue order and on how the table's doublings
+/// reorder its chains. The expected listing is ROBOT 1.9.10's (ODK v1.6.1) on
+/// one CPU, the same three times over.
+#[test]
+fn reason_lists_unsatisfiable_classes_in_bottom_node_order() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/elk-order");
+    let run = bin()
+        .args(["reason", "-r", "ELK", "-i"])
+        .arg(fixtures.join("bottom-order.ofn"))
+        .output()
+        .unwrap();
+    assert!(!run.status.success());
+    let listed = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter_map(|l| l.split_once("unsatisfiable: ").map(|(_, iri)| iri.trim().to_string()))
+            .collect()
+    };
+    let ours = listed(&String::from_utf8_lossy(&run.stdout));
+    let robot = listed(&std::fs::read_to_string(fixtures.join("bottom-order.robot.txt")).unwrap());
+    assert_eq!(robot.len(), 263);
+    assert_eq!(ours, robot);
+}
+
+/// `owltools --export-parents` lists a cell's parents in the order of the sets
+/// they pass through, the first being every superclass of the row's class with
+/// owl:Thing among them. X:0000900 has twelve superclasses besides owl:Thing,
+/// so owl:Thing takes that set from 16 buckets to 32; the two parents' classes
+/// share a bucket at 16 and at every later step, and at 32 the second whole
+/// comes first. The expected table is owltools 2020-04-06's (ODK v1.6.1), the
+/// same three times over.
+#[test]
+fn export_parents_sizes_the_superclass_set_with_owl_thing() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/export-parents");
+    let out = tmp("thing-sizes.tsv");
+    let run = bin()
+        .arg("owltools")
+        .arg(fixtures.join("thing-sizes.ofn"))
+        .args(["--reasoner", "mexr", "--export-parents", "-p", "BFO:0000050", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        std::fs::read_to_string(fixtures.join("thing-sizes.owltools.tsv")).unwrap()
+    );
+}
+
+/// A class frame that states one xref twice — as a plain literal from an
+/// imported mapping, with provenance, and as `xsd:string` from the OBO edit file
+/// — writes it once, where the first of the two sorts. The frame's order is a
+/// red-black tree's listing sorted by a run-merging sort. Under the frame's
+/// comparison each of the two copies follows the other, so which comes first
+/// turns on the frame's other axioms. With the full stanza
+/// (`twin.obo`) the MESH xref stands in its alphabetical place after FMA; cut
+/// down to its xrefs (`twin-cut.obo`) it stands first. The expected documents
+/// are ROBOT 1.9.10's (ODK v1.6.1), the same three times over each.
+#[test]
+fn a_twice_stated_xref_stands_where_the_frame_sorts_its_first_copy() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xref-twins");
+    for variant in ["twin", "twin-cut"] {
+        let out = tmp(&format!("{variant}.owl"));
+        let run = bin()
+            .arg("merge")
+            .arg("--catalog")
+            .arg(fixtures.join("catalog-v001.xml"))
+            .arg("-i")
+            .arg(fixtures.join(format!("{variant}.obo")))
+            .args(["expand", "--no-expand-term", "http://purl.obolibrary.org/obo/RO_0002175", "-o"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            std::fs::read_to_string(fixtures.join(format!("{variant}.robot.owl"))).unwrap(),
+            "{variant}"
+        );
+    }
 }

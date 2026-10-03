@@ -66,19 +66,17 @@ pub struct Args {
     /// retrieve. Default 1.
     #[arg(short = 'm', long, default_value_t = 1)]
     pub max: usize,
-    /// Write the justification(s) to this file. Same content as --output;
-    /// provided for compatibility with existing invocations.
+    /// Write the markdown report of the explanations to this file.
     #[arg(short = 'e', long)]
     pub explanation: Option<PathBuf>,
-    /// Output file for the justification. With `--format` (or an ontology file
-    /// extension) this is an ontology of the union of justification axioms, as in
-    /// `robot explain`; otherwise the human-readable report is written. Defaults
-    /// to stdout (the report).
+    /// Save the ontology this command was given, as it was given. The ontology
+    /// of the justifications is what the next command in a chain receives.
+    /// With neither this nor `--explanation`, the human-readable report goes
+    /// to stdout.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
-    /// Serialization format for the `--output` ontology of justification
-    /// axioms: owl/owx/ofn/obo/omn/ttl/json. When omitted the format is
-    /// inferred from the `--output` extension.
+    /// Serialization format for `--output`; inferred from its extension when
+    /// omitted.
     #[arg(short = 'f', long)]
     pub format: Option<String>,
     #[command(flatten)]
@@ -99,6 +97,9 @@ pub fn step(
 ) -> anyhow::Result<Option<crate::model::Model>> {
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
+    if args.output.is_some() {
+        crate::cmd::maybe_save(&mut model.clone(), args.output.as_deref(), args.format.as_deref())?;
+    }
 
     // `--reasoner` is validated up front, exactly as `reason` validates it: a
     // misspelt backend is an error, never a quiet fall-back to the EL engine
@@ -187,9 +188,9 @@ pub fn step(
     };
 
     let mut report = String::new();
-    // The union of all justification axioms across targets — used when `--output`
-    // (with `--format` or an ontology extension) asks for an ontology rather than
-    // the human-readable report.
+    let mut explained: Vec<crate::cmd::explain_markdown::Explained> = Vec::new();
+    // The union of all justification axioms across targets: the ontology the
+    // next command in a chain receives.
     let mut justification_axioms: Vec<AnnotatedComponent<RcStr>> = Vec::new();
 
     // One ⊥-module for the signature of EVERY target, extracted from the input
@@ -201,6 +202,26 @@ pub fn step(
     // the moment it is built: the search below never looks at it again, and on a
     // multi-hundred-megabyte input that is most of the resident memory.
     let seed: HashSet<String> = targets.iter().flat_map(|(a, b)| [a.clone(), b.clone()]).collect();
+    // The examined ontology's label assertions, by subject: the ontology of the
+    // justifications carries the labels of every term they name.
+    let mut labels: std::collections::HashMap<String, Vec<AnnotatedComponent<RcStr>>> = Default::default();
+    for ac in model.ont.iter() {
+        if let Component::AnnotationAssertion(aa) = &ac.component {
+            if aa.ann.ap.0.as_ref() == "http://www.w3.org/2000/01/rdf-schema#label" {
+                if let horned_owl::model::AnnotationSubject::IRI(iri) = &aa.subject {
+                    labels.entry(iri.as_ref().to_string()).or_default().push(ac.clone());
+                }
+            }
+        }
+    }
+    // What the markdown report needs of the examined ontology: the label each
+    // entity is shown with, and which ontology each axiom comes from.
+    let md_labels = if args.explanation.is_some() { crate::cmd::rdfs_labels(&model) } else { Default::default() };
+    let provenance = crate::cmd::explain_markdown::Provenance {
+        root: crate::build::model_ontology_id(&model).0,
+        import: if model.inlined_imports.len() == 1 { model.inlined_imports.first().cloned() } else { None },
+        imported: std::mem::take(&mut model.imported_components),
+    };
     let module = if targets.is_empty() {
         model
     } else {
@@ -218,9 +239,12 @@ pub fn step(
 
     for (n, (sub, sup)) in targets.iter().enumerate() {
         status!("explain: [{}/{}] {sub} ⊑ {sup}", n + 1, targets.len());
-        let (text, axioms) = explain_one(&module, backend, sub, sup, max);
+        let (text, axioms, justifications) = explain_one(&module, backend, sub, sup, max);
         report.push_str(&text);
         justification_axioms.extend(axioms);
+        for j in justifications {
+            explained.push(crate::cmd::explain_markdown::Explained { sub: sub.clone(), sup: sup.clone(), axioms: j });
+        }
     }
 
     // An ontology with nothing to explain still gets a report that says so, rather
@@ -229,19 +253,9 @@ pub fn step(
         report.push_str("No explanations found.");
     }
 
-    // `--output`: when a format is given or the path extension names an ontology
-    // serialization, write an ontology of the justification axioms; otherwise fall
-    // back to writing the human-readable report.
-    if let Some(p) = &args.output {
-        match resolve_ontology_format(args.format.as_deref(), p) {
-            Some(fmt) => write_justification_ontology(&justification_axioms, p, fmt)?,
-            None => std::fs::write(p, &report)?,
-        }
-    }
-    // `--explanation` always carries the human-readable report, whatever form
-    // `--output` was asked for.
+    // `--explanation` carries the markdown report.
     if let Some(p) = &args.explanation {
-        std::fs::write(p, &report)?;
+        std::fs::write(p, crate::cmd::explain_markdown::report(&explained, &md_labels, &provenance))?;
     }
     if args.output.is_none() && args.explanation.is_none() {
         print!("{report}");
@@ -251,38 +265,23 @@ pub fn step(
     // explaining — not the ontology that was examined. A chain ending
     // `explain … annotate --output x.ofn` therefore writes the explanation
     // ontology, carrying only the default prefix set.
+    let mut terms: HashSet<String> = HashSet::new();
+    for ac in &justification_axioms {
+        terms.extend(crate::sig::typed_signature(&ac.component).into_iter().map(|(_, iri)| iri));
+        terms.extend(ac.ann.iter().map(|a| a.ap.0.to_string()));
+    }
     let mut just = SetOntology::new();
     for ac in justification_axioms {
         just.insert(ac);
     }
-    Ok(Some(Model::from_parts(just, horned_owl::curie::PrefixMapping::default())))
-}
-
-/// Resolve the ontology serialization for `--output`: an explicit `--format`
-/// wins (erroring on an unknown name), otherwise infer from the path extension.
-/// Returns `None` when neither names a known ontology format, signalling that the
-/// human-readable report should be written instead.
-fn resolve_ontology_format(format: Option<&str>, output: &std::path::Path) -> Option<crate::io::Format> {
-    match format {
-        Some(name) => crate::io::Format::from_name(name).ok(),
-        None => crate::io::Format::from_path(output).ok(),
+    for t in &terms {
+        for ac in labels.get(t).into_iter().flatten() {
+            just.insert(ac.clone());
+        }
     }
-}
-
-/// Write the union of justification axioms to `path` in `fmt`. The
-/// justification ontology is a NEW ontology: it carries the default prefix set,
-/// not the examined document's.
-fn write_justification_ontology(
-    axioms: &[AnnotatedComponent<RcStr>],
-    path: &std::path::Path,
-    fmt: crate::io::Format,
-) -> anyhow::Result<()> {
-    let mut ont = SetOntology::new();
-    for ac in axioms {
-        ont.insert(ac.clone());
-    }
-    let mut out = Model::from_parts(ont, horned_owl::curie::PrefixMapping::default());
-    crate::io::save_as(&mut out, path, fmt)
+    let mut out = Model::from_parts(just, horned_owl::curie::PrefixMapping::default());
+    out.banner_labels = crate::cmd::rdfs_labels(&out);
+    Ok(Some(out))
 }
 
 /// The reasoner that answers every question this command asks: which classes are
@@ -497,7 +496,7 @@ fn explain_one(
     sub: &str,
     sup: &str,
     max: usize,
-) -> (String, Vec<AnnotatedComponent<RcStr>>) {
+) -> (String, Vec<AnnotatedComponent<RcStr>>, Vec<Vec<AnnotatedComponent<RcStr>>>) {
     let t0 = std::time::Instant::now();
     // Shrink to the ⊥-module for the two terms: it contains every justification
     // for the entailment, so the search never has to look outside it.
@@ -507,7 +506,32 @@ fn explain_one(
     let search = Search::new(&module, backend, sub, sup);
     let justifications = {
         let _hb = crate::progress::Heartbeat::start(format!("explain: justifying {sub} ⊑ {sup}"));
-        search.enumerate(max)
+        if max == 1 {
+            // One justification: the one black-box search finds.
+            let axioms: Vec<AnnotatedComponent<RcStr>> = module.ont.iter().cloned().collect();
+            let entails = |axs: &[&AnnotatedComponent<RcStr>]| -> bool {
+                search.tests.set(search.tests.get() + 1);
+                search.widest.set(search.widest.get().max(axs.len()));
+                let mut ont = SetOntology::new();
+                let mut entities: HashSet<String> = HashSet::new();
+                for ac in axs {
+                    ont.insert((*ac).clone());
+                    entities.extend(crate::sig::typed_signature(&ac.component).into_iter().map(|(_, iri)| iri));
+                }
+                for e in &entities {
+                    if let Some(decl) = search.declarations.get(e) {
+                        ont.insert(decl.clone());
+                    }
+                }
+                let m = Model::from_parts(ont, clone_prefixes(&module.prefixes));
+                backend.is_subsumed(&m, sub, sup)
+            };
+            crate::cmd::explain_blackbox::justification(&axioms, sub, sup, &entails)
+                .map(|j| vec![j])
+                .unwrap_or_default()
+        } else {
+            search.enumerate(max)
+        }
     };
     // The two numbers that say what the search cost: how many entailment tests it
     // asked, and how big the largest ontology it classified was. The module's
@@ -536,7 +560,7 @@ fn explain_one(
             }
         }
     }
-    (report, union)
+    (report, union, justifications)
 }
 
 /// A single justification, identified by the indices of the axioms (into the

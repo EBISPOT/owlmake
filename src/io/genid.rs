@@ -201,6 +201,40 @@ pub(crate) fn has_shared_structure(c: &Component<RcStr>) -> bool {
     seen.values().any(|n| *n > 1)
 }
 
+/// The group of every recorded node of an axiom, by signature hash: each
+/// recorded node takes its own group, and every anonymous node inside it is
+/// one object with the same node wherever that node's object reaches, so it
+/// takes [`crate::model::descendant_group`] of the node's object. Within an
+/// axiom that is numbered from its record a structure occurs once — one that
+/// occurs twice makes the whole axiom a copy — so a signature names one node.
+pub(crate) fn shared_groups(
+    nodes: &[crate::model::SharedNode],
+    c: &Component<RcStr>,
+) -> HashMap<u64, u64> {
+    fn walk(ce: &CE<RcStr>, nodes: &[crate::model::SharedNode], out: &mut HashMap<u64, u64>) {
+        if matches!(ce, CE::Class(_)) {
+            return;
+        }
+        let sig = crate::io::anon_sig_hash(&ce_sig(ce));
+        if let Some(n) = nodes.iter().find(|n| n.sig == sig) {
+            out.insert(sig, n.node_group());
+            for d in anonymous_descendants(ce) {
+                let ds = crate::io::anon_sig_hash(&ce_sig(d));
+                out.insert(ds, crate::model::descendant_group(n.group, ds));
+            }
+            return;
+        }
+        for sub in sub_expressions(ce) {
+            walk(sub, nodes, out);
+        }
+    }
+    let mut out = HashMap::new();
+    for ce in component_class_expressions(c) {
+        walk(ce, nodes, &mut out);
+    }
+    out
+}
+
 /// Every anonymous class expression nested inside `ce`, in walk order; `ce`
 /// itself is not included.
 pub(crate) fn anonymous_descendants(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
@@ -218,7 +252,7 @@ pub(crate) fn anonymous_descendants(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
 }
 
 /// The direct class-expression children of a class expression.
-fn sub_expressions(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
+pub(crate) fn sub_expressions(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
     match ce {
         CE::ObjectIntersectionOf(v) | CE::ObjectUnionOf(v) => v.iter().collect(),
         CE::ObjectComplementOf(b) => vec![b],
@@ -350,7 +384,7 @@ pub struct Genids {
     cross_intern: std::collections::HashMap<u64, u64>,
     /// `Model::shared_occurrences`: per axiom, the expressions in it that are
     /// one object with every other recorded occurrence.
-    shared_occurrences: HashMap<u64, Vec<(u64, u64)>>,
+    shared_occurrences: HashMap<u64, Vec<crate::model::SharedNode>>,
     /// The shared occurrences of the axiom being translated: signature hash to
     /// group.
     axiom_shared: HashMap<u64, u64>,
@@ -1149,6 +1183,10 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         }
     }
 
+    // A class frame holding a plain/`xsd:string` twin numbers its annotation
+    // assertions in the order the frame writes them (see `io::frame_twins`).
+    let frame_orders = crate::io::frame_twins::assertion_orders(model);
+
     // Entities in render order; each entity's axioms by axiom-type index, then
     // per-type field order.
     for section in [
@@ -1162,6 +1200,11 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         for iri in section.iter() {
             if let Some(mut axioms) = by_entity.remove(iri) {
                 axioms.sort_by(|a, b| cmp_axiom(&a.component, &b.component));
+                let assertion = |ac: &&AnnotatedComponent<RcStr>| matches!(ac.component, Component::AnnotationAssertion(_));
+                if let Some(order) = frame_orders.get(iri.as_str()).filter(|_| axioms.iter().any(assertion)) {
+                    axioms.retain(|ac| !assertion(ac));
+                    axioms.extend(order.iter().copied());
+                }
                 g.entity_start.insert(iri.clone(), g.counter);
                 if g.subtree_debug {
                     eprintln!("[start] {iri} {}", g.counter);
@@ -1471,7 +1514,7 @@ impl Genids {
         } else {
             self.shared_occurrences
                 .get(&axiom_identity(ac))
-                .map(|v| v.iter().copied().collect())
+                .map(|nodes| shared_groups(nodes, &ac.component))
                 .unwrap_or_default()
         };
         // A pending group belongs to ONE axiom's translation. A translation that
@@ -2094,5 +2137,59 @@ mod tests {
         assert_eq!(shared.counter, plain.counter - 1);
         let a_node = shared.entity_start["http://x/A"];
         assert_eq!(shared.shared["http://x/B"][&ce_sig(&sup)], a_node);
+    }
+
+    /// Two classes defined over the substituted expressions of merged classes:
+    /// `Ci ≡ (Ai ⊓ ∃t.T) ⊓ ∃r.(E ⊓ ∃t.T)`, where `Ai ⊓ ∃t.T` is Ai's defining
+    /// object and `E ⊓ ∃t.T` is E's, one object for both classes. Each
+    /// equivalence repeats `∃t.T`, so it is numbered as a copy; what relax
+    /// derives from it holds the objects themselves. `C2 ⊑ ∃r.(E ⊓ ∃t.T)`
+    /// reaches E's object and its `∃t.T` again, two nodes C1 already numbered;
+    /// `C2 ⊑ ∃t.T` is the `∃t.T` inside A2's object, which nothing else holds.
+    #[test]
+    fn a_relaxed_conjunct_shares_the_object_it_was_flattened_from() {
+        let ofn = "Declaration(Class(:C1))\nDeclaration(Class(:C2))\nDeclaration(Class(:A1))\n\
+                   Declaration(Class(:A2))\nDeclaration(Class(:E))\nDeclaration(Class(:T))\n\
+                   Declaration(ObjectProperty(:r))\nDeclaration(ObjectProperty(:t))\n\
+                   EquivalentClasses(:C1 ObjectIntersectionOf(ObjectIntersectionOf(:A1 ObjectSomeValuesFrom(:t :T)) \
+                   ObjectSomeValuesFrom(:r ObjectIntersectionOf(:E ObjectSomeValuesFrom(:t :T)))))\n\
+                   EquivalentClasses(:C2 ObjectIntersectionOf(ObjectIntersectionOf(:A2 ObjectSomeValuesFrom(:t :T)) \
+                   ObjectSomeValuesFrom(:r ObjectIntersectionOf(:E ObjectSomeValuesFrom(:t :T)))))";
+        let numbered = |recorded: bool| {
+            let mut m = model(ofn);
+            if recorded {
+                let defining = |c: &str| -> CE<RcStr> {
+                    let b = horned_owl::model::Build::new();
+                    CE::ObjectIntersectionOf(vec![
+                        CE::Class(b.class(format!("http://x/{c}"))),
+                        CE::ObjectSomeValuesFrom {
+                            ope: OPE::ObjectProperty(b.object_property("http://x/t")),
+                            bce: Box::new(CE::Class(b.class("http://x/T"))),
+                        },
+                    ])
+                };
+                let root = |c: &str| crate::model::SharedNode {
+                    sig: crate::io::anon_sig_hash(&ce_sig(&defining(c))),
+                    group: crate::io::anon_sig_hash(&format!("http://x/{c}")),
+                    inside: false,
+                };
+                let eqs: Vec<AnnotatedComponent<RcStr>> = m
+                    .ont
+                    .iter()
+                    .filter(|ac| matches!(ac.component, Component::EquivalentClasses(_)))
+                    .cloned()
+                    .collect();
+                for ac in eqs {
+                    let a = if format!("{:?}", ac.component).contains("http://x/A1") { "A1" } else { "A2" };
+                    m.shared_occurrences.insert(axiom_identity(&ac), vec![root(a), root("E")]);
+                }
+            }
+            let m = crate::cmd::relax::relax(m);
+            compute(&m, 0, 0)
+        };
+        let plain = numbered(false);
+        let shared = numbered(true);
+        assert_eq!(shared.counter, plain.counter - 2);
+        assert_eq!(shared.entity_start["http://x/C2"], plain.entity_start["http://x/C2"]);
     }
 }

@@ -430,6 +430,18 @@ pub struct Queryable {
     /// Every triple with a NAMED object, grouped by that object, in the order the
     /// document states them — what a pattern with a bound object is answered from.
     object_order: ObjectOrder,
+    /// The documents queried as named graphs under `--use-graphs`, whose union
+    /// the query's default graph is: built from `graph_docs` when first needed.
+    named_graphs: std::cell::OnceCell<Vec<Queryable>>,
+    graph_docs: Vec<GraphDoc>,
+}
+
+/// A document queried as a named graph of its own.
+pub enum GraphDoc {
+    /// The root ontology's own content.
+    Root(crate::model::Model),
+    /// An import, read again from where the closure was read from.
+    Import(crate::model::ImportSource),
 }
 
 /// The subject id standing for a blank node.
@@ -565,6 +577,8 @@ impl Queryable {
             store,
             type_order: scan_type_order(&rdf),
             object_order: scan_object_order(&rdf),
+            named_graphs: Default::default(),
+            graph_docs: Vec::new(),
         };
         q.drop_synthesised_types(model)?;
         Ok(q)
@@ -850,9 +864,146 @@ impl Queryable {
         )
     }
 
+    /// [`Queryable::predicate_pairs`] with each object in its solution-table
+    /// form (see [`term_to_tsv`]), and literal objects included: a literal is
+    /// read back from the store among its subject's values under the predicate,
+    /// by the value hash its slot was placed by. A literal whose value hash is
+    /// not modelled fills its slot but names no pair.
+    pub fn predicate_terms(&self, predicate: &str) -> Option<Vec<(String, String)>> {
+        use crate::sparql::jena_order as jo;
+        let bunch = self.object_order.pred_bunch(predicate)?;
+        let p = oxigraph::model::NamedNodeRef::new(predicate).ok()?;
+        let ph = jo::node_hash(predicate);
+        let hashes: Vec<Option<i32>> = bunch
+            .iter()
+            .map(|(s, o)| {
+                if *s == NO_SUBJECT {
+                    return None;
+                }
+                let oh = match o {
+                    PObj::Named(id) => Some(jo::node_hash(self.object_order.name(*id))),
+                    PObj::Lit(h) => *h,
+                    PObj::Anon => None,
+                }?;
+                Some(jo::triple_hash(jo::node_hash(self.object_order.name(*s)), ph, oh))
+            })
+            .collect();
+        // Each subject's literals under the predicate, as (value hash, form),
+        // handed out as the bunch reaches them.
+        let mut held: std::collections::HashMap<u32, Vec<(Option<i32>, String)>> = Default::default();
+        let mut out = Vec::new();
+        for i in jo::bunch_order(&hashes) {
+            let (s, o) = &bunch[i];
+            let subject = self.object_order.name(*s);
+            match o {
+                PObj::Named(oid) => {
+                    out.push((subject.to_string(), format!("<{}>", self.object_order.name(*oid))))
+                }
+                PObj::Lit(Some(h)) => {
+                    let values = held.entry(*s).or_insert_with(|| {
+                        let Ok(sn) = oxigraph::model::NamedNodeRef::new(subject) else {
+                            return Vec::new();
+                        };
+                        self.store
+                            .quads_for_pattern(Some(sn.into()), Some(p), None, None)
+                            .filter_map(|q| q.ok())
+                            .filter_map(|q| match &q.object {
+                                Term::Literal(l) => Some((
+                                    literal_value_hash(l.value(), l.datatype().as_str(), l.language().is_some()),
+                                    term_to_tsv(&q.object),
+                                )),
+                                _ => None,
+                            })
+                            .collect()
+                    });
+                    if let Some(at) = values.iter().position(|(vh, _)| *vh == Some(*h)) {
+                        out.push((subject.to_string(), values.remove(at).1));
+                    }
+                }
+                PObj::Lit(None) | PObj::Anon => {}
+            }
+        }
+        Some(out)
+    }
+
     /// The nodes an arbitrary-length path `?v <pred>* <root>` binds, in the order
     /// it binds them.
     ///
+    /// Query `docs` as named graphs: the default graph becomes their union.
+    pub fn set_graph_docs(&mut self, docs: Vec<GraphDoc>) {
+        self.graph_docs = docs;
+    }
+
+    /// The named graphs, in the order the union reads them: the order of the
+    /// table keyed by graph name, filled in the order of the set of ontologies
+    /// (keyed by ontology identity) they were added from. Empty without
+    /// `--use-graphs`, and when a graph cannot be built.
+    pub fn named_graphs(&self) -> &[Queryable] {
+        self.named_graphs.get_or_init(|| {
+            use crate::owlapi_hash::{java_hashset_capacity, ontology_id_hash};
+            use crate::sparql::jena_order as jo;
+            let mut built: Vec<(String, i32, Queryable)> = Vec::new();
+            for doc in &self.graph_docs {
+                let model = match doc {
+                    GraphDoc::Root(m) => Ok(m.clone()),
+                    GraphDoc::Import(src) => match &src.path {
+                        Some(p) => crate::io::load(p),
+                        None => crate::io::load_iri(&src.iri, None),
+                    },
+                };
+                let Ok(model) = model else { return Vec::new() };
+                let (iri, version) = crate::build::model_ontology_id(&model);
+                let name = match (&iri, doc) {
+                    (Some(i), _) => i.clone(),
+                    (None, GraphDoc::Import(src)) => src.iri.clone(),
+                    (None, GraphDoc::Root(_)) => String::new(),
+                };
+                let id = ontology_id_hash(iri.as_deref(), version.as_deref());
+                let Ok(q) = Queryable::from_model(&model) else { return Vec::new() };
+                built.push((name, id, q));
+            }
+            let spread = |h: i32| {
+                let h = h as u32;
+                (h ^ (h >> 16)) as usize
+            };
+            let cap = java_hashset_capacity(built.len());
+            let mut order: Vec<usize> = (0..built.len()).collect();
+            // The set of ontologies, then the name-keyed table filled from it.
+            order.sort_by_key(|&i| spread(built[i].1) & (cap - 1));
+            let rank: std::collections::HashMap<usize, usize> = order.iter().enumerate().map(|(r, &i)| (i, r)).collect();
+            order.sort_by_key(|&i| (spread(jo::node_hash(&built[i].0)) & (cap - 1), rank[&i]));
+            let mut slots: Vec<Option<Queryable>> = built.into_iter().map(|(_, _, q)| Some(q)).collect();
+            order.into_iter().filter_map(|i| slots[i].take()).collect()
+        })
+    }
+
+    /// `path_order` over the union of the named graphs: each step finds the
+    /// reachers graph by graph, in the order the union reads the graphs, keeping
+    /// a triple only the first time it is found.
+    pub fn union_path_order(graphs: &[Queryable], root: &str, predicate: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        let mut stack = vec![root.to_string()];
+        while let Some(node) = stack.pop() {
+            if !seen.insert(node.clone()) {
+                continue;
+            }
+            out.push(node.clone());
+            let mut reachers: Vec<String> = Vec::new();
+            for g in graphs {
+                for r in g.object_subjects(&node, predicate).unwrap_or_default() {
+                    if !reachers.contains(&r) {
+                        reachers.push(r);
+                    }
+                }
+            }
+            for r in reachers.into_iter().rev() {
+                stack.push(r);
+            }
+        }
+        out
+    }
+
     /// The path is walked backwards from `root`: a node is emitted when it is
     /// first reached, and each of its own reachers is then walked in turn, depth
     /// first — so a node always precedes everything that only it reaches.
@@ -2367,7 +2518,13 @@ SELECT ?entity ?property ?value WHERE {
                   <http://x/2> <http://x/p> \"c\" .\n" as &[u8],
             )
             .unwrap();
-        let q = Queryable { store, type_order: Default::default(), object_order: Default::default() };
+        let q = Queryable {
+            store,
+            type_order: Default::default(),
+            object_order: Default::default(),
+            named_graphs: Default::default(),
+            graph_docs: Vec::new(),
+        };
         let sparql = "SELECT ?s (COUNT(?o) AS ?n) WHERE { ?s <http://x/p> ?o } \
                       GROUP BY ?s HAVING (?n > 1)";
         assert_eq!(q.count(sparql).unwrap(), 1);

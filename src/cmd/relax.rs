@@ -104,6 +104,57 @@ fn obo_expressible(ce: &CE<horned_owl::model::RcStr>) -> bool {
     }
 }
 
+/// Every node of an equivalence's members that is a recorded node or lies
+/// inside one, keyed by address: a node whose structure is recorded is that
+/// node, and every anonymous node inside it lies inside the same object.
+fn recorded_nodes(
+    members: &[CE<horned_owl::model::RcStr>],
+    nodes: &[crate::model::SharedNode],
+) -> std::collections::HashMap<*const CE<horned_owl::model::RcStr>, crate::model::SharedNode> {
+    fn walk(
+        ce: &CE<horned_owl::model::RcStr>,
+        within: Option<u64>,
+        nodes: &[crate::model::SharedNode],
+        out: &mut std::collections::HashMap<*const CE<horned_owl::model::RcStr>, crate::model::SharedNode>,
+    ) {
+        if matches!(ce, CE::Class(_)) {
+            return;
+        }
+        let sig = crate::io::anon_sig_hash(&crate::io::genid::ce_sig(ce));
+        let mut inner = within;
+        if let Some(group) = within {
+            out.insert(ce as *const _, crate::model::SharedNode { sig, group, inside: true });
+        } else if let Some(n) = nodes.iter().find(|n| n.sig == sig) {
+            out.insert(ce as *const _, *n);
+            inner = Some(n.group);
+        }
+        for sub in crate::io::genid::sub_expressions(ce) {
+            walk(sub, inner, nodes, out);
+        }
+    }
+    let mut out = std::collections::HashMap::new();
+    for m in members {
+        walk(m, None, nodes, &mut out);
+    }
+    out
+}
+
+/// The outermost recorded nodes within `ce`: `ce` itself when it is one,
+/// otherwise the outermost ones below it.
+fn topmost_recorded(
+    ce: &CE<horned_owl::model::RcStr>,
+    recorded: &std::collections::HashMap<*const CE<horned_owl::model::RcStr>, crate::model::SharedNode>,
+    out: &mut Vec<crate::model::SharedNode>,
+) {
+    if let Some(n) = recorded.get(&(ce as *const _)) {
+        out.push(*n);
+        return;
+    }
+    for sub in crate::io::genid::sub_expressions(ce) {
+        topmost_recorded(sub, recorded, out);
+    }
+}
+
 /// Collect the leaf conjuncts of a class expression, flattening any nested
 /// `ObjectIntersectionOf` (but not descending into restriction fillers).
 fn collect_conjuncts<'a>(ce: &'a CE<horned_owl::model::RcStr>, out: &mut Vec<&'a CE<horned_owl::model::RcStr>>) {
@@ -203,17 +254,21 @@ pub fn relax_with(mut model: crate::model::Model, opts: &RelaxOptions) -> crate:
         })
         .collect();
 
-    // An axiom derived from a conjunct that is one object with the conjuncts
-    // of other axioms (`Model::shared_occurrences`) holds that very object as
-    // its superclass, so it carries the record on.
-    let mut derived_recs: Vec<(u64, Vec<(u64, u64)>)> = Vec::new();
+    // A derived axiom holds the very conjunct object it was flattened from, so
+    // whatever recorded node (`Model::shared_occurrences`) that object is, lies
+    // inside, or holds, the derived axiom holds too.
+    let mut derived_recs: Vec<(u64, Vec<crate::model::SharedNode>)> = Vec::new();
     for ac in model.ont.iter() {
-        let shared_rec: Option<&Vec<(u64, u64)>> = if model.shared_occurrences.is_empty() {
+        let shared_rec: Option<&Vec<crate::model::SharedNode>> = if model.shared_occurrences.is_empty() {
             None
         } else {
             model.shared_occurrences.get(&crate::io::genid::axiom_identity(ac))
         };
         if let Component::EquivalentClasses(eq) = &ac.component {
+            let recorded = match shared_rec {
+                Some(nodes) => recorded_nodes(&eq.0, nodes),
+                None => std::collections::HashMap::new(),
+            };
             // Find a named class member and a conjunction member.
             let named: Vec<&CE<_>> = eq.0.iter().filter(|c| matches!(c, CE::Class(_))).collect();
             for n in &named {
@@ -307,18 +362,28 @@ pub fn relax_with(mut model: crate::model::Model, opts: &RelaxOptions) -> crate:
                         if existing_plain.contains(&((*n).clone(), sup.clone())) {
                             continue;
                         }
+                        let weakened = sup != *leaf;
                         let derived = Component::SubClassOf(SubClassOf {
                             sub: (*n).clone(),
                             sup,
                         });
-                        if let Some(rec) = shared_rec {
-                            let sup_hash = crate::io::anon_sig_hash(&crate::io::genid::ce_sig(leaf));
-                            if rec.iter().any(|(s, _)| *s == sup_hash) {
+                        if !recorded.is_empty() {
+                            // A weakened cardinality is a new restriction around
+                            // the same filler.
+                            let mut nodes = Vec::new();
+                            if !weakened {
+                                topmost_recorded(leaf, &recorded, &mut nodes);
+                            } else {
+                                for sub in crate::io::genid::sub_expressions(leaf) {
+                                    topmost_recorded(sub, &recorded, &mut nodes);
+                                }
+                            }
+                            if !nodes.is_empty() {
                                 let ac = horned_owl::model::AnnotatedComponent {
                                     component: derived.clone(),
                                     ann: Default::default(),
                                 };
-                                derived_recs.push((crate::io::genid::axiom_identity(&ac), rec.clone()));
+                                derived_recs.push((crate::io::genid::axiom_identity(&ac), nodes));
                             }
                         }
                         to_add.push(derived);
