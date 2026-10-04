@@ -3,9 +3,8 @@
 //! component on its own (`render_component_line`) and for the OBO `owl-axioms:`
 //! clause (`render_owl_axioms`), both written by the functional writer.
 //!
-//! The order is a preorder, not a total one: `cmp_component` reports equal for
-//! two distinct axioms whose type it does not rank, and `cmp_ce` does the same
-//! for two distinct expressions of a form it does not compare. An output stable
+//! The order over axioms is a preorder, not a total one: `cmp_component` reports
+//! equal for two distinct axioms whose type it does not rank. An output stable
 //! across runs therefore does not follow from the comparison alone — it follows
 //! from sorting with a STABLE sort, which leaves tied axioms in the order they
 //! were handed over.
@@ -143,12 +142,9 @@ pub(crate) fn cmp_literal(x: &Literal<RcStr>, y: &Literal<RcStr>) -> Ordering {
         .then_with(|| lit_lang(x).cmp(lit_lang(y)))
 }
 
-/// Orders class expressions by `typeIndex`, then by their components.
-///
-/// Forms with no comparison arm of their own — `ObjectOneOf`, `ObjectHasValue`, and
-/// everything the 3999 catch-all collects — compare equal to each other, so this is
-/// a preorder, not a total order. Ties keep the order they arrived in, which only a
-/// stable sort preserves.
+/// Orders class expressions by `typeIndex`, then by their components: a
+/// restriction by its property and then its filler or value, an n-ary boolean
+/// and a one-of by their members as a set.
 pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
     let ti = ce_type_index(a).cmp(&ce_type_index(b));
     if ti != Ordering::Equal {
@@ -160,6 +156,16 @@ pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
         | (CE::ObjectUnionOf(x), CE::ObjectUnionOf(y)) => cmp_ce_list(x, y),
         (CE::ObjectComplementOf(x), CE::ObjectComplementOf(y)) => cmp_ce(x, y),
         (CE::ObjectHasSelf(x), CE::ObjectHasSelf(y)) => cmp_ope(x, y),
+        (CE::ObjectOneOf(x), CE::ObjectOneOf(y)) => {
+            let mut x: Vec<&Individual<RcStr>> = x.iter().collect();
+            let mut y: Vec<&Individual<RcStr>> = y.iter().collect();
+            x.sort_by(|p, q| cmp_individual(p, q));
+            y.sort_by(|p, q| cmp_individual(p, q));
+            cmp_sorted(&x, &y, |p, q| cmp_individual(p, q))
+        }
+        (CE::ObjectHasValue { ope: pa, i: ia }, CE::ObjectHasValue { ope: pb, i: ib }) => {
+            cmp_ope(pa, pb).then_with(|| cmp_individual(ia, ib))
+        }
         (
             CE::ObjectSomeValuesFrom { ope: pa, bce: fa },
             CE::ObjectSomeValuesFrom { ope: pb, bce: fb },

@@ -325,7 +325,7 @@ pub struct Genids {
     /// order. Two annotated axioms over structurally-equal anonymous expressions
     /// are two DISTINCT blank nodes, which a signature-keyed map cannot represent;
     /// the writer consumes this positionally, in the order it renders them
-    /// (equivalentClass then subClassOf, each `ce_key`-sorted).
+    /// (equivalentClass then subClassOf, each in [`cmp_ce`] order).
     pub shared_seq: HashMap<String, Vec<(String, u64)>>,
     /// Signatures the pass actually REUSED, per owner — i.e. where two axioms
     /// resolved to one blank node. The writer keys its operand-reference map on

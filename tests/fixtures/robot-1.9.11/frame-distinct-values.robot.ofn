@@ -1,0 +1,30 @@
+Prefix(:=<http://example.org/frame-distinct-values.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/frame-distinct-values.owl>
+
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(NamedIndividual(<http://example.org/a>))
+Declaration(NamedIndividual(<http://example.org/b>))
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/p> (<http://example.org/p>)
+
+ObjectPropertyDomain(<http://example.org/p> DataHasValue(<http://example.org/d> "1"))
+ObjectPropertyDomain(<http://example.org/p> DataHasValue(<http://example.org/d> "1"^^xsd:integer))
+ObjectPropertyRange(<http://example.org/p> ObjectOneOf(<http://example.org/a>))
+ObjectPropertyRange(<http://example.org/p> ObjectOneOf(<http://example.org/b>))
+
+
+
+
+
+)

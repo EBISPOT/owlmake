@@ -4355,16 +4355,17 @@ fn untyped_class_expressions_in_turtle_are_read_by_their_predicates() {
 /// domain or range of an inverse by the property, an n-ary axiom by its operand
 /// set; IRIs by namespace and then local name, so `…/p_b` precedes `…/p/c`; a
 /// data union before every other data range, and a one-of's, union's and
-/// restriction's operands sorted; and in OBO, a pair's clause on the first
-/// member naming the other. In functional syntax for all three documents, in
-/// RDF/XML and Turtle for the two whose frames hold no restriction, and in OBO
-/// for the one ROBOT can write as OBO.
+/// restriction's operands sorted; a class's restrictions and an individual's
+/// property values in a frame in that same order; and in OBO, a pair's clause
+/// on the first member naming the other. In functional syntax, RDF/XML and
+/// Turtle for all three documents, and in OBO for the one ROBOT can write as
+/// OBO.
 #[test]
 fn axioms_and_operands_are_ordered_as_robot_orders_them() {
     for (name, exts) in [
         ("axiom-order-general", &["ofn", "owl", "ttl"][..]),
         ("axiom-order-operands", &["ofn", "owl", "ttl", "obo"]),
-        ("axiom-order-frames", &["ofn"]),
+        ("axiom-order-frames", &["ofn", "owl", "ttl"]),
     ] {
         for ext in exts {
             let out = tmp(&format!("{name}.{ext}"));
@@ -4380,6 +4381,28 @@ fn axioms_and_operands_are_ordered_as_robot_orders_them() {
             let _ = std::fs::remove_file(&out);
             assert_eq!(text, fixture_text(&format!("{name}.robot.{ext}")), "{name}.{ext}");
         }
+    }
+}
+
+/// Two expressions that differ only in a literal's datatype are two
+/// expressions: a property's domains `DataHasValue(d "1")` and
+/// `DataHasValue(d "1"^^xsd:integer)` are both written. As ROBOT 1.9.11 writes
+/// them, in functional syntax, RDF/XML and Turtle.
+#[test]
+fn expressions_that_differ_only_in_a_datatype_are_both_written() {
+    for ext in ["ofn", "owl", "ttl"] {
+        let out = tmp(&format!("frame-distinct-values.{ext}"));
+        let run = bin()
+            .args(["convert", "-i"])
+            .arg(robot_fixture("frame-distinct-values.ofn"))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("frame-distinct-values.robot.{ext}")), "{ext}");
     }
 }
 

@@ -2160,6 +2160,8 @@ type Ann = (String, AnnotationValue<RcStr>, Vec<(String, AnnotationValue<RcStr>)
 
 use horned_owl::model::{ClassExpression as CE, Individual, ObjectPropertyExpression as OPEx};
 
+use crate::io::owlfunc::cmp_ce;
+
 /// The `owl:onProperty` slot of a restriction. A NAMED property is a bare
 /// `rdf:resource`; an INVERSE one is an anonymous node carrying `owl:inverseOf`
 /// — `ope_iri` has no IRI to give for it, so formatting that as the attribute
@@ -2176,130 +2178,6 @@ fn render_on_property(ope: &OPEx<RcStr>, indent: usize) -> String {
             esc_attr(p.0.as_ref())
         ),
     }
-}
-
-fn ope_iri(ope: &OPEx<RcStr>) -> Option<String> {
-    match ope {
-        OPEx::ObjectProperty(p) => Some(p.0.as_ref().to_string()),
-        OPEx::InverseObjectProperty(_) => None,
-    }
-}
-
-/// A class-expression sort key mirroring `render_ce` output order for a set of
-/// superclass/operand expressions: named classes (rank 0, by ns/rem) before
-/// restrictions (rank 1, by property then filler), encoded as a string so it
-/// nests without a recursive type. `\u{1}` separates fields, `\u{0}` ns/rem.
-fn ce_key(ce: &CE<RcStr>) -> String {
-    match ce {
-        // Named class (rdf:resource) first, then owl:Class set operators, then
-        // owl:Restriction nodes — the order anonymous superclasses render in.
-        CE::Class(c) => {
-            let (n, r) = iri_key(c.0.as_ref());
-            format!("0\u{1}{n}\u{0}{r}")
-        }
-        CE::ObjectIntersectionOf(_) => format!("1\u{1}i\u{1}{}", set_key(ce)),
-        CE::ObjectUnionOf(_) => format!("1\u{1}u\u{1}{}", set_key(ce)),
-        // Restrictions on a property share rank 2 and sort by property, then by
-        // class-expression kind (some < all < min < exact < max), then by
-        // cardinality value and filler.
-        CE::ObjectSomeValuesFrom { ope, bce } => {
-            let p = ope_iri(ope).unwrap_or_default();
-            let (n, r) = iri_key(&p);
-            format!("2\u{1}1\u{1}{n}\u{0}{r}\u{1}{}", ce_key(bce))
-        }
-        CE::ObjectAllValuesFrom { ope, bce } => {
-            let p = ope_iri(ope).unwrap_or_default();
-            let (n, r) = iri_key(&p);
-            format!("2\u{1}2\u{1}{n}\u{0}{r}\u{1}{}", ce_key(bce))
-        }
-        CE::ObjectMinCardinality { n: card, ope, bce } => {
-            let p = ope_iri(ope).unwrap_or_default();
-            let (n, r) = iri_key(&p);
-            format!("2\u{1}3\u{1}{n}\u{0}{r}\u{1}{card:020}\u{1}{}", ce_key(bce))
-        }
-        CE::ObjectExactCardinality { n: card, ope, bce } => {
-            let p = ope_iri(ope).unwrap_or_default();
-            let (n, r) = iri_key(&p);
-            format!("2\u{1}4\u{1}{n}\u{0}{r}\u{1}{card:020}\u{1}{}", ce_key(bce))
-        }
-        CE::ObjectMaxCardinality { n: card, ope, bce } => {
-            let p = ope_iri(ope).unwrap_or_default();
-            let (n, r) = iri_key(&p);
-            format!("2\u{1}5\u{1}{n}\u{0}{r}\u{1}{card:020}\u{1}{}", ce_key(bce))
-        }
-        // Class-expression kind order: Class < Intersection < Union < Complement
-        // < restrictions. Complement sorts by its operand; rank it between union
-        // ("1\x01u") and the restrictions ("2").
-        CE::ObjectComplementOf(b) => format!("1\u{1}v\u{1}{}", ce_key(b)),
-        // `ObjectOneOf` is the last of the object class-expression kinds, after
-        // every restriction (sub-ranks 1–5 above), so rank it "2\x019".
-        CE::ObjectOneOf(inds) => {
-            let mut keys: Vec<String> = inds.iter().map(ind_key).collect();
-            keys.sort();
-            format!("2\u{1}9\u{1}{}", keys.join("\u{2}"))
-        }
-        // `ObjectHasValue` is the kind after the three object cardinalities and
-        // before the data restrictions, so it ranks between them. Keyed by the
-        // property and then the individual, as the data form is keyed by the
-        // property and then its literal.
-        CE::ObjectHasValue { ope, i } => {
-            let p = ope_iri(ope).unwrap_or_default();
-            let (n, r) = iri_key(&p);
-            format!("2\u{1}6\u{1}{n}\u{0}{r}\u{1}{}", ind_key(i))
-        }
-        // The DATA restrictions. The kind ordering continues past the object
-        // forms, so they rank after `ObjectOneOf` — keyed, like the object ones,
-        // by the property they restrict.
-        CE::DataSomeValuesFrom { dp, dr } => {
-            let (n, r) = iri_key(dp.0.as_ref());
-            format!("2\u{1}a\u{1}{n}\u{0}{r}\u{1}{}", dr_key(dr))
-        }
-        CE::DataAllValuesFrom { dp, dr } => {
-            let (n, r) = iri_key(dp.0.as_ref());
-            format!("2\u{1}b\u{1}{n}\u{0}{r}\u{1}{}", dr_key(dr))
-        }
-        CE::DataHasValue { dp, l } => {
-            let (n, r) = iri_key(dp.0.as_ref());
-            format!("2\u{1}c\u{1}{n}\u{0}{r}\u{1}{}", l.literal())
-        }
-        // The data cardinalities keep the object ones' relative order — min, then
-        // exact, then max — after the other data restrictions.
-        CE::DataMinCardinality { n: card, dp, dr } => {
-            let (n, r) = iri_key(dp.0.as_ref());
-            format!("2\u{1}d\u{1}{n}\u{0}{r}\u{1}{card:020}\u{1}{}", dr_key(dr))
-        }
-        CE::DataExactCardinality { n: card, dp, dr } => {
-            let (n, r) = iri_key(dp.0.as_ref());
-            format!("2\u{1}e\u{1}{n}\u{0}{r}\u{1}{card:020}\u{1}{}", dr_key(dr))
-        }
-        CE::DataMaxCardinality { n: card, dp, dr } => {
-            let (n, r) = iri_key(dp.0.as_ref());
-            format!("2\u{1}f\u{1}{n}\u{0}{r}\u{1}{card:020}\u{1}{}", dr_key(dr))
-        }
-        _ => "3".to_string(),
-    }
-}
-
-/// Sort key for an individual in an `owl:oneOf` list — named individuals by
-/// (namespace, remainder) like `ce_key`, anonymous ones after them by node id.
-fn ind_key(i: &Individual<RcStr>) -> String {
-    match i {
-        Individual::Named(n) => {
-            let (ns, rem) = iri_key(n.0.as_ref());
-            format!("0\u{1}{ns}\u{0}{rem}")
-        }
-        Individual::Anonymous(a) => format!("1\u{1}{}", a.0.as_ref()),
-    }
-}
-
-fn set_key(ce: &CE<RcStr>) -> String {
-    let ops = match ce {
-        CE::ObjectIntersectionOf(o) | CE::ObjectUnionOf(o) => o,
-        _ => return String::new(),
-    };
-    let mut keys: Vec<String> = ops.iter().map(ce_key).collect();
-    keys.sort();
-    keys.join("\u{2}")
 }
 
 /// Render a class expression as RDF/XML at `indent` spaces. A named class
@@ -3060,19 +2938,6 @@ pub(crate) fn facet_rank(iri: &str) -> usize {
     FACETS.iter().position(|f| *f == local).unwrap_or(FACETS.len())
 }
 
-/// Sort key for a data range, so multiple ranges on one property render in a
-/// stable order (named datatypes by IRI).
-fn dr_key(dr: &horned_owl::model::DataRange<RcStr>) -> String {
-    use horned_owl::model::DataRange as DR;
-    match dr {
-        DR::Datatype(d) => {
-            let (n, r) = iri_key(d.0.as_ref());
-            format!("0\u{1}{n}\u{0}{r}")
-        }
-        _ => "1".to_string(),
-    }
-}
-
 /// A data range as the object of `tag` on a property or datatype block, and —
 /// when its axiom is annotated — the reification's `owl:annotatedTarget`. A named
 /// datatype is a resource in both places. An anonymous range of an annotated
@@ -3150,12 +3015,12 @@ fn render_prop_ce(tag: &str, ce: &CE<RcStr>, g: &Genids) -> String {
     }
 }
 
-/// The class expressions for one property's domain/range, sorted by `ce_key`, as
-/// the writer renders multiple values.
+/// The class expressions for one property's domain/range, in class-expression
+/// order, as the writer renders multiple values.
 fn sorted_ce(v: Option<&Vec<CE<RcStr>>>) -> Vec<&CE<RcStr>> {
     let mut out: Vec<&CE<RcStr>> = v.map(|xs| xs.iter().collect()).unwrap_or_default();
-    out.sort_by(|a, b| ce_key(a).cmp(&ce_key(b)));
-    out.dedup_by(|a, b| ce_key(a) == ce_key(b));
+    out.sort_by(|a, b| cmp_ce(a, b));
+    out.dedup_by(|a, b| cmp_ce(a, b).is_eq());
     out
 }
 
@@ -3166,8 +3031,8 @@ fn sorted_prop_ce(
 ) -> Vec<&(CE<RcStr>, Vec<(String, AnnotationValue<RcStr>)>)> {
     let mut out: Vec<&(CE<RcStr>, Vec<(String, AnnotationValue<RcStr>)>)> =
         v.map(|xs| xs.iter().collect()).unwrap_or_default();
-    out.sort_by(|a, b| ce_key(&a.0).cmp(&ce_key(&b.0)));
-    out.dedup_by(|a, b| ce_key(&a.0) == ce_key(&b.0) && a.1 == b.1);
+    out.sort_by(|a, b| cmp_ce(&a.0, &b.0));
+    out.dedup_by(|a, b| cmp_ce(&a.0, &b.0).is_eq() && a.1 == b.1);
     out
 }
 
@@ -3178,7 +3043,7 @@ fn render_set(ops: &[CE<RcStr>], tag: &str, indent: usize, g: &Genids) -> String
     let inner = " ".repeat(indent + 8);
     let mut s = format!("{pad}<owl:Class>\n{pad2}<owl:{tag} rdf:parseType=\"Collection\">\n");
     let mut sorted: Vec<&CE<RcStr>> = ops.iter().collect();
-    sorted.sort_by(|a, b| ce_key(a).cmp(&ce_key(b)));
+    sorted.sort_by(|a, b| cmp_ce(a, b));
     for op in sorted {
         match op {
             CE::Class(c) => s.push_str(&format!("{inner}<rdf:Description rdf:about=\"{}\"/>\n", esc_attr(c.0.as_ref()))),
@@ -3298,7 +3163,7 @@ fn render_gci_subclass(sub: &CE<RcStr>, sup: &CE<RcStr>, g: &Genids) -> String {
 /// to the other. UBERON's `uberon_bot.owl` has seven, each a union of `part_of`
 /// restrictions equivalent to a third.
 fn render_gci_equivalent(a: &CE<RcStr>, b: &CE<RcStr>, g: &Genids) -> String {
-    let (host, other) = if ce_key(a) <= ce_key(b) { (a, b) } else { (b, a) };
+    let (host, other) = if cmp_ce(a, b).is_le() { (a, b) } else { (b, a) };
     insert_before_close(&render_ce(host, 4, g), &edge_to("owl:equivalentClass", other, g))
 }
 
@@ -3318,7 +3183,7 @@ fn render_gci_equivalent_annotated(
     prefixes: &[(String, String)],
 ) -> String {
     let mut ops: Vec<&CE<RcStr>> = members.iter().collect();
-    ops.sort_by(|a, b| crate::io::owlfunc::cmp_ce(a, b));
+    ops.sort_by(|a, b| cmp_ce(a, b));
     let (src, tgt) = (ops[0], ops[1]);
     let no_g = Genids::new();
     // Inline-anon: the edge nests a full copy of the target inside the source
@@ -3374,7 +3239,7 @@ fn render_gci_disjoint(a: &CE<RcStr>, b: &CE<RcStr>, g: &Genids) -> String {
         (b, a)
     } else if matches!(b, CE::Class(_)) {
         (a, b)
-    } else if ce_key(a) <= ce_key(b) {
+    } else if cmp_ce(a, b).is_le() {
         (a, b)
     } else {
         (b, a)
@@ -3470,7 +3335,7 @@ fn render_gci_disjoint_annotated(
     prefixes: &[(String, String)],
 ) -> String {
     let mut ops: Vec<&CE<RcStr>> = members.iter().collect();
-    ops.sort_by(|a, b| crate::io::owlfunc::cmp_ce(a, b));
+    ops.sort_by(|a, b| cmp_ce(a, b));
     let (src, tgt) = (ops[0], ops[1]);
     let no_g = Genids::new();
     // Inline-anon: the edge nests a full copy of the target inside the source
@@ -3525,7 +3390,7 @@ fn render_gci_disjoint_annotated(
 /// `rdf:Description rdf:about`, anonymous ones nested.
 fn render_all_disjoint(members: &[CE<RcStr>], g: &Genids, anns: &str) -> String {
     let mut ms: Vec<&CE<RcStr>> = members.iter().collect();
-    ms.sort_by(|a, b| ce_key(a).cmp(&ce_key(b)));
+    ms.sort_by(|a, b| cmp_ce(a, b));
     let mut s = String::from("    <rdf:Description>\n");
     s.push_str("        <rdf:type rdf:resource=\"http://www.w3.org/2002/07/owl#AllDisjointClasses\"/>\n");
     s.push_str("        <owl:members rdf:parseType=\"Collection\">\n");
@@ -4515,7 +4380,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 let mut members: Vec<&CE<RcStr>> = du.1.iter().collect();
                 members.sort_by(|a, b| match (a, b) {
                     (CE::Class(x), CE::Class(y)) => iri_key(x.0.as_ref()).cmp(&iri_key(y.0.as_ref())),
-                    _ => crate::io::owlfunc::cmp_ce(a, b),
+                    _ => cmp_ce(a, b),
                 });
                 members.dedup();
                 let items: Vec<String> = members
@@ -5931,17 +5796,13 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         let mut sub_reif = String::new();
 
         let mut eqs: Vec<&SubSup> = equiv_class.get(iri).unwrap_or(&no_eq).iter().collect();
-        eqs.sort_by(|a, b| {
-            ce_key(&a.0).cmp(&ce_key(&b.0)).then_with(|| cmp_ann_list(&a.1, &b.1))
-        });
+        eqs.sort_by(|a, b| cmp_ce(&a.0, &b.0).then_with(|| cmp_ann_list(&a.1, &b.1)));
         let mut sups: Vec<&SubSup> = sub_class.get(iri).unwrap_or(&no_sub).iter().collect();
-        sups.sort_by(|a, b| {
-            ce_key(&a.0).cmp(&ce_key(&b.0)).then_with(|| cmp_ann_list(&a.1, &b.1))
-        });
+        sups.sort_by(|a, b| cmp_ce(&a.0, &b.0).then_with(|| cmp_ann_list(&a.1, &b.1)));
 
         // The blank-node ids (`genidN`) for this class's annotated anonymous
         // equivalentClass/subClassOf expressions, in the render order the loop below
-        // consumes them (equivalentClass then subClassOf, each ce_key-sorted). Looked
+        // consumes them (equivalentClass then subClassOf, each in class-expression order). Looked
         // up from the computed genid pass by structural signature.
         let _ = &no_genids;
         // Consume this owner's genids in allocation order, falling back to the
@@ -5953,7 +5814,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
         // SubClassOf 2, DisjointClasses 3) and the order the body renders them.
         let dj_ann: Vec<(CE<RcStr>, Vec<(String, AnnotationValue<RcStr>)>)> = {
             let mut v = disjoint_anon.get(iri.as_str()).cloned().unwrap_or_default();
-            v.sort_by(|a, b| crate::io::owlfunc::cmp_ce(&a.0, &b.0));
+            v.sort_by(|a, b| cmp_ce(&a.0, &b.0));
             v
         };
         let dj_ann_refs: Vec<&(CE<RcStr>, Vec<(String, AnnotationValue<RcStr>)>)> =
@@ -6424,7 +6285,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 ));
             }
             // A named type is a bare `rdf:resource` and sorts ahead of every
-            // expression; the expressions follow, in `ce_key` order. An annotated
+            // expression; the expressions follow, in class-expression order. An annotated
             // one is a node of its own, as an annotated domain is.
             let mut type_defs = String::new();
             let mut ce_type_reif = String::new();
@@ -6475,7 +6336,10 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 let is_data = |lit: &Option<String>| lit.as_ref().is_some_and(|l| *l != anon);
                 let value_key = |(_, v, lit): &IndProp| -> (String, String, String) {
                     match lit {
-                        None => (v.clone(), String::new(), String::new()),
+                        None => {
+                            let (ns, rem) = iri_key(v);
+                            (ns.to_string(), rem.to_string(), String::new())
+                        }
                         Some(l) if *l == anon => (format!("{}{v}", char::MAX), String::new(), String::new()),
                         Some(attrs) => match (between(attrs, "rdf:datatype=\"", "\""), between(attrs, "xml:lang=\"", "\"")) {
                             (Some(dt), _) => literal_parts_key(v, "", &crate::io::unescape_attr(dt)),
