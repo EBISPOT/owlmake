@@ -1,0 +1,7 @@
+@prefix : <http://example.org/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<http://example.org/lit.owl> a owl:Ontology .
+:d a owl:DatatypeProperty .
+:i a owl:NamedIndividual ;
+   :d "007"^^xsd:integer , "1.50"^^xsd:decimal , "1"^^xsd:nonNegativeInteger , "+5"^^xsd:int , "2020-01-01Z"^^xsd:date .

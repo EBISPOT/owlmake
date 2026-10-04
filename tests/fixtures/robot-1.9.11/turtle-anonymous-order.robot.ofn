@@ -1,0 +1,34 @@
+Prefix(:=<http://example.org/anon.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/anon.owl>
+
+Declaration(Class(<http://example.org/K>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(NamedIndividual(<http://example.org/i>))
+
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/i> (<http://example.org/i>)
+
+ObjectPropertyAssertion(<http://example.org/p> <http://example.org/i> _:genid2147483651)
+
+
+ClassAssertion(<http://example.org/K> _:genid2147483648)
+ClassAssertion(<http://example.org/K> _:genid2147483649)
+ClassAssertion(<http://example.org/K> _:genid2147483650)
+AnnotationAssertion(rdfs:label _:genid2147483648 "A")
+AnnotationAssertion(rdfs:label _:genid2147483649 "B")
+AnnotationAssertion(rdfs:label _:genid2147483650 "C")
+AnnotationAssertion(rdfs:label _:genid2147483651 "D")
+)

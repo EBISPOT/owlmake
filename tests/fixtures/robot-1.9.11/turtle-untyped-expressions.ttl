@@ -1,0 +1,15 @@
+@prefix : <http://example.org/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<http://example.org/untyped.owl> a owl:Ontology .
+:A a owl:Class .
+:B a owl:Class .
+:C a owl:Class .
+:p a owl:ObjectProperty .
+:i a owl:NamedIndividual .
+:j a owl:NamedIndividual .
+:A rdfs:subClassOf [ owl:onProperty :p ; owl:someValuesFrom :B ] .
+:A rdfs:subClassOf [ owl:unionOf ( :B :C ) ] .
+:B rdfs:subClassOf [ owl:complementOf :C ] .
+:C owl:equivalentClass [ owl:oneOf ( :i :j ) ] .
+:B rdfs:subClassOf [ owl:intersectionOf ( :A [ owl:onProperty :p ; owl:allValuesFrom :C ] ) ] .

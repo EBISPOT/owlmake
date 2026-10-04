@@ -1,0 +1,12 @@
+@prefix : <http://example.org/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<http://example.org/anon.owl> a owl:Ontology .
+:K a owl:Class .
+:p a owl:ObjectProperty .
+:i a owl:NamedIndividual .
+_:z a :K ; rdfs:label "A" .
+_:m a :K ; rdfs:label "B" .
+_:a a :K ; rdfs:label "C" .
+:i :p _:q .
+_:q rdfs:label "D" .

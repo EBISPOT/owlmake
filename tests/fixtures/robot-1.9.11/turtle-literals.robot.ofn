@@ -1,0 +1,29 @@
+Prefix(:=<http://example.org/lit.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/lit.owl>
+
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(NamedIndividual(<http://example.org/i>))
+Declaration(Datatype(xsd:date))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/i> (<http://example.org/i>)
+
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "2020-01-01Z"^^xsd:date)
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "1.50"^^xsd:decimal)
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "+5"^^xsd:int)
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "007"^^xsd:integer)
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "1"^^xsd:nonNegativeInteger)
+
+
+)

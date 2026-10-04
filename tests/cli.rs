@@ -4302,6 +4302,53 @@ fn bridges_reach_only_expressions_whose_entities_remain() {
     }
 }
 
+/// A Turtle document is read as it is written: its anonymous individuals are
+/// numbered in the order the document first mentions them, and each typed
+/// literal keeps its lexical form and its datatype (`"007"^^xsd:integer`,
+/// `"1.50"^^xsd:decimal`, `"+5"^^xsd:int`). As ROBOT 1.9.11 reads it, in
+/// functional syntax, RDF/XML and Turtle.
+#[test]
+fn a_turtle_document_is_read_in_its_own_order_and_literals() {
+    for name in ["turtle-anonymous-order", "turtle-literals"] {
+        for ext in ["ofn", "owl", "ttl"] {
+            let out = tmp(&format!("{name}.{ext}"));
+            let run = bin()
+                .args(["convert", "-i"])
+                .arg(robot_fixture(&format!("{name}.ttl")))
+                .arg("-o")
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+            let text = std::fs::read_to_string(&out).unwrap();
+            let _ = std::fs::remove_file(&out);
+            assert_eq!(text, fixture_text(&format!("{name}.robot.{ext}")), "{name}.{ext}");
+        }
+    }
+}
+
+/// A Turtle document may leave an anonymous class expression untyped: a node
+/// with `owl:onProperty` is a restriction, and one with `owl:unionOf`,
+/// `owl:intersectionOf`, `owl:complementOf` or `owl:oneOf` a class, nested or
+/// not. As ROBOT 1.9.11 reads it, in functional syntax, RDF/XML and Turtle.
+#[test]
+fn untyped_class_expressions_in_turtle_are_read_by_their_predicates() {
+    for ext in ["ofn", "owl", "ttl"] {
+        let out = tmp(&format!("turtle-untyped-expressions.{ext}"));
+        let run = bin()
+            .args(["convert", "-i"])
+            .arg(robot_fixture("turtle-untyped-expressions.ttl"))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("turtle-untyped-expressions.robot.{ext}")), "{ext}");
+    }
+}
+
 /// Axioms and their operands are written in the order OWL's object model
 /// compares them, as ROBOT 1.9.11 writes them: an assertion by its subject
 /// first, a sub-property axiom by its sub-property, a property characteristic,
