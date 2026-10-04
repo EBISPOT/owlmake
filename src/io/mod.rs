@@ -2047,7 +2047,8 @@ fn write_to_with<W: Write>(
         Format::RdfXml if rdfxml == RdfXmlWriter::Owlapi => {
             // An axiom the layout cannot state sends the whole document through
             // the general writer, so it is never written without one.
-            let unstated = crate::io::owlrdf::try_save(model, &mut writer)?;
+            let unstated =
+                with_inverse_assertions_stated(model, |m| crate::io::owlrdf::try_save(m, &mut writer))?;
             if unstated.is_empty() {
                 return Ok(());
             }
@@ -2201,11 +2202,63 @@ fn write_to_with<W: Write>(
         }
         Format::Turtle => {
             let prefixes = written_prefixes(model);
-            owlapi_ttl::save(model, &prefixes, &mut writer)?
+            with_inverse_assertions_stated(model, |m| owlapi_ttl::save(m, &prefixes, &mut writer))?
         }
         Format::NTriples => turtle::save_ntriples(model, &mut writer)?,
     }
     Ok(())
+}
+
+/// Run `write` with every annotated assertion on an inverse property that names
+/// an anonymous individual stated by the named property instead, as the RDF
+/// statement it makes: `ObjectPropertyAssertion(ObjectInverseOf(p) x y)` as
+/// `ObjectPropertyAssertion(p y x)`, its annotations reifying that statement.
+/// The model is as it was once `write` returns.
+fn with_inverse_assertions_stated<T>(model: &mut Model, write: impl FnOnce(&mut Model) -> T) -> T {
+    use horned_owl::model::{
+        AnnotatedComponent, Component, Individual, MutableOntology, ObjectPropertyAssertion,
+        ObjectPropertyExpression as OPE,
+    };
+    let anonymous = |i: &Individual<horned_owl::model::RcStr>| matches!(i, Individual::Anonymous(_));
+    let stated: Vec<(AnnotatedComponent<_>, AnnotatedComponent<_>)> = model
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::ObjectPropertyAssertion(a) if !ac.ann.is_empty() => match &a.ope {
+                OPE::InverseObjectProperty(p) if anonymous(&a.from) || anonymous(&a.to) => Some((
+                    ac.clone(),
+                    AnnotatedComponent {
+                        component: Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
+                            ope: OPE::ObjectProperty(p.clone()),
+                            from: a.to.clone(),
+                            to: a.from.clone(),
+                        }),
+                        ann: ac.ann.clone(),
+                    },
+                )),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    if stated.is_empty() {
+        return write(model);
+    }
+    // A named-property twin the model already holds stays: only what this adds
+    // is taken out again.
+    let added: Vec<bool> = stated.iter().map(|(_, new)| !model.ont.iter().any(|ac| ac == new)).collect();
+    for (old, new) in &stated {
+        model.ont.remove(old);
+        model.ont.insert(new.clone());
+    }
+    let out = write(model);
+    for ((old, new), added) in stated.iter().zip(added) {
+        if added {
+            model.ont.remove(new);
+        }
+        model.ont.insert(old.clone());
+    }
+    out
 }
 
 /// The `Prefix(p:=<ns>)` declarations a Functional document makes for itself, in
@@ -2675,4 +2728,30 @@ fn is_valid_curie_local(local: &str) -> bool {
         && !local.contains(':')
         && !local.starts_with('-')
         && !local.starts_with('.')
+}
+
+#[cfg(test)]
+mod inverse_assertion_tests {
+    use super::*;
+
+    /// Writing RDF states an annotated assertion on an inverse property by the
+    /// named property, and the model the write was given is unchanged after it,
+    /// so whatever reads the model next still has the inverse.
+    #[test]
+    fn writing_rdf_leaves_the_inverse_assertion_in_the_model() {
+        let text = "Prefix(:=<http://example.org/>)\n\
+                    Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+                    Ontology(<http://example.org/o>\n\
+                    ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") ObjectInverseOf(:p) _:a :b)\n\
+                    ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") :p :b _:a)\n\
+                    ObjectPropertyAssertion(Annotation(rdfs:comment \"d\") ObjectInverseOf(:p) :s _:x)\n)\n";
+        let mut model = load_from(std::io::Cursor::new(text), Format::Functional).unwrap();
+        let before: std::collections::HashSet<_> = model.ont.iter().cloned().collect();
+        for fmt in [Format::RdfXml, Format::Turtle] {
+            let mut out = Vec::new();
+            write_to_with(&mut model, &mut out, fmt, RdfXmlWriter::Owlapi).unwrap();
+            let after: std::collections::HashSet<_> = model.ont.iter().cloned().collect();
+            assert_eq!(before, after, "{fmt:?}");
+        }
+    }
 }

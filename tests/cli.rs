@@ -4640,52 +4640,78 @@ fn an_axiom_between_a_property_and_an_earlier_inverse_is_stated() {
 }
 
 /// A document holding an axiom the RDF layout cannot state is written in full
-/// through the plain RDF mapping, with a warning naming the axiom. The
-/// annotations of an assertion on an inverse property whose subject, stated of
-/// the named property, is anonymous have no place in the layout, and the class
-/// assertion about that subject, which nothing else reaches, goes with them. In
-/// RDF/XML and in Turtle, the node the assertion is made of is the one the
-/// class assertion types and the reification's source.
+/// through the plain RDF mapping, with a warning naming the axiom. An annotated
+/// disjointness of three object properties, one of them an inverse, has no
+/// place in the layout; in RDF/XML and in Turtle it is one node of all its
+/// members, carrying its annotation, and the rest of the document is there
+/// beside it.
 #[test]
 fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     use oxigraph::io::{RdfFormat, RdfParser};
     use oxigraph::sparql::{QueryResults, SparqlEvaluator};
     use oxigraph::store::Store;
-    let src = tmp("anon-object.ofn");
+    let src = tmp("unstated.ofn");
     std::fs::write(
         &src,
         "Prefix(:=<http://example.org/a#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
          Ontology(<http://example.org/a>\n\
-         ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") ObjectInverseOf(:p) :i _:x)\n\
-         ClassAssertion(:B _:x)\n)\n",
+         DisjointObjectProperties(Annotation(rdfs:comment \"c\") :p ObjectInverseOf(:q) :r)\n\
+         SubClassOf(:A :B)\n)\n",
     )
     .unwrap();
     for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
-        let out = tmp(&format!("anon-object.{ext}"));
+        let out = tmp(&format!("unstated.{ext}"));
         let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
         assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
         let stderr = String::from_utf8_lossy(&run.stderr);
         assert!(
-            stderr.contains("layout cannot state 2 axiom(s)") && stderr.contains("ClassAssertion"),
+            stderr.contains("layout cannot state 1 axiom(s)") && stderr.contains("DisjointObjectProperties"),
             "{ext}: {stderr}"
         );
         let text = std::fs::read(&out).unwrap();
         let store = Store::new().unwrap();
         store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
-        let joined = SparqlEvaluator::new()
+        let whole = SparqlEvaluator::new()
             .parse_query(
                 "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
-                 PREFIX : <http://example.org/a#> ASK { ?x :p :i ; a :B . ?r owl:annotatedSource ?x ; \
-                 owl:annotatedProperty :p ; owl:annotatedTarget :i ; rdfs:comment \"c\" }",
+                 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> PREFIX : <http://example.org/a#> \
+                 ASK { ?n a owl:AllDisjointProperties ; rdfs:comment \"c\" ; owl:members ?l . \
+                 ?l rdf:rest*/rdf:first :p . ?l rdf:rest*/rdf:first :r . ?l rdf:rest*/rdf:first ?i . \
+                 ?i owl:inverseOf :q . :A rdfs:subClassOf :B }",
             )
             .unwrap()
             .on_store(&store)
             .execute()
             .unwrap();
-        assert!(matches!(joined, QueryResults::Boolean(true)), "{ext}: {}", String::from_utf8_lossy(&text));
+        assert!(matches!(whole, QueryResults::Boolean(true)), "{ext}: {}", String::from_utf8_lossy(&text));
         let _ = std::fs::remove_file(&out);
     }
     let _ = std::fs::remove_file(&src);
+}
+
+/// An annotated assertion on an inverse property that names an anonymous
+/// individual is written as the statement it makes of the named property, its
+/// annotations reifying that statement: the document comes out as the one
+/// stating each assertion by the named property does, which is how ROBOT 1.9.11
+/// writes that one. For an anonymous subject, an anonymous object and both, in
+/// RDF/XML and in Turtle.
+#[test]
+fn annotated_inverse_assertions_on_anonymous_individuals_are_stated_by_the_named_property() {
+    for ext in ["owl", "ttl"] {
+        let out = tmp(&format!("inverse-annotated.{ext}"));
+        let run = bin()
+            .args(["convert", "-i"])
+            .arg(robot_fixture("inverse-annotated.ofn"))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert!(!String::from_utf8_lossy(&run.stderr).contains("WARN"), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("inverse-annotated.named.robot.{ext}")), "{ext}");
+    }
 }
 
 /// A document is read in the syntax its content is in, whatever the file is
@@ -4723,8 +4749,7 @@ fn line_based_rdf_is_the_same_on_every_run() {
         "Prefix(:=<http://example.org/a#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
          Ontology(<http://example.org/a>\n\
          SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n\
-         ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") ObjectInverseOf(:p) :i _:x)\n\
-         ClassAssertion(:B _:x)\n)\n",
+         DisjointObjectProperties(Annotation(rdfs:comment \"c\") :p ObjectInverseOf(:q) :r)\n)\n",
     )
     .unwrap();
     for ext in ["nt", "ttl"] {
