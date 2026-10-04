@@ -2694,7 +2694,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.4";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.8";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3616,9 +3616,7 @@ mod format_floor_tests {
         // A filter step gains `base_iri`, the namespaces `--axioms internal` and
         // `--axioms external` judge subjects by. A step's fields are not checked
         // for unknown ones, so a 0.4.7 build would drop it and select with no
-        // namespace at all: that is the silent case, and the floor would move to
-        // the version this ships in. No plan exists outside this repository, so
-        // it moves with the next release rather than ahead of the crate version.
+        // namespace at all: that is the silent case, so the floor moves to 0.4.8.
         const PLAN_SCHEMA_DIGEST: &str = "12a0167799d84da6";
         let actual = super::schema_digest();
         assert_eq!(
