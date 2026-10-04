@@ -1,0 +1,7 @@
+Prefix(i:=<http://example.org/int/>)
+Ontology(<http://example.org/bridge-root.owl>
+Import(<http://example.org/child.owl>)
+Declaration(Class(i:A))
+Declaration(Class(i:C))
+SubClassOf(i:C i:K)
+)

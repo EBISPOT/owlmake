@@ -306,11 +306,13 @@ fn filter_core(
     // --preserve-structure (default true): bridge the hierarchy across the classes
     // being dropped (everything not in the kept seed) so a kept subclass still
     // connects to its nearest kept superclass expression. Reuses `remove`'s
-    // `spanGaps` with the *removed* set = declared entities − seed, then keeps the
-    // bridge axioms (their signature lies in the seed). The default is on, matching
-    // `remove`, so an unset option bridges rather than silently flattening.
+    // `spanGaps` with the *removed* set = declared entities − seed, over the root
+    // ontology's own axioms, as the axioms kept are the root's. The bridges join
+    // the result below whatever axiom types `--axioms` names. The default is on,
+    // matching `remove`, so an unset option bridges rather than silently
+    // flattening.
+    let mut bridges: Vec<Component<RcStr>> = Vec::new();
     if opts.preserve_structure.unwrap_or(true) {
-        use horned_owl::model::MutableOntology;
         let removed: HashSet<String> = select::entities(&model)
             .all()
             .filter(|e| !terms.contains(*e))
@@ -321,8 +323,20 @@ fn filter_core(
         // expression are one blank node, however many classes now carry them.
         let mut span_shared = std::collections::HashMap::new();
         let mut cross_add = std::collections::HashMap::new();
-        let bridges = crate::cmd::remove::span_gaps_shared(
-            &model,
+        let root_view;
+        let span_model = if model.imported_components.is_empty() {
+            &model
+        } else {
+            use horned_owl::model::MutableOntology;
+            let mut root = model.clone();
+            for ac in &model.imported_components {
+                root.ont.remove(ac);
+            }
+            root_view = root;
+            &root_view
+        };
+        bridges = crate::cmd::remove::span_gaps_shared(
+            span_model,
             &removed,
             &no_exclude,
             None,
@@ -330,9 +344,6 @@ fn filter_core(
             &mut cross_add,
         );
         model.cross_shared.extend(cross_add);
-        for b in bridges {
-            model.ont.insert(b);
-        }
         if std::env::var("OM_SPAN_LOG").is_ok() {
             let mut v: Vec<_> = span_shared.iter().collect();
             v.sort();
@@ -405,19 +416,9 @@ fn filter_core(
         Vec::new()
     };
 
-    let matches_seed = |comp: &Component<RcStr>| -> bool {
-        if matches!(comp, Component::OntologyID(_) | Component::DocIRI(_)) {
-            return true;
-        }
-        if matches!(comp, Component::OntologyAnnotation(_)) {
-            return keep_ontology;
-        }
-        if matches!(comp, Component::Import(_)) {
-            return keep_imports;
-        }
-        if !axiom_type_match(comp, &axiom_toks) {
-            return false;
-        }
+    // Whether the seed selects `comp`: its signature lies in the seed, or meets
+    // it under `--trim false`.
+    let seed_selects = |comp: &Component<RcStr>| -> bool {
         let sig = axiom_sig(comp);
         match mode {
             SigMode::Any => sig.iter().any(|s| terms.contains(s)),
@@ -434,6 +435,18 @@ fn filter_core(
                 .iter()
                 .all(|s| terms.contains(s) || (exempt_builtins && is_builtin(s))),
         }
+    };
+    let matches_seed = |comp: &Component<RcStr>| -> bool {
+        if matches!(comp, Component::OntologyID(_) | Component::DocIRI(_)) {
+            return true;
+        }
+        if matches!(comp, Component::OntologyAnnotation(_)) {
+            return keep_ontology;
+        }
+        if matches!(comp, Component::Import(_)) {
+            return keep_imports;
+        }
+        axiom_type_match(comp, &axiom_toks) && seed_selects(comp)
     };
 
     let mut kept = {
@@ -506,6 +519,18 @@ fn filter_core(
         }
         for ac in annotation_backfill {
             ont.insert(ac);
+        }
+        // The bridges, whatever axiom types were asked for. Under `internal` or
+        // `external` — the first named — only those whose subject is in, or
+        // outside, the base namespaces.
+        let bridge_namespace =
+            axiom_toks.iter().map(String::as_str).find(|t| matches!(*t, "internal" | "external"));
+        for b in bridges {
+            let in_namespace =
+                bridge_namespace.is_none_or(|n| select::axiom_in_category(&b, n, &base_iris));
+            if in_namespace && seed_selects(&b) {
+                ont.insert(b);
+            }
         }
         if keep_imports {
             for iri in &model.inlined_imports {

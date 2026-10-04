@@ -4193,6 +4193,68 @@ fn filter_keeps_the_root_axioms_and_its_imports_only_when_selected() {
     }
 }
 
+/// `filter`'s bridges join the result whatever axiom types `--axioms` names:
+/// a selected class keeps its path to its nearest selected superclass, through
+/// classes dropped or directly, and a property likewise. Under `internal` or
+/// `external` only the bridges whose subject is in, or outside, the base
+/// namespaces join. The hierarchy bridged is the root ontology's own, so an
+/// imported superclass link carries no bridge. As ROBOT 1.9.11 filters.
+#[test]
+fn filter_bridges_whatever_axiom_types_are_named() {
+    let run = |input: &str, args: &[&str], expected: &str| {
+        let out = tmp(&format!("{expected}.ofn"));
+        let run = bin()
+            .args(["filter", "--catalog"])
+            .arg(robot_fixture("filter-imports-catalog.xml"))
+            .arg("-i")
+            .arg(robot_fixture(input))
+            .args(args)
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("{expected}.ofn")), "{expected}");
+    };
+    const C: &str = "http://example.org/int/C";
+    const A: &str = "http://example.org/int/A";
+    let label = "rdfs:label";
+    run(
+        "filter-bridges.ofn",
+        &["--term", C, "--term", A, "--term", label, "--axioms", "annotation"],
+        "filter-bridges.annotation",
+    );
+    run(
+        "filter-bridges.ofn",
+        &["--term", C, "--term", "http://example.org/int/B", "--term", label, "--axioms", "annotation"],
+        "filter-bridges.direct",
+    );
+    run(
+        "filter-bridges.ofn",
+        &["--term", "http://example.org/int/r", "--term", "http://example.org/int/p", "--axioms", "annotation"],
+        "filter-bridges.properties",
+    );
+    run(
+        "filter-bridges.ofn",
+        &[
+            "--base-iri",
+            "http://example.org/int/",
+            "--term",
+            C,
+            "--term",
+            A,
+            "--term",
+            "http://example.org/ext/D",
+            "--axioms",
+            "external annotation",
+        ],
+        "filter-bridges.external",
+    );
+    run("filter-imports-bridge.ofn", &["--term", C, "--term", A], "filter-imports-bridge.terms");
+}
+
 /// Axioms and their operands are written in the order OWL's object model
 /// compares them, as ROBOT 1.9.11 writes them: an assertion by its subject
 /// first, a sub-property axiom by its sub-property, a property characteristic,
