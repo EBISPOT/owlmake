@@ -1,0 +1,12 @@
+format-version: 1.2
+ontology: http://example.org/b
+
+[Term]
+id: A
+disjoint_from: B
+
+[Typedef]
+id: p
+equivalent_to: q
+disjoint_from: q
+

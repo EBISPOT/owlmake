@@ -4048,6 +4048,81 @@ fn an_assertion_about_an_individual_a_rule_names_is_stated_in_the_rule() {
     }
 }
 
+/// An OBO document carries every axiom it has no tag for in its `owl-axioms:`
+/// clause, as ROBOT 1.9.11 writes it: keys, data property axioms, datatype
+/// definitions, and a disjointness of object properties with an inverse member.
+#[test]
+fn obo_carries_every_untranslatable_axiom_in_owl_axioms() {
+    assert_eq!(convert_fixture("obo-owl-axioms.ofn", "obo-owl-axioms.obo", &[]), fixture_text("obo-owl-axioms.obo"));
+}
+
+/// An equivalence or disjointness of named object properties is one clause of
+/// its first member's [Typedef], naming its last member, with the axiom's
+/// annotations as qualifiers; one with an inverse member goes to `owl-axioms:`;
+/// and an annotated equivalence of classes keeps its qualifiers. As ROBOT 1.9.11
+/// writes `obo-property-axioms`.
+#[test]
+fn obo_translates_property_equivalence_and_disjointness_as_robot_does() {
+    assert_eq!(
+        convert_fixture("obo-property-axioms.ofn", "obo-property-axioms.obo", &[]),
+        fixture_text("obo-property-axioms.obo")
+    );
+}
+
+/// A data restriction is written in the `owl-axioms:` clause wherever it sits
+/// in a class expression, as ROBOT 1.9.11 writes it.
+#[test]
+fn obo_owl_axioms_write_data_restrictions() {
+    let clause = |text: &str| text.lines().find(|l| l.starts_with("owl-axioms: ")).map(str::to_string);
+    let written = convert_fixture("obo-data-restrictions.ofn", "obo-data-restrictions.obo", &[]);
+    assert_eq!(clause(&written), clause(&fixture_text("obo-data-restrictions.obo")));
+}
+
+/// An RDF document stating a property equivalence and a property disjointness
+/// from both ends holds each axiom once, and every syntax writes it once, as
+/// ROBOT 1.9.11 writes `symmetric-pairs`.
+#[test]
+fn axioms_stated_from_both_ends_are_written_once() {
+    for ext in ["ofn", "owl", "obo"] {
+        assert_eq!(
+            convert_fixture("symmetric-pairs.owl", &format!("symmetric-pairs-written.{ext}"), &[]),
+            fixture_text(&format!("symmetric-pairs.robot.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// A document the RDF layout cannot state is written whole through the plain
+/// RDF mapping: an annotated disjointness of more than two properties, one an
+/// inverse, comes back with its annotation, and the warning names it.
+#[test]
+fn the_plain_mapping_keeps_an_annotated_disjointness_of_properties() {
+    let src = tmp("annotated-disjoint-properties.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://example.org/t#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/t>\nDeclaration(ObjectProperty(:p))\nDeclaration(ObjectProperty(:q))\n\
+         Declaration(ObjectProperty(:r))\n\
+         DisjointObjectProperties(Annotation(rdfs:comment \"c\") :p ObjectInverseOf(:q) :r)\n)\n",
+    )
+    .unwrap();
+    for ext in ["owl", "ttl"] {
+        let out = tmp(&format!("annotated-disjoint-properties.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(stderr.contains("(first: DisjointObjectProperties(Annotation(rdfs:comment \"c\")"), "{ext}: {stderr}");
+        let back = tmp(&format!("annotated-disjoint-properties-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&back).unwrap();
+        assert!(
+            text.contains("DisjointObjectProperties(Annotation(rdfs:comment \"c\") :p :r ObjectInverseOf(:q))"),
+            "{ext}:\n{text}"
+        );
+    }
+}
+
 /// `remove --axioms external` removes every assertion about an anonymous
 /// individual, which is in no base namespace whatever the class or property
 /// the assertion names, and keeps an assertion about an internal individual

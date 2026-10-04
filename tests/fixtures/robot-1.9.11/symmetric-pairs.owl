@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Ontology rdf:about="http://example.org/b"/>
+    <owl:Class rdf:about="http://example.org/b#A">
+        <owl:disjointWith rdf:resource="http://example.org/b#B"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/b#B">
+        <owl:disjointWith rdf:resource="http://example.org/b#A"/>
+    </owl:Class>
+    <owl:ObjectProperty rdf:about="http://example.org/b#p">
+        <owl:propertyDisjointWith rdf:resource="http://example.org/b#q"/>
+        <owl:equivalentProperty rdf:resource="http://example.org/b#q"/>
+    </owl:ObjectProperty>
+    <owl:ObjectProperty rdf:about="http://example.org/b#q">
+        <owl:propertyDisjointWith rdf:resource="http://example.org/b#p"/>
+        <owl:equivalentProperty rdf:resource="http://example.org/b#p"/>
+    </owl:ObjectProperty>
+</rdf:RDF>

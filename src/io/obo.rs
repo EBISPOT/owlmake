@@ -2676,7 +2676,7 @@ struct SubjData {
     // each line's tokens, plus any clause qualifiers (a cardinality bound)
     intersection_of: Vec<(Vec<String>, Vec<(String, String)>, BTreeSet<Annotation<RcStr>>)>,
     union_of: Vec<String>,
-    equivalent_to: Vec<String>,
+    equivalent_to: Vec<(String, BTreeSet<Annotation<RcStr>>)>,
     disjoint_from: Vec<(String, BTreeSet<Annotation<RcStr>>)>,
     // Typedef-only property axioms.
     domain: Vec<(String, BTreeSet<Annotation<RcStr>>)>,
@@ -2841,6 +2841,24 @@ fn dc_untranslatable(ops: &[CE<RcStr>]) -> bool {
 /// `oba.obo` both carry it). Dropping it would take the clause with it.
 fn dc_droppable(ops: &[CE<RcStr>]) -> bool {
     ops.len() < 2 || ops.iter().any(ce_is_top_or_bottom) || !ops.iter().all(ce_named_class)
+}
+
+/// The first and last members, in canonical order, of an equivalence or
+/// disjointness of object properties that has two or more members, every one a
+/// named property; `None` otherwise, when the axiom has no OBO clause.
+fn property_ends(members: &[OPE<RcStr>]) -> Option<(String, String)> {
+    if members.len() < 2 {
+        return None;
+    }
+    let mut named: Vec<&str> = Vec::new();
+    for m in members {
+        match m {
+            OPE::ObjectProperty(p) => named.push(p.0.as_ref()),
+            OPE::InverseObjectProperty(_) => return None,
+        }
+    }
+    named.sort_unstable();
+    Some((named[0].to_string(), named[named.len() - 1].to_string()))
 }
 
 fn opr_untranslatable(ope: &OPE<RcStr>, ce: &CE<RcStr>) -> bool {
@@ -3061,6 +3079,8 @@ fn collect_untranslatable_opt(
                 }
             }
             Component::ObjectPropertyRange(ax) => opr_untranslatable(&ax.ope, &ax.ce),
+            Component::EquivalentObjectProperties(ax) => property_ends(&ax.0).is_none(),
+            Component::DisjointObjectProperties(ax) => property_ends(&ax.0).is_none(),
             Component::SubObjectPropertyOf(ax) => sop_untranslatable(ax),
             // A SubAnnotationPropertyOf whose super-property is oboInOwl:SubsetProperty
             // or SynonymTypeProperty becomes a `subsetdef:`/`synonymtypedef:` header
@@ -3695,19 +3715,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         // entirely (see `Model::obo_drop_untranslatable`).
         let unt =
             if model.obo_drop_untranslatable { Vec::new() } else { collect_untranslatable(model) };
-        let mut oa_labels: HashMap<String, String> = HashMap::new();
-        for ac in &unt {
-            if let Component::AnnotationAssertion(aa) = &ac.component {
-                if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                    if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(l)) =
-                        (&aa.subject, &aa.ann.av)
-                    {
-                        oa_labels.insert(s.as_ref().to_string(), l.literal().clone());
-                    }
-                }
-            }
-        }
-        if let Some(block) = crate::io::owlfunc::render_owl_axioms(&unt, &oa_labels) {
+        if let Some(block) = crate::io::owlfunc::render_owl_axioms(&unt, model.plain_literals_typed)? {
             let escaped = block
                 .replace('\\', "\\\\")
                 .replace('"', "\\\"")
@@ -4267,7 +4275,7 @@ fn record_ac(
                 // Pairwise named equivalences (C ≡ D) → equivalent_to.
                 for other in &named[1..] {
                     let e = data.entry(named[0].to_string()).or_default();
-                    e.equivalent_to.push(ctx.id(other));
+                    e.equivalent_to.push((ctx.id(other), axanns.clone()));
                 }
             }
         }
@@ -4362,19 +4370,18 @@ fn record_ac(
                 data.entry(a.0.as_ref().to_string()).or_default().inverse_of.push(ctx.id(b.0.as_ref()));
             }
         }
-        // Disjoint object properties become `disjoint_from:` in the first property's
-        // [Typedef] (in_lateral_side_of is disjoint_from in_central_side_of and
-        // in_right_side_of), mirroring the [Term] `DisjointClasses` handling.
+        // An equivalence or disjointness of object properties is one clause of
+        // its first member's [Typedef], naming its last member: of three or more,
+        // the members between are written nowhere. One with an inverse member
+        // goes to `owl-axioms:` instead (see `property_ends`).
+        Component::EquivalentObjectProperties(eq) => {
+            if let Some((first, last)) = property_ends(&eq.0) {
+                data.entry(first).or_default().equivalent_to.push((ctx.id(&last), axanns.clone()));
+            }
+        }
         Component::DisjointObjectProperties(dj) => {
-            let named: Vec<&str> = dj.0.iter().filter_map(|ope| match ope {
-                OPE::ObjectProperty(p) => Some(p.0.as_ref()),
-                _ => None,
-            }).collect();
-            if let Some((first, rest)) = named.split_first() {
-                let e = data.entry(first.to_string()).or_default();
-                for other in rest {
-                    e.disjoint_from.push((ctx.id(other), axanns.clone()));
-                }
+            if let Some((first, last)) = property_ends(&dj.0) {
+                data.entry(first).or_default().disjoint_from.push((ctx.id(&last), axanns.clone()));
             }
         }
         _ => {}
@@ -6090,8 +6097,10 @@ fn write_stanza<W: Write>(
                 (fold(u), format!("{u}{}", label_comment(labels, &[u])))
             }).collect())?;
         }
-        write_sorted(writer, "equivalent_to", sd.equivalent_to.iter().map(|e| {
-            (fold(e), format!("{e}{}", label_comment(labels, &[e])))
+        write_sorted(writer, "equivalent_to", sd.equivalent_to.iter().map(|(e, anns)| {
+            let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
+            let quals = quals_with_xrefs(&dbxrefs, &quals);
+            (fold(e), format!("{e}{}{}", render_quals(&quals), label_comment(labels, &[e])))
         }).collect())?;
         write_sorted(writer, "disjoint_from", sd.disjoint_from.iter().map(|(dj, anns)| {
             let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
@@ -6217,7 +6226,13 @@ fn write_stanza<W: Write>(
         write_sorted(writer, "is_a", sd.sub_property_of.iter().map(|sp| {
             (fold(sp), format!("{sp}{}", label_comment(labels, &[sp])))
         }).collect())?;
-        // `disjoint_from:` follows `is_a:` in a [Typedef], from DisjointObjectProperties.
+        // `equivalent_to:` and `disjoint_from:` follow `is_a:` in a [Typedef], from
+        // EquivalentObjectProperties and DisjointObjectProperties.
+        write_sorted(writer, "equivalent_to", sd.equivalent_to.iter().map(|(e, anns)| {
+            let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
+            let quals = quals_with_xrefs(&dbxrefs, &quals);
+            (fold(e), format!("{e}{}{}", render_quals(&quals), label_comment(labels, &[e])))
+        }).collect())?;
         write_sorted(writer, "disjoint_from", sd.disjoint_from.iter().map(|(dj, anns)| {
             let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
             let quals = quals_with_xrefs(&dbxrefs, &quals);

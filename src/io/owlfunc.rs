@@ -1,37 +1,21 @@
-//! The OBO `owl-axioms:` header value: the axioms OBO tags cannot express,
-//! serialised in OWL functional syntax so an OBO write loses nothing.
+//! The order over axioms, class expressions, individuals and the rest that the
+//! writers sort by (`cmp_component`, `cmp_ce`, …), and functional syntax for one
+//! component on its own (`render_component_line`) and for the OBO `owl-axioms:`
+//! clause (`render_owl_axioms`), both written by the functional writer.
 //!
-//! The rendering covers the fragment OBO ontologies exercise: entity-grouped
-//! output with `####` section banners and `# Type: <IRI> (<label>)` per-entity
-//! comments, declarations grouped by `typeIndex` then IRI, axioms in the order
-//! `cmp_component` defines, then leftover axioms, all wrapped in `Ontology( … )`
-//! under five fixed `Prefix(…)` lines.
-//!
-//! That order is a preorder, not a total one: `cmp_component` reports equal for two
-//! distinct axioms whose type it does not rank, and `cmp_ce` does the same for two
-//! distinct expressions of a form it does not compare. A header stable across runs
-//! therefore does not follow from the comparison alone — it follows from sorting
-//! with a STABLE sort, which leaves tied axioms in the order they were handed over,
-//! and from dropping axioms whose rendered text repeats. Both are load-bearing: an
-//! unstable sort here would reshuffle emitted headers for no change in content.
+//! The order is a preorder, not a total one: `cmp_component` reports equal for
+//! two distinct axioms whose type it does not rank, and `cmp_ce` does the same
+//! for two distinct expressions of a form it does not compare. An output stable
+//! across runs therefore does not follow from the comparison alone — it follows
+//! from sorting with a STABLE sort, which leaves tied axioms in the order they
+//! were handed over.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
 
 use horned_owl::model::{
-    AnnotatedComponent, Annotation, AnnotationSubject, AnnotationValue, Atom, ClassExpression as CE,
-    Component, DataRange as DR, IArgument, Individual, Literal, ObjectPropertyExpression as OPE,
-    RcStr, SubObjectPropertyExpression as SOPE,
+    AnnotatedComponent, AnnotationValue, Atom, ClassExpression as CE, Component, DataRange as DR, Individual,
+    Literal, ObjectPropertyExpression as OPE, RcStr, SubObjectPropertyExpression as SOPE,
 };
-
-const OWL_NS: &str = "http://www.w3.org/2002/07/owl#";
-const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-const RDFS_NS: &str = "http://www.w3.org/2000/01/rdf-schema#";
-const XSD_NS: &str = "http://www.w3.org/2001/XMLSchema#";
-const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
-const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
-const RDF_PLAIN: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
-const RDF_LANGSTRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
 // ---------------------------------------------------------------------------
 // Ordering: type indexes and total comparisons
@@ -533,1121 +517,114 @@ fn cmp_sope(a: &SOPE<RcStr>, b: &SOPE<RcStr>) -> Ordering {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Entity kinds and grouping
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum EKind {
-    Class,
-    ObjectProperty,
-    DataProperty,
-    Datatype,
-    NamedIndividual,
-    AnnotationProperty,
-}
-
-/// The entity (IRI, kind) under whose section an axiom is rendered, or `None`
-/// for the leftover section: an axiom belongs to the entity it is stated about.
-fn owner_entity(c: &Component<RcStr>) -> Option<(String, EKind)> {
-    match c {
-        Component::SubClassOf(ax) => match &ax.sub {
-            CE::Class(s) => Some((s.0.as_ref().to_string(), EKind::Class)),
-            _ => None, // GCI (anonymous subclass) → general axiom → leftover
-        },
-        Component::EquivalentClasses(ax) => ax
-            .0
-            .iter()
-            .filter_map(named_class)
-            .min()
-            .map(|i| (i, EKind::Class)),
-        Component::DisjointClasses(ax) => {
-            if ax.0.len() > 2 {
-                None // rendered in leftover
-            } else {
-                ax.0.iter().filter_map(named_class).min().map(|i| (i, EKind::Class))
-            }
-        }
-        Component::DisjointUnion(ax) => Some((ax.0 .0.as_ref().to_string(), EKind::Class)),
-        Component::ObjectPropertyRange(ax) => match &ax.ope {
-            OPE::ObjectProperty(p) => Some((p.0.as_ref().to_string(), EKind::ObjectProperty)),
-            _ => None,
-        },
-        Component::SubObjectPropertyOf(ax) => match &ax.sub {
-            SOPE::ObjectPropertyExpression(OPE::ObjectProperty(p)) => {
-                Some((p.0.as_ref().to_string(), EKind::ObjectProperty))
-            }
-            _ => None,
-        },
-        Component::IrreflexiveObjectProperty(ax) => match &ax.0 {
-            OPE::ObjectProperty(p) => Some((p.0.as_ref().to_string(), EKind::ObjectProperty)),
-            _ => None,
-        },
-        Component::ObjectPropertyAssertion(ax) => match &ax.from {
-            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
-            _ => None,
-        },
-        // An individual's other assertions render under its section too, and a
-        // `SameIndividual` under its first member's: the other members' sections
-        // then hold nothing unwritten and are left out.
-        Component::SameIndividual(ax) => ax
-            .0
-            .iter()
-            .filter_map(|i| match i {
-                Individual::Named(n) => Some(n.0.as_ref().to_string()),
-                _ => None,
-            })
-            .min()
-            .map(|i| (i, EKind::NamedIndividual)),
-        Component::ClassAssertion(ax) => match &ax.i {
-            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
-            _ => None,
-        },
-        Component::NegativeObjectPropertyAssertion(ax) => match &ax.from {
-            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
-            _ => None,
-        },
-        Component::DataPropertyAssertion(ax) => match &ax.from {
-            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
-            _ => None,
-        },
-        Component::NegativeDataPropertyAssertion(ax) => match &ax.from {
-            Individual::Named(i) => Some((i.0.as_ref().to_string(), EKind::NamedIndividual)),
-            _ => None,
-        },
-        // A SubAnnotationPropertyOf renders under its SUB-property's section (EFO's
-        // created_by ⊑ dc:creator and skos:prefLabel ⊑ rdfs:label sit under the
-        // Annotation Properties banner).
-        Component::SubAnnotationPropertyOf(ax) => {
-            Some((ax.sub.0.as_ref().to_string(), EKind::AnnotationProperty))
-        }
-        // …and so do the annotation-property domain/range axioms, which OBO cannot
-        // express at all (MONDO's `AnnotationPropertyRange(IAO_0006012 xsd:dateTime)`
-        // sits under `# Annotation Property: IAO_0006012`).
-        Component::AnnotationPropertyRange(ax) => {
-            Some((ax.ap.0.as_ref().to_string(), EKind::AnnotationProperty))
-        }
-        Component::AnnotationPropertyDomain(ax) => {
-            Some((ax.ap.0.as_ref().to_string(), EKind::AnnotationProperty))
-        }
-        // An AnnotationAssertion is grouped by the section loop against its subject
-        // IRI directly (see `ann_subject`), so `owner_entity` leaves it `None` here.
-        _ => None,
-    }
-}
-
-/// rdf/rdfs/owl/xsd/xml properties are builtin — they are never declared.
-fn is_builtin_prop(iri: &str) -> bool {
-    iri.starts_with(RDF_NS)
-        || iri.starts_with(RDFS_NS)
-        || iri.starts_with(OWL_NS)
-        || iri.starts_with(XSD_NS)
-        || iri.starts_with(XML_NS)
-}
-
-fn named_class(ce: &CE<RcStr>) -> Option<String> {
-    match ce {
-        CE::Class(c) => Some(c.0.as_ref().to_string()),
-        _ => None,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Signature
-// ---------------------------------------------------------------------------
-
-/// Collect the referenced entities of the untranslatable axioms, split by kind.
-/// (Every entity in the signature gets a `Declaration(…)`.)
-struct Sig {
-    classes: BTreeSet<String>,
-    oprops: BTreeSet<String>,
-    dprops: BTreeSet<String>,
-    inds: BTreeSet<String>,
-    aprops: BTreeSet<String>,
-    datatypes: BTreeSet<String>,
-}
-
-fn signature(axioms: &[&AnnotatedComponent<RcStr>]) -> Sig {
-    let mut s = Sig {
-        classes: BTreeSet::new(),
-        oprops: BTreeSet::new(),
-        dprops: BTreeSet::new(),
-        inds: BTreeSet::new(),
-        aprops: BTreeSet::new(),
-        datatypes: BTreeSet::new(),
-    };
-    for ac in axioms {
-        sig_component(&ac.component, &mut s.classes, &mut s.oprops, &mut s.inds, &mut s.aprops);
-        match &ac.component {
-            Component::AnnotationAssertion(aa) => sig_dt_value(&aa.ann.av, &mut s.datatypes),
-            Component::DataPropertyAssertion(ax) => {
-                s.dprops.insert(ax.dp.0.as_ref().to_string());
-                sig_dt_literal(&ax.to, &mut s.datatypes);
-            }
-            Component::NegativeDataPropertyAssertion(ax) => {
-                s.dprops.insert(ax.dp.0.as_ref().to_string());
-                sig_dt_literal(&ax.to, &mut s.datatypes);
-            }
-            _ => {}
-        }
-        for a in &ac.ann {
-            sig_annotation(a, &mut s.classes, &mut s.oprops, &mut s.inds, &mut s.aprops);
-            sig_dt_value(&a.av, &mut s.datatypes);
-        }
-    }
-    s
-}
-
-/// Every literal's datatype counts towards the signature, which makes the
-/// (undeclared, builtin) Datatypes section non-empty and so emit its trailing
-/// blank line. Only the set's non-emptiness matters, so a representative datatype
-/// per literal kind suffices.
-fn sig_dt_value(av: &AnnotationValue<RcStr>, dt: &mut BTreeSet<String>) {
-    if let AnnotationValue::Literal(l) = av {
-        sig_dt_literal(l, dt);
-    }
-}
-
-fn sig_dt_literal(l: &Literal<RcStr>, dt: &mut BTreeSet<String>) {
-    let d = match l {
-        Literal::Simple { .. } => "http://www.w3.org/2001/XMLSchema#string",
-        Literal::Language { .. } => "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString",
-        Literal::Datatype { datatype_iri, .. } => datatype_iri.as_ref(),
-    };
-    dt.insert(d.to_string());
-}
-
-fn sig_ce(ce: &CE<RcStr>, cl: &mut BTreeSet<String>, op: &mut BTreeSet<String>, ind: &mut BTreeSet<String>) {
-    match ce {
-        CE::Class(c) => {
-            // owl:Thing / owl:Nothing are builtin — never declared.
-            if !c.0.as_ref().starts_with(OWL_NS) {
-                cl.insert(c.0.as_ref().to_string());
-            }
-        }
-        CE::ObjectIntersectionOf(v) | CE::ObjectUnionOf(v) => {
-            v.iter().for_each(|x| sig_ce(x, cl, op, ind))
-        }
-        CE::ObjectComplementOf(x) => sig_ce(x, cl, op, ind),
-        CE::ObjectSomeValuesFrom { ope, bce } | CE::ObjectAllValuesFrom { ope, bce } => {
-            sig_ope(ope, op);
-            sig_ce(bce, cl, op, ind);
-        }
-        CE::ObjectMinCardinality { ope, bce, .. }
-        | CE::ObjectExactCardinality { ope, bce, .. }
-        | CE::ObjectMaxCardinality { ope, bce, .. } => {
-            sig_ope(ope, op);
-            sig_ce(bce, cl, op, ind);
-        }
-        CE::ObjectHasValue { ope, i } => {
-            sig_ope(ope, op);
-            if let Individual::Named(n) = i {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }
-        CE::ObjectHasSelf(ope) => sig_ope(ope, op),
-        CE::ObjectOneOf(v) => v.iter().for_each(|i| {
-            if let Individual::Named(n) = i {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }),
-        _ => {}
-    }
-}
-
-fn sig_ope(ope: &OPE<RcStr>, op: &mut BTreeSet<String>) {
-    op.insert(ope_iri(ope).to_string());
-}
-
-fn sig_atom(
-    atom: &Atom<RcStr>,
-    cl: &mut BTreeSet<String>,
-    op: &mut BTreeSet<String>,
-    ind: &mut BTreeSet<String>,
-) {
-    match atom {
-        Atom::ObjectPropertyAtom { pred, args } => {
-            sig_ope(pred, op);
-            for a in [&args.0, &args.1] {
-                if let IArgument::Individual(Individual::Named(n)) = a {
-                    ind.insert(n.0.as_ref().to_string());
-                }
-            }
-        }
-        Atom::ClassAtom { pred, arg } => {
-            sig_ce(pred, cl, op, ind);
-            if let IArgument::Individual(Individual::Named(n)) = arg {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }
-        _ => {}
-    }
-}
-
-fn sig_annotation(
-    a: &Annotation<RcStr>,
-    _cl: &mut BTreeSet<String>,
-    _op: &mut BTreeSet<String>,
-    _ind: &mut BTreeSet<String>,
-    ap: &mut BTreeSet<String>,
-) {
-    if !is_builtin_prop(a.ap.0.as_ref()) {
-        ap.insert(a.ap.0.as_ref().to_string());
-    }
-}
-
-fn sig_component(
-    c: &Component<RcStr>,
-    cl: &mut BTreeSet<String>,
-    op: &mut BTreeSet<String>,
-    ind: &mut BTreeSet<String>,
-    ap: &mut BTreeSet<String>,
-) {
-    match c {
-        Component::SubClassOf(ax) => {
-            sig_ce(&ax.sub, cl, op, ind);
-            sig_ce(&ax.sup, cl, op, ind);
-        }
-        Component::EquivalentClasses(ax) => ax.0.iter().for_each(|x| sig_ce(x, cl, op, ind)),
-        Component::DisjointClasses(ax) => ax.0.iter().for_each(|x| sig_ce(x, cl, op, ind)),
-        Component::DisjointUnion(ax) => {
-            cl.insert(ax.0 .0.as_ref().to_string());
-            ax.1.iter().for_each(|x| sig_ce(x, cl, op, ind));
-        }
-        Component::ObjectPropertyRange(ax) => {
-            sig_ope(&ax.ope, op);
-            sig_ce(&ax.ce, cl, op, ind);
-        }
-        Component::SubObjectPropertyOf(ax) => {
-            match &ax.sub {
-                SOPE::ObjectPropertyExpression(o) => sig_ope(o, op),
-                SOPE::ObjectPropertyChain(v) => v.iter().for_each(|o| sig_ope(o, op)),
-            }
-            sig_ope(&ax.sup, op);
-        }
-        Component::ObjectPropertyAssertion(ax) => {
-            sig_ope(&ax.ope, op);
-            if let Individual::Named(n) = &ax.from {
-                ind.insert(n.0.as_ref().to_string());
-            }
-            if let Individual::Named(n) = &ax.to {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }
-        Component::IrreflexiveObjectProperty(ax) => sig_ope(&ax.0, op),
-        Component::DifferentIndividuals(ax) => {
-            for i in &ax.0 {
-                if let Individual::Named(n) = i {
-                    ind.insert(n.0.as_ref().to_string());
-                }
-            }
-        }
-        Component::SameIndividual(ax) => {
-            for i in &ax.0 {
-                if let Individual::Named(n) = i {
-                    ind.insert(n.0.as_ref().to_string());
-                }
-            }
-        }
-        Component::ClassAssertion(ax) => {
-            sig_ce(&ax.ce, cl, op, ind);
-            if let Individual::Named(n) = &ax.i {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }
-        Component::NegativeObjectPropertyAssertion(ax) => {
-            sig_ope(&ax.ope, op);
-            for i in [&ax.from, &ax.to] {
-                if let Individual::Named(n) = i {
-                    ind.insert(n.0.as_ref().to_string());
-                }
-            }
-        }
-        // The data property is collected by `signature`, with the literal's datatype.
-        Component::DataPropertyAssertion(ax) => {
-            if let Individual::Named(n) = &ax.from {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }
-        Component::NegativeDataPropertyAssertion(ax) => {
-            if let Individual::Named(n) = &ax.from {
-                ind.insert(n.0.as_ref().to_string());
-            }
-        }
-        Component::SubAnnotationPropertyOf(ax) => {
-            if !is_builtin_prop(ax.sub.0.as_ref()) {
-                ap.insert(ax.sub.0.as_ref().to_string());
-            }
-            if !is_builtin_prop(ax.sup.0.as_ref()) {
-                ap.insert(ax.sup.0.as_ref().to_string());
-            }
-        }
-        Component::AnnotationPropertyRange(ax) => {
-            if !is_builtin_prop(ax.ap.0.as_ref()) {
-                ap.insert(ax.ap.0.as_ref().to_string());
-            }
-        }
-        Component::AnnotationPropertyDomain(ax) => {
-            if !is_builtin_prop(ax.ap.0.as_ref()) {
-                ap.insert(ax.ap.0.as_ref().to_string());
-            }
-        }
-        Component::Rule(r) => {
-            for atom in r.body.iter().chain(r.head.iter()) {
-                sig_atom(atom, cl, op, ind);
-            }
-        }
-        Component::AnnotationAssertion(ax) => {
-            // Only the annotation property is a declared entity; the subject is a
-            // bare IRI and the value (IRI/literal) is not a typed entity.
-            if !is_builtin_prop(ax.ann.ap.0.as_ref()) {
-                ap.insert(ax.ann.ap.0.as_ref().to_string());
-            }
-        }
-        _ => {}
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-struct Renderer<'a> {
-    out: String,
-    labels: &'a std::collections::HashMap<String, String>,
-    focused: Option<String>,
-}
-
-impl<'a> Renderer<'a> {
-    fn w(&mut self, s: &str) {
-        self.out.push_str(s);
-    }
-
-    fn iri(&mut self, iri: &str) {
-        // Only owl/rdf/rdfs/xsd/xml get a CURIE; every other IRI is written in full.
-        let short = if let Some(l) = iri.strip_prefix(OWL_NS) {
-            Some(format!("owl:{l}"))
-        } else if let Some(l) = iri.strip_prefix(RDF_NS) {
-            Some(format!("rdf:{l}"))
-        } else if let Some(l) = iri.strip_prefix(RDFS_NS) {
-            Some(format!("rdfs:{l}"))
-        } else if let Some(l) = iri.strip_prefix(XSD_NS) {
-            Some(format!("xsd:{l}"))
-        } else if let Some(l) = iri.strip_prefix(&format!("{XML_NS}#")) {
-            Some(format!("xml:{l}"))
-        } else {
-            None
-        };
-        match short {
-            Some(q) if !q.ends_with(':') => self.w(&q),
-            _ => {
-                self.w("<");
-                self.w(iri);
-                self.w(">");
-            }
-        }
-    }
-
-    fn ope(&mut self, ope: &OPE<RcStr>) {
-        match ope {
-            OPE::ObjectProperty(p) => self.iri(p.0.as_ref()),
-            OPE::InverseObjectProperty(p) => {
-                self.w("ObjectInverseOf(");
-                self.iri(p.0.as_ref());
-                self.w(")");
-            }
-        }
-    }
-
-    fn individual(&mut self, i: &Individual<RcStr>) {
-        match i {
-            Individual::Named(n) => self.iri(n.0.as_ref()),
-            Individual::Anonymous(a) => self.w(&anonymous_label(a.0.as_ref())),
-        }
-    }
-
-    fn ce(&mut self, ce: &CE<RcStr>) {
-        match ce {
-            CE::Class(c) => self.iri(c.0.as_ref()),
-            CE::ObjectIntersectionOf(v) => {
-                self.w("ObjectIntersectionOf(");
-                self.ce_list(v);
-                self.w(")");
-            }
-            CE::ObjectUnionOf(v) => {
-                self.w("ObjectUnionOf(");
-                self.ce_list(v);
-                self.w(")");
-            }
-            CE::ObjectComplementOf(x) => {
-                self.w("ObjectComplementOf(");
-                self.ce(x);
-                self.w(")");
-            }
-            CE::ObjectSomeValuesFrom { ope, bce } => {
-                self.w("ObjectSomeValuesFrom(");
-                self.ope(ope);
-                self.w(" ");
-                self.ce(bce);
-                self.w(")");
-            }
-            CE::ObjectAllValuesFrom { ope, bce } => {
-                self.w("ObjectAllValuesFrom(");
-                self.ope(ope);
-                self.w(" ");
-                self.ce(bce);
-                self.w(")");
-            }
-            CE::ObjectHasSelf(ope) => {
-                self.w("ObjectHasSelf(");
-                self.ope(ope);
-                self.w(")");
-            }
-            CE::ObjectHasValue { ope, i } => {
-                self.w("ObjectHasValue(");
-                self.ope(ope);
-                self.w(" ");
-                self.individual(i);
-                self.w(")");
-            }
-            CE::ObjectMinCardinality { n, ope, bce } => self.card("ObjectMinCardinality", *n, ope, bce),
-            CE::ObjectExactCardinality { n, ope, bce } => {
-                self.card("ObjectExactCardinality", *n, ope, bce)
-            }
-            CE::ObjectMaxCardinality { n, ope, bce } => self.card("ObjectMaxCardinality", *n, ope, bce),
-            CE::ObjectOneOf(v) => {
-                self.w("ObjectOneOf(");
-                for (k, i) in v.iter().enumerate() {
-                    if k > 0 {
-                        self.w(" ");
-                    }
-                    self.individual(i);
-                }
-                self.w(")");
-            }
-            _ => {}
-        }
-    }
-
-    /// The atoms of a rule's body or head, space-separated. A collection of exactly
-    /// two renders its members swapped (second, first); one atom, or three or more,
-    /// renders in stored order. The swap is the order released files carry, so
-    /// changing it would rewrite every 2-atom body and head in every release diff.
-    fn atom_collection(&mut self, atoms: &[Atom<RcStr>]) {
-        match atoms.len() {
-            0 => {}
-            1 => self.atom(&atoms[0]),
-            2 => {
-                self.atom(&atoms[1]);
-                self.w(" ");
-                self.atom(&atoms[0]);
-            }
-            _ => {
-                for (k, a) in atoms.iter().enumerate() {
-                    if k > 0 {
-                        self.w(" ");
-                    }
-                    self.atom(a);
-                }
-            }
-        }
-    }
-
-    fn atom(&mut self, atom: &Atom<RcStr>) {
-        match atom {
-            Atom::ObjectPropertyAtom { pred, args } => {
-                self.w("ObjectPropertyAtom(");
-                self.ope(pred);
-                self.w(" ");
-                self.iarg(&args.0);
-                self.w(" ");
-                self.iarg(&args.1);
-                self.w(")");
-            }
-            Atom::ClassAtom { pred, arg } => {
-                self.w("ClassAtom(");
-                self.ce(pred);
-                self.w(" ");
-                self.iarg(arg);
-                self.w(")");
-            }
-            _ => {}
-        }
-    }
-
-    fn iarg(&mut self, a: &IArgument<RcStr>) {
-        match a {
-            IArgument::Individual(i) => self.individual(i),
-            IArgument::Variable(v) => {
-                self.w("Variable(");
-                self.iri(v.0.as_ref());
-                self.w(")");
-            }
-        }
-    }
-
-    fn card(&mut self, tag: &str, n: u32, ope: &OPE<RcStr>, bce: &CE<RcStr>) {
-        self.w(tag);
-        self.w("(");
-        self.w(&n.to_string());
-        self.w(" ");
-        self.ope(ope);
-        // An owl:Thing filler is implicit and omitted.
-        if !matches!(bce, CE::Class(c) if c.0.as_ref() == format!("{OWL_NS}Thing")) {
-            self.w(" ");
-            self.ce(bce);
-        }
-        self.w(")");
-    }
-
-    /// An operand list — operands in `cmp_ce` order, space-separated.
-    fn ce_list(&mut self, v: &[CE<RcStr>]) {
-        let mut items: Vec<&CE<RcStr>> = v.iter().collect();
-        items.sort_by(|a, b| cmp_ce(a, b));
-        for (k, ce) in items.iter().enumerate() {
-            if k > 0 {
-                self.w(" ");
-            }
-            self.ce(ce);
-        }
-    }
-
-    fn literal(&mut self, lit: &Literal<RcStr>) {
-        match lit {
-            Literal::Simple { literal } => {
-                self.w(&escape_str(literal));
-            }
-            Literal::Language { literal, lang } => {
-                self.w(&escape_str(literal));
-                self.w("@");
-                self.w(lang);
-            }
-            Literal::Datatype { literal, datatype_iri } => {
-                let dt = datatype_iri.as_ref();
-                self.w(&escape_str(literal));
-                if dt != XSD_STRING && dt != RDF_PLAIN && dt != RDF_LANGSTRING {
-                    self.w("^^");
-                    self.iri(dt);
-                }
-            }
-        }
-    }
-
-    fn annotation(&mut self, a: &Annotation<RcStr>) {
-        self.w("Annotation(");
-        self.iri(a.ap.0.as_ref());
-        self.w(" ");
-        match &a.av {
-            AnnotationValue::Literal(l) => self.literal(l),
-            AnnotationValue::IRI(i) => self.iri(i.as_ref()),
-            AnnotationValue::AnonymousIndividual(x) => self.w(&anonymous_label(x.0.as_ref())),
-        }
-        self.w(")");
-    }
-
-    /// The sorted annotations of an axiom, each followed by a space.
-    fn axiom_annotations(&mut self, anns: &BTreeSet<Annotation<RcStr>>) {
-        let mut v: Vec<&Annotation<RcStr>> = anns.iter().collect();
-        v.sort();
-        for a in v {
-            self.annotation(a);
-            self.w(" ");
-        }
-    }
-
-    /// Render one axiom in functional syntax (no trailing newline).
-    fn axiom(&mut self, ac: &AnnotatedComponent<RcStr>) {
-        let anns = &ac.ann;
-        match &ac.component {
-            Component::DeclareClass(d) => self.decl("Class", d.0 .0.as_ref(), anns),
-            Component::DeclareObjectProperty(d) => self.decl("ObjectProperty", d.0 .0.as_ref(), anns),
-            Component::DeclareNamedIndividual(d) => {
-                self.decl("NamedIndividual", d.0 .0.as_ref(), anns)
-            }
-            Component::DeclareAnnotationProperty(d) => {
-                self.decl("AnnotationProperty", d.0 .0.as_ref(), anns)
-            }
-            Component::DeclareDataProperty(d) => self.decl("DataProperty", d.0 .0.as_ref(), anns),
-            Component::DeclareDatatype(d) => self.decl("Datatype", d.0 .0.as_ref(), anns),
-            Component::SubClassOf(ax) => {
-                self.w("SubClassOf(");
-                self.axiom_annotations(anns);
-                self.ce(&ax.sub);
-                self.w(" ");
-                self.ce(&ax.sup);
-                self.w(")");
-            }
-            Component::EquivalentClasses(ax) => {
-                self.w("EquivalentClasses(");
-                self.axiom_annotations(anns);
-                self.ce_list(&ax.0);
-                self.w(")");
-            }
-            Component::DisjointClasses(ax) => {
-                self.w("DisjointClasses(");
-                self.axiom_annotations(anns);
-                self.ce_list(&ax.0);
-                self.w(")");
-            }
-            Component::DisjointUnion(ax) => {
-                self.w("DisjointUnion(");
-                self.axiom_annotations(anns);
-                self.iri(ax.0 .0.as_ref());
-                self.w(" ");
-                self.ce_list(&ax.1);
-                self.w(")");
-            }
-            Component::ObjectPropertyRange(ax) => {
-                self.w("ObjectPropertyRange(");
-                self.axiom_annotations(anns);
-                self.ope(&ax.ope);
-                self.w(" ");
-                self.ce(&ax.ce);
-                self.w(")");
-            }
-            Component::SubObjectPropertyOf(ax) => {
-                self.w("SubObjectPropertyOf(");
-                self.axiom_annotations(anns);
-                match &ax.sub {
-                    SOPE::ObjectPropertyExpression(o) => self.ope(o),
-                    SOPE::ObjectPropertyChain(v) => {
-                        self.w("ObjectPropertyChain(");
-                        for (k, o) in v.iter().enumerate() {
-                            if k > 0 {
-                                self.w(" ");
-                            }
-                            self.ope(o);
-                        }
-                        self.w(")");
-                    }
-                }
-                self.w(" ");
-                self.ope(&ax.sup);
-                self.w(")");
-            }
-            Component::ObjectPropertyAssertion(ax) => {
-                self.w("ObjectPropertyAssertion(");
-                self.axiom_annotations(anns);
-                self.ope(&ax.ope);
-                self.w(" ");
-                self.individual(&ax.from);
-                self.w(" ");
-                self.individual(&ax.to);
-                self.w(")");
-            }
-            Component::IrreflexiveObjectProperty(ax) => {
-                self.w("IrreflexiveObjectProperty(");
-                self.axiom_annotations(anns);
-                self.ope(&ax.0);
-                self.w(")");
-            }
-            Component::DifferentIndividuals(ax) => {
-                self.w("DifferentIndividuals(");
-                self.axiom_annotations(anns);
-                for (n, i) in ax.0.iter().enumerate() {
-                    if n > 0 {
-                        self.w(" ");
-                    }
-                    self.individual(i);
-                }
-                self.w(")");
-            }
-            Component::SameIndividual(ax) => {
-                self.w("SameIndividual(");
-                self.axiom_annotations(anns);
-                for (n, i) in ax.0.iter().enumerate() {
-                    if n > 0 {
-                        self.w(" ");
-                    }
-                    self.individual(i);
-                }
-                self.w(")");
-            }
-            Component::ClassAssertion(ax) => {
-                self.w("ClassAssertion(");
-                self.axiom_annotations(anns);
-                self.ce(&ax.ce);
-                self.w(" ");
-                self.individual(&ax.i);
-                self.w(")");
-            }
-            Component::NegativeObjectPropertyAssertion(ax) => {
-                self.w("NegativeObjectPropertyAssertion(");
-                self.axiom_annotations(anns);
-                self.ope(&ax.ope);
-                self.w(" ");
-                self.individual(&ax.from);
-                self.w(" ");
-                self.individual(&ax.to);
-                self.w(")");
-            }
-            Component::DataPropertyAssertion(ax) => {
-                self.w("DataPropertyAssertion(");
-                self.axiom_annotations(anns);
-                self.iri(ax.dp.0.as_ref());
-                self.w(" ");
-                self.individual(&ax.from);
-                self.w(" ");
-                self.literal(&ax.to);
-                self.w(")");
-            }
-            Component::NegativeDataPropertyAssertion(ax) => {
-                self.w("NegativeDataPropertyAssertion(");
-                self.axiom_annotations(anns);
-                self.iri(ax.dp.0.as_ref());
-                self.w(" ");
-                self.individual(&ax.from);
-                self.w(" ");
-                self.literal(&ax.to);
-                self.w(")");
-            }
-            Component::SubAnnotationPropertyOf(ax) => {
-                self.w("SubAnnotationPropertyOf(");
-                self.axiom_annotations(anns);
-                self.iri(ax.sub.0.as_ref());
-                self.w(" ");
-                self.iri(ax.sup.0.as_ref());
-                self.w(")");
-            }
-            Component::AnnotationPropertyRange(ax) => {
-                self.w("AnnotationPropertyRange(");
-                self.axiom_annotations(anns);
-                self.iri(ax.ap.0.as_ref());
-                self.w(" ");
-                self.iri(ax.iri.as_ref());
-                self.w(")");
-            }
-            Component::AnnotationPropertyDomain(ax) => {
-                self.w("AnnotationPropertyDomain(");
-                self.axiom_annotations(anns);
-                self.iri(ax.ap.0.as_ref());
-                self.w(" ");
-                self.iri(ax.iri.as_ref());
-                self.w(")");
-            }
-            Component::Rule(r) => {
-                self.w("DLSafeRule(");
-                self.axiom_annotations(anns);
-                self.w("Body(");
-                self.atom_collection(&r.body);
-                self.w(")Head(");
-                self.atom_collection(&r.head);
-                self.w("))");
-            }
-            Component::AnnotationAssertion(ax) => {
-                self.w("AnnotationAssertion(");
-                self.axiom_annotations(anns);
-                self.iri(ax.ann.ap.0.as_ref());
-                self.w(" ");
-                match &ax.subject {
-                    AnnotationSubject::IRI(i) => self.iri(i.as_ref()),
-                    AnnotationSubject::AnonymousIndividual(a) => {
-                        self.w(&anonymous_label(a.0.as_ref()))
-                    }
-                }
-                self.w(" ");
-                match &ax.ann.av {
-                    AnnotationValue::Literal(l) => self.literal(l),
-                    AnnotationValue::IRI(i) => self.iri(i.as_ref()),
-                    AnnotationValue::AnonymousIndividual(x) => {
-                        self.w(&anonymous_label(x.0.as_ref()))
-                    }
-                }
-                self.w(")");
-            }
-            _ => {}
-        }
-    }
-
-    fn decl(&mut self, kind: &str, iri: &str, anns: &BTreeSet<Annotation<RcStr>>) {
-        self.w("Declaration(");
-        self.axiom_annotations(anns);
-        self.w(kind);
-        self.w("(");
-        self.iri(iri);
-        self.w(")");
-        self.w(")");
-    }
-
-    fn entity_comment(&mut self, ekind: &str, iri: &str) {
-        self.w("# ");
-        self.w(ekind);
-        self.w(": <");
-        self.w(iri);
-        self.w("> (");
-        match self.labels.get(iri) {
-            Some(l) => {
-                let l = l.replace('\n', "\n# ");
-                self.w(&l);
-            }
-            None => {
-                self.w("<");
-                self.w(iri);
-                self.w(">");
-            }
-        }
-        self.w(")\n");
-    }
-}
-
-fn escape_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
-/// One component in functional syntax, standing on its own — for a report that
-/// lists components a line at a time rather than assembling a document.
-///
-/// An ontology annotation is written the way the header writes it,
-/// `Annotation(<property> <value>)`: on its own line there is no `Ontology(` for
-/// it to sit inside, and the axiom renderer passes it over for that reason.
-/// An anonymous individual's node id as functional syntax writes it: with its
-/// `_:`, whether or not the id carries one.
-fn anonymous_label(id: &str) -> String {
-    if id.starts_with("_:") {
-        id.to_string()
-    } else {
-        format!("_:{id}")
-    }
-}
-
+/// One component in functional syntax, on one line: its set-valued operands
+/// in canonical order, and every IRI in full but those of the five built-in
+/// namespaces, which are CURIEs.
 pub(crate) fn render_component_line(ac: &AnnotatedComponent<RcStr>) -> String {
-    let labels = std::collections::HashMap::new();
-    let mut r = Renderer { out: String::new(), labels: &labels, focused: None };
-    match &ac.component {
-        Component::OntologyAnnotation(a) => r.annotation(&a.0),
-        _ => r.axiom(ac),
-    }
-    r.out
+    use horned_owl::io::ofn::writer::AsFunctional;
+    let component = crate::io::canonical_component(&ac.component).unwrap_or_else(|| ac.component.clone());
+    let ac = AnnotatedComponent { component, ann: ac.ann.clone() };
+    ac.as_functional_with_prefixes(&crate::io::ofn_prefix_block(&Default::default(), None)).to_string()
 }
 
-/// Build the functional-syntax `owl-axioms:` value (before OBO escaping) from the
-/// untranslatable axioms. Returns `None` if there are none.
+/// The functional-syntax document the `owl-axioms:` clause carries: the
+/// untranslatable axioms as an ontology of their own, with no IRI, each entity
+/// they name declared, and the five built-in prefixes, as the functional
+/// writer writes any document. Returns `None` if there are none.
 pub fn render_owl_axioms(
     untranslatable: &[&AnnotatedComponent<RcStr>],
-    labels: &std::collections::HashMap<String, String>,
-) -> Option<String> {
+    plain_literals_typed: bool,
+) -> anyhow::Result<Option<String>> {
+    use horned_owl::model::MutableOntology;
     if untranslatable.is_empty() {
-        return None;
+        return Ok(None);
     }
-    // Dedup axioms that render identically: horned-owl keeps both operand orders of
-    // a symmetric axiom (a `DisjointClasses(A B)` and a `DisjointClasses(B A)`),
-    // which say the same thing and must be written once.
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut deduped: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
+    let mut ont = crate::model::Onto::new();
     for ac in untranslatable {
-        let mut tmp = Renderer { out: String::new(), labels, focused: None };
-        tmp.axiom(ac);
-        if seen.insert(tmp.out) {
-            deduped.push(ac);
+        let component = crate::io::canonical_component(&ac.component).unwrap_or_else(|| ac.component.clone());
+        ont.insert(AnnotatedComponent { component, ann: ac.ann.clone() });
+    }
+    let cm: crate::model::CmOnto = ont.into();
+    horned_owl::io::ofn::writer::set_plain_literals_typed(plain_literals_typed);
+    let prefixes = crate::io::ofn_prefix_block(&Default::default(), None);
+    let out = horned_owl::io::ofn::writer::write_with_labels(Vec::new(), &cm, Some(&prefixes), None, None)
+        .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"))?;
+    Ok(Some(String::from_utf8(out)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_component_line;
+    use horned_owl::model::Kinded;
+
+    /// Every kind of axiom renders as itself on one line, its annotations
+    /// included: a kind written as nothing would vanish from a diff report and
+    /// leave a warning naming nothing.
+    #[test]
+    fn every_axiom_kind_renders_on_one_line() {
+        let ofn = r#"Prefix(:=<http://example.org/t#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/t>
+Import(<http://example.org/other>)
+Annotation(rdfs:comment "ontology")
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:q))
+Declaration(DataProperty(:d))
+Declaration(DataProperty(:e))
+Declaration(AnnotationProperty(:ap))
+Declaration(AnnotationProperty(:aq))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(Datatype(:t))
+SubClassOf(Annotation(rdfs:comment "c") :A ObjectIntersectionOf(:B DataSomeValuesFrom(:d xsd:string)))
+EquivalentClasses(:A :B)
+DisjointClasses(:A :B)
+DisjointUnion(:A :B ObjectComplementOf(:B))
+SubObjectPropertyOf(ObjectPropertyChain(:p :q) :p)
+EquivalentObjectProperties(:p :q)
+DisjointObjectProperties(:p ObjectInverseOf(:q))
+InverseObjectProperties(:p :q)
+ObjectPropertyDomain(:p :A)
+ObjectPropertyRange(:p :A)
+FunctionalObjectProperty(:p)
+InverseFunctionalObjectProperty(:p)
+ReflexiveObjectProperty(:p)
+IrreflexiveObjectProperty(:p)
+SymmetricObjectProperty(:p)
+AsymmetricObjectProperty(:p)
+TransitiveObjectProperty(:p)
+SubDataPropertyOf(:d :e)
+EquivalentDataProperties(:d :e)
+DisjointDataProperties(:d :e)
+DataPropertyDomain(:d :A)
+DataPropertyRange(:d DataUnionOf(xsd:string xsd:integer))
+FunctionalDataProperty(:d)
+DatatypeDefinition(:t DatatypeRestriction(xsd:integer xsd:minInclusive "1"^^xsd:integer))
+HasKey(:A (:p) (:d))
+SameIndividual(:i :j)
+DifferentIndividuals(:i :j)
+ClassAssertion(:A :i)
+ObjectPropertyAssertion(:p :i :j)
+NegativeObjectPropertyAssertion(:p :i :j)
+DataPropertyAssertion(:d :i "x")
+NegativeDataPropertyAssertion(:d :i "y")
+AnnotationAssertion(Annotation(rdfs:comment "nested") :ap :A "z")
+SubAnnotationPropertyOf(:ap :aq)
+AnnotationPropertyDomain(:ap :A)
+AnnotationPropertyRange(:ap :B)
+DLSafeRule(Body(ClassAtom(:A Variable(:v)) DataPropertyAtom(:d Variable(:v) Variable(:w))) Head(ClassAtom(:B Variable(:v))))
+)"#;
+        let model = crate::io::load_from(std::io::Cursor::new(ofn), crate::io::Format::Functional).unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        for ac in model.ont.iter() {
+            let kind = format!("{:?}", ac.component.kind());
+            let line = render_component_line(ac);
+            assert!(!line.is_empty() && !line.contains('\n'), "{kind}: {line:?}");
+            seen.insert(kind);
         }
+        assert!(seen.len() >= 45, "{} kinds: {seen:?}", seen.len());
     }
-    let untranslatable: &[&AnnotatedComponent<RcStr>] = &deduped;
-    let Sig { classes, oprops, dprops, inds, aprops, datatypes } = signature(untranslatable);
-
-    let mut r = Renderer { out: String::new(), labels, focused: None };
-    // The five builtin prefixes in fixed order, then blank line, Ontology(.
-    r.w("Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n");
-    r.w("Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\n");
-    r.w("Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)\n");
-    r.w("Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n");
-    r.w("Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n");
-    r.w("\n\nOntology(\n");
-
-    // Declarations: entities in typeIndex order (Class 1001, ObjectProperty 1002,
-    // DataProperty 1003, NamedIndividual 1005, AnnotationProperty 1006), IRI-sorted
-    // within.
-    for iri in &classes {
-        r.w("Declaration(Class(");
-        r.iri(iri);
-        r.w("))\n");
-    }
-    for iri in &oprops {
-        r.w("Declaration(ObjectProperty(");
-        r.iri(iri);
-        r.w("))\n");
-    }
-    for iri in &dprops {
-        r.w("Declaration(DataProperty(");
-        r.iri(iri);
-        r.w("))\n");
-    }
-    for iri in &inds {
-        r.w("Declaration(NamedIndividual(");
-        r.iri(iri);
-        r.w("))\n");
-    }
-    for iri in &aprops {
-        r.w("Declaration(AnnotationProperty(");
-        r.iri(iri);
-        r.w("))\n");
-    }
-
-    // Partition axioms into entity buckets and leftover.
-    let mut written: HashSet<usize> = HashSet::new();
-    let mut sections: Vec<(EKind, &BTreeSet<String>, &str, &str)> = vec![
-        (EKind::AnnotationProperty, &aprops, "Annotation Properties", "Annotation Property"),
-        (EKind::ObjectProperty, &oprops, "Object Properties", "Object Property"),
-        (EKind::DataProperty, &dprops, "Data Properties", "Data Property"),
-        (EKind::Datatype, &datatypes, "Datatypes", "Datatype"),
-        (EKind::Class, &classes, "Classes", "Class"),
-        (EKind::NamedIndividual, &inds, "Named Individuals", "Individual"),
-    ];
-    // owners: axiom index -> (iri, kind)
-    let owners: Vec<Option<(String, EKind)>> =
-        untranslatable.iter().map(|ac| owner_entity(&ac.component)).collect();
-    // An AnnotationAssertion is written under its subject-entity's section —
-    // CHEBI_64208's `hasDbXref`s under `# Class: CHEBI_64208` — when the subject IRI
-    // is a signature entity; the remainder (subject not declared) fall to the
-    // leftover block. Keyed by subject IRI, matched against whichever section's
-    // entity set contains it.
-    let ann_subjects: Vec<Option<String>> = untranslatable
-        .iter()
-        .map(|ac| match &ac.component {
-            Component::AnnotationAssertion(aa) => match &aa.subject {
-                AnnotationSubject::IRI(i) => Some(i.as_ref().to_string()),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect();
-
-    // Axioms that make an entity's block NON-empty without ever being printed in it.
-    // A `DifferentIndividuals` axiom, and a `DisjointClasses` with more than two
-    // operands, is never rendered inside an entity block — it falls through to the
-    // trailing leftover block — but it still counts when deciding whether the
-    // block is written at all, because that emptiness test runs over the entity's
-    // unfiltered axiom set. So an entity whose only axioms are of those two kinds
-    // gets a
-    // `# Class: …` / `# Individual: …` comment with nothing under it. That is MONDO's
-    // case: `FOODON_034121115` & co. appear only in 3+-way `DisjointClasses`, and
-    // `IAO_0000120`…`IAO_0000428` only in one `DifferentIndividuals`.
-    let mut mention_only: HashSet<String> = HashSet::new();
-    for ac in untranslatable {
-        match &ac.component {
-            Component::DifferentIndividuals(ax) => {
-                for i in &ax.0 {
-                    if let Individual::Named(n) = i {
-                        mention_only.insert(n.0.as_ref().to_string());
-                    }
-                }
-            }
-            Component::DisjointClasses(ax) if ax.0.len() > 2 => {
-                for ce in &ax.0 {
-                    if let CE::Class(c) = ce {
-                        mention_only.insert(c.0.as_ref().to_string());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for (kind, entities, banner, etype) in sections.drain(..) {
-        // A section runs (and emits a trailing blank) only for a non-empty entity
-        // set — even when no entity has renderable content, which is what gives the
-        // blank line after the declarations block (the annotation-property set).
-        if entities.is_empty() {
-            continue;
-        }
-        let mut wrote_banner = false;
-        for ent in entities {
-            // axioms owned by this entity, not yet written
-            let mut group: Vec<usize> = Vec::new();
-            for (i, o) in owners.iter().enumerate() {
-                if written.contains(&i) {
-                    continue;
-                }
-                if let Some((oiri, okind)) = o {
-                    if *okind == kind && oiri == ent {
-                        group.push(i);
-                        continue;
-                    }
-                }
-                // AnnotationAssertion attaches to the section whose entity is its subject.
-                if ann_subjects[i].as_deref() == Some(ent.as_str()) {
-                    group.push(i);
-                }
-            }
-            // annotation assertions on this entity render as annotations, separate.
-            let has_axioms = group
-                .iter()
-                .any(|&i| !matches!(untranslatable[i].component, Component::AnnotationAssertion(_)));
-            let has_anns = group
-                .iter()
-                .any(|&i| matches!(untranslatable[i].component, Component::AnnotationAssertion(_)));
-            // An entity with neither axioms nor annotation assertions is SKIPPED
-            // outright, whatever its kind, and the banner is written lazily by the
-            // first entity that survives. So a document whose only individuals occur
-            // inside an `ObjectOneOf` gets no `#   Named Individuals` section at all.
-            if !has_axioms && !has_anns && !mention_only.contains(ent) {
-                continue;
-            }
-            if !wrote_banner {
-                r.w("############################\n#   ");
-                r.w(banner);
-                r.w("\n############################\n\n");
-                wrote_banner = true;
-            }
-            r.entity_comment(etype, ent);
-            r.w("\n");
-            r.focused = Some(ent.clone());
-            // annotation assertions first (sorted), then the axioms (sorted),
-            // excluding DisjointClasses with >2 operands.
-            let mut ann_ids: Vec<usize> = group
-                .iter()
-                .cloned()
-                .filter(|&i| matches!(untranslatable[i].component, Component::AnnotationAssertion(_)))
-                .collect();
-            ann_ids.sort_by(|&a, &b| cmp_component(&untranslatable[a].component, &untranslatable[b].component));
-            for i in ann_ids {
-                r.axiom(untranslatable[i]);
-                r.w("\n");
-                written.insert(i);
-            }
-            let mut ax_ids: Vec<usize> = group
-                .iter()
-                .cloned()
-                .filter(|&i| {
-                    !matches!(untranslatable[i].component, Component::AnnotationAssertion(_))
-                        && !matches!(&untranslatable[i].component,
-                            Component::DisjointClasses(d) if d.0.len() > 2)
-                })
-                .collect();
-            ax_ids.sort_by(|&a, &b| cmp_component(&untranslatable[a].component, &untranslatable[b].component));
-            for i in ax_ids {
-                r.axiom(untranslatable[i]);
-                r.w("\n");
-                written.insert(i);
-            }
-            r.w("\n");
-        }
-        // Trailing blank line closing the section.
-        r.w("\n");
-    }
-
-    // Leftover axioms (DisjointClasses>2, GCI, SWRL rules), sorted.
-    let mut leftover: Vec<usize> = (0..untranslatable.len()).filter(|i| !written.contains(i)).collect();
-    leftover.sort_by(|&a, &b| cmp_component(&untranslatable[a].component, &untranslatable[b].component));
-    r.focused = None;
-    for i in leftover {
-        r.axiom(untranslatable[i]);
-        r.w("\n");
-    }
-
-    r.w(")");
-    Some(r.out)
 }

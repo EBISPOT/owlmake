@@ -1,0 +1,20 @@
+format-version: 1.2
+ontology: t
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_6>))\nDeclaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_9>))\n############################\n#   Object Properties\n############################\n\n# Object Property: <http://purl.obolibrary.org/obo/T_6> (<http://purl.obolibrary.org/obo/T_6>)\n\nDisjointObjectProperties(<http://purl.obolibrary.org/obo/T_6> ObjectInverseOf(<http://purl.obolibrary.org/obo/T_9>))\n\n\n)
+
+[Term]
+id: T:10
+equivalent_to: T:11 {comment="classes"}
+
+[Typedef]
+id: T:1
+equivalent_to: T:2 {comment="two"}
+
+[Typedef]
+id: T:3
+equivalent_to: T:5
+
+[Typedef]
+id: T:6
+disjoint_from: T:8
+

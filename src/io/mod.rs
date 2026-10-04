@@ -1662,13 +1662,6 @@ pub fn save(model: &mut Model, path: &Path) -> Result<()> {
     save_as(model, path, fmt)
 }
 
-/// Save `model` to `path` in the explicitly given format. Shows a byte heartbeat
-/// for the (potentially multi-GB) serialization, which is otherwise silent.
-///
-/// Takes `&mut Model` so the XML writers (which require an owned
-/// `ComponentMappedOntology`) can *move* the components in and back out rather
-/// than deep-cloning the whole ontology — a multi-GB copy on phenio-scale
-/// inputs. The model is left unchanged once the write returns.
 /// Put every SET-valued operand list into canonical order, so two axioms that OWL
 /// considers identical are identical here too.
 ///
@@ -1680,104 +1673,21 @@ pub fn save(model: &mut Model, path: &Path) -> Result<()> {
 /// and its `owl:Axiom` reification twice each. Sorting the operands lets
 /// `SetOntology`'s own deduplication collapse them.
 ///
-/// This does not change rendering order: every writer already sorts operands as
-/// it emits them. It only merges duplicates.
+/// The same holds of the members of the other set-valued axioms —
+/// equivalent and disjoint object and data properties, same and different
+/// individuals — and of a key's properties: an RDF document stating
+/// `p owl:equivalentProperty q` and `q owl:equivalentProperty p` reads as two
+/// axioms, which would otherwise be written twice in every syntax.
 ///
-/// Scope is the class-expression axioms MONDO actually exercises. The other
-/// set-valued axioms — `SameIndividual`, `DifferentIndividuals`,
-/// `EquivalentObjectProperties`, `DisjointObjectProperties`, `HasKey`, … — have
-/// the same Vec-vs-Set mismatch and are deliberately left alone until an artefact
-/// shows they matter. (`SubObjectPropertyOf`'s chain is genuinely ordered and must
-/// never be sorted.)
+/// Every writer sorts operands as it emits them, so this changes no order; it
+/// only merges duplicates. (`SubObjectPropertyOf`'s chain is genuinely ordered
+/// and is never sorted.)
 pub fn normalize_set_operands(model: &mut Model) {
-    use horned_owl::model::{
-        AnnotatedComponent, ClassExpression as CE, Component, MutableOntology, RcStr,
-    };
-    use crate::io::owlfunc::{cmp_ce, cmp_individual};
-
-    fn norm_ce(ce: &CE<RcStr>) -> CE<RcStr> {
-        match ce {
-            CE::ObjectIntersectionOf(ops) => CE::ObjectIntersectionOf(sorted(ops)),
-            CE::ObjectUnionOf(ops) => CE::ObjectUnionOf(sorted(ops)),
-            CE::ObjectComplementOf(b) => CE::ObjectComplementOf(Box::new(norm_ce(b))),
-            CE::ObjectSomeValuesFrom { ope, bce } => CE::ObjectSomeValuesFrom {
-                ope: ope.clone(),
-                bce: Box::new(norm_ce(bce)),
-            },
-            CE::ObjectAllValuesFrom { ope, bce } => CE::ObjectAllValuesFrom {
-                ope: ope.clone(),
-                bce: Box::new(norm_ce(bce)),
-            },
-            CE::ObjectMinCardinality { n, ope, bce } => CE::ObjectMinCardinality {
-                n: *n,
-                ope: ope.clone(),
-                bce: Box::new(norm_ce(bce)),
-            },
-            CE::ObjectMaxCardinality { n, ope, bce } => CE::ObjectMaxCardinality {
-                n: *n,
-                ope: ope.clone(),
-                bce: Box::new(norm_ce(bce)),
-            },
-            CE::ObjectExactCardinality { n, ope, bce } => CE::ObjectExactCardinality {
-                n: *n,
-                ope: ope.clone(),
-                bce: Box::new(norm_ce(bce)),
-            },
-            CE::ObjectOneOf(inds) => {
-                let mut v = inds.clone();
-                v.sort_by(cmp_individual);
-                v.dedup();
-                CE::ObjectOneOf(v)
-            }
-            other => other.clone(),
-        }
-    }
-
-    fn sorted(ops: &[CE<RcStr>]) -> Vec<CE<RcStr>> {
-        let mut v: Vec<CE<RcStr>> = ops.iter().map(norm_ce).collect();
-        v.sort_by(cmp_ce);
-        v.dedup();
-        v
-    }
-
+    use horned_owl::model::{AnnotatedComponent, MutableOntology, RcStr};
     let mut replace: Vec<(AnnotatedComponent<RcStr>, AnnotatedComponent<RcStr>)> = Vec::new();
     for ac in model.ont.iter() {
-        let new_c = match &ac.component {
-            Component::EquivalentClasses(ax) => {
-                Component::EquivalentClasses(horned_owl::model::EquivalentClasses(sorted(&ax.0)))
-            }
-            Component::DisjointClasses(ax) => {
-                Component::DisjointClasses(horned_owl::model::DisjointClasses(sorted(&ax.0)))
-            }
-            Component::SubClassOf(ax) => Component::SubClassOf(horned_owl::model::SubClassOf {
-                sub: norm_ce(&ax.sub),
-                sup: norm_ce(&ax.sup),
-            }),
-            Component::DisjointUnion(ax) => Component::DisjointUnion(
-                horned_owl::model::DisjointUnion(ax.0.clone(), sorted(&ax.1)),
-            ),
-            Component::ClassAssertion(ax) => {
-                Component::ClassAssertion(horned_owl::model::ClassAssertion {
-                    ce: norm_ce(&ax.ce),
-                    i: ax.i.clone(),
-                })
-            }
-            Component::ObjectPropertyDomain(ax) => {
-                Component::ObjectPropertyDomain(horned_owl::model::ObjectPropertyDomain {
-                    ope: ax.ope.clone(),
-                    ce: norm_ce(&ax.ce),
-                })
-            }
-            Component::ObjectPropertyRange(ax) => {
-                Component::ObjectPropertyRange(horned_owl::model::ObjectPropertyRange {
-                    ope: ax.ope.clone(),
-                    ce: norm_ce(&ax.ce),
-                })
-            }
-            _ => continue,
-        };
-        if new_c != ac.component {
-            replace.push((ac.clone(), AnnotatedComponent { component: new_c, ann: ac.ann.clone() }));
+        if let Some(component) = canonical_component(&ac.component).filter(|c| *c != ac.component) {
+            replace.push((ac.clone(), AnnotatedComponent { component, ann: ac.ann.clone() }));
         }
     }
     for (old, new) in replace {
@@ -1786,6 +1696,130 @@ pub fn normalize_set_operands(model: &mut Model) {
     }
 }
 
+/// `c` with its set-valued operand lists in canonical order (see
+/// [`normalize_set_operands`]), or `None` when it has none.
+pub(crate) fn canonical_component(
+    c: &horned_owl::model::Component<horned_owl::model::RcStr>,
+) -> Option<horned_owl::model::Component<horned_owl::model::RcStr>> {
+    use crate::io::owlfunc::{cmp_individual, cmp_ope};
+    use horned_owl::model::{self as m, Component};
+    Some(match c {
+        Component::EquivalentClasses(ax) => Component::EquivalentClasses(m::EquivalentClasses(sorted_ces(&ax.0))),
+        Component::DisjointClasses(ax) => Component::DisjointClasses(m::DisjointClasses(sorted_ces(&ax.0))),
+        Component::SubClassOf(ax) => {
+            Component::SubClassOf(m::SubClassOf { sub: canonical_ce(&ax.sub), sup: canonical_ce(&ax.sup) })
+        }
+        Component::DisjointUnion(ax) => Component::DisjointUnion(m::DisjointUnion(ax.0.clone(), sorted_ces(&ax.1))),
+        Component::ClassAssertion(ax) => {
+            Component::ClassAssertion(m::ClassAssertion { ce: canonical_ce(&ax.ce), i: ax.i.clone() })
+        }
+        Component::ObjectPropertyDomain(ax) => {
+            Component::ObjectPropertyDomain(m::ObjectPropertyDomain { ope: ax.ope.clone(), ce: canonical_ce(&ax.ce) })
+        }
+        Component::ObjectPropertyRange(ax) => {
+            Component::ObjectPropertyRange(m::ObjectPropertyRange { ope: ax.ope.clone(), ce: canonical_ce(&ax.ce) })
+        }
+        Component::EquivalentObjectProperties(ax) => {
+            Component::EquivalentObjectProperties(m::EquivalentObjectProperties(sorted_by(&ax.0, cmp_ope)))
+        }
+        Component::DisjointObjectProperties(ax) => {
+            Component::DisjointObjectProperties(m::DisjointObjectProperties(sorted_by(&ax.0, cmp_ope)))
+        }
+        Component::EquivalentDataProperties(ax) => {
+            Component::EquivalentDataProperties(m::EquivalentDataProperties(sorted_by(&ax.0, cmp_dp)))
+        }
+        Component::DisjointDataProperties(ax) => {
+            Component::DisjointDataProperties(m::DisjointDataProperties(sorted_by(&ax.0, cmp_dp)))
+        }
+        Component::SameIndividual(ax) => Component::SameIndividual(m::SameIndividual(sorted_by(&ax.0, cmp_individual))),
+        Component::DifferentIndividuals(ax) => {
+            Component::DifferentIndividuals(m::DifferentIndividuals(sorted_by(&ax.0, cmp_individual)))
+        }
+        Component::HasKey(ax) => Component::HasKey(m::HasKey { ce: canonical_ce(&ax.ce), vpe: sorted_by(&ax.vpe, cmp_pe) }),
+        _ => return None,
+    })
+}
+
+fn sorted_by<T: Clone + PartialEq>(v: &[T], cmp: impl Fn(&T, &T) -> std::cmp::Ordering) -> Vec<T> {
+    let mut v = v.to_vec();
+    v.sort_by(|a, b| cmp(a, b));
+    v.dedup();
+    v
+}
+
+fn cmp_dp(
+    a: &horned_owl::model::DataProperty<horned_owl::model::RcStr>,
+    b: &horned_owl::model::DataProperty<horned_owl::model::RcStr>,
+) -> std::cmp::Ordering {
+    a.0.as_ref().cmp(b.0.as_ref())
+}
+
+/// A key's object properties before its data properties, each in their own
+/// order.
+fn cmp_pe(
+    a: &horned_owl::model::PropertyExpression<horned_owl::model::RcStr>,
+    b: &horned_owl::model::PropertyExpression<horned_owl::model::RcStr>,
+) -> std::cmp::Ordering {
+    use horned_owl::model::PropertyExpression as PE;
+    let rank = |p: &PE<horned_owl::model::RcStr>| match p {
+        PE::ObjectPropertyExpression(_) => 0,
+        PE::DataProperty(_) => 1,
+        PE::AnnotationProperty(_) => 2,
+    };
+    rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
+        (PE::ObjectPropertyExpression(x), PE::ObjectPropertyExpression(y)) => crate::io::owlfunc::cmp_ope(x, y),
+        (PE::DataProperty(x), PE::DataProperty(y)) => cmp_dp(x, y),
+        (PE::AnnotationProperty(x), PE::AnnotationProperty(y)) => x.0.as_ref().cmp(y.0.as_ref()),
+        _ => std::cmp::Ordering::Equal,
+    })
+}
+
+/// A class expression with its set-valued operands, at any depth, in
+/// canonical order.
+fn canonical_ce(
+    ce: &horned_owl::model::ClassExpression<horned_owl::model::RcStr>,
+) -> horned_owl::model::ClassExpression<horned_owl::model::RcStr> {
+    use horned_owl::model::ClassExpression as CE;
+    match ce {
+        CE::ObjectIntersectionOf(ops) => CE::ObjectIntersectionOf(sorted_ces(ops)),
+        CE::ObjectUnionOf(ops) => CE::ObjectUnionOf(sorted_ces(ops)),
+        CE::ObjectComplementOf(b) => CE::ObjectComplementOf(Box::new(canonical_ce(b))),
+        CE::ObjectSomeValuesFrom { ope, bce } => {
+            CE::ObjectSomeValuesFrom { ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectAllValuesFrom { ope, bce } => {
+            CE::ObjectAllValuesFrom { ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectMinCardinality { n, ope, bce } => {
+            CE::ObjectMinCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectMaxCardinality { n, ope, bce } => {
+            CE::ObjectMaxCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectExactCardinality { n, ope, bce } => {
+            CE::ObjectExactCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
+        }
+        CE::ObjectOneOf(inds) => CE::ObjectOneOf(sorted_by(inds, crate::io::owlfunc::cmp_individual)),
+        other => other.clone(),
+    }
+}
+
+fn sorted_ces(
+    ops: &[horned_owl::model::ClassExpression<horned_owl::model::RcStr>],
+) -> Vec<horned_owl::model::ClassExpression<horned_owl::model::RcStr>> {
+    let mut v: Vec<_> = ops.iter().map(canonical_ce).collect();
+    v.sort_by(crate::io::owlfunc::cmp_ce);
+    v.dedup();
+    v
+}
+
+/// Save `model` to `path` in the explicitly given format. Shows a byte heartbeat
+/// for the (potentially multi-GB) serialization, which is otherwise silent.
+///
+/// Takes `&mut Model` so the XML writers (which require an owned
+/// `ComponentMappedOntology`) can *move* the components in and back out rather
+/// than deep-cloning the whole ontology — a multi-GB copy on phenio-scale
+/// inputs. The model is left unchanged once the write returns.
 pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
     if is_discard_path(path) {
         return Ok(());
@@ -2366,7 +2400,7 @@ fn prefixes_default_ns(model: &Model, document: &PrefixMapping) -> Option<String
 /// alphabetical order, and a long name is last. EFO's `components/gwas_import.owl`
 /// is a Turtle graph a CONSTRUCT produced, and its block ends
 /// `Prefix(oboInOwl:=…)` then `Prefix(gwas_trait:=…)`.
-fn ofn_prefix_block(document: &PrefixMapping, default_ns: Option<&str>) -> PrefixMapping {
+pub(crate) fn ofn_prefix_block(document: &PrefixMapping, default_ns: Option<&str>) -> PrefixMapping {
     let mut by_name: BTreeMap<(usize, String), String> = BTreeMap::new();
     let mut put = |name: &str, ns: &str| {
         by_name.insert((name.len() + 1, format!("{name}:")), ns.to_string());

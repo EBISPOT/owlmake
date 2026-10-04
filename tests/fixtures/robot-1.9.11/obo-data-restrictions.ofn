@@ -1,0 +1,12 @@
+Prefix(:=<http://purl.obolibrary.org/obo/>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://purl.obolibrary.org/obo/t.owl>
+Declaration(Class(:T_1))
+Declaration(Class(:T_2))
+Declaration(DataProperty(:T_20))
+Declaration(ObjectProperty(:T_10))
+EquivalentClasses(:T_1 ObjectIntersectionOf(:T_2 DataSomeValuesFrom(:T_20 xsd:string)))
+SubClassOf(:T_2 DataHasValue(:T_20 "x"))
+SubClassOf(:T_1 ObjectIntersectionOf(:T_2 DataMinCardinality(1 :T_20 xsd:integer) ObjectSomeValuesFrom(:T_10 :T_2)))
+SubClassOf(:T_2 DataAllValuesFrom(:T_20 DataOneOf("a" "b")))
+)
