@@ -723,50 +723,133 @@ pub fn is_logical(comp: &horned_owl::model::Component<Rc>) -> bool {
     ) && !is_declaration(comp)
 }
 
-/// The "about"/subject entity IRI of an axiom, used for `internal`/`external`
-/// namespace classification.
-pub fn subject_iri(comp: &horned_owl::model::Component<Rc>) -> Option<String> {
+/// The IRIs `comp` is about. `--axioms internal` selects an axiom when one of
+/// them lies in a base namespace, and `--axioms external` every other axiom.
+///
+/// A declaration is about its entity; an assertion about its named individual or
+/// annotation subject; a sub-class or sub-property axiom about its sub-class or
+/// sub-property; a property characteristic, domain or range about the property;
+/// and an inverse pair about its first property. An n-ary class or property
+/// axiom is about each of its members, save that an equivalence of classes counts
+/// its named members alone and an equivalence of properties needs two members to
+/// be about any. Where that subject is an anonymous expression, each entity in it
+/// is a subject: a property chain is about its links, and
+/// `ObjectSomeValuesFrom(p C) ⊑ D` about `p` and `C`.
+///
+/// An assertion about an anonymous individual is about no IRI, and nor is an
+/// axiom with no subject to give: a key, a disjoint union, a datatype definition,
+/// sameness or difference of individuals, a negative assertion, a functional data
+/// property, an annotation property's domain or range, and a rule. Each is
+/// therefore external to any namespace.
+pub fn axiom_subjects(comp: &horned_owl::model::Component<Rc>) -> Vec<String> {
     use horned_owl::model::{
-        AnnotationSubject, ClassExpression as CE, Component as C, ObjectPropertyExpression as OPE,
-        SubObjectPropertyExpression as SOPE,
-    };
-    let class = |c: &CE<Rc>| match c {
-        CE::Class(cl) => Some(cl.0.to_string()),
-        _ => None,
+        AnnotationSubject, ClassExpression as CE, Component as C, Individual,
+        ObjectPropertyExpression as OPE, SubObjectPropertyExpression as SOPE,
     };
     let ope = |o: &OPE<Rc>| match o {
-        OPE::ObjectProperty(p) => Some(p.0.to_string()),
-        OPE::InverseObjectProperty(p) => Some(p.0.to_string()),
+        OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p) => p.0.to_string(),
     };
+    let ce = |c: &CE<Rc>| match c {
+        CE::Class(cl) => vec![cl.0.to_string()],
+        _ => crate::sig::class_expression_signature(c).into_iter().collect(),
+    };
+    let named = |i: &Individual<Rc>| match i {
+        Individual::Named(n) => vec![n.0.to_string()],
+        Individual::Anonymous(_) => Vec::new(),
+    };
+    // An equivalence of properties is about the sub-property of each pairwise
+    // inclusion it implies, which one member alone does not give.
+    let pairwise = |members: Vec<String>| if members.len() < 2 { Vec::new() } else { members };
     match comp {
-        C::DeclareClass(d) => Some(d.0 .0.to_string()),
-        C::DeclareObjectProperty(d) => Some(d.0 .0.to_string()),
-        C::DeclareAnnotationProperty(d) => Some(d.0 .0.to_string()),
-        C::DeclareDataProperty(d) => Some(d.0 .0.to_string()),
-        C::DeclareNamedIndividual(d) => Some(d.0 .0.to_string()),
-        C::DeclareDatatype(d) => Some(d.0 .0.to_string()),
-        C::SubClassOf(ax) => class(&ax.sub),
-        C::EquivalentClasses(ax) => ax.0.iter().find_map(class),
-        C::DisjointClasses(ax) => ax.0.iter().find_map(class),
-        C::AnnotationAssertion(ax) => match &ax.subject {
-            AnnotationSubject::IRI(i) => Some(i.to_string()),
-            _ => None,
-        },
+        C::DeclareClass(d) => vec![d.0.0.to_string()],
+        C::DeclareObjectProperty(d) => vec![d.0.0.to_string()],
+        C::DeclareAnnotationProperty(d) => vec![d.0.0.to_string()],
+        C::DeclareDataProperty(d) => vec![d.0.0.to_string()],
+        C::DeclareNamedIndividual(d) => vec![d.0.0.to_string()],
+        C::DeclareDatatype(d) => vec![d.0.0.to_string()],
+        C::SubClassOf(ax) => ce(&ax.sub),
+        C::EquivalentClasses(ax) => ax
+            .0
+            .iter()
+            .filter_map(|c| match c {
+                CE::Class(cl) => Some(cl.0.to_string()),
+                _ => None,
+            })
+            .collect(),
+        C::DisjointClasses(ax) => ax.0.iter().flat_map(ce).collect(),
         C::SubObjectPropertyOf(ax) => match &ax.sub {
-            SOPE::ObjectPropertyExpression(o) => ope(o),
-            _ => None,
+            SOPE::ObjectPropertyExpression(o) => vec![ope(o)],
+            SOPE::ObjectPropertyChain(chain) => chain.iter().map(ope).collect(),
         },
-        C::SubDataPropertyOf(ax) => Some(ax.sub.0.to_string()),
-        C::SubAnnotationPropertyOf(ax) => Some(ax.sub.0.to_string()),
-        C::ObjectPropertyDomain(ax) => ope(&ax.ope),
-        C::ObjectPropertyRange(ax) => ope(&ax.ope),
-        C::TransitiveObjectProperty(ax) => ope(&ax.0),
-        C::ClassAssertion(ax) => match &ax.i {
-            horned_owl::model::Individual::Named(n) => Some(n.0.to_string()),
-            _ => None,
+        C::SubDataPropertyOf(ax) => vec![ax.sub.0.to_string()],
+        C::SubAnnotationPropertyOf(ax) => vec![ax.sub.0.to_string()],
+        C::EquivalentObjectProperties(ax) => pairwise(ax.0.iter().map(ope).collect()),
+        C::EquivalentDataProperties(ax) => pairwise(ax.0.iter().map(|p| p.0.to_string()).collect()),
+        C::DisjointObjectProperties(ax) => ax.0.iter().map(ope).collect(),
+        C::DisjointDataProperties(ax) => ax.0.iter().map(|p| p.0.to_string()).collect(),
+        C::AnnotationAssertion(ax) => match &ax.subject {
+            AnnotationSubject::IRI(i) => vec![i.to_string()],
+            AnnotationSubject::AnonymousIndividual(_) => Vec::new(),
         },
-        _ => None,
+        C::ClassAssertion(ax) => named(&ax.i),
+        C::ObjectPropertyAssertion(ax) => named(&ax.from),
+        C::DataPropertyAssertion(ax) => named(&ax.from),
+        C::FunctionalObjectProperty(ax) => vec![ope(&ax.0)],
+        C::InverseFunctionalObjectProperty(ax) => vec![ope(&ax.0)],
+        C::ReflexiveObjectProperty(ax) => vec![ope(&ax.0)],
+        C::IrreflexiveObjectProperty(ax) => vec![ope(&ax.0)],
+        C::SymmetricObjectProperty(ax) => vec![ope(&ax.0)],
+        C::AsymmetricObjectProperty(ax) => vec![ope(&ax.0)],
+        C::TransitiveObjectProperty(ax) => vec![ope(&ax.0)],
+        C::ObjectPropertyDomain(ax) => vec![ope(&ax.ope)],
+        C::ObjectPropertyRange(ax) => vec![ope(&ax.ope)],
+        C::DataPropertyDomain(ax) => vec![ax.dp.0.to_string()],
+        C::DataPropertyRange(ax) => vec![ax.dp.0.to_string()],
+        C::InverseObjectProperties(ax) => vec![ope(&ax.0)],
+        _ => Vec::new(),
     }
+}
+
+/// Whether `comp` is an axiom internal to `base_iris`: one of its subjects
+/// ([`axiom_subjects`]) lies in one of those namespaces.
+fn is_internal(comp: &horned_owl::model::Component<Rc>, base_iris: &[String]) -> bool {
+    axiom_subjects(comp)
+        .iter()
+        .any(|iri| base_iris.iter().any(|b| iri.starts_with(b.as_str())))
+}
+
+/// Whether `comp` is an axiom at all. The ontology's IRIs, its annotations and
+/// its imports belong to the ontology rather than stating anything in it, so no
+/// axiom selector reaches them. MONDO's `remove --base-iri …/MFOMD --axioms
+/// external` keeps mfomd's four imports that way, and the merge over the mirrors
+/// follows them to the terms its import module needs.
+fn is_axiom(comp: &horned_owl::model::Component<Rc>) -> bool {
+    use horned_owl::model::Component as C;
+    !matches!(comp, C::OntologyID(_) | C::DocIRI(_) | C::OntologyAnnotation(_) | C::Import(_))
+}
+
+/// The namespace selectors among the `--axioms` values that take effect. An
+/// `internal` named after an `external` is ignored, with a warning; an
+/// `external` named after an `internal` applies with it, and the two together
+/// select every axiom.
+pub fn namespace_selectors(toks: &[String]) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for t in toks {
+        match t.as_str() {
+            "internal" if out.contains(&"external") => status!(
+                "warning: ignoring the 'internal' axiom selector named after 'external': the two together would select every axiom"
+            ),
+            "internal" if !out.contains(&"internal") => out.push("internal"),
+            "external" if !out.contains(&"external") => {
+                if out.contains(&"internal") {
+                    status!("warning: 'internal' and 'external' together select every axiom");
+                }
+                out.push("external");
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Axiom-type classification: does `comp` belong to the named category?
@@ -882,18 +965,11 @@ pub fn axiom_in_category(
                 | C::ReflexiveObjectProperty(_)
                 | C::IrreflexiveObjectProperty(_)
         ),
-        // Namespace-based partition over the axiom's whole signature: the test is
-        // over every referenced entity, not just a single subject, so axioms with no
-        // obvious subject — DisjointClasses, SameIndividual — are still categorised.
-        // With no base IRIs, nothing is internal.
-        "internal" => {
-            let sig = crate::sig::signature(comp);
-            !sig.is_empty() && sig.iter().all(|iri| base_iris.iter().any(|b| iri.starts_with(b.as_str())))
-        }
-        "external" => {
-            let sig = crate::sig::signature(comp);
-            !sig.is_empty() && !sig.iter().any(|iri| base_iris.iter().any(|b| iri.starts_with(b.as_str())))
-        }
+        // Each axiom is internal or external to the base namespaces by its
+        // subjects (see `axiom_subjects`). With no base IRIs, every axiom is
+        // external.
+        "internal" => is_axiom(comp) && is_internal(comp, base_iris),
+        "external" => is_axiom(comp) && !is_internal(comp, base_iris),
         // A single axiom type, named the way the OWL object model names it.
         // uPheno's `upheno-old-model.owl` asks for ten of these one per step
         // (`--axioms FunctionalObjectProperty`, `--axioms DisjointDataProperties`,
@@ -1064,4 +1140,59 @@ where
     let mut out = Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes));
     out.carry_meta_from(&model);
     out
+}
+
+#[cfg(test)]
+mod namespace_tests {
+    use super::*;
+    use horned_owl::model::{
+        Build, Component, ObjectProperty, ObjectPropertyExpression as OPE, RcStr,
+        SubObjectPropertyExpression as SOPE, SubObjectPropertyOf,
+    };
+
+    const UPHENO: &str = "http://purl.obolibrary.org/obo/UPHENO_";
+
+    fn chain(members: &[&str], sup: &str) -> Component<RcStr> {
+        let b: Build<RcStr> = Build::new();
+        let op = |i: &str| OPE::ObjectProperty(ObjectProperty(b.iri(i)));
+        Component::SubObjectPropertyOf(SubObjectPropertyOf {
+            sub: SOPE::ObjectPropertyChain(members.iter().map(|m| op(m)).collect()),
+            sup: match op(sup) {
+                OPE::ObjectProperty(p) => OPE::ObjectProperty(p),
+                other => other,
+            },
+        })
+    }
+
+    /// A chain axiom's subjects are its chain members alone; the super-property is
+    /// not among them. So a chain built out of foreign properties is external to
+    /// `--base-iri …/UPHENO_` however internal its super-property is, and a base
+    /// module states none of them.
+    #[test]
+    fn a_chain_of_foreign_properties_is_external_whatever_its_super_property() {
+        let base = vec![UPHENO.to_string()];
+        let c = chain(
+            &[
+                "http://purl.obolibrary.org/obo/BFO_0000051",
+                "http://purl.obolibrary.org/obo/RO_0000052",
+            ],
+            "http://purl.obolibrary.org/obo/UPHENO_0000001",
+        );
+        assert!(axiom_in_category(&c, "external", &base), "chain members are all foreign, so the axiom is external");
+    }
+
+    /// The converse: one internal chain member keeps it, because an axiom is
+    /// internal when ANY of its subjects lies in the base namespace.
+    #[test]
+    fn a_chain_with_one_internal_member_is_kept() {
+        let base = vec![UPHENO.to_string()];
+        let c = chain(
+            &[
+                "http://purl.obolibrary.org/obo/UPHENO_0000001",
+                "http://purl.obolibrary.org/obo/BFO_0000050",
+            ],
+            "http://purl.obolibrary.org/obo/UPHENO_0000001",
+        );
+        assert!(!axiom_in_category(&c, "external", &base), "an internal chain member keeps the axiom");
+    }
 }

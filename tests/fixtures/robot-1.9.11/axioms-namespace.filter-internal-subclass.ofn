@@ -1,0 +1,82 @@
+Prefix(:=<http://example.org/probe.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/probe.owl>
+
+Declaration(Class(<http://example.org/ext/B>))
+Declaration(Class(<http://example.org/int/A>))
+Declaration(Class(<http://example.org/int/C>))
+Declaration(ObjectProperty(<http://example.org/ext/q>))
+Declaration(ObjectProperty(<http://example.org/ext/r>))
+Declaration(ObjectProperty(<http://example.org/int/p>))
+Declaration(DataProperty(<http://example.org/int/d>))
+Declaration(NamedIndividual(<http://example.org/ext/x>))
+Declaration(NamedIndividual(<http://example.org/int/y>))
+Declaration(AnnotationProperty(<http://example.org/int/ap>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/int/ap> (<http://example.org/int/ap>)
+
+SubAnnotationPropertyOf(<http://example.org/int/ap> rdfs:comment)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/ext/q> (<http://example.org/ext/q>)
+
+DisjointObjectProperties(<http://example.org/ext/q> ObjectInverseOf(<http://example.org/int/p>))
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/int/d> (<http://example.org/int/d>)
+
+DataPropertyRange(<http://example.org/int/d> xsd:string)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/ext/B> (<http://example.org/ext/B>)
+
+DisjointClasses(<http://example.org/ext/B> ObjectSomeValuesFrom(<http://example.org/int/p> <http://example.org/int/A>))
+
+# Class: <http://example.org/int/A> (a)
+
+AnnotationAssertion(rdfs:label <http://example.org/int/A> "a")
+EquivalentClasses(<http://example.org/int/A> ObjectSomeValuesFrom(<http://example.org/ext/q> <http://example.org/ext/B>))
+
+# Class: <http://example.org/int/C> (<http://example.org/int/C>)
+
+SubClassOf(<http://example.org/int/C> <http://example.org/ext/B>)
+SubClassOf(Annotation(rdfs:comment "kept whole") <http://example.org/int/C> <http://example.org/ext/B>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/int/y> (<http://example.org/int/y>)
+
+ClassAssertion(<http://example.org/ext/B> <http://example.org/int/y>)
+ObjectPropertyAssertion(<http://example.org/ext/q> <http://example.org/int/y> <http://example.org/ext/x>)
+
+
+SubClassOf(ObjectSomeValuesFrom(<http://example.org/ext/q> <http://example.org/int/A>) <http://example.org/ext/B>)
+SubObjectPropertyOf(ObjectInverseOf(<http://example.org/int/p>) <http://example.org/ext/r>)
+FunctionalObjectProperty(ObjectInverseOf(<http://example.org/int/p>))
+SubObjectPropertyOf(ObjectPropertyChain(<http://example.org/ext/q> <http://example.org/int/p>) <http://example.org/ext/r>)
+)

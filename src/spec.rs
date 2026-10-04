@@ -920,6 +920,10 @@ pub enum StepSpec {
         /// ROBOT `--axioms`: keep only these axiom types.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         axioms: Vec<String>,
+        /// ROBOT `--base-iri`: the namespaces `--axioms internal|external` judge
+        /// an axiom's subjects by.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        base_iri: Vec<String>,
         /// `--prefix "name: namespace"`, which is how a `--select` CURIE resolves.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         prefixes: Vec<String>,
@@ -1919,6 +1923,7 @@ impl StepSpec {
                 signature: s.signature,
                 trim: s.trim,
                 axioms: s.axioms.clone(),
+                base_iri: s.base_iri.clone(),
                 prefixes: s.prefixes.clone(),
             },
             Op::Annotate(s) => StepSpec::Annotate {
@@ -2131,17 +2136,18 @@ impl StepSpec {
                 signature,
                 drop_axiom_annotations,
             }),
-            StepSpec::Filter { terms, term_files, selects, signature, trim, axioms, prefixes } => {
-                step::filter_step(FilterSpec {
-                    terms,
-                    term_files,
-                    selects,
-                    signature,
-                    trim,
-                    axioms,
-                    prefixes,
-                })
-            }
+            StepSpec::Filter {
+                terms, term_files, selects, signature, trim, axioms, base_iri, prefixes,
+            } => step::filter_step(FilterSpec {
+                terms,
+                term_files,
+                selects,
+                signature,
+                trim,
+                axioms,
+                base_iri,
+                prefixes,
+            }),
             StepSpec::Annotate {
                 ontology_iri,
                 version_iri,
@@ -3606,7 +3612,14 @@ mod format_floor_tests {
         // module. A 0.4.3 build reading `when: [mirrors]` would make a group of
         // that name beside the real one, so its `MIR=false` would not pin the
         // target: that is the silent case, so the floor moves to 0.4.4.
-        const PLAN_SCHEMA_DIGEST: &str = "f0c7120d757af956";
+        //
+        // A filter step gains `base_iri`, the namespaces `--axioms internal` and
+        // `--axioms external` judge subjects by. A step's fields are not checked
+        // for unknown ones, so a 0.4.7 build would drop it and select with no
+        // namespace at all: that is the silent case, and the floor would move to
+        // the version this ships in. No plan exists outside this repository, so
+        // it moves with the next release rather than ahead of the crate version.
+        const PLAN_SCHEMA_DIGEST: &str = "12a0167799d84da6";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3753,6 +3766,22 @@ mod round_trip_tests {
             back.gating_flags, plan.gating_flags,
             "gating_flags was dropped — a switch the plan cannot vary would then \
              be silently accepted"
+        );
+    }
+
+    /// A filter step's `--base-iri` survives the spec: `--axioms internal`
+    /// judges each axiom's subjects against those namespaces.
+    #[test]
+    fn filter_base_iri_survives_a_spec_round_trip() {
+        let op = Op::Filter(FilterSpec {
+            axioms: vec!["internal".into()],
+            base_iri: vec!["http://example.org/X_".into()],
+            ..Default::default()
+        });
+        let back = StepSpec::from_op(&op).into_step();
+        assert!(
+            matches!(&back, Step::Op(Op::Filter(s)) if s.base_iri == ["http://example.org/X_"]),
+            "{back:?}"
         );
     }
 

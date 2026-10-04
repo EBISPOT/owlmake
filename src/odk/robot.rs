@@ -1401,6 +1401,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             signature: boolv("--signature"),
             trim: boolv("--trim"),
             axioms: all("--axioms"),
+            base_iri: all("--base-iri"),
             prefixes: { let mut p = all("--prefix"); p.extend(all("--add-prefix")); p },
         }),
         "annotate" => {
@@ -1999,6 +2000,29 @@ mod tests {
             spec.prefixes,
             vec!["uberon: http://purl.obolibrary.org/obo/uberon/core#"],
             "the --prefix binding must reach the plan"
+        );
+    }
+
+    /// `filter --axioms internal` judges each axiom's subjects against the
+    /// `--base-iri` namespaces, so the plan carries them: without them no axiom
+    /// is internal, and `--axioms external` takes every one.
+    #[test]
+    fn filter_records_its_base_iris() {
+        let steps = parse_command(
+            "robot filter -i x.owl --base-iri http://purl.obolibrary.org/obo/X_ \
+             --base-iri http://purl.obolibrary.org/obo/x# --axioms internal -o y.owl",
+            "robot",
+        );
+        let spec = steps
+            .iter()
+            .find_map(|s| match s {
+                Step::Op(Op::Filter(f)) => Some(f),
+                _ => None,
+            })
+            .expect("a filter step owlmake runs");
+        assert_eq!(
+            spec.base_iri,
+            vec!["http://purl.obolibrary.org/obo/X_", "http://purl.obolibrary.org/obo/x#"]
         );
     }
 

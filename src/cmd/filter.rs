@@ -68,7 +68,8 @@ pub struct Args {
     /// If true, allow selecting punned entities (`<bool>`).
     #[arg(long = "allow-punning", num_args = 1, default_missing_value = "true")]
     pub allow_punning: Option<bool>,
-    /// Base IRI(s). Accepted for compatibility.
+    /// Base IRI(s): the namespaces `--axioms internal` and `--axioms external`
+    /// judge an axiom's subjects by. Repeatable.
     #[arg(long = "base-iri", value_name = "IRI")]
     pub base_iri: Vec<String>,
     /// Set the output ontology IRI.
@@ -205,16 +206,8 @@ fn filter_core(
     terms.extend(included);
     let excluded = ent(select::collect_terms(&model, &opts.exclude_term, &opts.exclude_terms)?);
 
-    // --base-iri: every entity under one of the base namespaces joins the seed, so
-    // the base "module" (and every axiom over it) is kept.
+    // --base-iri: the namespaces `--axioms internal|external` judge subjects by.
     let base_iris: Vec<String> = base_iri.iter().map(|b| select::expand(&model, b)).collect();
-    if !base_iris.is_empty() {
-        for e in select::entities(&model).all() {
-            if base_iris.iter().any(|b| e.starts_with(b.as_str())) {
-                terms.insert(e.clone());
-            }
-        }
-    }
 
     let selects: HashSet<String> = select
         .iter()
@@ -349,13 +342,18 @@ fn filter_core(
         model.span_shared.extend(span_shared);
     }
 
-    // --axioms: restrict to the requested axiom categories
-    // (`logical|annotation|subclass|…`). Empty ⇒ no restriction.
+    // --axioms: the axiom types the seed selects from (`logical|annotation|
+    // subclass|…`; none named ⇒ every type), plus the namespace selector, which
+    // takes the axioms internal or external to the base IRIs whatever the seed.
     let axiom_toks: Vec<String> = axioms
         .iter()
         .flat_map(|a| a.split_whitespace())
         .map(str::to_string)
         .collect();
+    let namespace = select::namespace_selectors(&axiom_toks);
+    let by_namespace = |comp: &Component<RcStr>| {
+        namespace.iter().any(|n| select::axiom_in_category(comp, n, &base_iris))
+    };
 
     // The signature matched against the seed counts an annotation property as an
     // entity — so `AnnotationAssertion(rdfs:label X "…")` has `rdfs:label` in its
@@ -410,7 +408,7 @@ fn filter_core(
         if matches!(comp, Component::OntologyAnnotation(_)) {
             return keep_ontology;
         }
-        if !axiom_category_match(comp, &axiom_toks, &base_iris) {
+        if !axiom_type_match(comp, &axiom_toks) {
             return false;
         }
         let sig = axiom_sig(comp);
@@ -436,6 +434,10 @@ fn filter_core(
         use horned_owl::ontology::set::SetOntology;
         let mut ont = SetOntology::new();
         for ac in model.ont.iter() {
+            // What the namespace selector takes is kept whole, annotations and all.
+            if by_namespace(&ac.component) {
+                ont.insert(ac.clone());
+            }
             if !matches_seed(&ac.component) {
                 continue;
             }
@@ -560,38 +562,27 @@ fn set_ontology_iri(model: &mut Model, iri: &str) {
     model.ont = ont;
 }
 
-/// `filter --axioms <category>`: does `comp` belong to one of the requested
-/// axiom categories? Declarations and ontology structure are always kept (so the
-/// result stays well-formed); an empty request keeps everything. Supports the
-/// full category vocabulary (`all`, `logical`, `annotation`, `subclass`,
-/// `subproperty`, `equivalent`, `disjoint`, `type`, `tbox`, `abox`, `rbox`,
-/// `declaration`, `internal`, `external`).
-fn axiom_category_match(
-    comp: &Component<horned_owl::model::RcStr>,
-    toks: &[String],
-    base_iris: &[String],
-) -> bool {
-    if toks.is_empty() {
-        return true;
-    }
-    // A declaration is an axiom TYPE like any other, so it survives only when the
-    // request names it. Retaining declarations unconditionally does not dangle —
-    // the writer re-declares whatever the signature holds — but it does keep every
-    // entity IN the signature, and that changes what later steps can see.
-    //
-    // UBERON's `-basic` composites turn on exactly that. After `filter --axioms
-    // "subclass equivalent annotation"` a class with annotations and no logical
-    // axioms should appear only as an annotation SUBJECT, which is an IRI and not
-    // an entity of any axiom's signature — so the later
-    // `remove --term rdfs:label --select complement --axioms annotation --trim false`
-    // cannot reach its definition and keeps it. The reference keeps 1,512 such
-    // definitions and every one of them is on a class with no edge at all. Holding
-    // the declarations put those classes back in the signature and took all 1,512.
-    let only_namespace = toks.iter().all(|t| t == "internal" || t == "external");
-    if select::is_declaration(comp) && only_namespace {
-        return toks.iter().any(|t| select::axiom_in_category(comp, t, base_iris));
-    }
-    toks.iter().any(|t| select::axiom_in_category(comp, t, base_iris))
+/// `filter --axioms`: whether `comp` has one of the requested axiom types, which
+/// is every type when none is named. `internal` and `external` name no type: they
+/// select by namespace, apart from the seed.
+///
+/// A declaration is an axiom type like any other, kept only when the request
+/// names it. Keeping declarations regardless would not dangle — the writer
+/// re-declares whatever the signature holds — but it would keep every declared
+/// entity in the signature, which changes what later steps can see. After
+/// UBERON's `-basic` composites' `filter --axioms "subclass equivalent
+/// annotation"`, a class with annotations and no logical axiom is only an
+/// annotation subject, which no signature holds, so the later `remove --term
+/// rdfs:label --select complement --axioms annotation --trim false` cannot reach
+/// its definition and keeps it. A kept declaration would put the class back in
+/// the signature, and that step would remove the 1,512 definitions on such
+/// classes.
+fn axiom_type_match(comp: &Component<horned_owl::model::RcStr>, toks: &[String]) -> bool {
+    toks.is_empty()
+        || toks
+            .iter()
+            .filter(|t| !matches!(t.as_str(), "internal" | "external"))
+            .any(|t| select::axiom_in_category(comp, t, &[]))
 }
 
 /// Built-in OWL/RDF/RDFS/XSD vocabulary IRIs are not part of a term seed.

@@ -4163,6 +4163,52 @@ fn assertions_about_anonymous_individuals_are_external() {
     }
 }
 
+/// `--axioms internal` and `--axioms external` judge each axiom by its
+/// subjects — the declared entity, the sub-class or sub-property, the named
+/// individual asserted about, every member of a disjointness — and select from
+/// every axiom, whatever the terms select; `--base-iri` names the namespaces and
+/// nothing else. An axiom the namespace selector takes is kept whole, beside the
+/// copy without annotations a type selector keeps of it. As ROBOT 1.9.11 does,
+/// for `remove` and for `filter`.
+#[test]
+fn internal_and_external_axioms_are_judged_by_their_subjects() {
+    const BASE: &str = "http://example.org/int/";
+    for (expected, args) in [
+        ("remove-external", &["remove", "--axioms", "external"][..]),
+        ("remove-internal", &["remove", "--term", "http://example.org/ext/B", "--axioms", "internal"]),
+        ("filter-internal", &["filter", "--term", "http://example.org/int/A", "--axioms", "internal"]),
+        (
+            "filter-internal-subclass",
+            &[
+                "filter",
+                "--term",
+                "http://example.org/int/C",
+                "--term",
+                "http://example.org/ext/B",
+                "--axioms",
+                "internal subclass",
+            ],
+        ),
+        ("filter-external", &["filter", "--axioms", "external"]),
+    ] {
+        let out = tmp(&format!("axioms-namespace-{expected}.ofn"));
+        let run = bin()
+            .args(&args[..1])
+            .arg("-i")
+            .arg(robot_fixture("axioms-namespace.ofn"))
+            .args(["--base-iri", BASE])
+            .args(&args[1..])
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("axioms-namespace.{expected}.ofn")), "{expected}");
+    }
+}
+
 /// The annotations of an assertion on an inverse property reify the
 /// statement of the named property it is, with no warning, annotations of
 /// annotations and anonymous values included, and the document reads back

@@ -6828,7 +6828,15 @@ fn apply_op(
                 };
                 common.apply(&mut model)?;
             }
-            cmd::filter::filter_with(model, &spec.terms, &tf, &spec.selects, &spec.axioms, &[], &opts)?
+            cmd::filter::filter_with(
+                model,
+                &spec.terms,
+                &tf,
+                &spec.selects,
+                &spec.axioms,
+                &spec.base_iri,
+                &opts,
+            )?
         }
         Op::Annotate(spec) => {
             let mut annotation = Vec::new();

@@ -1,0 +1,83 @@
+Prefix(:=<http://example.org/probe.owl#>)
+Prefix(e:=<http://example.org/ext/>)
+Prefix(i:=<http://example.org/int/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/probe.owl>
+
+Declaration(Class(e:B))
+Declaration(Class(i:A))
+Declaration(Class(i:C))
+Declaration(ObjectProperty(e:q))
+Declaration(ObjectProperty(e:r))
+Declaration(ObjectProperty(i:p))
+Declaration(DataProperty(i:d))
+Declaration(NamedIndividual(e:x))
+Declaration(NamedIndividual(i:y))
+Declaration(AnnotationProperty(i:ap))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: i:ap (i:ap)
+
+SubAnnotationPropertyOf(i:ap rdfs:comment)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: e:q (e:q)
+
+DisjointObjectProperties(e:q ObjectInverseOf(i:p))
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: i:d (i:d)
+
+DataPropertyRange(i:d xsd:string)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: e:B (e:B)
+
+DisjointClasses(e:B ObjectSomeValuesFrom(i:p i:A))
+
+# Class: i:A (a)
+
+AnnotationAssertion(rdfs:label i:A "a")
+EquivalentClasses(i:A ObjectSomeValuesFrom(e:q e:B))
+
+# Class: i:C (i:C)
+
+SubClassOf(Annotation(rdfs:comment "kept whole") i:C e:B)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: i:y (i:y)
+
+ClassAssertion(e:B i:y)
+ObjectPropertyAssertion(e:q i:y e:x)
+
+
+SubClassOf(ObjectSomeValuesFrom(e:q i:A) e:B)
+SubObjectPropertyOf(ObjectInverseOf(i:p) e:r)
+FunctionalObjectProperty(ObjectInverseOf(i:p))
+SubObjectPropertyOf(ObjectPropertyChain(e:q i:p) e:r)
+)

@@ -364,6 +364,9 @@ pub struct FilterSpec {
     /// `composite-*-basic.owl` is `filter --axioms "subclass equivalent
     /// annotation"`; recording the step with no axioms kept everything.
     pub axioms: Vec<String>,
+    /// ROBOT `--base-iri`: the namespaces `--axioms internal|external` judge an
+    /// axiom's subjects by.
+    pub base_iri: Vec<String>,
     /// `--prefix "name: namespace"` bindings, which is how a `--select` CURIE
     /// resolves. UBERON's `cumbo` term list is
     /// `filter --prefix 'uberon: …/obo/uberon/core#' --select
@@ -769,6 +772,7 @@ fn op_label(op: &Op) -> String {
             let mut bits = vec![];
             if !s.term_files.is_empty() { bits.push(format!("term-file×{}", s.term_files.len())); }
             if !s.selects.is_empty() { bits.push(format!("select={}", s.selects.join("+"))); }
+            if !s.base_iri.is_empty() { bits.push(format!("base-iri={}", s.base_iri.join("|"))); }
             format!("filter[{}]", bits.join(", "))
         }
         Op::Annotate(s) => format!(

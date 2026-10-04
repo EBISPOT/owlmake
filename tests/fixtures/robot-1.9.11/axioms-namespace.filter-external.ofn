@@ -1,0 +1,80 @@
+Prefix(:=<http://example.org/probe.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/probe.owl>
+
+Declaration(Class(<http://example.org/ext/B>))
+Declaration(Class(<http://example.org/ext/D>))
+Declaration(Class(<http://example.org/int/A>))
+Declaration(ObjectProperty(<http://example.org/ext/q>))
+Declaration(ObjectProperty(<http://example.org/ext/r>))
+Declaration(ObjectProperty(<http://example.org/int/p>))
+Declaration(DataProperty(<http://example.org/ext/d2>))
+Declaration(DataProperty(<http://example.org/int/d>))
+Declaration(NamedIndividual(<http://example.org/ext/x>))
+Declaration(NamedIndividual(<http://example.org/int/y>))
+Declaration(AnnotationProperty(<http://example.org/int/ap>))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/ext/q> (<http://example.org/ext/q>)
+
+InverseObjectProperties(<http://example.org/ext/q> <http://example.org/int/p>)
+SymmetricObjectProperty(<http://example.org/ext/q>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/ext/d2> (<http://example.org/ext/d2>)
+
+SubDataPropertyOf(<http://example.org/ext/d2> <http://example.org/int/d>)
+DataPropertyDomain(<http://example.org/ext/d2> <http://example.org/int/A>)
+
+# Data Property: <http://example.org/int/d> (<http://example.org/int/d>)
+
+FunctionalDataProperty(<http://example.org/int/d>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/ext/B> (<http://example.org/ext/B>)
+
+AnnotationAssertion(<http://example.org/int/ap> <http://example.org/ext/B> "b")
+EquivalentClasses(<http://example.org/ext/B> ObjectSomeValuesFrom(<http://example.org/int/p> <http://example.org/int/A>))
+SubClassOf(<http://example.org/ext/B> <http://example.org/int/A>)
+DisjointClasses(<http://example.org/ext/B> <http://example.org/ext/D>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/ext/x> (<http://example.org/ext/x>)
+
+ClassAssertion(<http://example.org/int/A> <http://example.org/ext/x>)
+ObjectPropertyAssertion(<http://example.org/int/p> <http://example.org/ext/x> <http://example.org/int/y>)
+DataPropertyAssertion(<http://example.org/int/d> <http://example.org/ext/x> "v")
+
+# Individual: <http://example.org/int/y> (<http://example.org/int/y>)
+
+NegativeObjectPropertyAssertion(<http://example.org/int/p> <http://example.org/int/y> <http://example.org/int/y>)
+
+
+SubClassOf(ObjectSomeValuesFrom(<http://example.org/ext/q> <http://example.org/ext/D>) <http://example.org/int/A>)
+ClassAssertion(<http://example.org/int/A> _:genid2147483648)
+DataPropertyAssertion(<http://example.org/int/d> _:genid2147483648 "w")
+SubObjectPropertyOf(ObjectInverseOf(<http://example.org/ext/q>) <http://example.org/int/p>)
+HasKey(<http://example.org/int/A> () (<http://example.org/int/d>))
+)

@@ -1,0 +1,82 @@
+Prefix(:=<http://example.org/probe.owl#>)
+Prefix(e:=<http://example.org/ext/>)
+Prefix(i:=<http://example.org/int/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/probe.owl>
+
+Declaration(Class(e:B))
+Declaration(Class(e:D))
+Declaration(Class(i:A))
+Declaration(ObjectProperty(e:q))
+Declaration(ObjectProperty(e:r))
+Declaration(ObjectProperty(i:p))
+Declaration(DataProperty(e:d2))
+Declaration(DataProperty(i:d))
+Declaration(NamedIndividual(e:x))
+Declaration(NamedIndividual(i:y))
+Declaration(AnnotationProperty(i:ap))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: e:q (e:q)
+
+InverseObjectProperties(e:q i:p)
+SymmetricObjectProperty(e:q)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: e:d2 (e:d2)
+
+SubDataPropertyOf(e:d2 i:d)
+DataPropertyDomain(e:d2 i:A)
+
+# Data Property: i:d (i:d)
+
+FunctionalDataProperty(i:d)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: e:B (e:B)
+
+AnnotationAssertion(i:ap e:B "b")
+EquivalentClasses(e:B ObjectSomeValuesFrom(i:p i:A))
+SubClassOf(e:B i:A)
+DisjointClasses(e:B e:D)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: e:x (e:x)
+
+ClassAssertion(i:A e:x)
+ObjectPropertyAssertion(i:p e:x i:y)
+DataPropertyAssertion(i:d e:x "v")
+
+# Individual: i:y (i:y)
+
+NegativeObjectPropertyAssertion(i:p i:y i:y)
+
+
+SubClassOf(ObjectSomeValuesFrom(e:q e:D) i:A)
+ClassAssertion(i:A _:genid2147483648)
+DataPropertyAssertion(i:d _:genid2147483648 "w")
+SubObjectPropertyOf(ObjectInverseOf(e:q) i:p)
+HasKey(i:A () (i:d))
+)

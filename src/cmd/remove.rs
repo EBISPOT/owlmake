@@ -64,7 +64,8 @@ pub struct Args {
     /// If true, allow selecting punned entities (widens IRI matching) (`<bool>`).
     #[arg(long = "allow-punning", num_args = 1, default_missing_value = "true")]
     pub allow_punning: Option<bool>,
-    /// Base IRI(s) defining "internal" terms for `--axioms external`. Repeatable.
+    /// Base IRI(s): the namespaces `--axioms internal` and `--axioms external`
+    /// judge an axiom's subjects by. Repeatable.
     #[arg(long = "base-iri", value_name = "IRI")]
     pub base_iri: Vec<String>,
 
@@ -211,20 +212,24 @@ pub fn remove_with(
     let axiom_toks: Vec<String> =
         axioms.iter().flat_map(|a| a.split_whitespace()).map(str::to_string).collect();
     let has_ax = |name: &str| axiom_toks.iter().any(|a| a == name);
-    let rm_external = has_ax("external");
+    // `internal` and `external` select by the axiom's subjects alone, whatever
+    // the terms select.
+    let namespace = select::namespace_selectors(&axiom_toks);
     let rm_annotation = has_ax("annotation");
     // `structural-tautologies`: `C ⊑ C` and `C ⊑ owl:Thing` (the ones owlmake's
     // reasoner already excludes under `--exclude-tautologies structural`).
     let rm_tautologies = has_ax("structural-tautologies");
     // Every other `--axioms` value goes through the shared classifier, which holds
-    // each grouping category's axiom-type set and each single axiom type by name.
-    // `external` and `annotation` are excluded because they keep bespoke,
-    // term-aware behaviour here.
+    // each grouping category's axiom-type set and each single axiom type by name,
+    // and selects the axioms of those types that the terms select. `annotation`
+    // keeps term-aware behaviour of its own here.
     let generic_axiom_cats: Vec<String> = axiom_toks
         .iter()
         .filter(|t| {
-            !matches!(t.as_str(), "external" | "annotation" | "structural-tautologies")
-                && select::is_axiom_category(t)
+            !matches!(
+                t.as_str(),
+                "internal" | "external" | "annotation" | "structural-tautologies"
+            ) && select::is_axiom_category(t)
         })
         .cloned()
         .collect();
@@ -590,14 +595,14 @@ pub fn remove_with(
         }
         // An axiom-TYPE selector removes the intersection of the type and the
         // selected objects. Only `internal`/`external`/`tautologies` ignore the
-        // objects, which is why `rm_external` above is not gated. uPheno's merged
+        // objects, which is why `namespace` above is not gated. uPheno's merged
         // mirror shows what is at stake: `remove --term owl:Nothing --axioms
         // logical` drops the logical axioms that mention `owl:Nothing`, where
         // removing every logical axiom instead would leave `mirror/merged.owl` with
         // 22 SubClassOf axioms in place of 798,674 — the whole phenotype hierarchy,
         // and with it every shortcut relation the step before had just added.
         let axiom_type_terms = !named_terms || term_match_ac(ac_full, &terms, trim, ann_values);
-        let remove = (rm_external && is_external(comp, &base_iris))
+        let remove = namespace.iter().any(|n| select::axiom_in_category(comp, n, &base_iris))
             || (rm_tautologies && is_structural_tautology(comp))
             || (rm_imports && matches!(comp, Component::Import(_)))
             // The object-property complement removes every axiom whose SIGNATURE
@@ -1449,221 +1454,6 @@ fn term_match_with(
     }
 }
 
-/// An axiom is "external" (relative to the base IRIs) when it is not *about* any
-/// internal entity. For a named-subject axiom that is the subject's IRI; for a
-/// General Class Inclusion with an anonymous subject (`(CL ⊓ ∃part_of.X) ⊑ Y`)
-/// it is decided by the *subject expression* — external when no class in the
-/// subject is internal. With a CL base that keeps `(CL_0000163 ⊓ …) ⊑ Y` and
-/// strips both `(UBERON ⊓ …) ⊑ Y` and `(∃r.PATO) ⊑ CL_0000000` — an internal
-/// *object* does not save a GCI whose subject is entirely external, so the test is
-/// the subject's signature, not the axiom's.
-fn is_external(comp: &Component<horned_owl::model::RcStr>, base: &[String]) -> bool {
-    use horned_owl::model::Component as C;
-    // An `owl:imports` is an ontology-level declaration, not an axiom, so no
-    // `--axioms <category>` selector may reach it. Falling through would judge it
-    // external — it has no signature to be internal by — and MONDO's `mirror-mfomd`
-    // step (`remove --base-iri …/MFOMD --axioms external`) would strip mfomd's four
-    // imports. The merge over the mirrors follows those imports, so the MF /
-    // MD-core / MF-core closure would never reach `mirror/merged.owl` and
-    // MFOMD_0000119 and friends would be missing from the import module.
-    if matches!(comp, C::Import(_)) {
-        return false;
-    }
-    // `subject_iri`/`subject_iris` below have no arm for these axiom types, so their
-    // subject set comes out EMPTY — and an axiom with an empty subject set is
-    // external, which `--axioms external` removes. Return that here rather than fall
-    // through to the whole-signature test, which would keep them whenever any entity
-    // they mention is internal. (Giving one of these types a subject means adding an
-    // arm there and dropping it from this list.) BSPO states three SWRL rules;
-    // keeping them would leave `mirror/bspo.owl` 8,431 bytes larger, carrying a whole
-    // `<!-- Rules -->` section that a mirror stripped to its own base has no place
-    // for.
-    if matches!(
-        comp,
-        C::Rule(_)
-            | C::HasKey(_)
-            | C::DatatypeDefinition(_)
-            | C::DifferentIndividuals(_)
-            | C::SameIndividual(_)
-            | C::NegativeObjectPropertyAssertion(_)
-            | C::NegativeDataPropertyAssertion(_)
-            | C::AnnotationPropertyDomain(_)
-            | C::AnnotationPropertyRange(_)
-            | C::DisjointUnion(_)
-            | C::FunctionalDataProperty(_)
-    ) {
-        return true;
-    }
-    let internal = |iri: &str| base.iter().any(|b| iri.starts_with(b.as_str()));
-    // The "primary" class of a subject expression: the named subject, or — for an
-    // intersection subject — its first named-class conjunct, and none at all for a
-    // subject with no named-class conjunct (`∃r.PATO`). The external test below does
-    // NOT key a GCI on that genus; an anonymous subject is judged by its whole
-    // signature, for the reason given there.
-    fn primary_class(ce: &CE<horned_owl::model::RcStr>) -> Option<String> {
-        match ce {
-            CE::Class(c) => Some(c.0.to_string()),
-            CE::ObjectIntersectionOf(v) => v.iter().find_map(|c| match c {
-                CE::Class(cl) => Some(cl.0.to_string()),
-                _ => None,
-            }),
-            _ => None,
-        }
-    }
-    // An ANONYMOUS subclass contributes its whole SIGNATURE, and any internal
-    // member keeps the axiom. Keying on the first named-class conjunct instead
-    // would make a GCI with no named conjunct — `ObjectSomeValuesFrom(
-    // RO_0000053 PATO_0010006) ⊑ CL_0000000` — external, so `mirror-pato` would
-    // drop it and it would never reach the import module.
-    if let C::SubClassOf(ax) = comp {
-        if !matches!(&ax.sub, CE::Class(_)) {
-            let sub_sig = sig::class_expression_signature(&ax.sub);
-            return !sub_sig.iter().any(|iri| internal(iri));
-        }
-    }
-    // An assertion about an anonymous individual has that individual as its
-    // subject, and an anonymous individual is in no base namespace. Falling
-    // through to the whole-signature test would keep it whenever the class or
-    // property it names is internal, and EFO's `efo-base.owl` would carry the
-    // obsolescence records it states about anonymous individuals.
-    if anonymous_subject(comp) {
-        return true;
-    }
-    // The subjects are a SET, and the axiom is internal when ANY of them is. For
-    // the n-ary axioms — disjoint/equivalent classes and properties — every member
-    // is a subject, so an axiom that mentions one internal term is kept however the
-    // members happen to be ordered. Taking only the first would make `mirror-uberon`
-    // (`remove --base-iri …/UBERON --axioms external`) drop
-    // `DisjointClasses(GO_0110165 UBERON_0000001)` — the one axiom whose first
-    // member is the foreign one.
-    let subjects = subject_iris(comp);
-    if !subjects.is_empty() {
-        return !subjects.iter().any(|iri| internal(iri));
-    }
-    // An n-ary CLASS axiom whose members are all anonymous has no subject at all:
-    // only the NAMED members are subjects, and "external" is "no subject in the base
-    // namespaces", which an empty set satisfies. Falling through to the
-    // whole-signature test instead would keep PATO's `EquivalentClasses(
-    // ∧(CARO_0000000, ∃RO_0000053.PATO_0001993) …)` — its signature holds a PATO
-    // term — and with it a bare `<owl:ObjectProperty rdf:about="…/RO_0002180"/>`
-    // that `mirror/pato.owl` has no business declaring.
-    // (EquivalentClasses only: an all-anonymous `DisjointClasses` is KEPT — its
-    // subjects do fall back to the signature.)
-    if matches!(comp, C::EquivalentClasses(_)) {
-        return true;
-    }
-    !sig::signature(comp).iter().any(|iri| internal(iri))
-}
-
-/// Every subject IRI of `comp`: one for a binary axiom, all members for an n-ary
-/// one. Empty when the subject is anonymous (the caller then falls back to the
-/// whole signature).
-fn subject_iris(comp: &Component<horned_owl::model::RcStr>) -> Vec<String> {
-    use horned_owl::model::Component as C;
-    let class = |c: &CE<horned_owl::model::RcStr>| match c {
-        CE::Class(cl) => Some(cl.0.to_string()),
-        _ => None,
-    };
-    match comp {
-        C::EquivalentClasses(ax) => ax.0.iter().filter_map(class).collect(),
-        C::DisjointClasses(ax) => ax.0.iter().filter_map(class).collect(),
-        C::DisjointObjectProperties(ax) => ax.0.iter().filter_map(ope_iri).collect(),
-        C::EquivalentObjectProperties(ax) => ax.0.iter().filter_map(ope_iri).collect(),
-        C::DisjointDataProperties(ax) => ax.0.iter().map(|p| p.0.to_string()).collect(),
-        C::EquivalentDataProperties(ax) => ax.0.iter().map(|p| p.0.to_string()).collect(),
-        // A property CHAIN's subjects are its chain members; the super-property is
-        // not among them. So `BFO_0000051 ∘ RO_0000052 ⊑ UPHENO_…` is external to
-        // `--base-iri …/UPHENO_` even though its super-property is internal, and a
-        // base module states no chain built out of foreign properties. Without this
-        // arm the subject set would be empty and the caller would fall back to the
-        // whole signature, which does include the super-property.
-        C::SubObjectPropertyOf(ax)
-            if matches!(
-                &ax.sub,
-                horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(_)
-            ) =>
-        {
-            match &ax.sub {
-                horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(chain) => {
-                    chain.iter().filter_map(ope_iri).collect()
-                }
-                _ => Vec::new(),
-            }
-        }
-        _ => subject_iri(comp).into_iter().collect(),
-    }
-}
-
-/// The "about" entity IRI of an axiom, for base-module selection.
-fn subject_iri(comp: &Component<horned_owl::model::RcStr>) -> Option<String> {
-    use horned_owl::model::Component as C;
-    let class = |c: &CE<horned_owl::model::RcStr>| match c {
-        CE::Class(cl) => Some(cl.0.to_string()),
-        _ => None,
-    };
-    match comp {
-        C::DeclareClass(d) => Some(d.0 .0.to_string()),
-        C::DeclareObjectProperty(d) => Some(d.0 .0.to_string()),
-        C::DeclareAnnotationProperty(d) => Some(d.0 .0.to_string()),
-        C::DeclareDataProperty(d) => Some(d.0 .0.to_string()),
-        C::DeclareNamedIndividual(d) => Some(d.0 .0.to_string()),
-        C::DeclareDatatype(d) => Some(d.0 .0.to_string()),
-        C::SubClassOf(ax) => class(&ax.sub),
-        C::EquivalentClasses(ax) => ax.0.iter().find_map(class),
-        C::DisjointClasses(ax) => ax.0.iter().find_map(class),
-        C::AnnotationAssertion(ax) => match &ax.subject {
-            horned_owl::model::AnnotationSubject::IRI(i) => Some(i.to_string()),
-            _ => None,
-        },
-        C::SubObjectPropertyOf(ax) => match &ax.sub {
-            horned_owl::model::SubObjectPropertyExpression::ObjectPropertyExpression(
-                OPE::ObjectProperty(p),
-            ) => Some(p.0.to_string()),
-            _ => None,
-        },
-        // A sub-annotation-property axiom is about its sub-property. CL's subset
-        // declarations (`cl#eye_upper_slim ⊑ oboInOwl:SubsetProperty`) are
-        // internal and kept: without this arm the fallthrough signature test
-        // finds no signature for the axiom and judges it external.
-        C::SubAnnotationPropertyOf(ax) => Some(ax.sub.0.to_string()),
-        C::TransitiveObjectProperty(ax) => ope_iri(&ax.0),
-        // `InverseObjectProperties(P, Q)` renders as `P owl:inverseOf Q`, so P is
-        // its subject. Falling through to the whole-signature test would keep the
-        // axiom whenever EITHER property was internal, and EFO's base would carry
-        // `IAO_0000136 owl:inverseOf EFO_0006351` — an external subject, where the
-        // base is to keep only a bare `owl:ObjectProperty` declaration.
-        C::InverseObjectProperties(ax) => ope_iri(&ax.0),
-        C::ObjectPropertyDomain(ax) => ope_iri(&ax.ope),
-        C::ObjectPropertyRange(ax) => ope_iri(&ax.ope),
-        // A ClassAssertion is about its individual (`i type C`): CL's imported
-        // CCN cell-set individuals carry an external `ClassAssertion`, which the
-        // base strips along with the individual's declaration (the RDF writer only
-        // re-declares it because the assertion keeps it in the signature). A named
-        // individual is the subject; an anonymous one is no IRI (`anonymous_subject`).
-        C::ClassAssertion(ax) => match &ax.i {
-            horned_owl::model::Individual::Named(n) => Some(n.0.to_string()),
-            horned_owl::model::Individual::Anonymous(_) => None,
-        },
-        _ => None,
-    }
-}
-
-/// Whether `comp` is an assertion about an anonymous individual.
-fn anonymous_subject(comp: &Component<horned_owl::model::RcStr>) -> bool {
-    use horned_owl::model::{AnnotationSubject, Component as C, Individual};
-    let anonymous =
-        |i: &Individual<horned_owl::model::RcStr>| matches!(i, Individual::Anonymous(_));
-    match comp {
-        C::ClassAssertion(ax) => anonymous(&ax.i),
-        C::ObjectPropertyAssertion(ax) => anonymous(&ax.from),
-        C::DataPropertyAssertion(ax) => anonymous(&ax.from),
-        C::AnnotationAssertion(ax) => {
-            matches!(ax.subject, AnnotationSubject::AnonymousIndividual(_))
-        }
-        _ => false,
-    }
-}
-
 fn ope_iri(ope: &OPE<horned_owl::model::RcStr>) -> Option<String> {
     match ope {
         OPE::ObjectProperty(p) => Some(p.0.to_string()),
@@ -1730,60 +1520,5 @@ fn collect_ce_props(ce: &CE<horned_owl::model::RcStr>, out: &mut HashSet<String>
             v.iter().for_each(|c| collect_ce_props(c, out))
         }
         _ => {}
-    }
-}
-
-
-#[cfg(test)]
-mod external_axiom_tests {
-    use super::*;
-    use horned_owl::model::{
-        Build, ObjectProperty, RcStr, SubObjectPropertyExpression as SOPE, SubObjectPropertyOf,
-    };
-
-    const UPHENO: &str = "http://purl.obolibrary.org/obo/UPHENO_";
-
-    fn chain(members: &[&str], sup: &str) -> Component<RcStr> {
-        let b: Build<RcStr> = Build::new();
-        let op = |i: &str| OPE::ObjectProperty(ObjectProperty(b.iri(i)));
-        Component::SubObjectPropertyOf(SubObjectPropertyOf {
-            sub: SOPE::ObjectPropertyChain(members.iter().map(|m| op(m)).collect()),
-            sup: match op(sup) {
-                OPE::ObjectProperty(p) => OPE::ObjectProperty(p),
-                other => other,
-            },
-        })
-    }
-
-    /// A chain axiom's subjects are its chain members alone; the super-property is
-    /// not among them. So a chain built out of foreign properties is external to
-    /// `--base-iri …/UPHENO_` however internal its super-property is, and a base
-    /// module states none of them.
-    #[test]
-    fn a_chain_of_foreign_properties_is_external_whatever_its_super_property() {
-        let base = vec![UPHENO.to_string()];
-        let c = chain(
-            &[
-                "http://purl.obolibrary.org/obo/BFO_0000051",
-                "http://purl.obolibrary.org/obo/RO_0000052",
-            ],
-            "http://purl.obolibrary.org/obo/UPHENO_0000001",
-        );
-        assert!(is_external(&c, &base), "chain members are all foreign, so the axiom is external");
-    }
-
-    /// The converse: one internal chain member keeps it, because an axiom is
-    /// internal when ANY of its subjects lies in the base namespace.
-    #[test]
-    fn a_chain_with_one_internal_member_is_kept() {
-        let base = vec![UPHENO.to_string()];
-        let c = chain(
-            &[
-                "http://purl.obolibrary.org/obo/UPHENO_0000001",
-                "http://purl.obolibrary.org/obo/BFO_0000050",
-            ],
-            "http://purl.obolibrary.org/obo/UPHENO_0000001",
-        );
-        assert!(!is_external(&c, &base), "an internal chain member keeps the axiom");
     }
 }
