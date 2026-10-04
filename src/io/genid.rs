@@ -549,6 +549,11 @@ pub struct Genids {
     pub anon_roots: Vec<String>,
     /// The nodes annotated annotations have taken, in the order numbered.
     annotation_nodes: Vec<u64>,
+    /// Whether the statements being numbered are the reifications of annotated
+    /// assertions on an inverse property, numbered after every other node: an
+    /// individual they name is defined where the rest of the document names it,
+    /// so they count toward no graph's objects.
+    restating: bool,
 }
 
 /// The annotations on one node that carry annotations of their own: each
@@ -591,7 +596,9 @@ impl Genids {
     }
 
     fn object_anon(&mut self, x: &str) {
-        *self.anon_objects.entry((self.cur_graph.clone(), x.to_string())).or_default() += 1;
+        if !self.restating {
+            *self.anon_objects.entry((self.cur_graph.clone(), x.to_string())).or_default() += 1;
+        }
     }
 
     /// The next id for an anonymous node.
@@ -1745,6 +1752,8 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
 
     // Rules run last, one graph for the whole section. A rule's own node comes
     // first, then its body and head lists — one cell and one atom node per atom.
+    // The anonymous individuals the rules name, in the order they name them.
+    let mut ruled: Vec<String> = Vec::new();
     let mut rules: Vec<&AnnotatedComponent<RcStr>> = model
         .ont
         .iter()
@@ -1767,6 +1776,13 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
                 g.translate_node_annotations(id, &ac.ann);
                 g.translate_atom_list(&r.body);
                 g.translate_atom_list(&r.head);
+                let mut named = Vec::new();
+                component_anonymous(&ac.component, &mut named);
+                for x in named {
+                    if !ruled.contains(&x) {
+                        ruled.push(x);
+                    }
+                }
             }
         }
     }
@@ -1839,7 +1855,21 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
             crate::io::owlrdf::esc_attr(target)
         );
         g.reif.entry(owner).or_default().push((sig, rid));
+        g.restating = true;
         g.translate_node_annotations(rid, &ac.ann);
+        g.restating = false;
+    }
+
+    // The axioms about an individual a rule names that no graph reached are
+    // stated in the rules' graph, their nodes after every other.
+    if g.anon_present && !ruled.is_empty() {
+        g.cur_owner = "__rules__".to_string();
+        g.begin_graph(RULES_GRAPH.to_string());
+        g.intern.clear();
+        g.graph_seq += 1;
+        for x in &ruled {
+            g.reach(x, None);
+        }
     }
 
     g

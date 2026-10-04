@@ -438,15 +438,18 @@ fn anonymous_object(id: &str, pad: &str) -> String {
 // An anonymous individual's statements are made in the graph that first
 // reaches it: the graph of the entity whose statement names it as an object,
 // of the general axiom whose class expression holds it, of the ontology whose
-// annotation it is, or, when every statement naming it is about it, a graph of
-// its own in the anonymous section. In that graph each statement it is the
-// subject of is nested in its node, and each reification or negative
-// assertion about it is a root; in every other graph its node is empty.
+// annotation it is, of the rules that name it, or, when every statement naming
+// it is about it, a graph of its own in the anonymous section. In that graph
+// each statement it is the subject of is nested in its node, and each
+// reification or negative assertion about it is a root; in every other graph
+// its node is empty.
 //
 // Where it is an object it is nested, unless the document names it twice or
 // more, or the graph names it as the object of two statements. Then it is
 // written by id and defined once in the document: after the first block of
-// the first graph to name it by id, with what that graph states about it.
+// the first graph to name it by id as the object of a statement, with what
+// that graph states about it. What a later graph states about it is a block of
+// its own, by id, after the first block of that graph naming it.
 
 /// Opens a placeholder line for an anonymous individual in object position,
 /// `{indent}\u{E000}{property}\u{E001}{individual}\n`, the property empty for a
@@ -496,6 +499,15 @@ struct AnonDoc {
     defs: HashMap<String, Vec<(String, String)>>,
     /// The individuals whose definition has been written.
     written: HashSet<String>,
+    /// For an individual named by id as the object of a statement, the graph
+    /// that defines it: the first to name it so.
+    definer: HashMap<String, String>,
+    /// For a graph and an individual named by id, whether what the graph
+    /// states about the individual has been written.
+    stated: HashSet<(String, String)>,
+    /// The graphs and individuals whose node has been written with what the
+    /// graph states about it.
+    rendered: std::cell::RefCell<HashSet<(String, String)>>,
     /// The class expressions of `defs` whose definition has been written.
     written_defs: HashSet<String>,
 }
@@ -636,6 +648,7 @@ impl AnonDoc {
 
     /// The node element of `x` at `pad`, with what `graph` states about it.
     fn node(&self, graph: &str, x: &str, pad: &str, id: Option<u64>, open: &mut Vec<String>) -> String {
+        self.rendered.borrow_mut().insert((graph.to_string(), x.to_string()));
         let edges = self.edges.get(&(graph.to_string(), x.to_string())).cloned().unwrap_or_default();
         // The node's element is named after the last type it can be named after.
         let named = edges.iter().rposition(|e| matches!(e, AnonEdge::Element(_)));
@@ -697,6 +710,14 @@ impl AnonDoc {
     fn resolve(&mut self, graph: &str, text: &str) -> String {
         let text = self.expand(graph, text, &mut Vec::new());
         let blocks = top_level_blocks(&text);
+        // A root of the graph that carries its own id defines its individual,
+        // with what the graph states about it.
+        for b in &blocks {
+            if let Some(x) = opening_node_id(b).and_then(|g| self.by_gid.get(&g).cloned()) {
+                self.written.insert(x.clone());
+                self.stated.insert((graph.to_string(), x));
+            }
+        }
         let defined = |g: &String| self.by_gid.contains_key(g) || self.defs.get(graph).is_some_and(|d| d.iter().any(|(id, _)| id == g));
         if !blocks.iter().any(|b| named_node_ids(b).iter().any(defined)) {
             return text;
@@ -722,10 +743,20 @@ impl AnonDoc {
             let mut queue: std::collections::VecDeque<String> = named_node_ids(&b).into();
             while let Some(g) = queue.pop_front() {
                 let def = match self.by_gid.get(&g).cloned() {
+                    // An individual is defined once, in the graph that defines
+                    // it, with what that graph states about it. What another
+                    // graph states about it is a block of its own there.
                     Some(x) => {
-                        if !self.written.insert(x.clone()) {
+                        let key = (graph.to_string(), x.clone());
+                        let define =
+                            self.definer.get(&x).is_none_or(|d| d == graph) && !self.written.contains(&x);
+                        if !define && (self.stated.contains(&key) || !self.edges.contains_key(&key)) {
                             continue;
                         }
+                        if define {
+                            self.written.insert(x.clone());
+                        }
+                        self.stated.insert(key);
                         let id = self.node_id(&x);
                         self.node(graph, &x, "    ", Some(id), &mut Vec::new())
                     }
@@ -887,7 +918,7 @@ fn build_anon_doc<'m>(
     prefixes: &[(String, String)],
     left_out: &mut Vec<&'m AnnotatedComponent<RcStr>>,
 ) -> AnonDoc {
-    use crate::io::genid::{axiom_identity, names_anonymous, GENERAL_GRAPH, HEADER_GRAPH};
+    use crate::io::genid::{axiom_identity, names_anonymous, GENERAL_GRAPH};
     let mut doc = AnonDoc {
         ids: g.anon_ids.clone(),
         repeated: anonymous_multiples(model),
@@ -909,10 +940,8 @@ fn build_anon_doc<'m>(
         }
     }
     let rdf_type = format!("{RDF_NS}type");
-    let mut graph_of: HashMap<u64, String> = HashMap::new();
     for key in &g.anon_order {
         let (Some(ac), Some(graph)) = (by_key.get(key).copied(), g.anon_home.get(key)) else { continue };
-        graph_of.insert(*key, graph.clone());
         let nodes = g.anon_reif.get(key).cloned().unwrap_or_default();
         let node = nodes.first().copied().unwrap_or(0);
         let anns = node_annotations(ac, prefixes);
@@ -1087,11 +1116,6 @@ fn build_anon_doc<'m>(
             }
             _ => {}
         }
-        // The ontology's graph writes its own node and those annotating it.
-        if graph == HEADER_GRAPH && doc.roots.contains_key(HEADER_GRAPH) {
-            left_out.push(ac);
-            doc.roots.remove(HEADER_GRAPH);
-        }
     }
     // The axioms naming an anonymous individual as the object of a statement
     // about a named subject, in the subject's graph.
@@ -1110,6 +1134,13 @@ fn build_anon_doc<'m>(
                         let block = anon_reification(&source, p.0.as_ref(), &individual_target(&ax.to), &anns);
                         doc.root(s.0.as_ref(), node, block);
                     }
+                }
+                // On an inverse it is stated the other way round, of the
+                // anonymous individual, in the graph of the named one: a root
+                // of that graph when nothing there names the individual.
+                (OPEx::InverseObjectProperty(p), Individual::Named(s), Individual::Anonymous(x)) if ac.ann.is_empty() => {
+                    let q = qname(p.0.as_ref(), prefixes);
+                    doc.edge(s.0.as_ref(), x.0.as_ref(), AnonEdge::Property(individual_slot(&q, &ax.from, "        ")));
                 }
                 (OPEx::InverseObjectProperty(_), _, _) => left_out.push(ac),
                 _ => {}
@@ -1154,39 +1185,21 @@ fn build_anon_doc<'m>(
         let node = doc.node_id(&x);
         doc.root(&graph, node, format!("    {ANON_SLOT}{ANON_ROOT}{ANON_SEP}{x}\n"));
     }
-    // An individual named by id is defined once, by the first graph to name it
-    // by id: what any later graph states about it, where it names it by id too,
-    // would be written nowhere.
+    // An individual named by id is defined by the first graph to name it by id
+    // as the object of a statement; what a later graph states about it is a
+    // block of its own there.
     let position: HashMap<&str, usize> = g.graphs.iter().enumerate().map(|(i, k)| (k.as_str(), i)).rev().collect();
-    let mut first_by_id: HashMap<&str, usize> = HashMap::new();
+    let mut first: HashMap<&str, (usize, &str)> = HashMap::new();
     for ((graph, x), n) in &doc.objects {
         if *n > 0 && doc.by_id(graph, x) {
-            let p = position.get(graph.as_str()).copied().unwrap_or(usize::MAX);
-            let e = first_by_id.entry(x.as_str()).or_insert(p);
-            *e = (*e).min(p);
+            let at = (position.get(graph.as_str()).copied().unwrap_or(usize::MAX), graph.as_str());
+            let e = first.entry(x.as_str()).or_insert(at);
+            *e = (*e).min(at);
         }
     }
-    let lost: Vec<(String, String)> = doc
-        .edges
-        .keys()
-        .filter(|(graph, x)| {
-            doc.by_id(graph, x)
-                && doc.objects.get(&(graph.clone(), x.clone())).copied().unwrap_or(0) > 0
-                && first_by_id.get(x.as_str()).copied() < position.get(graph.as_str()).copied()
-        })
-        .cloned()
-        .collect();
-    for (graph, x) in lost {
-        for key in &g.anon_order {
-            if graph_of.get(key) == Some(&graph) {
-                if let Some(ac) = by_key.get(key) {
-                    if crate::io::genid::referenced_anonymous(ac).contains(&x) {
-                        left_out.push(ac);
-                    }
-                }
-            }
-        }
-    }
+    let definer: HashMap<String, String> =
+        first.into_iter().map(|(x, (_, graph))| (x.to_string(), graph.to_string())).collect();
+    doc.definer = definer;
     doc
 }
 
@@ -4220,7 +4233,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     // annotations. Any one of them stops the write before its first byte.
     let mut left_out: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
     // Anonymous individuals are written from the model.
-    let anon_model = !genid_pass.anon_ids.is_empty();
+    let anon_model = model.ont.iter().any(|ac| crate::io::genid::names_anonymous(&ac.component));
     if anon_model {
         // The placeholders the statements are built with need the nodes first.
         let ids = AnonDoc { ids: genid_pass.anon_ids.clone(), ..Default::default() };
@@ -5349,6 +5362,8 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             header_roots.push_str(&root);
         }
     }
+    // Then the roots its anonymous individuals add to it, in node order.
+    header_roots.push_str(&sorted_blocks(keyed_blocks(&anon_root_blocks(crate::io::genid::HEADER_GRAPH), &[])));
     write!(w, "{}", resolve_anon(crate::io::genid::HEADER_GRAPH, &header_roots))?;
 
     // The per-kind entity sections are driven by the ontology's SIGNATURE, not by
@@ -6701,6 +6716,17 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
     if let Some(node) = unstated {
         bail!("RDF/XML writer: the annotations of the annotations on node genid{node} were not written");
     }
+    // Every statement about an anonymous individual has been written, in the
+    // node of the graph that makes it.
+    let unwritten = ANON_DOC.with(|d| {
+        let d = d.borrow();
+        let doc = d.as_ref()?;
+        let rendered = doc.rendered.borrow();
+        doc.edges.keys().filter(|k| !rendered.contains(*k)).min().cloned()
+    });
+    if let Some((graph, x)) = unwritten {
+        bail!("RDF/XML writer: what graph {graph:?} states about the anonymous individual {x} was not written");
+    }
     write!(w, "</rdf:RDF>\n\n\n\n")?;
     let banner_version = if model.owlapi_456 { "4.5.6" } else { "4.5.29" };
     write!(w, "<!-- Generated by the OWL API (version {banner_version}) https://github.com/owlcs/owlapi -->\n\n")?;
@@ -7108,6 +7134,9 @@ fn write_rules<W: Write>(
             None => blocks.push((Some(*id), i, b)),
         }
     }
+    // With the roots the anonymous individuals the rules name add to their
+    // graph, by node.
+    blocks.extend(keyed_blocks(&anon_root_blocks(crate::io::genid::RULES_GRAPH), &[]));
     let text = place_defs(&sorted_blocks(blocks), Some(&defs));
     write!(w, "{}", resolve_anon(crate::io::genid::RULES_GRAPH, &text))?;
     Ok(())

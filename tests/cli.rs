@@ -3944,6 +3944,110 @@ fn anonymous_individuals_read_from_rdf_are_written_as_robot_writes_them() {
     }
 }
 
+/// A statement about an anonymous individual with no place in the layout is
+/// written around it, and the rest of the document keeps the layout ROBOT
+/// 1.9.11 writes, line for line, in RDF/XML and in Turtle: what a later graph
+/// states about a node defined by id, the annotations of an assertion on an
+/// inverse property, an assertion on an inverse whose subject is anonymous, and
+/// an annotated assertion about an ontology annotation's value are blocks of
+/// their own after the first block of the graph that makes them; and the
+/// document reads back whole.
+#[test]
+fn statements_with_no_place_in_the_layout_are_written_around_it() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    // The first line ROBOT writes that `written` does not, in order.
+    fn missing<'a>(written: &str, robot: &'a str) -> Option<&'a str> {
+        let mut lines = written.lines();
+        robot.lines().find(|want| !lines.any(|l| l == *want))
+    }
+    // The axioms of a functional-syntax document, an assertion on an inverse
+    // as the assertion of the named property it is, without anonymous labels.
+    fn axioms(text: &str) -> Vec<String> {
+        let mut out: Vec<String> = text
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with(['#', ')']) && !l.starts_with("Prefix(") && !l.starts_with("Ontology("))
+            .map(|l| {
+                let l = l.replace("drop:", ":");
+                let l = match l.split_once("ObjectInverseOf(") {
+                    Some((head, rest)) => {
+                        let (p, terms) = rest.split_once(") ").unwrap();
+                        let (a, b) = terms.trim_end_matches(')').split_once(' ').unwrap();
+                        format!("{head}{p} {b} {a})")
+                    }
+                    None => l,
+                };
+                let mut bare = String::new();
+                let mut rest = l.as_str();
+                while let Some(at) = rest.find("_:") {
+                    bare.push_str(&rest[..at + 2]);
+                    rest = rest[at + 2..].trim_start_matches(|c: char| c.is_ascii_alphanumeric());
+                }
+                bare + rest
+            })
+            .collect();
+        out.sort();
+        out
+    }
+    let source = axioms(&convert_fixture("rdf-dropped-statements.ofn", "rdf-dropped-statements-source.ofn", &[]));
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let written = convert_fixture("rdf-dropped-statements.ofn", &format!("rdf-dropped-statements.{ext}"), &[]);
+        let robot = fixture_text(&format!("rdf-dropped-statements.{ext}"));
+        assert_eq!(missing(&written, &robot), None, "{ext}\n{written}");
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), written.as_bytes()).unwrap();
+        let query = "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> PREFIX : <http://example.org/drop#> \
+                     ASK { :a1 owl:differentFrom ?x1 . :a2 :p ?x1 . :a3 :q ?x1 . ?x1 a :A . \
+                     <http://example.org/drop> :ap ?h . ?h a :A . ?r2 owl:annotatedSource ?h ; \
+                     owl:annotatedProperty rdf:type ; owl:annotatedTarget :A ; rdfs:comment \"ann\" . \
+                     ?x3 :p :c1 . FILTER(isBlank(?x3)) \
+                     ?r5 owl:annotatedSource :e2 ; owl:annotatedProperty :p ; owl:annotatedTarget :e1 ; rdfs:seeAlso ?x5 . :e3 :q ?x5 . \
+                     ?r6 owl:annotatedSource :f2 ; owl:annotatedProperty :p ; owl:annotatedTarget :f1 ; rdfs:seeAlso ?x6 . :f3 :q ?x6 . ?x6 a :B . \
+                     ?r7 owl:annotatedSource :g2 ; owl:annotatedProperty :p ; owl:annotatedTarget :g1 ; rdfs:comment \"c\" . \
+                     ?n7 owl:annotatedSource ?r7 ; owl:annotatedProperty rdfs:comment ; owl:annotatedTarget \"c\" ; rdfs:seeAlso ?x7 . :g3 :q ?x7 }";
+        let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
+        assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}\n{written}");
+        let path = tmp(&format!("rdf-dropped-statements-written.{ext}"));
+        std::fs::write(&path, &written).unwrap();
+        let back = tmp(&format!("rdf-dropped-statements-back-{ext}.ofn"));
+        let run = bin().args(["convert", "-i"]).arg(&path).arg("-o").arg(&back).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(axioms(&std::fs::read_to_string(&back).unwrap()), source, "{ext} read back");
+    }
+}
+
+/// An assertion about an anonymous individual a rule names, which no other
+/// graph reaches, is a statement of the individual's node in the rule: the one
+/// line ROBOT 1.9.11 writes for that node, empty, becomes the node with its
+/// statement, and every other line is as ROBOT writes it.
+#[test]
+fn an_assertion_about_an_individual_a_rule_names_is_stated_in_the_rule() {
+    use oxigraph::io::{RdfFormat, RdfParser};
+    use oxigraph::sparql::{QueryResults, SparqlEvaluator};
+    use oxigraph::store::Store;
+    let robot = fixture_text("rdf-dropped-rule.owl");
+    let empty = "<swrl:argument2>\n                            <rdf:Description/>\n";
+    assert!(robot.contains(empty));
+    let stated = "<swrl:argument2>\n                            <rdf:Description>\n                                \
+                  <rdf:type rdf:resource=\"http://example.org/drop#B\"/>\n                            </rdf:Description>\n";
+    assert_eq!(convert_fixture("rdf-dropped-rule.ofn", "rdf-dropped-rule.owl", &[]), robot.replacen(empty, stated, 1));
+    for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
+        let out = tmp(&format!("rdf-dropped-rule-checked.{ext}"));
+        let run = bin().args(["convert", "-i"]).arg(robot_fixture("rdf-dropped-rule.ofn")).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!stderr.contains("layout cannot state"), "{ext}: {stderr}");
+        let store = Store::new().unwrap();
+        store.load_from_slice(RdfParser::from_format(format), &std::fs::read(&out).unwrap()).unwrap();
+        let query = "PREFIX swrl: <http://www.w3.org/2003/11/swrl#> PREFIX : <http://example.org/drop#> \
+                     ASK { ?atom a swrl:IndividualPropertyAtom ; swrl:argument2 ?x . ?x a :B }";
+        let answer = SparqlEvaluator::new().parse_query(query).unwrap().on_store(&store).execute().unwrap();
+        assert!(matches!(answer, QueryResults::Boolean(true)), "{ext}");
+    }
+}
+
 /// `remove --axioms external` removes every assertion about an anonymous
 /// individual, which is in no base namespace whatever the class or property
 /// the assertion names, and keeps an assertion about an internal individual
@@ -4242,12 +4346,12 @@ fn an_axiom_between_a_property_and_an_earlier_inverse_is_stated() {
 }
 
 /// A document holding an axiom the RDF layout cannot state is written in full
-/// through the plain RDF mapping, with a warning naming the axiom. An anonymous
-/// individual named by id is defined once, by the first graph to name it, and a
-/// class assertion about it that a later graph makes would be written nowhere:
-/// here `:i`'s difference from it names it first, and `:j`'s assertion reaches
-/// its type. In RDF/XML and in Turtle, the node `:i` differs from is the one
-/// `:j` and `:k` assert and the assertion types.
+/// through the plain RDF mapping, with a warning naming the axiom. The
+/// annotations of an assertion on an inverse property whose subject, stated of
+/// the named property, is anonymous have no place in the layout, and the class
+/// assertion about that subject, which nothing else reaches, goes with them. In
+/// RDF/XML and in Turtle, the node the assertion is made of is the one the
+/// class assertion types and the reification's source.
 #[test]
 fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     use oxigraph::io::{RdfFormat, RdfParser};
@@ -4256,9 +4360,10 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     let src = tmp("anon-object.ofn");
     std::fs::write(
         &src,
-        "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
-         DifferentIndividuals(:i _:x)\nObjectPropertyAssertion(:p :j _:x)\n\
-         ObjectPropertyAssertion(:q :k _:x)\nClassAssertion(:B _:x)\n)\n",
+        "Prefix(:=<http://example.org/a#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/a>\n\
+         ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") ObjectInverseOf(:p) :i _:x)\n\
+         ClassAssertion(:B _:x)\n)\n",
     )
     .unwrap();
     for (ext, format) in [("owl", RdfFormat::RdfXml), ("ttl", RdfFormat::Turtle)] {
@@ -4267,7 +4372,7 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
         assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
         let stderr = String::from_utf8_lossy(&run.stderr);
         assert!(
-            stderr.contains("layout cannot state 1 axiom(s)") && stderr.contains("ClassAssertion"),
+            stderr.contains("layout cannot state 2 axiom(s)") && stderr.contains("ClassAssertion"),
             "{ext}: {stderr}"
         );
         let text = std::fs::read(&out).unwrap();
@@ -4275,8 +4380,9 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
         store.load_from_slice(RdfParser::from_format(format), &text).unwrap();
         let joined = SparqlEvaluator::new()
             .parse_query(
-                "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX : <http://example.org/a#> \
-                 ASK { :i owl:differentFrom ?x . :j :p ?x . :k :q ?x . ?x a :B }",
+                "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
+                 PREFIX : <http://example.org/a#> ASK { ?x :p :i ; a :B . ?r owl:annotatedSource ?x ; \
+                 owl:annotatedProperty :p ; owl:annotatedTarget :i ; rdfs:comment \"c\" }",
             )
             .unwrap()
             .on_store(&store)
@@ -4320,10 +4426,11 @@ fn line_based_rdf_is_the_same_on_every_run() {
     let src = tmp("blank-nodes.ofn");
     std::fs::write(
         &src,
-        "Prefix(:=<http://example.org/a#>)\nOntology(<http://example.org/a>\n\
+        "Prefix(:=<http://example.org/a#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/a>\n\
          SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n\
-         DifferentIndividuals(:i _:x)\nObjectPropertyAssertion(:p :j _:x)\n\
-         ObjectPropertyAssertion(:q :k _:x)\nClassAssertion(:B _:x)\n)\n",
+         ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") ObjectInverseOf(:p) :i _:x)\n\
+         ClassAssertion(:B _:x)\n)\n",
     )
     .unwrap();
     for ext in ["nt", "ttl"] {
