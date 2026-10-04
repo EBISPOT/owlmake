@@ -215,6 +215,9 @@ fn filter_core(
         .map(str::to_string)
         .collect();
     let keep_ontology = selects.contains("ontology");
+    // `--select imports` keeps the root's `owl:imports` declarations; without it
+    // the result imports nothing.
+    let keep_imports = selects.contains("imports");
 
     // Entity/relation selectors EXPAND the seed before filtering: a type selector
     // (`object-properties`, `classes`, …) adds every entity of that type; a
@@ -386,6 +389,7 @@ fn filter_core(
         model
             .ont
             .iter()
+            .filter(|ac| !model.imported_components.contains(*ac))
             .filter(|ac| match &ac.component {
                 Component::AnnotationAssertion(aa) => match &aa.subject {
                     horned_owl::model::AnnotationSubject::IRI(i) => {
@@ -407,6 +411,9 @@ fn filter_core(
         }
         if matches!(comp, Component::OntologyAnnotation(_)) {
             return keep_ontology;
+        }
+        if matches!(comp, Component::Import(_)) {
+            return keep_imports;
         }
         if !axiom_type_match(comp, &axiom_toks) {
             return false;
@@ -433,7 +440,10 @@ fn filter_core(
         use horned_owl::model::MutableOntology;
         use horned_owl::ontology::set::SetOntology;
         let mut ont = SetOntology::new();
-        for ac in model.ont.iter() {
+        // The terms resolve against the whole import closure, but the axioms
+        // kept are the root ontology's own: what an import lent stays with the
+        // import.
+        for ac in model.ont.iter().filter(|ac| !model.imported_components.contains(*ac)) {
             // What the namespace selector takes is kept whole, annotations and all.
             if by_namespace(&ac.component) {
                 ont.insert(ac.clone());
@@ -496,6 +506,11 @@ fn filter_core(
         }
         for ac in annotation_backfill {
             ont.insert(ac);
+        }
+        if keep_imports {
+            for iri in &model.inlined_imports {
+                ont.insert(Component::Import(horned_owl::model::Import(model.build.iri(iri.as_str()))));
+            }
         }
         let mut out = crate::model::Model::from_parts(ont, model.prefixes);
         // The banner labels are NOT carried: a filter keeps a subset, and a

@@ -487,7 +487,7 @@ pub fn filter_gaps(spec: &FilterSpec) -> Vec<String> {
     for s in spec.selects.iter().flat_map(|s| s.split_whitespace()) {
         let covered = matches!(
             s,
-            "annotations" | "ontology" | "anonymous" | "named" | "self" | "complement"
+            "annotations" | "ontology" | "imports" | "anonymous" | "named" | "self" | "complement"
                 | "classes" | "properties" | "object-properties" | "data-properties"
                 | "annotation-properties" | "individuals" | "named-individuals" | "datatypes"
                 // The relation selectors `filter_core` expands the seed with, the

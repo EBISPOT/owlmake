@@ -1,0 +1,5 @@
+Prefix(i:=<http://example.org/int/>)
+Ontology(<http://example.org/child.owl>
+Declaration(Class(i:K))
+SubClassOf(i:K i:A)
+)

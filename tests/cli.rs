@@ -4163,6 +4163,36 @@ fn assertions_about_anonymous_individuals_are_external() {
     }
 }
 
+/// `filter` keeps the root ontology's own axioms: a term the import closure
+/// declares still selects, but what the import states stays with the import,
+/// and the result imports nothing unless `--select imports` keeps the root's
+/// `owl:imports`. As ROBOT 1.9.11 filters.
+#[test]
+fn filter_keeps_the_root_axioms_and_its_imports_only_when_selected() {
+    for (expected, args) in [
+        ("term-closure", &["--term", "http://example.org/int/K"][..]),
+        ("terms", &["--term", "http://example.org/int/A", "--term", "http://example.org/int/K"]),
+        ("select-imports", &["--term", "http://example.org/int/A", "--select", "self imports"]),
+        ("all", &["--axioms", "all"]),
+    ] {
+        let out = tmp(&format!("filter-imports-{expected}.ofn"));
+        let run = bin()
+            .args(["filter", "--catalog"])
+            .arg(robot_fixture("filter-imports-catalog.xml"))
+            .arg("-i")
+            .arg(robot_fixture("filter-imports.ofn"))
+            .args(args)
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("filter-imports.{expected}.ofn")), "{expected}");
+    }
+}
+
 /// Axioms and their operands are written in the order OWL's object model
 /// compares them, as ROBOT 1.9.11 writes them: an assertion by its subject
 /// first, a sub-property axiom by its sub-property, a property characteristic,

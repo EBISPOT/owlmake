@@ -1,0 +1,9 @@
+Prefix(i:=<http://example.org/int/>)
+Prefix(e:=<http://example.org/ext/>)
+Ontology(<http://example.org/root.owl>
+Import(<http://example.org/child.owl>)
+Declaration(Class(i:A))
+Declaration(Class(e:B))
+SubClassOf(i:A e:B)
+AnnotationAssertion(<http://www.w3.org/2000/01/rdf-schema#label> i:A "a")
+)
