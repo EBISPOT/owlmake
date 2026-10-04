@@ -1,0 +1,78 @@
+Prefix(:=<http://example.org/operands.owl#>)
+Prefix(i:=<http://example.org/int/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/operands.owl>
+
+Declaration(Class(i:A))
+Declaration(Class(i:B))
+Declaration(Class(<http://x.org/a_b>))
+Declaration(Class(<http://x.org/a/c>))
+Declaration(ObjectProperty(<http://x.org/p_b>))
+Declaration(ObjectProperty(<http://x.org/p/c>))
+Declaration(DataProperty(i:d))
+Declaration(DataProperty(<http://x.org/d_b>))
+Declaration(DataProperty(<http://x.org/d/c>))
+Declaration(NamedIndividual(<http://x.org/j_b>))
+Declaration(NamedIndividual(<http://x.org/j/c>))
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://x.org/p_b> (<http://x.org/p_b>)
+
+EquivalentObjectProperties(<http://x.org/p_b> <http://x.org/p/c>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://x.org/d_b> (<http://x.org/d_b>)
+
+DisjointDataProperties(<http://x.org/d_b> <http://x.org/d/c>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: i:A (i:A)
+
+EquivalentClasses(i:A ObjectUnionOf(<http://x.org/a_b> <http://x.org/a/c>))
+SubClassOf(i:A ObjectOneOf(<http://x.org/j_b> <http://x.org/j/c>))
+SubClassOf(i:A DataSomeValuesFrom(i:d DataUnionOf(xsd:integer xsd:string)))
+SubClassOf(i:A DataSomeValuesFrom(i:d DataOneOf("a" "b")))
+SubClassOf(i:A DataSomeValuesFrom(i:d DataIntersectionOf(xsd:integer xsd:string)))
+SubClassOf(i:A DataSomeValuesFrom(i:d DatatypeRestriction(xsd:integer xsd:minInclusive "1"^^xsd:integer xsd:maxInclusive "9"^^xsd:integer)))
+
+# Class: i:B (i:B)
+
+EquivalentClasses(i:B ObjectIntersectionOf(<http://x.org/a_b> <http://x.org/a/c> ObjectSomeValuesFrom(<http://x.org/p_b> i:A) ObjectSomeValuesFrom(<http://x.org/p/c> i:A)))
+
+# Class: <http://x.org/a_b> (<http://x.org/a_b>)
+
+DisjointClasses(<http://x.org/a_b> <http://x.org/a/c>)
+
+# Class: <http://x.org/a/c> (<http://x.org/a/c>)
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://x.org/j_b> (<http://x.org/j_b>)
+
+SameIndividual(<http://x.org/j_b> <http://x.org/j/c>)
+
+
+DisjointClasses(i:A <http://x.org/a_b> <http://x.org/a/c>)
+HasKey(i:A (<http://x.org/p_b> <http://x.org/p/c>) (<http://x.org/d_b> <http://x.org/d/c>))
+)

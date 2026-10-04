@@ -4163,6 +4163,40 @@ fn assertions_about_anonymous_individuals_are_external() {
     }
 }
 
+/// Axioms and their operands are written in the order OWL's object model
+/// compares them, as ROBOT 1.9.11 writes them: an assertion by its subject
+/// first, a sub-property axiom by its sub-property, a property characteristic,
+/// domain or range of an inverse by the property, an n-ary axiom by its operand
+/// set; IRIs by namespace and then local name, so `…/p_b` precedes `…/p/c`; a
+/// data union before every other data range, and a one-of's, union's and
+/// restriction's operands sorted; and in OBO, a pair's clause on the first
+/// member naming the other. In functional syntax for all three documents, in
+/// RDF/XML and Turtle for the two whose frames hold no restriction, and in OBO
+/// for the one ROBOT can write as OBO.
+#[test]
+fn axioms_and_operands_are_ordered_as_robot_orders_them() {
+    for (name, exts) in [
+        ("axiom-order-general", &["ofn", "owl", "ttl"][..]),
+        ("axiom-order-operands", &["ofn", "owl", "ttl", "obo"]),
+        ("axiom-order-frames", &["ofn"]),
+    ] {
+        for ext in exts {
+            let out = tmp(&format!("{name}.{ext}"));
+            let run = bin()
+                .args(["convert", "-i"])
+                .arg(robot_fixture(&format!("{name}.ofn")))
+                .arg("-o")
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+            let text = std::fs::read_to_string(&out).unwrap();
+            let _ = std::fs::remove_file(&out);
+            assert_eq!(text, fixture_text(&format!("{name}.robot.{ext}")), "{name}.{ext}");
+        }
+    }
+}
+
 /// `--axioms internal` and `--axioms external` judge each axiom by its
 /// subjects — the declared entity, the sub-class or sub-property, the named
 /// individual asserted about, every member of a disjointness — and select from

@@ -17,6 +17,8 @@ use horned_owl::model::{
     Literal, ObjectPropertyExpression as OPE, RcStr, SubObjectPropertyExpression as SOPE,
 };
 
+use crate::owlapi_hash::iri_cmp;
+
 // ---------------------------------------------------------------------------
 // Ordering: type indexes and total comparisons
 // ---------------------------------------------------------------------------
@@ -65,14 +67,18 @@ pub(crate) fn cmp_ope(a: &OPE<RcStr>, b: &OPE<RcStr>) -> Ordering {
     // ObjectProperty typeIndex 1002, inverse 1003.
     let ta = matches!(a, OPE::InverseObjectProperty(_)) as i32;
     let tb = matches!(b, OPE::InverseObjectProperty(_)) as i32;
-    ta.cmp(&tb).then_with(|| ope_iri(a).cmp(ope_iri(b)))
+    ta.cmp(&tb).then_with(|| iri_cmp(ope_iri(a), ope_iri(b)))
 }
 
 pub(crate) fn cmp_individual(a: &Individual<RcStr>, b: &Individual<RcStr>) -> Ordering {
-    // Anonymous typeIndex differs from named; both compare by string form.
-    let ta = matches!(a, Individual::Anonymous(_)) as i32;
-    let tb = matches!(b, Individual::Anonymous(_)) as i32;
-    ta.cmp(&tb).then_with(|| (a as &str).cmp(b as &str))
+    // A named individual (typeIndex 1005) before an anonymous one (1007); named
+    // ones by IRI, anonymous ones by node ID.
+    match (a, b) {
+        (Individual::Named(x), Individual::Named(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
+        (Individual::Anonymous(x), Individual::Anonymous(y)) => x.0.as_ref().cmp(y.0.as_ref()),
+        (Individual::Named(_), Individual::Anonymous(_)) => Ordering::Less,
+        (Individual::Anonymous(_), Individual::Named(_)) => Ordering::Greater,
+    }
 }
 
 /// The datatype IRI a literal keys as: an explicit one as given, a
@@ -117,7 +123,7 @@ pub(crate) fn cmp_annotation_value(a: &AnnotationValue<RcStr>, b: &AnnotationVal
         }
     }
     match (a, b) {
-        (AnnotationValue::IRI(x), AnnotationValue::IRI(y)) => x.as_ref().cmp(y.as_ref()),
+        (AnnotationValue::IRI(x), AnnotationValue::IRI(y)) => iri_cmp(x.as_ref(), y.as_ref()),
         // Two literals compare on their DATATYPE first, then on the lexical form,
         // then on the language. Two literals that render the same can still order
         // differently: `xsd:string` (what the OBO parser builds) sorts after
@@ -131,9 +137,8 @@ pub(crate) fn cmp_annotation_value(a: &AnnotationValue<RcStr>, b: &AnnotationVal
 
 /// Two literals compare on their DATATYPE first, then on the lexical form, then
 /// on the language.
-fn cmp_literal(x: &Literal<RcStr>, y: &Literal<RcStr>) -> Ordering {
-    lit_datatype(x)
-        .cmp(lit_datatype(y))
+pub(crate) fn cmp_literal(x: &Literal<RcStr>, y: &Literal<RcStr>) -> Ordering {
+    iri_cmp(lit_datatype(x), lit_datatype(y))
         .then_with(|| x.literal().cmp(y.literal()))
         .then_with(|| lit_lang(x).cmp(lit_lang(y)))
 }
@@ -150,7 +155,7 @@ pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
         return ti;
     }
     match (a, b) {
-        (CE::Class(x), CE::Class(y)) => x.0.as_ref().cmp(y.0.as_ref()),
+        (CE::Class(x), CE::Class(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
         (CE::ObjectIntersectionOf(x), CE::ObjectIntersectionOf(y))
         | (CE::ObjectUnionOf(x), CE::ObjectUnionOf(y)) => cmp_ce_list(x, y),
         (CE::ObjectComplementOf(x), CE::ObjectComplementOf(y)) => cmp_ce(x, y),
@@ -177,14 +182,11 @@ pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
         ) => cmp_ope(pa, pb).then_with(|| na.cmp(nb)).then_with(|| cmp_ce(fa, fb)),
         (CE::DataSomeValuesFrom { dp: pa, dr: ra }, CE::DataSomeValuesFrom { dp: pb, dr: rb })
         | (CE::DataAllValuesFrom { dp: pa, dr: ra }, CE::DataAllValuesFrom { dp: pb, dr: rb }) => {
-            pa.0.as_ref().cmp(pb.0.as_ref()).then_with(|| cmp_dr(ra, rb))
+            iri_cmp(pa.0.as_ref(), pb.0.as_ref()).then_with(|| cmp_dr(ra, rb))
         }
-        (CE::DataHasValue { dp: pa, l: la }, CE::DataHasValue { dp: pb, l: lb }) => pa
-            .0
-            .as_ref()
-            .cmp(pb.0.as_ref())
-            .then_with(|| lit_datatype(la).cmp(lit_datatype(lb)))
-            .then_with(|| la.literal().cmp(lb.literal())),
+        (CE::DataHasValue { dp: pa, l: la }, CE::DataHasValue { dp: pb, l: lb }) => {
+            iri_cmp(pa.0.as_ref(), pb.0.as_ref()).then_with(|| cmp_literal(la, lb))
+        }
         (
             CE::DataMinCardinality { n: na, dp: pa, dr: ra },
             CE::DataMinCardinality { n: nb, dp: pb, dr: rb },
@@ -196,10 +198,7 @@ pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
         | (
             CE::DataMaxCardinality { n: na, dp: pa, dr: ra },
             CE::DataMaxCardinality { n: nb, dp: pb, dr: rb },
-        ) => pa
-            .0
-            .as_ref()
-            .cmp(pb.0.as_ref())
+        ) => iri_cmp(pa.0.as_ref(), pb.0.as_ref())
             .then_with(|| na.cmp(nb))
             .then_with(|| cmp_dr(ra, rb)),
         _ => Ordering::Equal,
@@ -207,19 +206,19 @@ pub(crate) fn cmp_ce(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
 }
 
 /// Orders data ranges the way class expressions are ordered: by the form's index,
-/// then by components. A named datatype is an ENTITY, so it takes the entity block's
-/// 1004 and precedes every anonymous form; the anonymous forms follow in enumeration
-/// order. The operands of a union or intersection, the values of a one-of and the
-/// restrictions of a datatype restriction are sets, compared in their own sorted
-/// order.
+/// then by components. The indices run datatype 4001, complement 4002, one-of
+/// 4003, intersection 4004 and restriction 4006, but a union's is 2005, so a
+/// union precedes every other data range. The operands of a union or
+/// intersection, the values of a one-of and the restrictions of a datatype
+/// restriction are sets, compared in their own sorted order.
 pub(crate) fn cmp_dr(a: &DR<RcStr>, b: &DR<RcStr>) -> Ordering {
     fn idx(dr: &DR<RcStr>) -> i32 {
         match dr {
-            DR::Datatype(_) => 1004,
+            DR::DataUnionOf(_) => 2005,
+            DR::Datatype(_) => 4001,
             DR::DataComplementOf(_) => 4002,
             DR::DataOneOf(_) => 4003,
             DR::DataIntersectionOf(_) => 4004,
-            DR::DataUnionOf(_) => 4005,
             DR::DatatypeRestriction(_, _) => 4006,
         }
     }
@@ -228,7 +227,7 @@ pub(crate) fn cmp_dr(a: &DR<RcStr>, b: &DR<RcStr>) -> Ordering {
         return ti;
     }
     match (a, b) {
-        (DR::Datatype(x), DR::Datatype(y)) => x.0.as_ref().cmp(y.0.as_ref()),
+        (DR::Datatype(x), DR::Datatype(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
         (DR::DataComplementOf(x), DR::DataComplementOf(y)) => cmp_dr(x, y),
         (DR::DataIntersectionOf(x), DR::DataIntersectionOf(y))
         | (DR::DataUnionOf(x), DR::DataUnionOf(y)) => {
@@ -246,7 +245,7 @@ pub(crate) fn cmp_dr(a: &DR<RcStr>, b: &DR<RcStr>) -> Ordering {
             cmp_sorted(&x, &y, |p, q| p.cmp(q))
         }
         (DR::DatatypeRestriction(dx, fx), DR::DatatypeRestriction(dy, fy)) => {
-            dx.0.as_ref().cmp(dy.0.as_ref()).then_with(|| {
+            iri_cmp(dx.0.as_ref(), dy.0.as_ref()).then_with(|| {
                 let key = |f: &horned_owl::model::FacetRestriction<RcStr>| {
                     (crate::io::owlrdf::facet_rank(f.f.as_ref()), crate::io::owlrdf::literal_key(&f.l))
                 };
@@ -349,7 +348,7 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::EquivalentClasses(x), Component::EquivalentClasses(y)) => cmp_ce_list(&x.0, &y.0),
         (Component::DisjointClasses(x), Component::DisjointClasses(y)) => cmp_ce_list(&x.0, &y.0),
         (Component::DisjointUnion(x), Component::DisjointUnion(y)) => {
-            x.0 .0.as_ref().cmp(y.0 .0.as_ref()).then_with(|| cmp_ce_list(&x.1, &y.1))
+            iri_cmp(x.0 .0.as_ref(), y.0 .0.as_ref()).then_with(|| cmp_ce_list(&x.1, &y.1))
         }
         (Component::ObjectPropertyRange(x), Component::ObjectPropertyRange(y)) => {
             cmp_ope(&x.ope, &y.ope).then_with(|| cmp_ce(&x.ce, &y.ce))
@@ -368,21 +367,13 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         ) => cmp_ope(&x.ope, &y.ope)
             .then_with(|| cmp_individual(&x.from, &y.from))
             .then_with(|| cmp_individual(&x.to, &y.to)),
-        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => x
-            .dp
-            .0
-            .as_ref()
-            .cmp(y.dp.0.as_ref())
+        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref())
             .then_with(|| cmp_individual(&x.from, &y.from))
             .then_with(|| cmp_literal(&x.to, &y.to)),
         (
             Component::NegativeDataPropertyAssertion(x),
             Component::NegativeDataPropertyAssertion(y),
-        ) => x
-            .dp
-            .0
-            .as_ref()
-            .cmp(y.dp.0.as_ref())
+        ) => iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref())
             .then_with(|| cmp_individual(&x.from, &y.from))
             .then_with(|| cmp_literal(&x.to, &y.to)),
         (Component::ClassAssertion(x), Component::ClassAssertion(y)) => {
@@ -412,18 +403,17 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
             x.0.len().cmp(&y.0.len())
         }
         (Component::SubAnnotationPropertyOf(x), Component::SubAnnotationPropertyOf(y)) => {
-            x.sub.0.as_ref().cmp(y.sub.0.as_ref()).then_with(|| x.sup.0.as_ref().cmp(y.sup.0.as_ref()))
+            iri_cmp(x.sub.0.as_ref(), y.sub.0.as_ref()).then_with(|| iri_cmp(x.sup.0.as_ref(), y.sup.0.as_ref()))
         }
         (Component::AnnotationPropertyRange(x), Component::AnnotationPropertyRange(y)) => {
-            x.ap.0.as_ref().cmp(y.ap.0.as_ref()).then_with(|| x.iri.as_ref().cmp(y.iri.as_ref()))
+            iri_cmp(x.ap.0.as_ref(), y.ap.0.as_ref()).then_with(|| iri_cmp(x.iri.as_ref(), y.iri.as_ref()))
         }
         (Component::AnnotationPropertyDomain(x), Component::AnnotationPropertyDomain(y)) => {
-            x.ap.0.as_ref().cmp(y.ap.0.as_ref()).then_with(|| x.iri.as_ref().cmp(y.iri.as_ref()))
+            iri_cmp(x.ap.0.as_ref(), y.ap.0.as_ref()).then_with(|| iri_cmp(x.iri.as_ref(), y.iri.as_ref()))
         }
         (Component::AnnotationAssertion(x), Component::AnnotationAssertion(y)) => {
-            (x.subject.as_ref() as &str)
-                .cmp(y.subject.as_ref())
-                .then_with(|| x.ann.ap.0.as_ref().cmp(y.ann.ap.0.as_ref()))
+            cmp_annotation_subject(&x.subject, &y.subject)
+                .then_with(|| iri_cmp(x.ann.ap.0.as_ref(), y.ann.ap.0.as_ref()))
                 .then_with(|| cmp_annotation_value(&x.ann.av, &y.ann.av))
         }
         (Component::Rule(x), Component::Rule(y)) => {
@@ -433,16 +423,16 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
             cmp_ope(&x.ope, &y.ope).then_with(|| cmp_ce(&x.ce, &y.ce))
         }
         (Component::DataPropertyDomain(x), Component::DataPropertyDomain(y)) => {
-            x.dp.0.as_ref().cmp(y.dp.0.as_ref()).then_with(|| cmp_ce(&x.ce, &y.ce))
+            iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref()).then_with(|| cmp_ce(&x.ce, &y.ce))
         }
         (Component::DataPropertyRange(x), Component::DataPropertyRange(y)) => {
-            x.dp.0.as_ref().cmp(y.dp.0.as_ref()).then_with(|| cmp_dr(&x.dr, &y.dr))
+            iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref()).then_with(|| cmp_dr(&x.dr, &y.dr))
         }
         (Component::DatatypeDefinition(x), Component::DatatypeDefinition(y)) => {
-            x.kind.0.as_ref().cmp(y.kind.0.as_ref()).then_with(|| cmp_dr(&x.range, &y.range))
+            iri_cmp(x.kind.0.as_ref(), y.kind.0.as_ref()).then_with(|| cmp_dr(&x.range, &y.range))
         }
         (Component::SubDataPropertyOf(x), Component::SubDataPropertyOf(y)) => {
-            x.sub.0.as_ref().cmp(y.sub.0.as_ref()).then_with(|| x.sup.0.as_ref().cmp(y.sup.0.as_ref()))
+            iri_cmp(x.sub.0.as_ref(), y.sub.0.as_ref()).then_with(|| iri_cmp(x.sup.0.as_ref(), y.sup.0.as_ref()))
         }
         (Component::EquivalentObjectProperties(x), Component::EquivalentObjectProperties(y)) => {
             cmp_ope_set(&x.0, &y.0)
@@ -464,9 +454,24 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::TransitiveObjectProperty(x), Component::TransitiveObjectProperty(y)) => cmp_ope(&x.0, &y.0),
         (Component::ReflexiveObjectProperty(x), Component::ReflexiveObjectProperty(y)) => cmp_ope(&x.0, &y.0),
         (Component::FunctionalDataProperty(x), Component::FunctionalDataProperty(y)) => {
-            x.0 .0.as_ref().cmp(y.0 .0.as_ref())
+            iri_cmp(x.0 .0.as_ref(), y.0 .0.as_ref())
         }
         _ => Ordering::Equal,
+    }
+}
+
+/// An IRI subject (typeIndex 0) before an anonymous one (1007); IRIs in IRI
+/// order, anonymous subjects by node ID.
+fn cmp_annotation_subject(
+    a: &horned_owl::model::AnnotationSubject<RcStr>,
+    b: &horned_owl::model::AnnotationSubject<RcStr>,
+) -> Ordering {
+    use horned_owl::model::AnnotationSubject as S;
+    match (a, b) {
+        (S::IRI(x), S::IRI(y)) => iri_cmp(x.as_ref(), y.as_ref()),
+        (S::AnonymousIndividual(x), S::AnonymousIndividual(y)) => x.0.as_ref().cmp(y.0.as_ref()),
+        (S::IRI(_), S::AnonymousIndividual(_)) => Ordering::Less,
+        (S::AnonymousIndividual(_), S::IRI(_)) => Ordering::Greater,
     }
 }
 
@@ -474,9 +479,9 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
 fn cmp_dp_set(a: &[horned_owl::model::DataProperty<RcStr>], b: &[horned_owl::model::DataProperty<RcStr>]) -> Ordering {
     let mut a: Vec<&str> = a.iter().map(|p| p.0.as_ref()).collect();
     let mut b: Vec<&str> = b.iter().map(|p| p.0.as_ref()).collect();
-    a.sort();
-    b.sort();
-    a.cmp(&b)
+    a.sort_by(|p, q| iri_cmp(p, q));
+    b.sort_by(|p, q| iri_cmp(p, q));
+    cmp_sorted(&a, &b, |p, q| iri_cmp(p, q))
 }
 
 /// Two sets of object property expressions, each in its own order.

@@ -1,0 +1,26 @@
+format-version: 1.2
+idspace: i http://example.org/int/ 
+ontology: http://example.org/operands.owl
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/int/A>))\nDeclaration(Class(<http://x.org/a_b>))\nDeclaration(Class(<http://x.org/a/c>))\nDeclaration(ObjectProperty(<http://x.org/p_b>))\nDeclaration(ObjectProperty(<http://x.org/p/c>))\nDeclaration(DataProperty(<http://example.org/int/d>))\nDeclaration(DataProperty(<http://x.org/d_b>))\nDeclaration(DataProperty(<http://x.org/d/c>))\nDeclaration(NamedIndividual(<http://x.org/j_b>))\nDeclaration(NamedIndividual(<http://x.org/j/c>))\n\n############################\n#   Data Properties\n############################\n\n# Data Property: <http://x.org/d_b> (<http://x.org/d_b>)\n\nDisjointDataProperties(<http://x.org/d_b> <http://x.org/d/c>)\n\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/int/A> (<http://example.org/int/A>)\n\nSubClassOf(<http://example.org/int/A> ObjectOneOf(<http://x.org/j_b> <http://x.org/j/c>))\nSubClassOf(<http://example.org/int/A> DataSomeValuesFrom(<http://example.org/int/d> DataUnionOf(xsd:integer xsd:string)))\nSubClassOf(<http://example.org/int/A> DataSomeValuesFrom(<http://example.org/int/d> DataOneOf(\"a\" \"b\")))\nSubClassOf(<http://example.org/int/A> DataSomeValuesFrom(<http://example.org/int/d> DataIntersectionOf(xsd:integer xsd:string)))\nSubClassOf(<http://example.org/int/A> DataSomeValuesFrom(<http://example.org/int/d> DatatypeRestriction(xsd:integer xsd:minInclusive \"1\"^^xsd:integer xsd:maxInclusive \"9\"^^xsd:integer)))\n\n# Class: <http://x.org/a_b> (<http://x.org/a_b>)\n\n\n# Class: <http://x.org/a/c> (<http://x.org/a/c>)\n\n\n\n############################\n#   Named Individuals\n############################\n\n# Individual: <http://x.org/j_b> (<http://x.org/j_b>)\n\nSameIndividual(<http://x.org/j_b> <http://x.org/j/c>)\n\n\nDisjointClasses(<http://example.org/int/A> <http://x.org/a_b> <http://x.org/a/c>)\nHasKey(<http://example.org/int/A> (<http://x.org/p_b> <http://x.org/p/c>) (<http://x.org/d_b> <http://x.org/d/c>))\n)
+
+[Term]
+id: a:b
+disjoint_from: http://x.org/a/c
+
+[Term]
+id: i:A
+union_of: a:b
+union_of: http://x.org/a/c
+disjoint_from: a:b
+
+[Term]
+id: i:B
+intersection_of: a:b
+intersection_of: http://x.org/a/c
+intersection_of: http://x.org/p/c i:A
+intersection_of: p:b i:A
+
+[Typedef]
+id: p:b
+equivalent_to: http://x.org/p/c
+

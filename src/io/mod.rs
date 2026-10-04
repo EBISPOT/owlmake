@@ -1679,9 +1679,10 @@ pub fn save(model: &mut Model, path: &Path) -> Result<()> {
 /// `p owl:equivalentProperty q` and `q owl:equivalentProperty p` reads as two
 /// axioms, which would otherwise be written twice in every syntax.
 ///
-/// Every writer sorts operands as it emits them, so this changes no order; it
-/// only merges duplicates. (`SubObjectPropertyOf`'s chain is genuinely ordered
-/// and is never sorted.)
+/// The canonical order is the order OWL's object model keeps a set in. The
+/// functional writer emits operands in it; the other writers sort operands as
+/// they emit them. (`SubObjectPropertyOf`'s chain is genuinely ordered and is
+/// never sorted.)
 pub fn normalize_set_operands(model: &mut Model) {
     use horned_owl::model::{AnnotatedComponent, MutableOntology, RcStr};
     let mut replace: Vec<(AnnotatedComponent<RcStr>, AnnotatedComponent<RcStr>)> = Vec::new();
@@ -1736,6 +1737,16 @@ pub(crate) fn canonical_component(
             Component::DifferentIndividuals(m::DifferentIndividuals(sorted_by(&ax.0, cmp_individual)))
         }
         Component::HasKey(ax) => Component::HasKey(m::HasKey { ce: canonical_ce(&ax.ce), vpe: sorted_by(&ax.vpe, cmp_pe) }),
+        Component::DataPropertyDomain(ax) => {
+            Component::DataPropertyDomain(m::DataPropertyDomain { dp: ax.dp.clone(), ce: canonical_ce(&ax.ce) })
+        }
+        Component::DataPropertyRange(ax) => {
+            Component::DataPropertyRange(m::DataPropertyRange { dp: ax.dp.clone(), dr: canonical_dr(&ax.dr) })
+        }
+        Component::DatatypeDefinition(ax) => Component::DatatypeDefinition(m::DatatypeDefinition {
+            kind: ax.kind.clone(),
+            range: canonical_dr(&ax.range),
+        }),
         _ => return None,
     })
 }
@@ -1751,7 +1762,7 @@ fn cmp_dp(
     a: &horned_owl::model::DataProperty<horned_owl::model::RcStr>,
     b: &horned_owl::model::DataProperty<horned_owl::model::RcStr>,
 ) -> std::cmp::Ordering {
-    a.0.as_ref().cmp(b.0.as_ref())
+    crate::owlapi_hash::iri_cmp(a.0.as_ref(), b.0.as_ref())
 }
 
 /// A key's object properties before its data properties, each in their own
@@ -1769,7 +1780,9 @@ fn cmp_pe(
     rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
         (PE::ObjectPropertyExpression(x), PE::ObjectPropertyExpression(y)) => crate::io::owlfunc::cmp_ope(x, y),
         (PE::DataProperty(x), PE::DataProperty(y)) => cmp_dp(x, y),
-        (PE::AnnotationProperty(x), PE::AnnotationProperty(y)) => x.0.as_ref().cmp(y.0.as_ref()),
+        (PE::AnnotationProperty(x), PE::AnnotationProperty(y)) => {
+            crate::owlapi_hash::iri_cmp(x.0.as_ref(), y.0.as_ref())
+        }
         _ => std::cmp::Ordering::Equal,
     })
 }
@@ -1800,7 +1813,43 @@ fn canonical_ce(
             CE::ObjectExactCardinality { n: *n, ope: ope.clone(), bce: Box::new(canonical_ce(bce)) }
         }
         CE::ObjectOneOf(inds) => CE::ObjectOneOf(sorted_by(inds, crate::io::owlfunc::cmp_individual)),
+        CE::DataSomeValuesFrom { dp, dr } => CE::DataSomeValuesFrom { dp: dp.clone(), dr: canonical_dr(dr) },
+        CE::DataAllValuesFrom { dp, dr } => CE::DataAllValuesFrom { dp: dp.clone(), dr: canonical_dr(dr) },
+        CE::DataMinCardinality { n, dp, dr } => {
+            CE::DataMinCardinality { n: *n, dp: dp.clone(), dr: canonical_dr(dr) }
+        }
+        CE::DataMaxCardinality { n, dp, dr } => {
+            CE::DataMaxCardinality { n: *n, dp: dp.clone(), dr: canonical_dr(dr) }
+        }
+        CE::DataExactCardinality { n, dp, dr } => {
+            CE::DataExactCardinality { n: *n, dp: dp.clone(), dr: canonical_dr(dr) }
+        }
         other => other.clone(),
+    }
+}
+
+/// A data range with its set-valued operands — a union's or intersection's
+/// ranges, a one-of's literals, a restriction's facets — at any depth, in
+/// canonical order.
+fn canonical_dr(
+    dr: &horned_owl::model::DataRange<horned_owl::model::RcStr>,
+) -> horned_owl::model::DataRange<horned_owl::model::RcStr> {
+    use crate::io::owlfunc::{cmp_dr, cmp_literal};
+    use horned_owl::model::DataRange as DR;
+    let ranges = |ops: &[DR<horned_owl::model::RcStr>]| {
+        let ops: Vec<_> = ops.iter().map(canonical_dr).collect();
+        sorted_by(&ops, cmp_dr)
+    };
+    match dr {
+        DR::DataIntersectionOf(ops) => DR::DataIntersectionOf(ranges(ops)),
+        DR::DataUnionOf(ops) => DR::DataUnionOf(ranges(ops)),
+        DR::DataComplementOf(b) => DR::DataComplementOf(Box::new(canonical_dr(b))),
+        DR::DataOneOf(lits) => DR::DataOneOf(sorted_by(lits, cmp_literal)),
+        DR::DatatypeRestriction(dt, facets) => DR::DatatypeRestriction(
+            dt.clone(),
+            sorted_by(facets, |p, q| p.f.cmp(&q.f).then_with(|| cmp_literal(&p.l, &q.l))),
+        ),
+        DR::Datatype(_) => dr.clone(),
     }
 }
 

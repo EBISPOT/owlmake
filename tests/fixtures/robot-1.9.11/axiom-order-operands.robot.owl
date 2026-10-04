@@ -1,0 +1,265 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/operands.owl#"
+     xml:base="http://example.org/operands.owl"
+     xmlns:i="http://example.org/int/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/operands.owl"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://x.org/p_b -->
+
+    <owl:ObjectProperty rdf:about="http://x.org/p_b">
+        <owl:equivalentProperty rdf:resource="http://x.org/p/c"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://x.org/p/c -->
+
+    <owl:ObjectProperty rdf:about="http://x.org/p/c"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/int/d -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/int/d"/>
+    
+
+
+    <!-- http://x.org/d_b -->
+
+    <owl:DatatypeProperty rdf:about="http://x.org/d_b">
+        <owl:propertyDisjointWith rdf:resource="http://x.org/d/c"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://x.org/d/c -->
+
+    <owl:DatatypeProperty rdf:about="http://x.org/d/c"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/int/A -->
+
+    <owl:Class rdf:about="http://example.org/int/A">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://x.org/a_b"/>
+                    <rdf:Description rdf:about="http://x.org/a/c"/>
+                </owl:unionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+        <rdfs:subClassOf>
+            <owl:Class>
+                <owl:oneOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://x.org/j_b"/>
+                    <rdf:Description rdf:about="http://x.org/j/c"/>
+                </owl:oneOf>
+            </owl:Class>
+        </rdfs:subClassOf>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/int/d"/>
+                <owl:someValuesFrom>
+                    <rdfs:Datatype>
+                        <owl:unionOf rdf:parseType="Collection">
+                            <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#integer"/>
+                            <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#string"/>
+                        </owl:unionOf>
+                    </rdfs:Datatype>
+                </owl:someValuesFrom>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/int/d"/>
+                <owl:someValuesFrom>
+                    <rdfs:Datatype>
+                        <owl:oneOf>
+                            <rdf:Description>
+                                <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#List"/>
+                                <rdf:first>a</rdf:first>
+                                <rdf:rest>
+                                    <rdf:Description>
+                                        <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#List"/>
+                                        <rdf:first>b</rdf:first>
+                                        <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+                                    </rdf:Description>
+                                </rdf:rest>
+                            </rdf:Description>
+                        </owl:oneOf>
+                    </rdfs:Datatype>
+                </owl:someValuesFrom>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/int/d"/>
+                <owl:someValuesFrom>
+                    <rdfs:Datatype>
+                        <owl:intersectionOf rdf:parseType="Collection">
+                            <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#integer"/>
+                            <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#string"/>
+                        </owl:intersectionOf>
+                    </rdfs:Datatype>
+                </owl:someValuesFrom>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/int/d"/>
+                <owl:someValuesFrom>
+                    <rdfs:Datatype>
+                        <owl:onDatatype rdf:resource="http://www.w3.org/2001/XMLSchema#integer"/>
+                        <owl:withRestrictions rdf:parseType="Collection">
+                            <rdf:Description>
+                                <xsd:minInclusive rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1</xsd:minInclusive>
+                            </rdf:Description>
+                            <rdf:Description>
+                                <xsd:maxInclusive rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">9</xsd:maxInclusive>
+                            </rdf:Description>
+                        </owl:withRestrictions>
+                    </rdfs:Datatype>
+                </owl:someValuesFrom>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://x.org/p_b"/>
+            <rdf:Description rdf:about="http://x.org/p/c"/>
+            <rdf:Description rdf:about="http://x.org/d_b"/>
+            <rdf:Description rdf:about="http://x.org/d/c"/>
+        </owl:hasKey>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/int/B -->
+
+    <owl:Class rdf:about="http://example.org/int/B">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://x.org/a_b"/>
+                    <rdf:Description rdf:about="http://x.org/a/c"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://x.org/p_b"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/int/A"/>
+                    </owl:Restriction>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://x.org/p/c"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/int/A"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://x.org/a_b -->
+
+    <owl:Class rdf:about="http://x.org/a_b">
+        <owl:disjointWith rdf:resource="http://x.org/a/c"/>
+    </owl:Class>
+    
+
+
+    <!-- http://x.org/a/c -->
+
+    <owl:Class rdf:about="http://x.org/a/c"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://x.org/j_b -->
+
+    <owl:NamedIndividual rdf:about="http://x.org/j_b">
+        <owl:sameAs rdf:resource="http://x.org/j/c"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://x.org/j/c -->
+
+    <rdf:Description rdf:about="http://x.org/j/c"/>
+    
+
+
+    <!-- http://x.org/j/c -->
+
+    <owl:NamedIndividual rdf:about="http://x.org/j/c"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/int/A"/>
+            <rdf:Description rdf:about="http://x.org/a_b"/>
+            <rdf:Description rdf:about="http://x.org/a/c"/>
+        </owl:members>
+    </rdf:Description>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

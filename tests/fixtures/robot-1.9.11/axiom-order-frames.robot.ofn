@@ -1,0 +1,99 @@
+Prefix(:=<http://example.org/frames.owl#>)
+Prefix(e:=<http://example.org/ext/>)
+Prefix(i:=<http://example.org/int/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/frames.owl>
+
+Declaration(Class(e:B))
+Declaration(Class(i:A))
+Declaration(Class(<http://x.org/a_b>))
+Declaration(Class(<http://x.org/a/c>))
+Declaration(ObjectProperty(i:p))
+Declaration(ObjectProperty(<http://x.org/p_b>))
+Declaration(ObjectProperty(<http://x.org/p/c>))
+Declaration(DataProperty(i:d))
+Declaration(DataProperty(<http://x.org/d_b>))
+Declaration(DataProperty(<http://x.org/d/c>))
+Declaration(NamedIndividual(i:y))
+Declaration(NamedIndividual(i:z))
+Declaration(NamedIndividual(<http://x.org/j_b>))
+Declaration(NamedIndividual(<http://x.org/j/c>))
+############################
+#   Object Properties
+############################
+
+# Object Property: i:p (i:p)
+
+SubObjectPropertyOf(i:p <http://x.org/p_b>)
+SubObjectPropertyOf(i:p <http://x.org/p/c>)
+ObjectPropertyDomain(i:p <http://x.org/a_b>)
+ObjectPropertyDomain(i:p <http://x.org/a/c>)
+DisjointObjectProperties(i:p <http://x.org/p_b>)
+DisjointObjectProperties(i:p <http://x.org/p/c>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: i:d (i:d)
+
+SubDataPropertyOf(i:d <http://x.org/d_b>)
+SubDataPropertyOf(i:d <http://x.org/d/c>)
+DataPropertyRange(i:d xsd:string)
+DataPropertyRange(i:d DataOneOf("a" "b"))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: i:A (i:A)
+
+SubClassOf(i:A ObjectOneOf(i:y i:z))
+SubClassOf(i:A ObjectOneOf(<http://x.org/j/c>))
+SubClassOf(i:A ObjectHasValue(i:p <http://x.org/j_b>))
+SubClassOf(i:A ObjectHasValue(i:p <http://x.org/j/c>))
+SubClassOf(i:A DataSomeValuesFrom(<http://x.org/d_b> xsd:string))
+SubClassOf(i:A DataSomeValuesFrom(<http://x.org/d/c> xsd:string))
+SubClassOf(i:A DataAllValuesFrom(i:d DataUnionOf(xsd:integer xsd:string)))
+SubClassOf(i:A DataAllValuesFrom(i:d DatatypeRestriction(xsd:integer xsd:minInclusive "1"^^xsd:integer)))
+SubClassOf(i:A DataAllValuesFrom(i:d DatatypeRestriction(xsd:integer xsd:maxInclusive "9"^^xsd:integer)))
+SubClassOf(i:A DataHasValue(i:d "2"))
+SubClassOf(i:A DataHasValue(i:d "1"^^xsd:integer))
+SubClassOf(i:A DataMinCardinality(1 i:d))
+SubClassOf(i:A DataMinCardinality(2 i:d))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: i:y (i:y)
+
+ClassAssertion(<http://x.org/a_b> i:y)
+ClassAssertion(<http://x.org/a/c> i:y)
+ObjectPropertyAssertion(i:p i:y <http://x.org/j_b>)
+ObjectPropertyAssertion(i:p i:y <http://x.org/j/c>)
+ObjectPropertyAssertion(<http://x.org/p_b> i:y i:z)
+ObjectPropertyAssertion(<http://x.org/p/c> i:y i:z)
+DataPropertyAssertion(<http://x.org/d_b> i:y "1")
+DataPropertyAssertion(<http://x.org/d/c> i:y "1")
+
+
+SubClassOf(ObjectHasValue(i:p i:y) e:B)
+SubClassOf(ObjectHasValue(i:p i:z) e:B)
+SubClassOf(DataSomeValuesFrom(<http://x.org/d_b> xsd:string) e:B)
+SubClassOf(DataSomeValuesFrom(<http://x.org/d/c> xsd:string) e:B)
+SubClassOf(DataHasValue(i:d "2") e:B)
+SubClassOf(DataHasValue(i:d "1"^^xsd:integer) e:B)
+HasKey(i:A (i:p) (i:d))
+HasKey(i:A () (<http://x.org/d_b> <http://x.org/d/c>))
+)

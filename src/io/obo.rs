@@ -2857,7 +2857,7 @@ fn property_ends(members: &[OPE<RcStr>]) -> Option<(String, String)> {
             OPE::InverseObjectProperty(_) => return None,
         }
     }
-    named.sort_unstable();
+    named.sort_unstable_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
     Some((named[0].to_string(), named[named.len() - 1].to_string()))
 }
 
@@ -4290,11 +4290,12 @@ fn record_ac(
                 e.disjoint_from.push((ctx.id(named[1]), axanns.clone()));
             } else if named.len() >= 3 {
                 // A nary DisjointClasses maps to a SINGLE `disjoint_from:` clause,
-                // on the first two members in IRI order — `DisjointClasses(A B C)`
-                // in any input order yields `A disjoint_from B`. The other pairs are
-                // dropped, as OBO has no nary disjoint form.
+                // on the first two members in IRI order (namespace, then local
+                // name) — `DisjointClasses(A B C)` in any input order yields
+                // `A disjoint_from B`. The other pairs are dropped, as OBO has no
+                // nary disjoint form.
                 let mut sorted = named.clone();
-                sorted.sort_unstable();
+                sorted.sort_unstable_by(|a, b| crate::owlapi_hash::iri_cmp(a, b));
                 classes.insert(sorted[0].to_string());
                 let e = data.entry(sorted[0].to_string()).or_default();
                 e.disjoint_from.push((ctx.id(sorted[1]), axanns.clone()));

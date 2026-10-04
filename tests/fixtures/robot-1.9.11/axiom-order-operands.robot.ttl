@@ -1,0 +1,157 @@
+@prefix : <http://example.org/operands.owl#> .
+@prefix i: <http://example.org/int/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/operands.owl> .
+
+<http://example.org/operands.owl> rdf:type owl:Ontology .
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://x.org/p_b
+<http://x.org/p_b> rdf:type owl:ObjectProperty ;
+                   owl:equivalentProperty <http://x.org/p/c> .
+
+
+###  http://x.org/p/c
+<http://x.org/p/c> rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/int/d
+i:d rdf:type owl:DatatypeProperty .
+
+
+###  http://x.org/d_b
+<http://x.org/d_b> rdf:type owl:DatatypeProperty ;
+                   owl:propertyDisjointWith <http://x.org/d/c> .
+
+
+###  http://x.org/d/c
+<http://x.org/d/c> rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/int/A
+i:A rdf:type owl:Class ;
+    owl:equivalentClass [ rdf:type owl:Class ;
+                          owl:unionOf ( <http://x.org/a_b>
+                                        <http://x.org/a/c>
+                                      )
+                        ] ;
+    rdfs:subClassOf [ rdf:type owl:Class ;
+                      owl:oneOf ( <http://x.org/j_b>
+                                  <http://x.org/j/c>
+                                )
+                    ] ,
+                    [ rdf:type owl:Restriction ;
+                      owl:onProperty i:d ;
+                      owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                           owl:unionOf ( xsd:integer
+                                                         xsd:string
+                                                       )
+                                         ]
+                    ] ,
+                    [ rdf:type owl:Restriction ;
+                      owl:onProperty i:d ;
+                      owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                           owl:oneOf [ rdf:type rdf:List ;
+                                                       rdf:first "a" ;
+                                                       rdf:rest [ rdf:type rdf:List ;
+                                                                  rdf:first "b" ;
+                                                                  rdf:rest rdf:nil
+                                                                ]
+                                                     ]
+                                         ]
+                    ] ,
+                    [ rdf:type owl:Restriction ;
+                      owl:onProperty i:d ;
+                      owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                           owl:intersectionOf ( xsd:integer
+                                                                xsd:string
+                                                              )
+                                         ]
+                    ] ,
+                    [ rdf:type owl:Restriction ;
+                      owl:onProperty i:d ;
+                      owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                           owl:onDatatype xsd:integer ;
+                                           owl:withRestrictions ( [ xsd:minInclusive 1
+                                                                  ]
+                                                                  [ xsd:maxInclusive 9
+                                                                  ]
+                                                                )
+                                         ]
+                    ] ;
+    owl:hasKey ( <http://x.org/p_b>
+                 <http://x.org/p/c>
+                 <http://x.org/d_b>
+                 <http://x.org/d/c>
+               ) .
+
+
+###  http://example.org/int/B
+i:B rdf:type owl:Class ;
+    owl:equivalentClass [ owl:intersectionOf ( <http://x.org/a_b>
+                                               <http://x.org/a/c>
+                                               [ rdf:type owl:Restriction ;
+                                                 owl:onProperty <http://x.org/p_b> ;
+                                                 owl:someValuesFrom i:A
+                                               ]
+                                               [ rdf:type owl:Restriction ;
+                                                 owl:onProperty <http://x.org/p/c> ;
+                                                 owl:someValuesFrom i:A
+                                               ]
+                                             ) ;
+                          rdf:type owl:Class
+                        ] .
+
+
+###  http://x.org/a_b
+<http://x.org/a_b> rdf:type owl:Class ;
+                   owl:disjointWith <http://x.org/a/c> .
+
+
+###  http://x.org/a/c
+<http://x.org/a/c> rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://x.org/j_b
+<http://x.org/j_b> rdf:type owl:NamedIndividual ;
+                   owl:sameAs <http://x.org/j/c> .
+
+
+###  http://x.org/j/c
+
+###  http://x.org/j/c
+<http://x.org/j/c> rdf:type owl:NamedIndividual .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:AllDisjointClasses ;
+  owl:members ( i:A
+                <http://x.org/a_b>
+                <http://x.org/a/c>
+              )
+] .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi
