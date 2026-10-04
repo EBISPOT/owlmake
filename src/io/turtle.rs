@@ -225,30 +225,102 @@ fn missing_class_expression_types(statements: &[Triple]) -> Vec<Triple> {
 }
 
 /// The `@prefix p: <ns> .` (and SPARQL-style `PREFIX p: <ns>`) declarations of a
-/// Turtle document, in source order. A document that declares none — MONDO's
-/// `skos.ttl` is plain triples with full IRIs — yields an empty set, which is
-/// exactly right: it contributes no prefixes to the merge.
+/// Turtle document, in source order. Only the document's own directives count:
+/// the same text inside a string literal, an IRI or a comment declares nothing
+/// (RO quotes Turtle that binds `in_taxon:` and `part_of:` in its annotations). A
+/// document that declares none — MONDO's `skos.ttl` is plain triples with full
+/// IRIs — yields an empty set, which is exactly right: it contributes no prefixes
+/// to the merge.
 fn scan_turtle_prefixes(bytes: &[u8]) -> Vec<(String, String)> {
-    let text = String::from_utf8_lossy(bytes);
+    let start = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) { 3 } else { 0 };
     let mut out = Vec::new();
-    for line in text.lines() {
-        let t = line.trim_start();
-        let rest = if let Some(r) = t.strip_prefix("@prefix") {
-            r
-        } else if t.len() >= 6 && t[..6].eq_ignore_ascii_case("prefix") {
-            &t[6..]
-        } else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        // The prefix NAME comes first, so the first `:` ends it — the colons inside
-        // the namespace IRI come later. An empty name is the default `@prefix :`.
-        let Some(colon) = rest.find(':') else { continue };
-        let name = rest[..colon].trim().to_string();
-        let Some(open) = rest[colon..].find('<') else { continue };
-        let after = &rest[colon + open + 1..];
-        let Some(close) = after.find('>') else { continue };
-        out.push((name, after[..close].to_string()));
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            // A comment runs to the end of its line.
+            b'#' => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'<' => i = skip_iri(bytes, i),
+            b'"' | b'\'' => i = skip_string(bytes, i),
+            // An escaped character of a local name (`ex:o\'brien`) is part of it.
+            b'\\' => i += 2,
+            _ => {
+                let token_start = i == start || matches!(bytes[i - 1], b' ' | b'\t' | b'\r' | b'\n' | b'.' | b'>');
+                match token_start.then(|| prefix_directive(&bytes[i..])).flatten() {
+                    Some((name, namespace, len)) => {
+                        out.push((name, namespace));
+                        i += len;
+                    }
+                    None => i += 1,
+                }
+            }
+        }
     }
     out
+}
+
+/// The index just past the IRI `<…>` that starts at `i`.
+fn skip_iri(bytes: &[u8], i: usize) -> usize {
+    bytes[i + 1..].iter().position(|&c| c == b'>').map_or(bytes.len(), |p| i + p + 2)
+}
+
+/// The index just past the string literal that starts at `i`: `"…"` or `'…'`,
+/// or the long forms `"""…"""` and `'''…'''`, which may span lines and hold
+/// the quote character itself. A backslash escapes the character after it.
+fn skip_string(bytes: &[u8], i: usize) -> usize {
+    let q = bytes[i];
+    let delimiter: &[u8] = if bytes[i..].starts_with(&[q, q, q]) { &bytes[i..i + 3] } else { &bytes[i..i + 1] };
+    let mut j = i + delimiter.len();
+    while j < bytes.len() {
+        if bytes[j] == b'\\' {
+            j += 2;
+        } else if bytes[j..].starts_with(delimiter) {
+            return j + delimiter.len();
+        } else {
+            j += 1;
+        }
+    }
+    bytes.len()
+}
+
+/// The prefix directive `rest` starts with — `@prefix p: <ns>`, or `PREFIX p:
+/// <ns>` in any case — as its name, its namespace and the bytes it takes.
+fn prefix_directive(rest: &[u8]) -> Option<(String, String, usize)> {
+    let keyword = if rest.starts_with(b"@prefix") {
+        7
+    } else if rest.len() >= 6 && rest[..6].eq_ignore_ascii_case(b"prefix") {
+        6
+    } else {
+        return None;
+    };
+    // The keyword is a token of its own: `prefix:x` is a prefixed name.
+    let skip_space = |mut j: usize| -> Option<usize> {
+        while rest.get(j)?.is_ascii_whitespace() {
+            j += 1;
+        }
+        Some(j)
+    };
+    if !rest.get(keyword)?.is_ascii_whitespace() {
+        return None;
+    }
+    // The prefix NAME ends at its colon; the colons inside the namespace IRI
+    // come later. An empty name is the default `@prefix :`.
+    let name_start = skip_space(keyword)?;
+    let colon = name_start + rest[name_start..].iter().position(|&c| c == b':' || c.is_ascii_whitespace())?;
+    if rest[colon] != b':' {
+        return None;
+    }
+    let open = skip_space(colon + 1)?;
+    if rest[open] != b'<' {
+        return None;
+    }
+    let close = open + 1 + rest[open + 1..].iter().position(|&c| c == b'>')?;
+    Some((
+        String::from_utf8_lossy(&rest[name_start..colon]).into_owned(),
+        String::from_utf8_lossy(&rest[open + 1..close]).into_owned(),
+        close + 1,
+    ))
 }

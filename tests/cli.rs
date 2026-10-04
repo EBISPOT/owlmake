@@ -4327,6 +4327,28 @@ fn a_turtle_document_is_read_in_its_own_order_and_literals() {
     }
 }
 
+/// A Turtle document's prefixes are the directives it makes, `@prefix` and
+/// SPARQL-style `PREFIX`, wherever they stand: the same text inside a string
+/// literal, short or long, an IRI or a comment declares nothing. As ROBOT
+/// 1.9.11 reads it, in functional syntax, RDF/XML and Turtle.
+#[test]
+fn prefixes_quoted_in_a_turtle_document_declare_nothing() {
+    for ext in ["ofn", "owl", "ttl"] {
+        let out = tmp(&format!("turtle-quoted-prefixes.{ext}"));
+        let run = bin()
+            .args(["convert", "-i"])
+            .arg(robot_fixture("turtle-quoted-prefixes.ttl"))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("turtle-quoted-prefixes.robot.{ext}")), "{ext}");
+    }
+}
+
 /// A Turtle document may leave an anonymous class expression untyped: a node
 /// with `owl:onProperty` is a restriction, and one with `owl:unionOf`,
 /// `owl:intersectionOf`, `owl:complementOf` or `owl:oneOf` a class, nested or

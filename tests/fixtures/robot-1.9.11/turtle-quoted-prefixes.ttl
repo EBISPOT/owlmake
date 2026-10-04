@@ -1,0 +1,22 @@
+@prefix : <http://example.org/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+# @prefix commented: <http://example.org/commented#> .
+<http://example.org/turtle-quoted-prefixes.owl> a owl:Ontology .
+:A a owl:Class ;
+   rdfs:comment """A query this class is built by:
+PREFIX in_taxon: <http://purl.obolibrary.org/obo/RO_0002162>
+@prefix part_of: <http://purl.obolibrary.org/obo/BFO_0000050> .
+""" ;
+   rdfs:comment """He said \"""hi\""" and wrote
+PREFIX escaped: <http://example.org/escaped#>
+""" ;
+   rdfs:comment '''A single-quoted query:
+@prefix single: <http://example.org/single#> .
+''' ;
+   rdfs:comment "One line \" PREFIX inline: <http://example.org/inline#>" ;
+   rdfs:seeAlso <http://example.org/x?q=PREFIX%20iri:%20y> .
+@prefix late: <http://example.org/late#> .
+late:B a owl:Class .
+PREFIX sparql: <http://example.org/sparql#>
+sparql:C a owl:Class .

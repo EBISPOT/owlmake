@@ -1,0 +1,38 @@
+Prefix(:=<http://example.org/turtle-quoted-prefixes.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(late:=<http://example.org/late#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(sparql:=<http://example.org/sparql#>)
+
+
+Ontology(<http://example.org/turtle-quoted-prefixes.owl>
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(late:B))
+Declaration(Class(sparql:C))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (<http://example.org/A>)
+
+AnnotationAssertion(rdfs:comment <http://example.org/A> "A query this class is built by:
+PREFIX in_taxon: <http://purl.obolibrary.org/obo/RO_0002162>
+@prefix part_of: <http://purl.obolibrary.org/obo/BFO_0000050> .
+")
+AnnotationAssertion(rdfs:comment <http://example.org/A> "A single-quoted query:
+@prefix single: <http://example.org/single#> .
+")
+AnnotationAssertion(rdfs:comment <http://example.org/A> "He said \"\"\"hi\"\"\" and wrote
+PREFIX escaped: <http://example.org/escaped#>
+")
+AnnotationAssertion(rdfs:comment <http://example.org/A> "One line \" PREFIX inline: <http://example.org/inline#>")
+AnnotationAssertion(rdfs:seeAlso <http://example.org/A> <http://example.org/x?q=PREFIX%20iri:%20y>)
+
+
+)
