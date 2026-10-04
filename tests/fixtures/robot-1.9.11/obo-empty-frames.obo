@@ -1,0 +1,29 @@
+format-version: 1.2
+ontology: obo-empty-frames
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_01>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_03>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_04>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_05>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_06>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_07>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_08>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_09>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_11>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_13>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_A>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Z_B>))\nDeclaration(ObjectProperty(<http://purl.obolibrary.org/obo/Z_p>))\nDeclaration(NamedIndividual(<http://purl.obolibrary.org/obo/Z_i>))\n\n############################\n#   Classes\n############################\n\n# Class: <http://purl.obolibrary.org/obo/Z_01> (<http://purl.obolibrary.org/obo/Z_01>)\n\nSubClassOf(<http://purl.obolibrary.org/obo/Z_01> ObjectHasValue(<http://purl.obolibrary.org/obo/Z_p> <http://purl.obolibrary.org/obo/Z_i>))\n\n# Class: <http://purl.obolibrary.org/obo/Z_03> (<http://purl.obolibrary.org/obo/Z_03>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/Z_03> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Z_A> ObjectHasValue(<http://purl.obolibrary.org/obo/Z_p> <http://purl.obolibrary.org/obo/Z_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/Z_04> (<http://purl.obolibrary.org/obo/Z_04>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/Z_04> <http://purl.obolibrary.org/obo/Z_A> <http://purl.obolibrary.org/obo/Z_B>)\n\n# Class: <http://purl.obolibrary.org/obo/Z_05> (<http://purl.obolibrary.org/obo/Z_05>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/Z_05> ObjectUnionOf(<http://purl.obolibrary.org/obo/Z_A> ObjectHasValue(<http://purl.obolibrary.org/obo/Z_p> <http://purl.obolibrary.org/obo/Z_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/Z_06> (<http://purl.obolibrary.org/obo/Z_06>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/Z_06> ObjectHasValue(<http://purl.obolibrary.org/obo/Z_p> <http://purl.obolibrary.org/obo/Z_i>))\n\n# Class: <http://purl.obolibrary.org/obo/Z_07> (<http://purl.obolibrary.org/obo/Z_07>)\n\nDisjointClasses(<http://purl.obolibrary.org/obo/Z_07> ObjectHasValue(<http://purl.obolibrary.org/obo/Z_p> <http://purl.obolibrary.org/obo/Z_i>))\n\n# Class: <http://purl.obolibrary.org/obo/Z_08> (<http://purl.obolibrary.org/obo/Z_08>)\n\nDisjointUnion(<http://purl.obolibrary.org/obo/Z_08> <http://purl.obolibrary.org/obo/Z_A> <http://purl.obolibrary.org/obo/Z_B>)\n\n# Class: <http://purl.obolibrary.org/obo/Z_11> (<http://purl.obolibrary.org/obo/Z_11>)\n\nSubClassOf(<http://purl.obolibrary.org/obo/Z_11> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Z_A> <http://purl.obolibrary.org/obo/Z_B>))\n\n\n\nSubClassOf(ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/Z_p> <http://purl.obolibrary.org/obo/Z_13>) <http://purl.obolibrary.org/obo/Z_A>)\nHasKey(<http://purl.obolibrary.org/obo/Z_09> (<http://purl.obolibrary.org/obo/Z_p>) ())\n)
+
+[Term]
+id: Z:01
+
+[Term]
+id: Z:03
+
+[Term]
+id: Z:05
+
+[Term]
+id: Z:06
+
+[Term]
+id: Z:10
+intersection_of: Z:A
+intersection_of: Z:B
+
+[Term]
+id: Z:11
+
+[Term]
+id: Z:12
+intersection_of: Z:A
+intersection_of: Z:C {minCardinality="2"}
+

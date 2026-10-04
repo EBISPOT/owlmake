@@ -2707,6 +2707,12 @@ struct SubjData {
     // A synonym type's `oboInOwl:hasScope`: the scope (`EXACT`, …) of the
     // synonym property it names.
     synonym_scope: Option<&'static str>,
+    /// The class has a `[Term]` frame whatever clauses it ends up with: an
+    /// axiom whose translation starts on the class's frame names it — a
+    /// subclass axiom with the class as subclass, an equivalence of two members
+    /// with the class as its named member — even when that axiom goes to the
+    /// header's `owl-axioms` and the frame stays empty.
+    framed: bool,
 }
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
@@ -2863,6 +2869,30 @@ fn property_ends(members: &[OPE<RcStr>]) -> Option<(String, String)> {
 
 fn opr_untranslatable(ope: &OPE<RcStr>, ce: &CE<RcStr>) -> bool {
     matches!(ope, OPE::InverseObjectProperty(_)) || ce_is_top_or_bottom(ce) || !ce_named_class(ce)
+}
+
+/// A subclass axiom with a clause of its own whose superclass, or a conjunct of
+/// it, restricts an inverse property: its `relationship:` would have no
+/// relation to name, so no OBO document can state it.
+fn relates_through_an_inverse(c: &Component<RcStr>) -> bool {
+    let Component::SubClassOf(sc) = c else { return false };
+    if subclassof_untranslatable(&sc.sub, &sc.sup) {
+        return false;
+    }
+    let inverse = |ce: &CE<RcStr>| {
+        matches!(
+            ce,
+            CE::ObjectSomeValuesFrom { ope: OPE::InverseObjectProperty(_), .. }
+                | CE::ObjectAllValuesFrom { ope: OPE::InverseObjectProperty(_), .. }
+                | CE::ObjectMinCardinality { ope: OPE::InverseObjectProperty(_), .. }
+                | CE::ObjectExactCardinality { ope: OPE::InverseObjectProperty(_), .. }
+                | CE::ObjectMaxCardinality { ope: OPE::InverseObjectProperty(_), .. }
+        )
+    };
+    match &sc.sup {
+        CE::ObjectIntersectionOf(ops) => ops.iter().any(inverse),
+        sup => inverse(sup),
+    }
 }
 
 fn sop_untranslatable(
@@ -3209,6 +3239,13 @@ fn check_frame_structure<'a>(
 }
 
 pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
+    if let Some(ac) = model.ont.iter().find(|ac| relates_through_an_inverse(&ac.component)) {
+        anyhow::bail!(
+            "the ontology cannot be saved in OBO format: {} relates its class through an inverse \
+             property, which a `relationship:` clause has no relation id for",
+            crate::io::owlfunc::render_component_line(ac)
+        );
+    }
     let ctx = Ctx::new(model);
     let mut classes: BTreeSet<String> = BTreeSet::new();
     let mut obj_props: BTreeSet<String> = BTreeSet::new();
@@ -3414,7 +3451,7 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
             continue;
         }
         match data.get(&class) {
-            Some(sd) if has_content(sd) => {
+            Some(sd) if has_content(sd) || sd.framed => {
                 writeln!(body, "[Term]")?;
                 let cap = owlapi_set_cap(aa_counts.get(&class).copied().unwrap_or(0));
                 write_stanza(&mut body, &ctx, &labels, &class, Some(sd), Stanza2::Term, cap, subclass_cap)?;
@@ -4087,12 +4124,14 @@ fn record_ac(
             };
             if let Some(s) = subject {
                 classes.insert(s.clone());
+                let framed = !ce_is_top_or_bottom(&sc.sub) && !ce_is_top_or_bottom(&sc.sup);
                 // The whole SubClassOf axiom's hash fixes its position in the
                 // per-type axiom table — hence the tie-order of same-value
                 // is_a/relationship clauses. Computed once here (full IRIs in hand); a
                 // superclass conjunction that splits into several clauses shares it.
                 let sc_hash = owlapi_subclassof_hash(ctx, &sc.sub, &sc.sup, &axanns);
                 let e = data.entry(s).or_default();
+                e.framed |= framed;
                 // The GCI context rides along as extra qualifiers on the line.
                 let gci_quals = gci;
                 // A conjunction in superclass position is not one clause but
@@ -4219,12 +4258,17 @@ fn record_ac(
         }
         Component::EquivalentClasses(eq) => {
             // Named class C ≡ expr → intersection_of / union_of / equivalent_to.
+            // Only an equivalence of two members has an OBO spelling, and one
+            // naming owl:Thing or owl:Nothing has none; either goes whole to the
+            // header's `owl-axioms`.
             let named: Vec<&str> = eq.0.iter().filter_map(|m| match m {
                 CE::Class(c) => Some(c.0.as_ref()),
                 _ => None,
             }).collect();
-            if let Some(subj) = named.first().map(|s| s.to_string()) {
+            let spellable = eq.0.len() == 2 && !eq.0.iter().any(ce_is_top_or_bottom);
+            if let Some(subj) = named.first().filter(|_| spellable).map(|s| s.to_string()) {
                 let e = data.entry(subj).or_default();
+                e.framed = true;
                 for m in &eq.0 {
                     match m {
                         CE::Class(_) => {} // handled as subject / equivalent_to below
@@ -4428,13 +4472,10 @@ pub(crate) fn owlapi_ce_sort_key(ce: &CE<RcStr>) -> (u8, String, String) {
 fn ce_to_inter_tokens(ctx: &Ctx, ce: &CE<RcStr>) -> Option<(Vec<String>, Vec<(String, String)>)> {
     match ce {
         CE::Class(c) => Some((vec![ctx.id(c.0.as_ref())], Vec::new())),
-        CE::ObjectSomeValuesFrom { ope, bce } => {
-            if let (OPE::ObjectProperty(r), CE::Class(t)) = (ope, bce.as_ref()) {
-                Some((vec![ctx.id(r.0.as_ref()), ctx.id(t.0.as_ref())], Vec::new()))
-            } else {
-                None
-            }
-        }
+        CE::ObjectSomeValuesFrom { ope, bce } => match bce.as_ref() {
+            CE::Class(t) => Some((relation_and(ctx, ope, t.0.as_ref()), Vec::new())),
+            _ => None,
+        },
         // A cardinality restriction is the same `REL FILLER` clause carrying the
         // bound as a qualifier — UBERON's `zygapophysis ≡ skeletal joint and
         // connects exactly 2 vertebral centrum` is
@@ -4444,16 +4485,22 @@ fn ce_to_inter_tokens(ctx: &Ctx, ce: &CE<RcStr>) -> Option<(Vec<String>, Vec<(St
         // specimen` is `intersection_of: RO:0002351 OBI:0100051
         // {all_only="true"}`. (A universal inside a SUPERCLASS conjunction is
         // rendered unqualified instead; that path is handled separately.)
-        CE::ObjectAllValuesFrom { ope, bce } => {
-            if let (OPE::ObjectProperty(r), CE::Class(t)) = (ope, bce.as_ref()) {
-                Some((
-                    vec![ctx.id(r.0.as_ref()), ctx.id(t.0.as_ref())],
-                    vec![("all_only".to_string(), "true".to_string())],
-                ))
-            } else {
-                None
-            }
-        }
+        // A universal over a complement is the operand's class with
+        // `{cardinality="0"}`.
+        CE::ObjectAllValuesFrom { ope, bce } => match bce.as_ref() {
+            CE::Class(t) => Some((
+                relation_and(ctx, ope, t.0.as_ref()),
+                vec![("all_only".to_string(), "true".to_string())],
+            )),
+            CE::ObjectComplementOf(inner) => match inner.as_ref() {
+                CE::Class(t) => Some((
+                    relation_and(ctx, ope, t.0.as_ref()),
+                    vec![("cardinality".to_string(), "0".to_string())],
+                )),
+                _ => None,
+            },
+            _ => None,
+        },
         CE::ObjectExactCardinality { n, ope, bce } => {
             card_tokens(ctx, ope, bce, "cardinality", *n)
         }
@@ -4502,12 +4549,19 @@ fn card_tokens(
     qual: &str,
     n: u32,
 ) -> Option<(Vec<String>, Vec<(String, String)>)> {
-    let OPE::ObjectProperty(r) = ope else { return None };
     let CE::Class(t) = bce else { return None };
-    Some((
-        vec![ctx.id(r.0.as_ref()), ctx.id(t.0.as_ref())],
-        vec![(qual.to_string(), n.to_string())],
-    ))
+    Some((relation_and(ctx, ope, t.0.as_ref()), vec![(qual.to_string(), n.to_string())]))
+}
+
+/// A restriction's clause tokens: its relation and then its filler. An inverse
+/// property has no id of its own, so its restriction is the filler alone —
+/// `intersection_of: X` for `inverse(p) some X`, and the clause no longer says
+/// how X is reached.
+fn relation_and(ctx: &Ctx, ope: &OPE<RcStr>, filler: &str) -> Vec<String> {
+    match ope {
+        OPE::ObjectProperty(r) => vec![ctx.id(r.0.as_ref()), ctx.id(filler)],
+        OPE::InverseObjectProperty(_) => vec![ctx.id(filler)],
+    }
 }
 
 /// Sort one `AnnotationAssertion` into the right OBO tag of its subject.

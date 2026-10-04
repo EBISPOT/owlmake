@@ -1,0 +1,142 @@
+format-version: 1.2
+idspace: oboInOwl http://www.geneontology.org/formats/oboInOwl# 
+ontology: obo-two-definitions
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1001>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1003>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1004>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1005>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1006>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1008>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1009>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1010>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1011>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1012>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1013>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1014>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1015>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1016>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1017>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1019>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1020>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1021>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1022>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1023>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1024>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1025>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1026>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1027>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_1028>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_A>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_B>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_C>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_D>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_E>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/X36_H>))\nDeclaration(ObjectProperty(<http://purl.obolibrary.org/obo/X36_p>))\nDeclaration(ObjectProperty(<http://purl.obolibrary.org/obo/X36_q>))\nDeclaration(DataProperty(<http://purl.obolibrary.org/obo/X36_d>))\nDeclaration(NamedIndividual(<http://purl.obolibrary.org/obo/X36_i>))\n\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://purl.obolibrary.org/obo/X36_1001> (<http://purl.obolibrary.org/obo/X36_1001>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1001> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1003> (<http://purl.obolibrary.org/obo/X36_1003>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1003> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1004> (<http://purl.obolibrary.org/obo/X36_1004>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1004> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1005> (<http://purl.obolibrary.org/obo/X36_1005>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1005> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1006> (<http://purl.obolibrary.org/obo/X36_1006>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1006> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1008> (<http://purl.obolibrary.org/obo/X36_1008>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1008> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1009> (<http://purl.obolibrary.org/obo/X36_1009>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1009> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1009> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1010> (<http://purl.obolibrary.org/obo/X36_1010>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1010> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1010> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1011> (<http://purl.obolibrary.org/obo/X36_1011>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1011> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1011> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1012> (<http://purl.obolibrary.org/obo/X36_1012>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1012> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1012> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1013> (<http://purl.obolibrary.org/obo/X36_1013>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1013> ObjectIntersectionOf(ObjectUnionOf(<http://purl.obolibrary.org/obo/X36_D> <http://purl.obolibrary.org/obo/X36_E>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_C>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1014> (<http://purl.obolibrary.org/obo/X36_1014>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1014> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1015> (<http://purl.obolibrary.org/obo/X36_1015>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1015> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1016> (<http://purl.obolibrary.org/obo/X36_1016>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1016> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1017> (<http://purl.obolibrary.org/obo/X36_1017>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1017> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1019> (<http://purl.obolibrary.org/obo/X36_1019>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1019> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1019> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1020> (<http://purl.obolibrary.org/obo/X36_1020>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1020> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1020> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1021> (<http://purl.obolibrary.org/obo/X36_1021>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1021> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1021> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1022> (<http://purl.obolibrary.org/obo/X36_1022>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1022> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_A> ObjectHasValue(<http://purl.obolibrary.org/obo/X36_p> <http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1023> (<http://purl.obolibrary.org/obo/X36_1023>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1023> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1023> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1024> (<http://purl.obolibrary.org/obo/X36_1024>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1024> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1024> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1025> (<http://purl.obolibrary.org/obo/X36_1025>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1025> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_B> ObjectOneOf(<http://purl.obolibrary.org/obo/X36_i>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1026> (<http://purl.obolibrary.org/obo/X36_1026>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1026> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1026> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1027> (<http://purl.obolibrary.org/obo/X36_1027>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1027> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/X36_C> DataSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_d> xsd:string)))\n\n# Class: <http://purl.obolibrary.org/obo/X36_1028> (<http://purl.obolibrary.org/obo/X36_1028>)\n\nEquivalentClasses(<http://purl.obolibrary.org/obo/X36_1028> ObjectIntersectionOf(ObjectComplementOf(<http://purl.obolibrary.org/obo/X36_A>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/X36_q> <http://purl.obolibrary.org/obo/X36_H>)))\n\n\n\n)
+
+[Term]
+id: X36:1001
+intersection_of: X36:A
+intersection_of: X36:p X36:B
+intersection_of: X36:p X36:C
+
+[Term]
+id: X36:1002
+intersection_of: X36:A
+intersection_of: X36:F
+intersection_of: X36:G
+intersection_of: X36:p X36:B
+
+[Term]
+id: X36:1003
+intersection_of: X36:A
+intersection_of: X36:A
+intersection_of: X36:p X36:B
+
+[Term]
+id: X36:1004
+intersection_of: X36:A
+intersection_of: X36:B
+intersection_of: X36:p X36:B
+
+[Term]
+id: X36:1005
+intersection_of: X36:A
+intersection_of: X36:C
+intersection_of: X36:p X36:B
+
+[Term]
+id: X36:1006
+intersection_of: X36:A
+intersection_of: X36:p X36:B
+
+[Term]
+id: X36:1007
+intersection_of: X36:A
+intersection_of: X36:D
+intersection_of: X36:p X36:B
+intersection_of: X36:q X36:E
+
+[Term]
+id: X36:1008
+intersection_of: X36:F
+intersection_of: X36:G
+intersection_of: X36:p X36:C
+
+[Term]
+id: X36:1009
+
+[Term]
+id: X36:1010
+
+[Term]
+id: X36:1011
+
+[Term]
+id: X36:1012
+
+[Term]
+id: X36:1013
+intersection_of: X36:D
+intersection_of: X36:p X36:C
+intersection_of: X36:q X36:E
+
+[Term]
+id: X36:1014
+intersection_of: X36:A
+intersection_of: X36:F
+intersection_of: X36:G
+
+[Term]
+id: X36:1015
+intersection_of: X36:B
+intersection_of: X36:F
+intersection_of: X36:G
+
+[Term]
+id: X36:1016
+intersection_of: X36:C
+intersection_of: X36:F
+intersection_of: X36:G
+
+[Term]
+id: X36:1017
+intersection_of: X36:F
+intersection_of: X36:G
+intersection_of: X36:q X36:H
+
+[Term]
+id: X36:1018
+intersection_of: X36:D
+intersection_of: X36:F
+intersection_of: X36:G
+intersection_of: X36:q X36:E
+
+[Term]
+id: X36:1019
+
+[Term]
+id: X36:1020
+
+[Term]
+id: X36:1021
+
+[Term]
+id: X36:1022
+intersection_of: X36:D
+intersection_of: X36:q X36:E
+
+[Term]
+id: X36:1023
+
+[Term]
+id: X36:1024
+
+[Term]
+id: X36:1025
+intersection_of: X36:D
+intersection_of: X36:q X36:E
+
+[Term]
+id: X36:1026
+
+[Term]
+id: X36:1027
+intersection_of: X36:D
+intersection_of: X36:q X36:E
+
+[Term]
+id: X36:1028
+intersection_of: X36:D
+intersection_of: X36:q X36:E
+intersection_of: X36:q X36:H
+

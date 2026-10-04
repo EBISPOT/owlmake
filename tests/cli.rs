@@ -4056,6 +4056,61 @@ fn obo_carries_every_untranslatable_axiom_in_owl_axioms() {
     assert_eq!(convert_fixture("obo-owl-axioms.ofn", "obo-owl-axioms.obo", &[]), fixture_text("obo-owl-axioms.obo"));
 }
 
+/// Classes defined twice, over has-values, one-ofs, data restrictions, unions,
+/// complements and inverse properties, are written as ROBOT 1.9.11 writes them
+/// in OBO. The definitions reach a frame in the order of their hash; the first
+/// one is its `intersection_of:` clauses, and a later one with an operand OBO
+/// cannot spell adds the operands it can. A restriction on an inverse property
+/// is its filler alone, and a class whose definitions all go to `owl-axioms:`
+/// keeps an empty frame.
+#[test]
+fn classes_defined_twice_are_written_as_robot_writes_them_in_obo() {
+    assert_eq!(
+        convert_fixture("obo-two-definitions.ofn", "obo-two-definitions.obo", &[]),
+        fixture_text("obo-two-definitions.obo")
+    );
+}
+
+/// A class has a `[Term]` frame wherever an axiom's translation starts on it —
+/// a subclass axiom with the class as its subclass, an equivalence of two
+/// members with the class as its named member — even when that axiom goes to
+/// `owl-axioms:` and the frame is empty. An equivalence of three members, a
+/// disjointness or key with no clause, and a general axiom give it none. As
+/// ROBOT 1.9.11 writes `obo-empty-frames`.
+#[test]
+fn a_class_whose_axioms_have_no_clause_keeps_its_frame() {
+    assert_eq!(
+        convert_fixture("obo-empty-frames.ofn", "obo-empty-frames.obo", &[]),
+        fixture_text("obo-empty-frames.obo")
+    );
+}
+
+/// A subclass axiom that relates its class through an inverse property has no
+/// OBO spelling — its `relationship:` would name no relation — so the document
+/// is not written as OBO, as ROBOT 1.9.11 does not write it, and the axiom is
+/// named.
+#[test]
+fn a_relationship_through_an_inverse_property_is_not_written_as_obo() {
+    let src = tmp("obo-inverse-relationship.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(:=<http://purl.obolibrary.org/obo/>)\n\
+         Ontology(<http://purl.obolibrary.org/obo/z.owl>\n\
+         Declaration(Class(:Z_A))\n\
+         Declaration(Class(:Z_C))\n\
+         Declaration(ObjectProperty(:Z_p))\n\
+         SubClassOf(:Z_C ObjectSomeValuesFrom(ObjectInverseOf(:Z_p) :Z_A))\n\
+         )\n",
+    )
+    .unwrap();
+    let out = tmp("obo-inverse-relationship.obo");
+    let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+    let _ = std::fs::remove_file(&src);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success(), "{stderr}");
+    assert!(stderr.contains("cannot be saved in OBO format") && stderr.contains("ObjectInverseOf"), "{stderr}");
+}
+
 /// An equivalence or disjointness of named object properties is one clause of
 /// its first member's [Typedef], naming its last member, with the axiom's
 /// annotations as qualifiers; one with an inverse member goes to `owl-axioms:`;
