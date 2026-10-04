@@ -644,12 +644,13 @@ pub fn remove_with(
     // the keep set alone would re-assert the axiom and leave the property behind —
     // and, downstream, a `relationship: BFO:0000050 NBO:0000013` line in
     // `mp-full.obo` for a term the module does not carry.
-    let surviving: HashSet<String> = model
-        .ont
-        .iter()
-        .filter(|ac| keep_ac(ac))
-        .flat_map(|ac| sig::typed_signature(&ac.component).into_iter().map(|(_, i)| i))
-        .collect();
+    // A literal's datatype is among the objects too, wherever the literal is
+    // logical content.
+    let mut surviving: HashSet<String> = HashSet::new();
+    for ac in model.ont.iter().filter(|ac| keep_ac(ac)) {
+        surviving.extend(sig::typed_signature(&ac.component).into_iter().map(|(_, i)| i));
+        logical_literal_datatypes(&ac.component, &mut surviving);
+    }
 
     // Gap spanning is gated on an object set having been SELECTED, not on the kind
     // of removal: `--axioms` narrows which axioms go, and leaves the pass to
@@ -893,17 +894,19 @@ fn is_structural_tautology(comp: &Component<horned_owl::model::RcStr>) -> bool {
 
 type Rc = horned_owl::model::RcStr;
 
-/// Collect the class/object-property IRIs referenced anywhere in a class
-/// expression (individuals and data ranges are ignored — `remove --term` targets
-/// classes/properties). Used to decide whether an expression's signature is
-/// fully retained when bridging the hierarchy.
+/// The entities a superclass expression must keep for a bridge to reach it:
+/// its classes, properties and named individuals, the datatypes its data ranges
+/// name, and the datatype of each literal a data one-of or facet holds. The
+/// value of a data has-value is not among them.
 fn ce_iris(ce: &CE<Rc>, out: &mut HashSet<String>) {
     let role = |ope: &OPE<Rc>, out: &mut HashSet<String>| match ope {
-        OPE::ObjectProperty(p) => {
+        OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p) => {
             out.insert(p.0.to_string());
         }
-        OPE::InverseObjectProperty(p) => {
-            out.insert(p.0.to_string());
+    };
+    let named = |i: &horned_owl::model::Individual<Rc>, out: &mut HashSet<String>| {
+        if let horned_owl::model::Individual::Named(n) = i {
+            out.insert(n.0.to_string());
         }
     };
     match ce {
@@ -916,6 +919,7 @@ fn ce_iris(ce: &CE<Rc>, out: &mut HashSet<String>) {
             }
         }
         CE::ObjectComplementOf(b) => ce_iris(b, out),
+        CE::ObjectOneOf(inds) => inds.iter().for_each(|i| named(i, out)),
         CE::ObjectSomeValuesFrom { ope, bce } | CE::ObjectAllValuesFrom { ope, bce } => {
             role(ope, out);
             ce_iris(bce, out);
@@ -926,8 +930,104 @@ fn ce_iris(ce: &CE<Rc>, out: &mut HashSet<String>) {
             role(ope, out);
             ce_iris(bce, out);
         }
-        CE::ObjectHasValue { ope, .. } => role(ope, out),
+        CE::ObjectHasValue { ope, i } => {
+            role(ope, out);
+            named(i, out);
+        }
         CE::ObjectHasSelf(ope) => role(ope, out),
+        CE::DataSomeValuesFrom { dp, dr } | CE::DataAllValuesFrom { dp, dr } => {
+            out.insert(dp.0.to_string());
+            dr_iris(dr, out);
+        }
+        CE::DataMinCardinality { dp, dr, .. }
+        | CE::DataMaxCardinality { dp, dr, .. }
+        | CE::DataExactCardinality { dp, dr, .. } => {
+            out.insert(dp.0.to_string());
+            dr_iris(dr, out);
+        }
+        CE::DataHasValue { dp, .. } => {
+            out.insert(dp.0.to_string());
+        }
+    }
+}
+
+/// The datatypes a data range names, and those of the literals it holds.
+fn dr_iris(dr: &horned_owl::model::DataRange<Rc>, out: &mut HashSet<String>) {
+    use horned_owl::model::DataRange as DR;
+    match dr {
+        DR::Datatype(d) => {
+            out.insert(d.0.to_string());
+        }
+        DR::DataIntersectionOf(v) | DR::DataUnionOf(v) => v.iter().for_each(|d| dr_iris(d, out)),
+        DR::DataComplementOf(d) => dr_iris(d, out),
+        DR::DataOneOf(lits) => {
+            out.extend(lits.iter().map(literal_datatype));
+        }
+        DR::DatatypeRestriction(d, facets) => {
+            out.insert(d.0.to_string());
+            out.extend(facets.iter().map(|f| literal_datatype(&f.l)));
+        }
+    }
+}
+
+/// The datatype a literal has: its own, or `rdf:PlainLiteral` for one with a
+/// language tag, or for an untyped one whatever this document's untyped
+/// literals are.
+fn literal_datatype(l: &horned_owl::model::Literal<Rc>) -> String {
+    use horned_owl::model::Literal;
+    match l {
+        Literal::Datatype { datatype_iri, .. } => datatype_iri.to_string(),
+        Literal::Language { .. } => "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral".to_string(),
+        Literal::Simple { .. } => crate::io::owlrdf::plain_datatype().to_string(),
+    }
+}
+
+/// The datatypes of the literals an axiom states as logical content: an
+/// assertion's value, and every literal of its class expressions, has-values
+/// included. An annotation's value is not logical content.
+fn logical_literal_datatypes(comp: &Component<Rc>, out: &mut HashSet<String>) {
+    fn ce(c: &CE<Rc>, out: &mut HashSet<String>) {
+        match c {
+            CE::ObjectIntersectionOf(v) | CE::ObjectUnionOf(v) => v.iter().for_each(|x| ce(x, out)),
+            CE::ObjectComplementOf(b) => ce(b, out),
+            CE::ObjectSomeValuesFrom { bce, .. }
+            | CE::ObjectAllValuesFrom { bce, .. }
+            | CE::ObjectMinCardinality { bce, .. }
+            | CE::ObjectMaxCardinality { bce, .. }
+            | CE::ObjectExactCardinality { bce, .. } => ce(bce, out),
+            CE::DataSomeValuesFrom { dr, .. }
+            | CE::DataAllValuesFrom { dr, .. }
+            | CE::DataMinCardinality { dr, .. }
+            | CE::DataMaxCardinality { dr, .. }
+            | CE::DataExactCardinality { dr, .. } => dr_iris(dr, out),
+            CE::DataHasValue { l, .. } => {
+                out.insert(literal_datatype(l));
+            }
+            _ => {}
+        }
+    }
+    use horned_owl::model::Component as C;
+    match comp {
+        C::DataPropertyAssertion(ax) => {
+            out.insert(literal_datatype(&ax.to));
+        }
+        C::NegativeDataPropertyAssertion(ax) => {
+            out.insert(literal_datatype(&ax.to));
+        }
+        C::SubClassOf(ax) => {
+            ce(&ax.sub, out);
+            ce(&ax.sup, out);
+        }
+        C::EquivalentClasses(ax) => ax.0.iter().for_each(|c| ce(c, out)),
+        C::DisjointClasses(ax) => ax.0.iter().for_each(|c| ce(c, out)),
+        C::DisjointUnion(ax) => ax.1.iter().for_each(|c| ce(c, out)),
+        C::ClassAssertion(ax) => ce(&ax.ce, out),
+        C::ObjectPropertyDomain(ax) => ce(&ax.ce, out),
+        C::ObjectPropertyRange(ax) => ce(&ax.ce, out),
+        C::DataPropertyDomain(ax) => ce(&ax.ce, out),
+        C::DataPropertyRange(ax) => dr_iris(&ax.dr, out),
+        C::DatatypeDefinition(ax) => dr_iris(&ax.range, out),
+        C::HasKey(ax) => ce(&ax.ce, out),
         _ => {}
     }
 }
@@ -947,11 +1047,11 @@ pub(crate) fn span_gaps(
     span_gaps_shared(model, terms, excluded, None, &mut ignored, &mut ignored2)
 }
 
-/// `surviving`, when given, is the signature of the axioms that outlive the
-/// removal. `remove` derives the bridging object set from the ontology as it
-/// stands *after* the removal, so an entity that is kept but no longer mentioned
-/// anywhere is not in it and cannot appear in a bridge. `filter` bridges against
-/// its selection directly, with no such restriction, so it passes `None`.
+/// `surviving`, when given, is the object set a bridge must stay within: every
+/// IRI of its superclass expression ([`ce_iris`]) is in it. `remove` derives it
+/// from the ontology as it stands *after* the removal, so an entity that is kept
+/// but no longer mentioned anywhere is not in it and cannot appear in a bridge;
+/// `filter` passes its selection.
 pub(crate) fn span_gaps_shared(
     model: &Model,
     terms: &HashSet<String>,

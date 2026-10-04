@@ -1,0 +1,33 @@
+Prefix(:=<http://example.org/bridge.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/bridge.owl>
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/C>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(NamedIndividual(<http://example.org/y>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/C> (<http://example.org/C>)
+
+SubClassOf(<http://example.org/C> <http://example.org/A>)
+SubClassOf(<http://example.org/C> ObjectOneOf(<http://example.org/y>))
+SubClassOf(<http://example.org/C> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/A>))
+SubClassOf(<http://example.org/C> ObjectHasValue(<http://example.org/p> <http://example.org/y>))
+SubClassOf(<http://example.org/C> DataHasValue(<http://example.org/d> "x"))
+
+
+
+)

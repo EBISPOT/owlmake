@@ -339,7 +339,7 @@ fn filter_core(
             span_model,
             &removed,
             &no_exclude,
-            None,
+            Some(&terms),
             &mut span_shared,
             &mut cross_add,
         );

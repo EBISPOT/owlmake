@@ -4255,6 +4255,53 @@ fn filter_bridges_whatever_axiom_types_are_named() {
     run("filter-imports-bridge.ofn", &["--term", C, "--term", A], "filter-imports-bridge.terms");
 }
 
+/// A bridge reaches a superclass expression only when everything it names is
+/// still an object: its classes, properties and individuals, the datatypes its
+/// data ranges name, and the datatypes of the literals a data one-of or facet
+/// holds — though not the value of a data has-value. For `remove` the objects
+/// are what the surviving axioms mention, a literal's datatype included where it
+/// is logical content; for `filter`, what it selected. As ROBOT 1.9.11 bridges.
+#[test]
+fn bridges_reach_only_expressions_whose_entities_remain() {
+    const B: &str = "http://example.org/B";
+    for (input, expected, args) in [
+        ("bridges-data.ofn", "bridges-data.remove-B", &["remove", "--term", B][..]),
+        ("bridges-data.ofn", "bridges-data.remove-B-d", &["remove", "--term", B, "--term", "http://example.org/d"]),
+        ("bridges-data.ofn", "bridges-data.remove-B-y", &["remove", "--term", B, "--term", "http://example.org/y"]),
+        ("bridges-datatypes.ofn", "bridges-datatypes.remove-B", &["remove", "--term", B]),
+        (
+            "bridges-datatypes.ofn",
+            "bridges-datatypes.filter",
+            &[
+                "filter",
+                "--term",
+                "http://example.org/C",
+                "--term",
+                "http://example.org/A",
+                "--term",
+                "http://example.org/d",
+                "--term",
+                "http://example.org/p",
+            ],
+        ),
+    ] {
+        let out = tmp(&format!("{expected}.ofn"));
+        let run = bin()
+            .args(&args[..1])
+            .arg("-i")
+            .arg(robot_fixture(input))
+            .args(&args[1..])
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        let _ = std::fs::remove_file(&out);
+        assert_eq!(text, fixture_text(&format!("{expected}.ofn")), "{expected}");
+    }
+}
+
 /// Axioms and their operands are written in the order OWL's object model
 /// compares them, as ROBOT 1.9.11 writes them: an assertion by its subject
 /// first, a sub-property axiom by its sub-property, a property characteristic,
