@@ -317,8 +317,7 @@ fn ontology_iri(model: &Model) -> Option<String> {
 /// `obo:UBERON_0000001` instead of the `UBERON:0000001` form a mapping set is
 /// expected to carry.
 fn xref_prefixes() -> &'static BTreeMap<String, String> {
-    static MAP: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| crate::report::obo_context_prefixes().into_iter().collect())
+    crate::report::obo_context_map()
 }
 
 /// Split an entity IRI into `(prefix, local)` against `prefixes`, longest

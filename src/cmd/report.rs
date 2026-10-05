@@ -126,7 +126,7 @@ impl ShortForm {
         given: Vec<(String, String)>,
         labels: Option<HashMap<String, String>>,
     ) -> Self {
-        let mut context = report::obo_context_prefixes();
+        let mut context = report::obo_context_prefixes().to_vec();
         context.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
         let mut given: Vec<(String, String)> =
             given.into_iter().filter(|(p, _)| !p.is_empty()).collect();
