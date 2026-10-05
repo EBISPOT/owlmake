@@ -1,2 +1,4 @@
 src/sssom/obo.epm.json -diff linguist-generated
 src/sssom/obo.epm.1.9.8.json -diff linguist-generated
+# Fixtures whose bytes include a lone carriage return inside a value.
+tests/fixtures/robot-1.9.11/export-quoting.* -text

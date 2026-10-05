@@ -337,15 +337,11 @@ impl ReportResult {
 
     /// The report as TSV: Level / Rule Name / Subject / Property / Value.
     pub fn to_tsv(&self) -> String {
-        let mut out = String::from("Level\tRule Name\tSubject\tProperty\tValue\n");
+        let mut out = crate::table::record(&["Level", "Rule Name", "Subject", "Property", "Value"], '\t');
         for r in &self.rows {
-            out.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\n",
-                tsv_cell(r.level.label()),
-                tsv_cell(&r.rule),
-                tsv_cell(&r.subject),
-                tsv_cell(&r.property),
-                tsv_cell(&r.value)
+            out.push_str(&crate::table::record(
+                &[r.level.label(), &r.rule, &r.subject, &r.property, &r.value],
+                '\t',
             ));
         }
         out
@@ -353,16 +349,12 @@ impl ReportResult {
 
     /// The same table as CSV, with RFC-4180 quoting.
     pub fn to_csv(&self) -> String {
-        let mut out = String::new();
-        out.push_str(&csv_row(&["Level", "Rule Name", "Subject", "Property", "Value"]));
+        let mut out = crate::table::record(&["Level", "Rule Name", "Subject", "Property", "Value"], ',');
         for r in &self.rows {
-            out.push_str(&csv_row(&[
-                r.level.label(),
-                &r.rule,
-                &r.subject,
-                &r.property,
-                &r.value,
-            ]));
+            out.push_str(&crate::table::record(
+                &[r.level.label(), &r.rule, &r.subject, &r.property, &r.value],
+                ',',
+            ));
         }
         out
     }
@@ -429,21 +421,6 @@ impl ReportResult {
             }));
         }
         serde_json::to_string_pretty(&levels).unwrap_or_else(|_| "[]".to_string())
-    }
-}
-
-fn csv_row(cells: &[&str]) -> String {
-    let escaped: Vec<String> = cells.iter().map(|c| escape_csv(c)).collect();
-    let mut s = escaped.join(",");
-    s.push('\n');
-    s
-}
-
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
     }
 }
 
@@ -621,17 +598,6 @@ pub fn run_report_with_profile(model: &Model, rules: &[ReportRule]) -> Result<Re
     Ok(ReportResult { rows })
 }
 
-/// A TSV cell: quoted only when it holds the tab separator, a quote or a line
-/// break, with an embedded quote doubled. A reported value can contain a newline
-/// — MP's `MP:0030295` definition runs across two lines — and writing that bare
-/// would split one violation into two rows.
-fn tsv_cell(s: &str) -> String {
-    if s.contains('\t') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
 
 /// Order the rows a rule's `ORDER BY` leaves TIED.
 ///
@@ -747,14 +713,6 @@ mod tests {
         assert_eq!(rule_name("file:../sparql/qc/general/qc-reflexive.sparql"), "qc-reflexive");
         assert_eq!(rule_name("file:///tmp/a.b/qc-two.pattern.sparql"), "qc-two.pattern");
         assert_eq!(rule_name("missing_label"), "missing_label");
-    }
-
-    #[test]
-    fn csv_quoting_escapes_specials() {
-        assert_eq!(escape_csv("plain"), "plain");
-        assert_eq!(escape_csv("a,b"), "\"a,b\"");
-        assert_eq!(escape_csv("a\"b"), "\"a\"\"b\"");
-        assert_eq!(escape_csv("a\nb"), "\"a\nb\"");
     }
 
     #[test]

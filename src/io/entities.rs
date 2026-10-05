@@ -174,8 +174,21 @@ impl Visit<RcStr> for Collect {
 /// The entities `model` mentions, each with its kind. An IRI used as two kinds
 /// is two entities.
 pub fn signature(model: &Model) -> BTreeSet<(Kind, String)> {
+    signature_of(model, model.ont.iter())
+}
+
+/// The entities the root document of `model` mentions, leaving out what only
+/// its imports lend.
+pub fn root_signature(model: &Model) -> BTreeSet<(Kind, String)> {
+    signature_of(model, model.ont.iter().filter(|ac| !model.imported_components.contains(*ac)))
+}
+
+fn signature_of<'a>(
+    model: &Model,
+    components: impl Iterator<Item = &'a horned_owl::model::AnnotatedComponent<RcStr>>,
+) -> BTreeSet<(Kind, String)> {
     let mut walk = Walk::new(Collect { plain_typed: model.plain_literals_typed, out: BTreeSet::new() });
-    for ac in model.ont.iter() {
+    for ac in components {
         match &ac.component {
             Component::OntologyID(_) | Component::DocIRI(_) | Component::Import(_) => {}
             _ => walk.annotated_component(ac),

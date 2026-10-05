@@ -1,0 +1,252 @@
+<head>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+<table class="table table-bordered table-striped">
+<thead class="bg-dark text-white header-row">
+<tr>
+  <th>ID</th>
+  <th>LABEL</th>
+  <th>SubClass Of</th>
+  <th>Disjoint With</th>
+  <th>Type</th>
+  <th>see also</th>
+  <th>weight</th>
+  <th>part of</th>
+  <th>IRI</th>
+</tr>
+</thead>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_1">EX:1</a></td>
+		<td>alpha & <beta></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_4">epsilon</a>|<a href="http://purl.obolibrary.org/obo/EX_3">gamma</a>|<a href="http://purl.obolibrary.org/obo/EX_2">linetwo</a></td>
+		<td>Class</td>
+		<td><a href="http://example.org/Punned">ex:Punned</a>|<a href="http://example.org/Punned">ex:Punned</a>|http://example.org/not-an-entity|<a href="http://purl.obolibrary.org/obo/EX_2">linetwo</a>|lit  with   spaces</td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_1">http://purl.obolibrary.org/obo/EX_1</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_100">EX:100</a></td>
+		<td>individual one</td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a> some <a href="http://purl.obolibrary.org/obo/EX_2">linetwo</a>|<a href="http://purl.obolibrary.org/obo/EX_1">alpha &amp; &lt;beta></a></td>
+		<td></td>
+		<td>"7"^^xsd:integer|"sept"@fr|"seven"|"x\"y"</td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_101">EX:101</a>|<a href="http://example.org/Punned">ex:Punned</a></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_100">http://purl.obolibrary.org/obo/EX_100</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_101">EX:101</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Named individual</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_101">http://purl.obolibrary.org/obo/EX_101</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_2">EX:2</a></td>
+		<td>line
+two</td>
+		<td> inverse (<a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a>) some <a href="http://purl.obolibrary.org/obo/EX_1">'alpha &amp; &lt;beta>'</a>|<a href="http://purl.obolibrary.org/obo/RO_2">'has two spaces'</a> some (<a href="http://purl.obolibrary.org/obo/EX_3">gamma</a> and <a href="http://purl.obolibrary.org/obo/EX_4">epsilon</a>)|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> some <a href="http://www.w3.org/2001/XMLSchema#integer">xsd:integer</a>[>= 1 , < 9]|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value 5</td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_1">alpha &amp; &lt;beta></a>|<a href="http://purl.obolibrary.org/obo/EX_3">gamma</a></td>
+		<td>Class</td>
+		<td></td>
+		<td>(<a href="http://www.w3.org/2001/XMLSchema#integer">xsd:integer</a>[>= 1 , < 9])</td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_2">http://purl.obolibrary.org/obo/EX_2</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_3">EX:3</a></td>
+		<td>gamma</td>
+		<td><a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a> exactly 1 (<a href="http://purl.obolibrary.org/obo/EX_5">' lead space'</a> or <a href="http://purl.obolibrary.org/obo/EX_6">EX:6</a>)|<a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a> min 2 <a href="http://purl.obolibrary.org/obo/EX_4">epsilon</a>|<a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a> only (not (<a href="http://purl.obolibrary.org/obo/EX_7">EX:7</a>))|<a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a> value <a href="http://purl.obolibrary.org/obo/EX_100">'individual one'</a>|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> max 3 <a href="http://www.w3.org/2001/XMLSchema#decimal">xsd:decimal</a>|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> some <a href="http://www.w3.org/2001/XMLSchema#string">xsd:string</a>|{<a href="http://purl.obolibrary.org/obo/EX_100">'individual one'</a> , <a href="http://purl.obolibrary.org/obo/EX_101">EX:101</a>}</td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_1">alpha &amp; &lt;beta></a>|<a href="http://purl.obolibrary.org/obo/EX_2">linetwo</a></td>
+		<td>Class</td>
+		<td></td>
+		<td>3 <a href="http://www.w3.org/2001/XMLSchema#decimal">xsd:decimal</a>|<a href="http://www.w3.org/2001/XMLSchema#string">xsd:string</a></td>
+		<td>(not (<a href="http://purl.obolibrary.org/obo/EX_7">EX:7</a>))|1 (<a href="http://purl.obolibrary.org/obo/EX_5">' lead space'</a> or <a href="http://purl.obolibrary.org/obo/EX_6">EX:6</a>)|2 <a href="http://purl.obolibrary.org/obo/EX_4">epsilon</a></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_3">http://purl.obolibrary.org/obo/EX_3</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_4">EX:4</a></td>
+		<td>epsilon</td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_1">alpha &amp; &lt;beta></a>|<a href="http://purl.obolibrary.org/obo/EX_1">alpha &amp; &lt;beta></a></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_1">alpha &amp; &lt;beta></a></td>
+		<td>Class</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_4">http://purl.obolibrary.org/obo/EX_4</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_5">EX:5</a></td>
+		<td> lead space</td>
+		<td></td>
+		<td></td>
+		<td>Class</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_5">http://purl.obolibrary.org/obo/EX_5</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_6">EX:6</a></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/RO_1">'part of'</a> Self |<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> some (<a href="http://www.w3.org/2001/XMLSchema#integer">xsd:integer</a> or <a href="http://www.w3.org/2001/XMLSchema#string">xsd:string</a>)|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> some not <a href="http://www.w3.org/2001/XMLSchema#string">xsd:string</a>|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> some {"a" , "b"}|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value "2020-01-01"^^<a href="http://www.w3.org/2001/XMLSchema#date">xsd:date</a>|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value "a \"quoted\" \\ value"|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value "text"@en|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value 1.5f|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value 2.5|<a href="http://purl.obolibrary.org/obo/EX_dp">weight</a> value true</td>
+		<td></td>
+		<td>Class</td>
+		<td></td>
+		<td>( not <a href="http://www.w3.org/2001/XMLSchema#string">xsd:string</a>)|((<a href="http://www.w3.org/2001/XMLSchema#integer">xsd:integer</a> or <a href="http://www.w3.org/2001/XMLSchema#string">xsd:string</a>))|({"a" , "b"})</td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_6">http://purl.obolibrary.org/obo/EX_6</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_7">EX:7</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Class</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_7">http://purl.obolibrary.org/obo/EX_7</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_8">EX:8</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Class</td>
+		<td></td>
+		<td></td>
+		<td>(<a href="http://purl.obolibrary.org/obo/EX_2">linetwo</a> and <a href="http://purl.obolibrary.org/obo/EX_3">gamma</a>)</td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_8">http://purl.obolibrary.org/obo/EX_8</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_ap">EX:ap</a></td>
+		<td>see also</td>
+		<td></td>
+		<td></td>
+		<td>Annotation property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_ap">http://purl.obolibrary.org/obo/EX_ap</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/EX_dp">EX:dp</a></td>
+		<td>weight</td>
+		<td></td>
+		<td></td>
+		<td>Data property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_dp">http://purl.obolibrary.org/obo/EX_dp</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/IAO_0000118">IAO:0000118</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Annotation property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/IAO_0000118">http://purl.obolibrary.org/obo/IAO_0000118</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/RO_1">RO:1</a></td>
+		<td>part of</td>
+		<td></td>
+		<td> inverse (<a href="http://purl.obolibrary.org/obo/RO_2">'has two spaces'</a>)</td>
+		<td>Object property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/RO_1">http://purl.obolibrary.org/obo/RO_1</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://purl.obolibrary.org/obo/RO_2">RO:2</a></td>
+		<td>has  two   spaces</td>
+		<td></td>
+		<td></td>
+		<td>Object property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/RO_2">http://purl.obolibrary.org/obo/RO_2</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://example.org/Punned">ex:Punned</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://purl.obolibrary.org/obo/EX_2">linetwo</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://example.org/Punned">http://example.org/Punned</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://example.org/Punned">ex:Punned</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Class</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://example.org/Punned">http://example.org/Punned</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym">oboInOwl:hasRelatedSynonym</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Annotation property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym">http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://www.w3.org/2000/01/rdf-schema#comment">rdfs:comment</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Annotation property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://www.w3.org/2000/01/rdf-schema#comment">http://www.w3.org/2000/01/rdf-schema#comment</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://www.w3.org/2000/01/rdf-schema#label">rdfs:label</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Annotation property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://www.w3.org/2000/01/rdf-schema#label">http://www.w3.org/2000/01/rdf-schema#label</a></td>
+	</tr>
+	<tr>
+		<td><a href="http://www.w3.org/2000/01/rdf-schema#seeAlso">rdfs:seeAlso</a></td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td>Annotation property</td>
+		<td></td>
+		<td></td>
+		<td></td>
+		<td><a href="http://www.w3.org/2000/01/rdf-schema#seeAlso">http://www.w3.org/2000/01/rdf-schema#seeAlso</a></td>
+	</tr>
+</table>
+</body>

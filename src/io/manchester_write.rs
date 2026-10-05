@@ -193,7 +193,7 @@ fn is_qname(s: &str) -> bool {
 }
 
 /// How an entity's IRI is written.
-struct ShortForms {
+pub(crate) struct ShortForms {
     /// Prefix name with its colon → namespace, every declared prefix.
     names: Vec<(String, String)>,
     /// Namespace → `prefix:`; a namespace bound twice keeps the name that comes
@@ -204,7 +204,7 @@ struct ShortForms {
 }
 
 impl ShortForms {
-    fn new(prefixes: &[(String, String)]) -> ShortForms {
+    pub(crate) fn new(prefixes: &[(String, String)]) -> ShortForms {
         let mut names: Vec<(String, String)> = Vec::new();
         let mut put = |name: String, ns: String| match names.iter_mut().find(|(n, _)| *n == name) {
             Some(slot) => slot.1 = ns,
@@ -239,6 +239,12 @@ impl ShortForms {
             }
         }
         prefixed
+    }
+
+    /// An IRI as a prefix manager writes it: prefixed when it can be,
+    /// otherwise `<IRI>`.
+    pub(crate) fn prefixed_or_quoted(&self, iri: &str) -> String {
+        self.prefixed(iri).unwrap_or_else(|| format!("<{iri}>"))
     }
 
     /// An entity: prefixed when it can be, without the colon of the default
@@ -501,45 +507,30 @@ impl<'m> Entries<'m> {
     }
 }
 
-// === Renderer ============================================================
+// === Objects =============================================================
 
-struct Renderer<'m> {
-    out: Out,
-    sf: ShortForms,
-    order: NaturalOrder,
-    model: &'m Model,
-    ix: Index<'m>,
-    /// The entities a frame is written for, by kind.
-    signature: &'m BTreeSet<(Kind, String)>,
-    /// The anonymous individuals, by node id.
-    anonymous: &'m BTreeSet<String>,
-    /// Axioms written, and whether their annotations were.
-    written: HashMap<*const AC, bool>,
+/// How an entity is named where an object is written.
+pub(crate) trait Names {
+    fn entity(&self, iri: &str) -> String;
 }
 
-impl<'m> Renderer<'m> {
-    fn mark(&mut self, ax: &AC, with_annotations: bool) {
-        let e = self.written.entry(ax as *const AC).or_insert(false);
-        *e = *e || with_annotations;
+impl Names for ShortForms {
+    fn entity(&self, iri: &str) -> String {
+        ShortForms::entity(self, iri)
     }
+}
 
-    fn sort(&self, axs: &mut Vec<&'m AC>) {
-        let order = self.order;
-        axs.sort_by(|a, b| order.axiom(a, b));
-        axs.dedup_by(|a, b| std::ptr::eq(*a, *b));
-    }
+/// The object half of the writer: class expressions, property expressions,
+/// individuals, data ranges and literals, each entity named by `names`.
+struct Objects<'o> {
+    out: &'o mut Out,
+    order: NaturalOrder,
+    names: &'o dyn Names,
+}
 
-    /// The axioms of `list` this filter accepts, sorted.
-    fn select(&self, list: Option<&Vec<&'m AC>>, f: impl Fn(&Component<RcStr>) -> bool) -> Vec<&'m AC> {
-        let mut v: Vec<&'m AC> = list.map(|l| l.iter().copied().filter(|ac| f(&ac.component)).collect()).unwrap_or_default();
-        self.sort(&mut v);
-        v
-    }
-
-    // --- objects ---------------------------------------------------------
-
+impl Objects<'_> {
     fn entity(&mut self, iri: &str) {
-        let s = self.sf.entity(iri);
+        let s = self.names.entity(iri);
         self.out.write(&s);
     }
 
@@ -602,46 +593,6 @@ impl<'m> Renderer<'m> {
                 }
             }
         }
-        self.out.pop_tab();
-    }
-
-    fn annotation_value(&mut self, v: &AnnotationValue<RcStr>) {
-        match v {
-            AnnotationValue::IRI(i) => self.out.write(&format!("<{}>", i.as_ref() as &str)),
-            AnnotationValue::Literal(l) => self.literal(l),
-            AnnotationValue::AnonymousIndividual(a) => self.out.write(&entities::node_id(a.0.as_ref())),
-        }
-    }
-
-    /// An annotation: its own annotations, then property and value.
-    fn annotation(&mut self, a: &Annotation<RcStr>) {
-        self.nested_annotations(a.ann.iter());
-        self.entity(a.ap.0.as_ref());
-        self.out.space();
-        self.annotation_value(&a.av);
-    }
-
-    /// The annotations of an annotation or of an assertion, as a block of their
-    /// own.
-    fn nested_annotations<'a>(&mut self, anns: impl IntoIterator<Item = &'a Annotation<RcStr>>) {
-        let order = self.order;
-        let anns = order.sorted_annotations(anns);
-        if anns.is_empty() {
-            return;
-        }
-        self.out.newline();
-        self.out.write("Annotations: ");
-        let indent = self.out.indent();
-        self.out.push_tab(indent);
-        for (i, a) in anns.iter().enumerate() {
-            self.annotation(a);
-            if i + 1 < anns.len() {
-                self.out.write(", ");
-                self.out.newline();
-            }
-        }
-        self.out.newline();
-        self.out.newline();
         self.out.pop_tab();
     }
 
@@ -850,6 +801,148 @@ impl<'m> Renderer<'m> {
                 self.out.write("]");
             }
         }
+    }
+}
+
+/// One object written on its own, the way a frame writes it but on one line:
+/// an intersection breaks no line before its `and`s, and no line is indented. A
+/// restriction on a conjunction or disjunction still breaks its line before the
+/// opening bracket, as every rendering of it does.
+#[derive(Clone, Copy)]
+pub(crate) enum Object<'a> {
+    Ce(&'a CE<RcStr>),
+    Ope(&'a OPE<RcStr>),
+    Dr(&'a DR<RcStr>),
+    /// A named entity of any kind, by IRI.
+    Entity(&'a str),
+    /// An IRI that is not an entity — an annotation property's domain or range.
+    Iri(&'a str),
+}
+
+pub(crate) fn object_text(object: Object<'_>, order: NaturalOrder, names: &dyn Names) -> String {
+    let mut out = Out::new();
+    out.tabbing = false;
+    out.wrapping = false;
+    let mut o = Objects { out: &mut out, order, names };
+    match object {
+        Object::Ce(ce) => o.ce(ce),
+        Object::Ope(ope) => o.ope(ope),
+        Object::Dr(dr) => o.dr(dr),
+        Object::Entity(iri) => o.entity(iri),
+        Object::Iri(iri) => o.out.write(&format!("<{iri}>")),
+    }
+    out.text
+}
+
+// === Renderer ============================================================
+
+struct Renderer<'m> {
+    out: Out,
+    sf: ShortForms,
+    order: NaturalOrder,
+    model: &'m Model,
+    ix: Index<'m>,
+    /// The entities a frame is written for, by kind.
+    signature: &'m BTreeSet<(Kind, String)>,
+    /// The anonymous individuals, by node id.
+    anonymous: &'m BTreeSet<String>,
+    /// Axioms written, and whether their annotations were.
+    written: HashMap<*const AC, bool>,
+}
+
+impl<'m> Renderer<'m> {
+    fn mark(&mut self, ax: &AC, with_annotations: bool) {
+        let e = self.written.entry(ax as *const AC).or_insert(false);
+        *e = *e || with_annotations;
+    }
+
+    fn sort(&self, axs: &mut Vec<&'m AC>) {
+        let order = self.order;
+        axs.sort_by(|a, b| order.axiom(a, b));
+        axs.dedup_by(|a, b| std::ptr::eq(*a, *b));
+    }
+
+    /// The axioms of `list` this filter accepts, sorted.
+    fn select(&self, list: Option<&Vec<&'m AC>>, f: impl Fn(&Component<RcStr>) -> bool) -> Vec<&'m AC> {
+        let mut v: Vec<&'m AC> = list.map(|l| l.iter().copied().filter(|ac| f(&ac.component)).collect()).unwrap_or_default();
+        self.sort(&mut v);
+        v
+    }
+
+    // --- objects ---------------------------------------------------------
+
+    /// The object writer over this document's text, naming entities by its
+    /// prefixes.
+    fn objects(&mut self) -> Objects<'_> {
+        Objects { out: &mut self.out, order: self.order, names: &self.sf }
+    }
+
+    fn entity(&mut self, iri: &str) {
+        self.objects().entity(iri)
+    }
+
+    fn ope(&mut self, ope: &OPE<RcStr>) {
+        self.objects().ope(ope)
+    }
+
+    fn individual(&mut self, i: &Individual<RcStr>) {
+        self.objects().individual(i)
+    }
+
+    fn literal(&mut self, l: &Literal<RcStr>) {
+        self.objects().literal(l)
+    }
+
+    fn ce(&mut self, ce: &CE<RcStr>) {
+        self.objects().ce(ce)
+    }
+
+    fn ce_paren(&mut self, ce: &CE<RcStr>) {
+        self.objects().ce_paren(ce)
+    }
+
+    fn dr(&mut self, dr: &DR<RcStr>) {
+        self.objects().dr(dr)
+    }
+
+    fn annotation_value(&mut self, v: &AnnotationValue<RcStr>) {
+        match v {
+            AnnotationValue::IRI(i) => self.out.write(&format!("<{}>", i.as_ref() as &str)),
+            AnnotationValue::Literal(l) => self.literal(l),
+            AnnotationValue::AnonymousIndividual(a) => self.out.write(&entities::node_id(a.0.as_ref())),
+        }
+    }
+
+    /// An annotation: its own annotations, then property and value.
+    fn annotation(&mut self, a: &Annotation<RcStr>) {
+        self.nested_annotations(a.ann.iter());
+        self.entity(a.ap.0.as_ref());
+        self.out.space();
+        self.annotation_value(&a.av);
+    }
+
+    /// The annotations of an annotation or of an assertion, as a block of their
+    /// own.
+    fn nested_annotations<'a>(&mut self, anns: impl IntoIterator<Item = &'a Annotation<RcStr>>) {
+        let order = self.order;
+        let anns = order.sorted_annotations(anns);
+        if anns.is_empty() {
+            return;
+        }
+        self.out.newline();
+        self.out.write("Annotations: ");
+        let indent = self.out.indent();
+        self.out.push_tab(indent);
+        for (i, a) in anns.iter().enumerate() {
+            self.annotation(a);
+            if i + 1 < anns.len() {
+                self.out.write(", ");
+                self.out.newline();
+            }
+        }
+        self.out.newline();
+        self.out.newline();
+        self.out.pop_tab();
     }
 
     fn iarg(&mut self, a: &IArgument<RcStr>) {

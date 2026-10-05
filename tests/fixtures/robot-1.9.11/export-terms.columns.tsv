@@ -1,0 +1,13 @@
+ID	part of	has  two   spaces	weight	see also	EX:ap	BFO:0000051	EX:dp	rdfs:subClassOf	rdf:type	obo
+EX:1				ex:Punned|ex:Punned|http://example.org/not-an-entity|linetwo|lit  with   spaces	ex:Punned|ex:Punned|http://example.org/not-an-entity|linetwo|lit  with   spaces				Class	
+EX:100	EX:101|ex:Punned		"""7""^^xsd:integer|""sept""@fr|""seven""|""x\""y"""						'part of' some linetwo|alpha & <beta>	
+EX:101									Named individual	
+EX:2		(gamma and epsilon)	(xsd:integer[>= 1 , < 9])						Class	
+EX:3	(not (EX:7))|1 (' lead space' or EX:6)|2 epsilon		3 xsd:decimal|xsd:string						Class	
+EX:4									Class	
+EX:5									Class	
+EX:6			"( not xsd:string)|((xsd:integer or xsd:string))|({""a"" , ""b""})"						Class	
+EX:7									Class	
+EX:8	(linetwo and gamma)								Class	
+ex:Punned									linetwo	
+ex:Punned									Class	

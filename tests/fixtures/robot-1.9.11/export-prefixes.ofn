@@ -1,0 +1,8 @@
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/ex-c.owl>
+Declaration(Class(<http://example.org/ns/A>))
+Declaration(Class(<http://www.w3.org/2002/07/owl#Thing>))
+Declaration(Class(<http://purl.obolibrary.org/obo/GO_0005634>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex_thing>))
+SubClassOf(<http://example.org/ns/A> <http://purl.obolibrary.org/obo/GO_0005634>)
+)

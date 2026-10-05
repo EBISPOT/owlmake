@@ -1,0 +1,23 @@
+ID,LABEL,SubClass Of,SYNONYMS
+EX:1,alpha & <beta>,,Alpha | zeta | 
+EX:100,individual one,,
+EX:101,,,
+EX:2,"line
+two"," inverse ('part of') some 'alpha & <beta>' | 'has two spaces' some (gamma and epsilon) | weight some xsd:integer[>= 1 , < 9] | weight value 5",
+EX:3,gamma,"'part of' exactly 1 (' lead space' or EX:6) | 'part of' min 2 epsilon | 'part of' only (not (EX:7)) | 'part of' value 'individual one' | weight max 3 xsd:decimal | weight some xsd:string | {'individual one' , EX:101}",
+EX:4,epsilon,alpha & <beta> | alpha & <beta>,
+EX:5, lead space,,
+EX:6,,"'part of' Self  | weight some (xsd:integer or xsd:string) | weight some not xsd:string | weight some {""a"" , ""b""} | weight value ""2020-01-01""^^xsd:date | weight value ""a \""quoted\"" \\ value"" | weight value ""text""@en | weight value 1.5f | weight value 2.5 | weight value true",
+EX:7,,,
+EX:8,,,
+EX:ap,see also,,
+EX:dp,weight,,
+IAO:0000118,,,
+RO:1,part of,,
+RO:2,has  two   spaces,,
+ex:Punned,,,
+ex:Punned,,,
+oboInOwl:hasRelatedSynonym,,,
+rdfs:comment,,,
+rdfs:label,,,
+rdfs:seeAlso,,,

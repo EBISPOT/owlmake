@@ -1,0 +1,9 @@
+ID	LABEL
+EX:1	"a & <b> ""q"" 's"
+EX:2	 lead
+EX:3	trail 
+EX:4	"tab	here"
+EX:5	"nl
+x
+y"
+EX:6	ctl end _x0041_ é😀

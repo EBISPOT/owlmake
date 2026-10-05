@@ -1,0 +1,321 @@
+[
+  {
+    "ID": "EX:1",
+    "LABEL": [
+      "alpha & <beta>"
+    ],
+    "Disjoint With": [
+      "epsilon",
+      "gamma",
+      "linetwo"
+    ],
+    "Type": [
+      "Class"
+    ],
+    "see also": [
+      "ex:Punned",
+      "ex:Punned",
+      "http://example.org/not-an-entity",
+      "linetwo",
+      "lit  with   spaces"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_1",
+    "CURIE": "EX:1"
+  },
+  {
+    "ID": "EX:100",
+    "LABEL": [
+      "individual one"
+    ],
+    "Type": [
+      "'part of' some linetwo",
+      "alpha & <beta>"
+    ],
+    "weight": [
+      "\"7\"^^xsd:integer",
+      "\"sept\"@fr",
+      "\"seven\"",
+      "\"x\\\"y\""
+    ],
+    "part of": [
+      "EX:101",
+      "ex:Punned"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_100",
+    "CURIE": "EX:100"
+  },
+  {
+    "ID": "EX:101",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Named individual"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_101",
+    "CURIE": "EX:101"
+  },
+  {
+    "ID": "EX:2",
+    "LABEL": [
+      "line\ntwo"
+    ],
+    "SubClass Of": [
+      " inverse ('part of') some 'alpha & <beta>'",
+      "'has two spaces' some (gamma and epsilon)",
+      "weight some xsd:integer[>= 1 , < 9]",
+      "weight value 5"
+    ],
+    "Disjoint With": [
+      "alpha & <beta>",
+      "gamma"
+    ],
+    "Type": [
+      "Class"
+    ],
+    "weight": [
+      "(xsd:integer[>= 1 , < 9])"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_2",
+    "CURIE": "EX:2"
+  },
+  {
+    "ID": "EX:3",
+    "LABEL": [
+      "gamma"
+    ],
+    "SubClass Of": [
+      "'part of' exactly 1 (' lead space' or EX:6)",
+      "'part of' min 2 epsilon",
+      "'part of' only (not (EX:7))",
+      "'part of' value 'individual one'",
+      "weight max 3 xsd:decimal",
+      "weight some xsd:string",
+      "{'individual one' , EX:101}"
+    ],
+    "Disjoint With": [
+      "alpha & <beta>",
+      "linetwo"
+    ],
+    "Type": [
+      "Class"
+    ],
+    "weight": [
+      "3 xsd:decimal",
+      "xsd:string"
+    ],
+    "part of": [
+      "(not (EX:7))",
+      "1 (' lead space' or EX:6)",
+      "2 epsilon"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_3",
+    "CURIE": "EX:3"
+  },
+  {
+    "ID": "EX:4",
+    "LABEL": [
+      "epsilon"
+    ],
+    "SubClass Of": [
+      "alpha & <beta>",
+      "alpha & <beta>"
+    ],
+    "Disjoint With": [
+      "alpha & <beta>"
+    ],
+    "Type": [
+      "Class"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_4",
+    "CURIE": "EX:4"
+  },
+  {
+    "ID": "EX:5",
+    "LABEL": [
+      " lead space"
+    ],
+    "Type": [
+      "Class"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_5",
+    "CURIE": "EX:5"
+  },
+  {
+    "ID": "EX:6",
+    "LABEL": [
+      ""
+    ],
+    "SubClass Of": [
+      "'part of' Self ",
+      "weight some (xsd:integer or xsd:string)",
+      "weight some not xsd:string",
+      "weight some {\"a\" , \"b\"}",
+      "weight value \"2020-01-01\"^^xsd:date",
+      "weight value \"a \\\"quoted\\\" \\\\ value\"",
+      "weight value \"text\"@en",
+      "weight value 1.5f",
+      "weight value 2.5",
+      "weight value true"
+    ],
+    "Type": [
+      "Class"
+    ],
+    "weight": [
+      "( not xsd:string)",
+      "((xsd:integer or xsd:string))",
+      "({\"a\" , \"b\"})"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_6",
+    "CURIE": "EX:6"
+  },
+  {
+    "ID": "EX:7",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Class"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_7",
+    "CURIE": "EX:7"
+  },
+  {
+    "ID": "EX:8",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Class"
+    ],
+    "part of": [
+      "(linetwo and gamma)"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_8",
+    "CURIE": "EX:8"
+  },
+  {
+    "ID": "EX:ap",
+    "LABEL": [
+      "see also"
+    ],
+    "Type": [
+      "Annotation property"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_ap",
+    "CURIE": "EX:ap"
+  },
+  {
+    "ID": "EX:dp",
+    "LABEL": [
+      "weight"
+    ],
+    "Type": [
+      "Data property"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/EX_dp",
+    "CURIE": "EX:dp"
+  },
+  {
+    "ID": "IAO:0000118",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Annotation property"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/IAO_0000118",
+    "CURIE": "IAO:0000118"
+  },
+  {
+    "ID": "RO:1",
+    "LABEL": [
+      "part of"
+    ],
+    "Disjoint With": [
+      " inverse ('has two spaces')"
+    ],
+    "Type": [
+      "Object property"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/RO_1",
+    "CURIE": "RO:1"
+  },
+  {
+    "ID": "RO:2",
+    "LABEL": [
+      "has  two   spaces"
+    ],
+    "Type": [
+      "Object property"
+    ],
+    "IRI": "http://purl.obolibrary.org/obo/RO_2",
+    "CURIE": "RO:2"
+  },
+  {
+    "ID": "ex:Punned",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "linetwo"
+    ],
+    "IRI": "http://example.org/Punned",
+    "CURIE": "ex:Punned"
+  },
+  {
+    "ID": "ex:Punned",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Class"
+    ],
+    "IRI": "http://example.org/Punned",
+    "CURIE": "ex:Punned"
+  },
+  {
+    "ID": "oboInOwl:hasRelatedSynonym",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Annotation property"
+    ],
+    "IRI": "http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym",
+    "CURIE": "oboInOwl:hasRelatedSynonym"
+  },
+  {
+    "ID": "rdfs:comment",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Annotation property"
+    ],
+    "IRI": "http://www.w3.org/2000/01/rdf-schema#comment",
+    "CURIE": "rdfs:comment"
+  },
+  {
+    "ID": "rdfs:label",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Annotation property"
+    ],
+    "IRI": "http://www.w3.org/2000/01/rdf-schema#label",
+    "CURIE": "rdfs:label"
+  },
+  {
+    "ID": "rdfs:seeAlso",
+    "LABEL": [
+      ""
+    ],
+    "Type": [
+      "Annotation property"
+    ],
+    "IRI": "http://www.w3.org/2000/01/rdf-schema#seeAlso",
+    "CURIE": "rdfs:seeAlso"
+  }
+]

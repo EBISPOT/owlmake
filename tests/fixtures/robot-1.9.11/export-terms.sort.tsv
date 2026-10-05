@@ -1,0 +1,11 @@
+ID	LABEL	SubClass Of
+EX:2	"line
+two"	 inverse ('part of') some 'alpha & <beta>'|'has two spaces' some (gamma and epsilon)|weight some xsd:integer[>= 1 , < 9]|weight value 5
+EX:6		"'part of' Self |weight some (xsd:integer or xsd:string)|weight some not xsd:string|weight some {""a"" , ""b""}|weight value ""2020-01-01""^^xsd:date|weight value ""a \""quoted\"" \\ value""|weight value ""text""@en|weight value 1.5f|weight value 2.5|weight value true"
+EX:3	gamma	'part of' exactly 1 (' lead space' or EX:6)|'part of' min 2 epsilon|'part of' only (not (EX:7))|'part of' value 'individual one'|weight max 3 xsd:decimal|weight some xsd:string|{'individual one' , EX:101}
+EX:4	epsilon	alpha & <beta>|alpha & <beta>
+EX:8		
+EX:7		
+ex:Punned		
+EX:1	alpha & <beta>	
+EX:5	 lead space	
