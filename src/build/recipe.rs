@@ -888,18 +888,10 @@ pub fn run_line(
         return Ok(());
     }
 
-    // Honour `&&`/`||`/`;` short-circuiting so idioms like `cmd || true`
-    // (ignore failure) and `a && b` (run b only if a succeeds) behave as in a
-    // shell, instead of running every part unconditionally.
-    // `exit` terminates the SHELL, so a line containing one cannot be decomposed and
-    // re-sequenced here: `grep … && exit -1 || echo "No errors"` must die with 255
-    // when the grep matches, but treating `exit -1` as an ordinary failing part
-    // hands control to the `||` and the check reports success with errors present.
-    // Hand the whole line to `sh` and let it apply its own short-circuiting.
-    if robot::split_shell(l).iter().any(|p| {
-        let p = p.trim();
-        p == "exit" || p.starts_with("exit ")
-    }) {
+    // A line whose parts share the shell they run in — an `exit`, a `cd`, an
+    // assignment, a `$?` — runs as one shell, as make runs it (see
+    // `robot::shares_shell_state`).
+    if robot::shares_shell_state(l) {
         let r = run_shell(l, dir, exe, robot_prefix);
         return match r {
             Err(e) if ignore_err => {
@@ -909,6 +901,8 @@ pub fn run_line(
             other => other,
         };
     }
+    // Otherwise each part runs on its own, natively where owlmake has the
+    // command, with `&&`/`||`/`;` short-circuiting as a shell applies it.
     let seq = robot::split_shell_seq(l);
     let mut last_ok = true;
     let mut pending_err: Option<anyhow::Error> = None;
@@ -964,10 +958,10 @@ fn run_sub(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str) -> Result<()> 
         return Ok(());
     }
 
-    // A `$(…)`/backtick substitution has to be evaluated by the shell — decomposing
-    // such a command into a `FileOp` would use its text verbatim (see
-    // [`has_shell_substitution`]).
-    if has_shell_substitution(sub) {
+    // A shell expansion has to be evaluated by the shell — decomposing such a
+    // command into a `FileOp` would use its text verbatim (see
+    // [`has_shell_expansion`]).
+    if has_shell_expansion(sub) {
         return run_shell(sub, dir, exe, robot_prefix);
     }
 
@@ -1558,13 +1552,38 @@ fn as_sssom(argv: &[String]) -> Option<Vec<String>> {
     }
 }
 
-/// Whether a command's text contains a shell substitution — `$(…)` or a
-/// backtick — whose value only exists at run time. Such a command cannot be
-/// decomposed into a declarative [`FileOp`] or dismissed as benign: it has to be
-/// executed. (A `$$(…)` written in a recipe reaches this point already unescaped
-/// as `$(…)`.)
-pub fn has_shell_substitution(s: &str) -> bool {
-    s.contains("$(") || s.contains('`')
+/// Whether a command's text holds a shell expansion whose value only exists at
+/// run time: a command substitution, `$(…)` or a backtick, or a parameter,
+/// `$NAME`, `${…}`, `$?`, `$1` and the like, outside single quotes. Such a
+/// command cannot be decomposed into a declarative [`FileOp`] or an op, which
+/// would keep the text as written, or dismissed as benign: the shell has to run
+/// it. (A `$$NAME` written in a recipe reaches this point already unescaped as
+/// `$NAME`.)
+pub fn has_shell_expansion(s: &str) -> bool {
+    let b = s.as_bytes();
+    let (mut single, mut double) = (false, false);
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if !single => {
+                i += 2;
+                continue;
+            }
+            b'\'' if !double => single = !single,
+            b'"' if !single => double = !double,
+            b'`' if !single => return true,
+            b'$' if !single
+                && b.get(i + 1).is_some_and(|&c| {
+                    c.is_ascii_alphanumeric() || b"_{(?!#@*-$".contains(&c)
+                }) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 /// The owlmake binary a program embedding owlmake has named with
@@ -1615,6 +1634,47 @@ mod tests {
 
     fn tok(s: &str) -> Vec<String> {
         robot::tokenize(s)
+    }
+
+    /// A shell expansion is whatever the shell computes, so a command holding
+    /// one is the shell's to run; single quotes keep a `$` literal.
+    #[test]
+    fn shell_expansions_are_seen() {
+        for cmd in [
+            "echo $HOME > home.txt",
+            "echo \"${X}\" > x.txt",
+            "cp $SRC dst",
+            "echo status=$? > s.txt",
+            "echo $(date) > d.txt",
+            "echo `date` > d.txt",
+            "echo \"it's $USER\" > u.txt",
+        ] {
+            assert!(has_shell_expansion(cmd), "{cmd}");
+        }
+        for cmd in [
+            "echo '$HOME' > literal.txt",
+            "echo cost: 5$ > price.txt",
+            "robot query --query q.sparql out.tsv",
+            "echo \\$HOME > escaped.txt",
+        ] {
+            assert!(!has_shell_expansion(cmd), "{cmd}");
+        }
+    }
+
+    /// Every command word the shim directory serves is one a plan's `requires`
+    /// counts as served, so a shell step that names one asks the machine for
+    /// nothing.
+    #[test]
+    fn every_shimmed_tool_is_bundled() {
+        let dir = install_shims(Path::new("/bin/true"), &["--shim-test".to_string()]).unwrap();
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        let missing: Vec<&String> = names.iter().filter(|n| !robot::BUNDLED.contains(&n.as_str())).collect();
+        assert!(missing.is_empty(), "shimmed but not bundled: {missing:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Marked tokens, as `run_sub` produces them for `strip_redirects`.

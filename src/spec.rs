@@ -548,7 +548,11 @@ pub struct DosdpPattern {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArtefactSpec {
-    /// Output filename (e.g. `oba-full.owl`).
+    /// Output filename (e.g. `oba-full.owl`). A rule whose steps thread an
+    /// ontology writes it here, in the format the extension names. A file the
+    /// rule's own commands write is the target as they leave it, and is read as
+    /// an ontology only when a later step of the rule works on the model — so a
+    /// `.json` data product is not parsed as OBO Graphs JSON.
     pub target: String,
     /// The pipeline input: the file the first step reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3617,7 +3621,11 @@ mod format_floor_tests {
         // `--axioms external` judge subjects by. A step's fields are not checked
         // for unknown ones, so a 0.4.7 build would drop it and select with no
         // namespace at all: that is the silent case, so the floor moves to 0.4.8.
-        const PLAN_SCHEMA_DIGEST: &str = "12a0167799d84da6";
+        //
+        // A target's description now says when its file is read as an ontology.
+        // Only the text changed; every plan means what it meant, so the floor
+        // stays.
+        const PLAN_SCHEMA_DIGEST: &str = "288d90aaecc880bd";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

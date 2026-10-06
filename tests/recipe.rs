@@ -89,6 +89,34 @@ fn sequencing_and_ignore_errors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A line's parts share one shell, as make runs them: a `cd` reaches every
+/// part after it, and so do a variable set or exported, and the status `$?`
+/// reads.
+#[test]
+fn the_parts_of_a_line_share_one_shell() {
+    let dir = workdir("one-shell");
+    run("mkdir -p a/b && cd a && pwd > b/where.txt", &dir);
+    let where_ = std::fs::read_to_string(dir.join("a/b/where.txt")).unwrap();
+    assert_eq!(Path::new(where_.trim()), dir.join("a").canonicalize().unwrap());
+    run("mkdir -p c; cd c; touch here.txt", &dir);
+    assert!(dir.join("c/here.txt").is_file());
+    run("export x=1 && sh -c 'echo x=$x' > exported.txt", &dir);
+    assert_eq!(std::fs::read_to_string(dir.join("exported.txt")).unwrap().trim(), "x=1");
+    run("y=2; echo y=$y > assigned.txt", &dir);
+    assert_eq!(std::fs::read_to_string(dir.join("assigned.txt")).unwrap().trim(), "y=2");
+    run("false; echo status=$? > status.txt", &dir);
+    assert_eq!(std::fs::read_to_string(dir.join("status.txt")).unwrap().trim(), "status=1");
+    // A parameter is expanded where it stands, as the shell expands it.
+    recipe::run_line("echo x=$X > x.txt", &dir, Path::new(BIN), "robot", &[("X".into(), "1".into())])
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("x.txt")).unwrap().trim(), "x=1");
+    run("echo '$X' > literal.txt", &dir);
+    assert_eq!(std::fs::read_to_string(dir.join("literal.txt")).unwrap().trim(), "$X");
+    // A part that fails still fails the line.
+    assert!(recipe::run_line("cd a && ls not-in-a", &dir, Path::new(BIN), "robot", &[]).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A `make` the shell reaches inside a control construct — UBERON's
 /// `if [ ! -f mirror/ncbitaxondisjoints.owl ]; then make mirror/ncbitaxondisjoints.owl
 /// MIR=true IMP=true ; fi` — is owlmake's own, and builds the target from the
@@ -263,6 +291,123 @@ fn a_process_the_build_starts_writes_as_the_plan_emulates() {
         assert!(
             json.contains("said so"),
             "{route}: the definition's axiom annotation is not nested as ROBOT 1.9.10 nests it:\n{json}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A plan of the repository's own (`use_builtin_rules: false`) with `targets`,
+/// written at `root` beside `source.ofn` and built there with `om make <goals>`;
+/// whether the build succeeded, and what it reported.
+fn make_own_plan(root: &Path, targets: &str, goals: &[&str]) -> (bool, String) {
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        format!(
+            "id: ex\n\
+             version: '2026-10-05'\n\
+             reasoner: elk\n\
+             ontology_iri: http://example.org/ex.owl\n\
+             use_builtin_rules: false\n\
+             targets:\n{targets}"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("source.ofn"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/source.owl>\n\
+         Declaration(Class(<http://example.org/A>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/A> \"a thing\")\n)\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B"])
+        .args(goals)
+        .current_dir(root)
+        .output()
+        .expect("running om");
+    (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+/// A target made by shell commands alone is the file they leave, whatever its
+/// extension. A `.json` names OBO Graphs JSON as an ontology format, but a later
+/// command that merely names the file (`cat`, `ls`) gives nothing a model to read,
+/// so the file is not parsed as one — with `side_effect_only` as without — and a
+/// file that would parse is not cached as an ontology either.
+#[test]
+fn a_shell_built_data_file_is_not_read_as_an_ontology() {
+    let root = workdir("shell-json");
+    let write = |file: &str, json: &str| format!("\"echo '{json}' > {file}\"");
+    let targets = format!(
+        "  - target: stats.json\n    steps:\n\
+         \x20     - op: shell\n        command: {}\n\
+         \x20     - op: shell\n        command: cat stats.json\n\
+         \x20 - target: listed.json\n    steps:\n\
+         \x20     - op: shell\n        command: {}\n\
+         \x20     - op: shell\n        command: ls listed.json\n\
+         \x20 - target: marked.json\n    side_effect_only: true\n    steps:\n\
+         \x20     - op: shell\n        command: {}\n\
+         \x20     - op: shell\n        command: cat marked.json\n\
+         \x20 - target: graph.json\n    steps:\n\
+         \x20     - op: shell\n        command: {}\n\
+         \x20     - op: shell\n        command: echo s2\n",
+        write("stats.json", r#"{\"widgets\": 3}"#),
+        write("listed.json", r#"{\"widgets\": 4}"#),
+        write("marked.json", r#"{\"widgets\": 5}"#),
+        write("graph.json", r#"{\"graphs\": []}"#),
+    );
+    let (ok, err) = make_own_plan(&root, &targets, &["stats.json", "listed.json", "marked.json", "graph.json"]);
+    assert!(ok, "the build failed:\n{err}");
+    for (file, json) in [
+        ("stats.json", r#"{"widgets": 3}"#),
+        ("listed.json", r#"{"widgets": 4}"#),
+        ("marked.json", r#"{"widgets": 5}"#),
+        ("graph.json", r#"{"graphs": []}"#),
+    ] {
+        assert_eq!(std::fs::read_to_string(root.join(file)).unwrap().trim(), json, "{file}");
+    }
+    let cached: Vec<_> = std::fs::read_dir(root.join(".owlmake-odk-tmp"))
+        .map(|d| d.filter_map(Result::ok).map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(cached.is_empty(), "the build cached the data files as ontologies: {cached:?}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A plan's shell step runs its command line as one shell, so a `cd` in it
+/// reaches the commands after it.
+#[test]
+fn a_shell_step_changes_directory_for_the_rest_of_its_line() {
+    let root = workdir("shell-cd");
+    let targets = "  - target: a/b/where.txt\n    steps:\n\
+         \x20     - op: shell\n        command: \"mkdir -p a/b && cd a && pwd > b/where.txt\"\n";
+    let (ok, err) = make_own_plan(&root, targets, &["a/b/where.txt"]);
+    assert!(ok, "the build failed:\n{err}");
+    let where_ = std::fs::read_to_string(root.join("a/b/where.txt")).unwrap();
+    assert_eq!(Path::new(where_.trim()), root.join("a").canonicalize().unwrap());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// …while a target a command edits in place, with an op after it that reads the
+/// model, is read back: the op sees the edit. One target is put on disk from the
+/// rule's input, the other by a command of its own.
+#[test]
+fn a_target_edited_by_a_command_is_read_back_for_the_op_after_it() {
+    let root = workdir("shell-edit");
+    let targets = "  - target: edited.ofn\n    input: source.ofn\n    needs: [source.ofn]\n    steps:\n\
+         \x20     - op: shell\n        command: \"sed -i 's/a thing/a widget/' edited.ofn\"\n\
+         \x20     - op: annotate\n        version_iri: http://example.org/ex/v1/edited.ofn\n\
+         \x20 - target: copied.ofn\n    steps:\n\
+         \x20     - op: shell\n        command: cp source.ofn copied.ofn\n\
+         \x20     - op: shell\n        command: \"sed -i 's/a thing/a widget/' copied.ofn\"\n\
+         \x20     - op: annotate\n        version_iri: http://example.org/ex/v1/copied.ofn\n";
+    let (ok, err) = make_own_plan(&root, targets, &["edited.ofn", "copied.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    for file in ["edited.ofn", "copied.ofn"] {
+        let written = std::fs::read_to_string(root.join(file)).unwrap();
+        assert!(
+            written.contains("rdfs:label <http://example.org/A> \"a widget\")")
+                && written.contains(&format!("<http://example.org/ex/v1/{file}>")),
+            "{file} lost the edit or the annotation:\n{written}"
         );
     }
     let _ = std::fs::remove_dir_all(&root);

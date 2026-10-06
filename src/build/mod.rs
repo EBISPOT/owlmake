@@ -1749,7 +1749,7 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
         dosdp.steps.iter().cloned().map(crate::spec::StepEntry::into_step).collect();
     let work = repo.dir.join(".owlmake-odk-tmp");
     std::fs::create_dir_all(&work).ok();
-    let mut defs = run_steps(repo, &steps, defs, &catalog, &work, Some(&dosdp.output), true, None)?;
+    let mut defs = run_steps(repo, &steps, defs, &catalog, &work, Some(&dosdp.output), true, true, None)?;
     // `definitions.owl` declares only the default prefixes (`:` bound to the
     // ontology IRI plus `owl`/`rdf`/`xml`/`xsd`/`rdfs`), so OBO entity IRIs render
     // in full. That is the shape released pattern files carry; changing it would
@@ -3125,7 +3125,7 @@ fn build_one_import(
         Some(f) => inject_editsig_seed(&imp.steps, f),
         None => imp.steps.clone(),
     };
-    model = run_steps(repo, &steps, model, catalog, work, Some(&imp.output), true, Some(&src_path))
+    model = run_steps(repo, &steps, model, catalog, work, Some(&imp.output), true, true, Some(&src_path))
         .with_context(|| format!("building import {}", imp.id))?;
 
     // The module is written in the format its pipeline converts to; one that
@@ -3535,15 +3535,6 @@ fn step_command_text(step: &Step) -> Option<String> {
     }
 }
 
-/// Run an out-of-pipeline step from *inside* a model pipeline.
-///
-/// The pipeline holds the ontology in memory while a shell command works on
-/// files. When the command names the rule's own target, the model is flushed to
-/// it first and re-read afterwards, so a `perl`/`sed` pass can sit between two
-/// native ops instead of forcing the whole rule out to a recipe replay. When the
-/// command only touches side files — which is the common case, e.g. EFO's mondo
-/// import deriving its HGNC exclusion list — nothing is serialized and the model
-/// passes through untouched.
 /// The files a command REDIRECTS to (`> f`, `>> f`, `-o f`-style redirects are not
 /// included — only shell redirections, which are what create a file the command
 /// itself does not read).
@@ -3583,6 +3574,40 @@ fn read_operands(cmd: &str) -> impl Iterator<Item = &str> + '_ {
         .filter(move |t| !t.is_empty() && !dests.contains(t))
 }
 
+/// Whether `steps` read the model they are handed: an op, a command step that
+/// threads it, or a branch or tolerated step holding one, before the next
+/// invocation boundary (whose steps start from a model of their own).
+fn model_read_by(steps: &[Step]) -> bool {
+    for step in steps {
+        match step {
+            Step::Boundary { .. } => return false,
+            Step::Op(_) | Step::Partial { .. } | Step::OwlmakeCli { .. } => return true,
+            Step::Branch { then_steps, else_steps, .. } => {
+                if model_read_by(then_steps) || model_read_by(else_steps) {
+                    return true;
+                }
+            }
+            Step::MayFail(inner) => {
+                if model_read_by(std::slice::from_ref(inner.as_ref())) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Run an out-of-pipeline step from *inside* a model pipeline.
+///
+/// The pipeline holds the ontology in memory while a shell command works on
+/// files. When the command names the rule's own target, the model is flushed to
+/// it first and, where something after the command reads the model, re-read
+/// afterwards, so a `perl`/`sed` pass can sit between two native ops instead of
+/// forcing the whole rule out to a recipe replay. When the command only touches
+/// side files — which is the common case, e.g. EFO's mondo import deriving its
+/// HGNC exclusion list — nothing is serialized and the model passes through
+/// untouched.
 fn run_shell_step_in_pipeline(
     repo: &Repo,
     step: &Step,
@@ -3601,6 +3626,12 @@ fn run_shell_step_in_pipeline(
     // nothing in RDF/XML — so the target is put on disk for it in that format, not
     // in whichever one its file name suggests.
     format: Option<crate::io::Format>,
+    // Whether anything after this step reads the model: a later op, or the
+    // caller's own write of it. Only then is a target the command touched read
+    // back — what the command leaves there is otherwise the target itself, and a
+    // file whose extension merely looks like an ontology (a `.json` data product)
+    // is not parsed as one.
+    read_back: bool,
 ) -> Result<crate::model::Model> {
     let mut model = model;
     // A chained command step threads the model rather than touching files.
@@ -3666,7 +3697,7 @@ fn run_shell_step_in_pipeline(
     }
     // The command may have rewritten the target in place; if it did not, this
     // re-reads exactly what was handed over.
-    if !handed_over && !model_on_disk && !path.exists() {
+    if !read_back || (!handed_over && !model_on_disk && !path.exists()) {
         return Ok(model);
     }
     crate::io::load(&path)
@@ -3736,6 +3767,10 @@ fn run_steps(
     // When it does, a closing `mv $@.tmp $@` really is the output bookkeeping that
     // write stands in for; when it does not, nothing else will put the file there.
     writes_model_after: bool,
+    // Whether anything reads the model these steps return — the caller's write,
+    // or steps that follow these. A target a step touches is read back as an
+    // ontology only for a reader (see `run_shell_step_in_pipeline`).
+    model_read_after: bool,
     // The file the model handed in was loaded from, if any — see `apply_op`.
     pipeline_input: Option<&Path>,
 ) -> Result<crate::model::Model> {
@@ -3748,7 +3783,15 @@ fn run_steps(
         let Step::Fallback { command, .. } = &rest[0] else { unreachable!() };
         let spare = model.clone();
         let after = match run_steps(
-            repo, head, model, catalog, work, target, writes_model_after, pipeline_input,
+            repo,
+            head,
+            model,
+            catalog,
+            work,
+            target,
+            writes_model_after,
+            model_read_after || model_read_by(&rest[1..]),
+            pipeline_input,
         ) {
             Ok(m) => m,
             Err(head_err) => {
@@ -3761,7 +3804,15 @@ fn run_steps(
             }
         };
         return run_steps(
-            repo, &rest[1..], after, catalog, work, target, writes_model_after, pipeline_input,
+            repo,
+            &rest[1..],
+            after,
+            catalog,
+            work,
+            target,
+            writes_model_after,
+            model_read_after,
+            pipeline_input,
         );
     }
     let mut model = model;
@@ -3832,8 +3883,17 @@ fn run_steps(
             }
             Step::Branch { condition, then_steps, else_steps } => {
                 let body = if eval_condition(repo, condition) { then_steps } else { else_steps };
-                model =
-                    run_steps(repo, body, model, catalog, work, target, writes_model_after, pipe.as_deref())?;
+                model = run_steps(
+                    repo,
+                    body,
+                    model,
+                    catalog,
+                    work,
+                    target,
+                    writes_model_after,
+                    model_read_after || model_read_by(&steps[step_ix + 1..]),
+                    pipe.as_deref(),
+                )?;
             }
             // `cmd || true`. The model is kept aside so a failed step leaves the
             // pipeline exactly as it was rather than half-applied, and the failure
@@ -3849,6 +3909,7 @@ fn run_steps(
                     work,
                     target,
                     writes_model_after,
+                    model_read_after || model_read_by(&steps[step_ix + 1..]),
                     pipe.as_deref(),
                 ) {
                     Ok(m) => m,
@@ -3893,16 +3954,14 @@ fn run_steps(
                     // temp file the pipeline never wrote still falls through to the
                     // final write.
                     run_file_op(repo, op)?;
-                    // Re-read only where a later op will operate on it. The
-                    // re-read exists to hand the REST of the recipe what is now on
-                    // disk; with nothing left to hand it to, a target whose
-                    // extension merely looks like an ontology must not be parsed as
-                    // one. `tmp/obo.epm.json` is a prefix map that a `.json` reader
-                    // rejects, and the recipe that copies it has no later op.
-                    let later_op = steps[step_ix + 1..]
-                        .iter()
-                        .any(|s| matches!(s, Step::Op(_) | Step::Partial { .. }));
-                    if later_op && crate::io::Format::from_path(Path::new(&dst)).is_ok() {
+                    // Re-read only for a reader of the model. The re-read exists to
+                    // hand the REST of the recipe what is now on disk; with nothing
+                    // left to hand it to, a target whose extension merely looks like
+                    // an ontology must not be parsed as one. `tmp/obo.epm.json` is a
+                    // prefix map that a `.json` reader rejects, and the recipe that
+                    // copies it has no later op.
+                    let read_back = model_read_after || model_read_by(&steps[step_ix + 1..]);
+                    if read_back && crate::io::Format::from_path(Path::new(&dst)).is_ok() {
                         model = crate::io::load(&repo.dir.join(&dst))
                             .with_context(|| format!("re-reading {dst} after a staged move"))?;
                         model_on_disk = true;
@@ -3923,6 +3982,7 @@ fn run_steps(
                     model_on_disk,
                     pipeline_input,
                     target.and_then(|t| steps_format(t, steps)),
+                    model_read_after || model_read_by(&steps[step_ix + 1..]),
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;
@@ -4185,7 +4245,9 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
     // The steps stage the mirror at `tmp/mirror-<id>.owl` by their own outputs,
     // and `install_staged_mirror` puts it in place; the model is written there
     // only for a pipeline that names no output of its own.
-    let mut model = run_steps(repo, rest, model, &catalog, &work, Some(&rel), false, Some(&src))
+    // The model is saved below only where the steps produced no mirror, and a step
+    // that touched one leaves the file there; nothing else reads it.
+    let mut model = run_steps(repo, rest, model, &catalog, &work, Some(&rel), false, false, Some(&src))
         .with_context(|| format!("building mirror for import `{}`", imp.id))?;
     if !staged.exists() && !dest.exists() {
         if let Some(parent) = staged.parent() {
@@ -4987,6 +5049,7 @@ fn run_artefact(
             work,
             Some(&a.target),
             writes_model_after,
+            writes_model_after,
             threaded_from.as_deref(),
         )
         .with_context(|| format!("building {}", a.target))?;
@@ -5002,7 +5065,7 @@ fn run_artefact(
             .with_context(|| format!("building {}", a.target))?;
             clear_staging(repo, a);
         }
-        return surface_produced(repo, &a.target, &a.steps, work, out);
+        return surface_produced(repo, &a.target, &a.steps, out);
     }
     // A *source* op (e.g. `babelon convert`) reads a non-OWL input (`$<` is a
     // TSV) and produces the model itself — so skip the OWL load and start empty.
@@ -5100,7 +5163,13 @@ fn run_artefact(
     // the model still holds — serialising the model over it would put
     // `owl-axioms:` straight back.
     let mut shell_wrote_target = false;
-    for step in &a.steps {
+    // Whether the model is written over the target at the end (see below). With
+    // it, every step's model has a reader; without it, only a later op reads one.
+    let no_model_op = !a.steps.is_empty()
+        && !a.steps.iter().any(|s| matches!(s, Step::Op(_) | Step::Partial { .. }));
+    let model_written = !no_model_op && !repo.plan.is_phony(&a.target) && !a.side_effect_only;
+    for (ix, step) in a.steps.iter().enumerate() {
+        let read_back = model_written || model_read_by(&a.steps[ix + 1..]);
         let op = match step {
             Step::Op(op) => op,
             // A new tool invocation: it shares nothing with the last but files, so
@@ -5152,7 +5221,7 @@ fn run_artefact(
                     // a shell step really produced is not bookkeeping — the rest of
                     // the recipe reads it.
                     run_file_op(repo, op)?;
-                    if crate::io::Format::from_path(Path::new(&dst)).is_ok() {
+                    if read_back && crate::io::Format::from_path(Path::new(&dst)).is_ok() {
                         model = crate::io::load(&repo.dir.join(&dst))
                             .with_context(|| format!("re-reading {dst} after a staged move"))?;
                         model_on_disk = true;
@@ -5172,6 +5241,7 @@ fn run_artefact(
                     work,
                     Some(&a.target),
                     true,
+                    read_back,
                     threaded_from.as_deref(),
                 )?;
                 continue;
@@ -5187,6 +5257,7 @@ fn run_artefact(
                     work,
                     Some(&a.target),
                     true,
+                    read_back,
                     threaded_from.as_deref(),
                 )?;
                 model_on_disk = false;
@@ -5213,6 +5284,7 @@ fn run_artefact(
                     model_on_disk,
                     threaded_from.as_deref(),
                     recipe_format(a),
+                    read_back,
                 )?;
                 model_on_disk = false;
                 staged_by_shell = true;
@@ -5313,7 +5385,7 @@ fn run_artefact(
     // A shell step already produced the artefact by redirection — that file IS the
     // output, and re-serialising the model would undo whatever the command did.
     if shell_wrote_target && repo.dir.join(&a.target).exists() {
-        return surface_produced(repo, &a.target, &a.steps, work, out);
+        return surface_produced(repo, &a.target, &a.steps, out);
     }
     // Same for a recipe with NO PIPELINE OP in it at all — only file operations
     // and shell commands. Those produce the target themselves and leave no model
@@ -5329,10 +5401,8 @@ fn run_artefact(
     // file, is always out of date and simply runs again; writing the threaded
     // model would leave a copy of the artefact it had just checked at every such
     // target.
-    let no_model_op = !a.steps.is_empty()
-        && !a.steps.iter().any(|s| matches!(s, Step::Op(_) | Step::Partial { .. }));
     if no_model_op {
-        return surface_produced(repo, &a.target, &a.steps, work, out);
+        return surface_produced(repo, &a.target, &a.steps, out);
     }
     // A DECLARED phony target gets no file. This write never asked, and a `.PHONY`
     // target whose recipe threads a model was handed one anyway — materialised as
@@ -5352,7 +5422,7 @@ fn run_artefact(
     //     how the target is produced. Judging it by shape here would skip that
     //     write and destroy the output rather than merely fail to check for it.
     if repo.plan.is_phony(&a.target) {
-        return surface_produced(repo, &a.target, &a.steps, work, out);
+        return surface_produced(repo, &a.target, &a.steps, out);
     }
     // A side-effect-only rule writes the files its steps name and nothing at
     // the target path: no target file exists afterwards, the rule is simply
@@ -5527,9 +5597,10 @@ fn collapse_rdf_roundtrip(model: &mut crate::model::Model) {
 
 /// Surface a target a rule wrote itself. Steps run in the ontology directory (so
 /// their relative `$<`/`$@` paths resolve), which is not necessarily where the
-/// build wants the artefact: copy it to `out`, and cache an OFN keyed by basename
-/// so a downstream artefact's `resolve_input` picks it up without an RDF
-/// round-trip. Used by rules that thread no model of their own.
+/// build wants the artefact: copy it to `out`. The file is not read: the rule
+/// holds no model of it, and its extension does not make it an ontology — a
+/// `.json` a recipe writes may be any JSON at all. Used by rules that thread no
+/// model of their own.
 ///
 /// A target that is not a filename at all is PHONY, and nothing is guaranteed
 /// beyond its recipe having run. MONDO's `report-base-query-%` is the shape:
@@ -5554,13 +5625,7 @@ fn collapse_rdf_roundtrip(model: &mut crate::model::Model) {
 /// the file there would fail a check the repo deliberately declined, so the steps
 /// decide; they come from the plan, so a plan-only build reaches the same
 /// answer.
-fn surface_produced(
-    repo: &Repo,
-    target: &str,
-    steps: &[Step],
-    work: &Path,
-    out: &Path,
-) -> Result<()> {
+fn surface_produced(repo: &Repo, target: &str, steps: &[Step], out: &Path) -> Result<()> {
     let produced = repo.dir.join(target);
     if !produced.exists() {
         if !repo.plan.names_a_file(target) {
@@ -5595,35 +5660,6 @@ fn surface_produced(
         }
         std::fs::copy(&produced, out)
             .with_context(|| format!("copying {} to {}", produced.display(), out.display()))?;
-    }
-    // The `.ofn` cache is an OPTIMISATION: it saves a later step an RDF/XML round
-    // trip over a file this run already has as a model. It is not worth loading a
-    // bulk triple dump to build one. MONDO mirrors `ncbi_gene.nt` (3.2 GB, ~33M
-    // triples) and `hgnc_gene.nt`, and mapping the big one to axioms just to cache
-    // it takes the process past 15 GB — for a file whose only consumer is a SPARQL
-    // query run straight over the triples, which never builds a model. N-Triples is
-    // exactly the shape such bulk mirrors come in, so it is the right thing to
-    // except.
-    let bulk_triples = matches!(
-        crate::io::Format::from_path(Path::new(target)),
-        Ok(crate::io::Format::NTriples)
-    );
-    if let Some(name) = Path::new(target).file_name() {
-        if !bulk_triples {
-            if let Ok(mut m) = crate::io::load(&produced) {
-                // Functional syntax cannot express blank-node identity, so a
-                // product whose RDF carries sharing evidence (cross-owner nodes,
-                // shared reification targets) must NOT be replayed from the
-                // cache: a consumer that loads the `.ofn` gets the axioms and
-                // loses the identity, and every shared node it re-renders
-                // splits back into per-owner copies. Loading the real RDF/XML
-                // re-scans the evidence; the round trip is the price.
-                if m.cross_shared.is_empty() && m.owl_shared_owners.is_empty() {
-                    let cache = work.join(Path::new(name).with_extension("ofn"));
-                    let _ = crate::io::save_as(&mut m, &cache, crate::io::Format::Functional);
-                }
-            }
-        }
     }
     Ok(())
 }

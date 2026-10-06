@@ -29,8 +29,8 @@ const TERMINAL_COMMANDS: &[&str] = &[
 ];
 
 const BENIGN_SHELL: &[&str] = &[
-    "echo", "mv", "cp", "true", ":", "test", "[", "mkdir", "rm", "touch", "cat", "cd", "sort",
-    "uniq", "printf", "date", "ls", "tee", "head", "tail", "cut",
+    "echo", "mv", "cp", "true", ":", "test", "[", "mkdir", "rm", "touch", "cat", "cd", "pwd",
+    "sort", "uniq", "printf", "date", "ls", "tee", "head", "tail", "cut",
     // `!` is sh's negation operator, not a program.
     "!",
     // A version banner: `odk-info` prints tool versions and has no build effect,
@@ -111,6 +111,8 @@ pub(crate) const BUNDLED: &[&str] = &[
     // owlmake under its own name, which is how the standard build's recipes
     // spell a command line.
     "om",
+    // A recipe's own `make`, which builds from this repository's plan.
+    "make",
     "robot", "jq", "arq", "sssom", "sssom-cli", "kgx", "dosdp-tools", "dosdp",
     "owltools", "sed", "grep", "comm", "gzip", "gunzip", "zcat",
     // Helper command words a recipe can spell inline. Nothing else on the machine
@@ -218,28 +220,19 @@ fn is_shell_syntax(tok: &str) -> bool {
     if tok.ends_with(')') || !tok.chars().any(|c| c.is_alphanumeric()) {
         return true;
     }
-    matches!(
-        tok,
-        "exit"
-            | "return"
-            | "break"
-            | "continue"
-            | "shift"
-            | "set"
-            | "unset"
-            | "export"
-            | "eval"
-            | "exec"
-            | "trap"
-            | "read"
-            | "local"
-            | "source"
-            | "time"
-            | "until"
-            | "select"
-            | "function"
-    )
+    STATEFUL_BUILTINS.contains(&tok)
+        || matches!(tok, "exit" | "return" | "break" | "continue" | "time" | "until" | "select")
 }
+
+/// The shell builtins whose effect outlives the command: the working directory,
+/// variables, options, traps, functions, jobs and the shell's own limits. A part
+/// of a line that runs one changes what the parts after it see.
+const STATEFUL_BUILTINS: &[&str] = &[
+    "cd", "pushd", "popd", "export", "unset", "readonly", "declare", "typeset", "local", "let",
+    "set", "shopt", "umask", "ulimit", "alias", "unalias", ".", "source", "eval", "exec", "trap",
+    "shift", "read", "mapfile", "readarray", "getopts", "hash", "enable", "wait", "bg", "fg",
+    "jobs", "disown", "function",
+];
 
 /// Whether a recipe command is a Python interpreter invocation (`python`,
 /// `python3`, or a path ending in one).
@@ -286,6 +279,11 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
     if whole.is_empty() || whole.starts_with('#') {
         return vec![Step::Inert(whole.to_string())];
     }
+    // A line whose parts share the shell they run in stays one command, run by
+    // one shell (see [`shares_shell_state`]).
+    if shares_shell_state(whole) {
+        return vec![shell_step(whole.to_string())];
+    }
     if whole.starts_with("if ") || whole.starts_with("if[") {
         if let Some(step) = parse_shell_if(whole, robot_prefix) {
             return vec![step];
@@ -295,19 +293,6 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
     }
     // Other control-flow heads (`for`/`while`/`case`/`{`) stay a single shell op.
     if is_shell_block(whole) {
-        return vec![shell_step(whole.to_string())];
-    }
-    // `exit` TERMINATES the shell — it does not merely fail — so a line containing
-    // one cannot be decomposed without inverting its meaning. HPO's
-    // `grep '^ERROR' hp_report && exit -1 || echo "No errors"` must die with 255
-    // when the grep matches; split into steps, the `exit -1` reads as an ordinary
-    // failing step and hands control to the `||`, so the check reports "No errors"
-    // however many errors the report holds. Keep the line whole and let `sh` apply
-    // its own short-circuiting.
-    if split_shell(whole).iter().any(|p| {
-        let p = p.trim().trim_start_matches(['@', '+', '-']).trim();
-        p == "exit" || p.starts_with("exit ")
-    }) {
         return vec![shell_step(whole.to_string())];
     }
 
@@ -400,6 +385,17 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
             steps.push(shell_step(sub.to_string()));
             continue;
         }
+        // A command whose text holds a shell expansion is not static: its value
+        // is whatever the shell computes at run time. Neither an op nor a native
+        // `FileOp`, which keep the text as written, can carry that, so run it.
+        //
+        // EFO's mondo import counts its auto-excluded HGNC terms with
+        // `echo "Auto-excluding $(wc -l < …hgnc.txt) HGNC terms…"`. Parsed as a
+        // `Print`, it would announce the substitution instead of the count.
+        if crate::build::recipe::has_shell_expansion(sub) {
+            steps.push(shell_step(sub.to_string()));
+            continue;
+        }
         if is_robot(&toks, robot_prefix) {
             // A `sssom:` plugin command (e.g. `sssom:xref-extract`) is served by
             // the bundled `owlmake sssom` and writes its own target
@@ -424,16 +420,6 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
             steps.push(parse_babelon(&toks, sub));
         } else if toks[0] == "ontology-release-runner" || toks[0].ends_with("/ontology-release-runner") {
             steps.push(parse_oort(&toks));
-        } else if crate::build::recipe::has_shell_substitution(sub) {
-            // A command whose text contains `$(…)` or a backtick is not static: its
-            // value is whatever the shell computes at run time. Neither a native
-            // `FileOp` (which stores the text verbatim) nor `Shell` (which is
-            // ignored) can carry that, so run it.
-            //
-            // EFO's mondo import counts its auto-excluded HGNC terms with
-            // `echo "Auto-excluding $(wc -l < …hgnc.txt) HGNC terms…"`. Parsed as a
-            // `Print`, it would announce the substitution instead of the count.
-            steps.push(shell_step(sub.to_string()));
         } else if let Some(op) = FileOp::parse(&toks) {
             // cp/mv/rm/mkdir/touch → a native, declarative file operation.
             steps.push(Step::File(op));
@@ -1616,10 +1602,254 @@ pub(crate) fn split_shell_seq(s: &str) -> Vec<(String, Option<ShellSep>)> {
     parts
 }
 
-/// Split a shell command line on top-level `&&`, `;`, `||` (ignoring inside
-/// quotes), discarding which operator separated each pair.
-pub(crate) fn split_shell(s: &str) -> Vec<String> {
-    split_shell_seq(s).into_iter().map(|(p, _)| p).collect()
+/// Whether a line has to run as ONE shell, as make runs every recipe line,
+/// rather than part by part.
+///
+/// Its parts share the shell they run in. A part that `exit`s ends that shell, so
+/// nothing after it runs: HPO's `grep '^ERROR' hp_report && exit -1 || echo "No
+/// errors"` must die with 255 when the grep matches, where the `exit -1` taken as
+/// an ordinary failing part would hand control to the `||`. A part that changes
+/// the shell's state — `cd`, an assignment, `export`, `set`, `umask`, a function
+/// definition — changes what every part after it sees, and a part that reads
+/// `$?` or `$!` reads what the part before it left. A job started with `&` is the
+/// shell's to wait for.
+pub(crate) fn shares_shell_state(line: &str) -> bool {
+    let line = line.trim().trim_start_matches(['@', '+', '-']);
+    let parts = split_shell_seq(line);
+    if parts.iter().any(|(p, _)| {
+        let p = p.trim().trim_start_matches(['@', '+', '-']).trim();
+        p == "exit" || p.starts_with("exit ")
+    }) {
+        return true;
+    }
+    let scan = ShellScan::of(line);
+    scan.background
+        || parts.len() > 1
+            && (scan.reads_status
+                || scan.defines_function
+                || scan.assigns
+                || scan.commands.iter().any(|c| STATEFUL_BUILTINS.contains(&c.as_str())))
+}
+
+/// What a scan of a shell line finds at its command positions.
+#[derive(Default)]
+struct ShellScan {
+    /// The command word of each simple command, unquoted, after the
+    /// assignments and redirections before it and the reserved words that lead
+    /// into it.
+    commands: Vec<String>,
+    /// A simple command that is nothing but assignments, which set variables
+    /// of the shell itself.
+    assigns: bool,
+    /// A function definition, `name () …`.
+    defines_function: bool,
+    /// A `$?` or `$!` outside single quotes.
+    reads_status: bool,
+    /// A command run in the background with `&`.
+    background: bool,
+}
+
+impl ShellScan {
+    fn of(line: &str) -> ShellScan {
+        let mut scan = ShellScan::default();
+        // The line as words and operators, quotes removed from the words.
+        enum Tok {
+            Word(String),
+            Op(&'static str),
+        }
+        let mut toks: Vec<Tok> = Vec::new();
+        let chars: Vec<char> = line.chars().collect();
+        let mut word = String::new();
+        let mut in_word = false;
+        let mut i = 0;
+        // The text of a `$(…)`, `${…}` or backquoted substitution, read whole.
+        let substitution = |i: &mut usize, open: char, close: char, word: &mut String| {
+            let mut depth = 0;
+            while *i < chars.len() {
+                let c = chars[*i];
+                word.push(c);
+                *i += 1;
+                if c == open {
+                    depth += 1;
+                } else if c == close {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+        };
+        while i < chars.len() {
+            let c = chars[i];
+            match c {
+                '\\' => {
+                    if let Some(&n) = chars.get(i + 1) {
+                        word.push(n);
+                    }
+                    in_word = true;
+                    i += 2;
+                }
+                '\'' => {
+                    i += 1;
+                    while i < chars.len() && chars[i] != '\'' {
+                        word.push(chars[i]);
+                        i += 1;
+                    }
+                    in_word = true;
+                    i += 1;
+                }
+                '"' => {
+                    i += 1;
+                    while i < chars.len() && chars[i] != '"' {
+                        if chars[i] == '\\' && i + 1 < chars.len() {
+                            i += 1;
+                        } else if chars[i] == '$' && matches!(chars.get(i + 1), Some('?' | '!')) {
+                            scan.reads_status = true;
+                        }
+                        word.push(chars[i]);
+                        i += 1;
+                    }
+                    in_word = true;
+                    i += 1;
+                }
+                '`' => {
+                    substitution(&mut i, '`', '`', &mut word);
+                    in_word = true;
+                }
+                '$' if matches!(chars.get(i + 1), Some('(')) => {
+                    word.push('$');
+                    i += 1;
+                    substitution(&mut i, '(', ')', &mut word);
+                    in_word = true;
+                }
+                '$' if matches!(chars.get(i + 1), Some('{')) => {
+                    word.push('$');
+                    i += 1;
+                    substitution(&mut i, '{', '}', &mut word);
+                    in_word = true;
+                }
+                '$' if matches!(chars.get(i + 1), Some('?' | '!')) => {
+                    scan.reads_status = true;
+                    word.push(c);
+                    in_word = true;
+                    i += 1;
+                }
+                ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>' => {
+                    // A redirection with a descriptor is one word: `2>&1`, `2>/dev/null`.
+                    let redirect = matches!(c, '<' | '>')
+                        || c == '&' && matches!(chars.get(i + 1), Some('>'))
+                        || c == '&' && matches!(i.checked_sub(1).map(|p| chars[p]), Some('<' | '>'));
+                    if redirect {
+                        // `cmd>out`: the redirection starts a word of its own.
+                        if in_word && !word.chars().all(|c| c.is_ascii_digit() || c == '<' || c == '>' || c == '&') {
+                            toks.push(Tok::Word(std::mem::take(&mut word)));
+                        }
+                        word.push(c);
+                        in_word = true;
+                        i += 1;
+                        continue;
+                    }
+                    if in_word {
+                        toks.push(Tok::Word(std::mem::take(&mut word)));
+                        in_word = false;
+                    }
+                    let next = chars.get(i + 1).copied();
+                    let (op, len): (&'static str, usize) = match (c, next) {
+                        (' ' | '\t', _) => ("", 1),
+                        ('&', Some('&')) => ("&&", 2),
+                        ('|', Some('|')) => ("||", 2),
+                        (';', Some(';')) => (";;", 2),
+                        ('&', _) => ("&", 1),
+                        ('|', _) => ("|", 1),
+                        (';', _) => (";", 1),
+                        ('\n', _) => ("\n", 1),
+                        ('(', _) => ("(", 1),
+                        _ => (")", 1),
+                    };
+                    if !op.is_empty() {
+                        toks.push(Tok::Op(op));
+                    }
+                    i += len;
+                }
+                _ => {
+                    word.push(c);
+                    in_word = true;
+                    i += 1;
+                }
+            }
+        }
+        if in_word {
+            toks.push(Tok::Word(word));
+        }
+
+        // Walk the commands: at a command position, step over assignments,
+        // redirections and the reserved words that lead into a command.
+        let is_redirection = |w: &str| {
+            let w = w.trim_start_matches(|c: char| c.is_ascii_digit());
+            w.starts_with('<') || w.starts_with('>') || w.starts_with("&>")
+        };
+        let mut at_command = true;
+        let mut only_assignments = false;
+        let mut skip_target = false;
+        let mut last_command: Option<usize> = None;
+        for (n, tok) in toks.iter().enumerate() {
+            match tok {
+                Tok::Op(op) => {
+                    if only_assignments {
+                        scan.assigns = true;
+                    }
+                    if *op == "&" {
+                        scan.background = true;
+                    }
+                    // `name ( )`: a function definition.
+                    if *op == "("
+                        && last_command == Some(n.wrapping_sub(1))
+                        && matches!(toks.get(n + 1), Some(Tok::Op(")")))
+                    {
+                        scan.defines_function = true;
+                    }
+                    at_command = true;
+                    only_assignments = false;
+                    skip_target = false;
+                }
+                Tok::Word(w) => {
+                    if skip_target {
+                        skip_target = false;
+                        continue;
+                    }
+                    if is_redirection(w) {
+                        // A bare operator takes the next word as its target.
+                        skip_target = w.trim_start_matches(|c: char| c.is_ascii_digit())
+                            .trim_start_matches(['<', '>', '&', '|'])
+                            .is_empty();
+                        continue;
+                    }
+                    if !at_command {
+                        continue;
+                    }
+                    if is_env_assignment(w) {
+                        only_assignments = true;
+                        continue;
+                    }
+                    if matches!(
+                        w.as_str(),
+                        "!" | "{" | "}" | "if" | "then" | "else" | "elif" | "while" | "until"
+                            | "do" | "time" | "command" | "builtin"
+                    ) {
+                        continue;
+                    }
+                    scan.commands.push(w.clone());
+                    last_command = Some(n);
+                    at_command = false;
+                    only_assignments = false;
+                }
+            }
+        }
+        if only_assignments {
+            scan.assigns = true;
+        }
+        scan
+    }
 }
 
 /// Whether a command begins with a shell control-flow head we keep intact
@@ -2078,6 +2308,80 @@ mod tests {
             matches!(steps.as_slice(), [Step::Shell { command, .. }] if command.ends_with("|| true")),
             "expected one tolerated shell command, got {steps:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod shell_state_tests {
+    use super::*;
+
+    /// A part that changes the shell, or reads what an earlier part left, ties
+    /// the line to one shell.
+    #[test]
+    fn parts_that_share_the_shell_are_seen() {
+        for line in [
+            "mkdir -p sub && cd sub && pwd > ../where.txt",
+            "mkdir -p sub; cd sub; pwd > ../out.txt",
+            "export x=1 && sh -c 'echo x=$x' > out.txt",
+            "x=1; echo $x > out.txt",
+            "false; echo $? > out.txt",
+            "umask 077 && touch secret",
+            "set -e; false; touch never",
+            "f() { touch $1; }; f made",
+            "{ cd sub; } && touch here",
+            "-cd sub && touch here",
+            "sleep 1 & touch a",
+            "grep '^ERROR' hp_report && exit -1 || echo \"No errors\"",
+            "command cd sub && ls",
+        ] {
+            assert!(shares_shell_state(line), "{line}");
+        }
+    }
+
+    /// Parts that only run commands do not, whatever their arguments say.
+    #[test]
+    fn independent_parts_are_not() {
+        for line in [
+            "mkdir -p a/b && touch a/b/c.txt ; touch a/d.txt",
+            "robot convert -i x.owl -o y.owl && cp y.owl z.owl",
+            "grep -v cd notes.txt > out.txt || true",
+            "echo cd export set > words.txt && cat words.txt",
+            "X=1 make y && touch done",
+            "robot report -i x.owl --fail-on none -o r.tsv 2>&1 > log.txt && cat log.txt",
+            "( cd sub && make x )",
+            "cd sub",
+            "echo '$?' > literal.txt && cat literal.txt",
+        ] {
+            assert!(!shares_shell_state(line), "{line}");
+        }
+    }
+
+    /// A command holding a shell expansion is recorded as the command line it
+    /// is, whatever its program: an op or a native file operation would keep
+    /// `$X` as written.
+    #[test]
+    fn ingest_leaves_an_expansion_to_the_shell() {
+        for line in ["echo $HOME > home.txt", "robot convert -i $SRC -o out.owl"] {
+            match parse_command(line, "robot").as_slice() {
+                [Step::Shell { command, .. }] => assert_eq!(command, line),
+                other => panic!("{line}: expected one shell step, got {other:?}"),
+            }
+        }
+        assert!(matches!(parse_command("echo '$HOME' > literal.txt", "robot").as_slice(), [Step::File(_)]));
+    }
+
+    /// Ingest keeps such a line one shell step, so the plan does not split what
+    /// the shell would have shared.
+    #[test]
+    fn ingest_keeps_a_shared_line_whole() {
+        let line = "cd src/patterns && make test";
+        match parse_command(line, "robot").as_slice() {
+            [Step::Shell { command, requires }] => {
+                assert_eq!(command, line);
+                assert!(requires.is_empty(), "{requires:?}");
+            }
+            other => panic!("expected one shell step, got {other:?}"),
+        }
     }
 }
 
