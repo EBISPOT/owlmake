@@ -84,3 +84,4 @@ pub mod ubergraph;
 // pull unix-only crates; excluded from the wasm core.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod util;
+pub mod xlsx;

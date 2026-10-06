@@ -137,7 +137,7 @@ fn template_then_query_roundtrip() {
     let status = bin()
         .args(["export", "-i"])
         .arg(&owl)
-        .arg("-o")
+        .args(["--header", "ID|LABEL|SubClass Of", "--export"])
         .arg(&tsv)
         .status()
         .unwrap();
@@ -3620,6 +3620,240 @@ fn convert_fixture(src: &str, out: &str, args: &[&str]) -> String {
 
 fn fixture_text(name: &str) -> String {
     std::fs::read_to_string(robot_fixture(name)).unwrap()
+}
+
+/// `om export` a fixture with `args` to a file named `out`, whose extension picks
+/// the format when `args` names none; the bytes written.
+fn export_fixture(src: &str, out: &str, args: &[&str]) -> Vec<u8> {
+    let path = tmp(out);
+    let run = bin().args(["export", "-i"]).arg(robot_fixture(src)).args(args).arg("--export").arg(&path).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let bytes = std::fs::read(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    bytes
+}
+
+/// [`export_fixture`] as text.
+fn export_text(src: &str, out: &str, args: &[&str]) -> String {
+    String::from_utf8(export_fixture(src, out, args)).unwrap()
+}
+
+/// The prefixes the `export-terms` fixtures are written with.
+const EXPORT_PREFIXES: [&str; 4] =
+    ["--prefix", "EX: http://purl.obolibrary.org/obo/EX_", "--prefix", "ex: http://example.org/"];
+
+/// `args` after the `export-terms` prefixes.
+fn with_export_prefixes<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    EXPORT_PREFIXES.iter().copied().chain(args.iter().copied()).collect()
+}
+
+/// One part of a ZIP archive, inflated: the archive's entries are read in turn
+/// from their local headers.
+fn zip_part(zip: &[u8], name: &str) -> Option<String> {
+    use std::io::Read;
+    let u16_at = |i: usize| u16::from_le_bytes([zip[i], zip[i + 1]]) as usize;
+    let u32_at = |i: usize| u32::from_le_bytes([zip[i], zip[i + 1], zip[i + 2], zip[i + 3]]) as usize;
+    let mut i = 0;
+    while i + 30 <= zip.len() && zip[i..i + 4] == [0x50, 0x4b, 0x03, 0x04] {
+        let (method, size, name_len, extra_len) = (u16_at(i + 8), u32_at(i + 18), u16_at(i + 26), u16_at(i + 28));
+        let entry = &zip[i + 30..i + 30 + name_len];
+        let data = &zip[i + 30 + name_len + extra_len..i + 30 + name_len + extra_len + size];
+        if entry == name.as_bytes() {
+            let mut text = String::new();
+            match method {
+                0 => text = String::from_utf8(data.to_vec()).unwrap(),
+                _ => {
+                    flate2::read::DeflateDecoder::new(data).read_to_string(&mut text).unwrap();
+                }
+            }
+            return Some(text);
+        }
+        i += 30 + name_len + extra_len + size;
+    }
+    None
+}
+
+/// Entities render as ROBOT 1.9.11 renders them under each entity format: by
+/// name (the label, quoted inside an expression when it holds a space, else the
+/// CURIE), by label (empty without one) and by CURIE. Expressions are one line
+/// with runs of spaces collapsed, an inverse property keeps the space its
+/// keyword opens with, `owl:Thing` is no superclass, a superclass stated twice
+/// is listed twice, and every keyword column — subclasses, equivalents,
+/// disjoints, superproperties, domains, ranges, types, synonyms — holds what
+/// ROBOT's does, for classes, properties and individuals.
+#[test]
+fn export_renders_entities_as_robot_does_by_name_label_and_id() {
+    let all = "ID|LABEL|SubClass Of|Equivalent Class|Disjoint With|SubProperty Of|Domain|Range|Type|SYNONYMS|SubClasses|Equivalent Property";
+    for (format, expected) in [
+        (None, "export-terms.name.tsv"),
+        (Some("LABEL"), "export-terms.label.tsv"),
+        (Some("ID"), "export-terms.id.tsv"),
+    ] {
+        let mut args = with_export_prefixes(&["-n", "classes properties individuals", "-c", all]);
+        if let Some(f) = format {
+            args.extend(["-E", f]);
+        }
+        assert_eq!(export_text("export-terms.ofn", expected, &args), fixture_text(expected), "{expected}");
+    }
+}
+
+/// A header names a property by its label — spaces and all — or by CURIE: an
+/// object or data property named by label lists the fillers of the restrictions
+/// on it and an individual's values of it, while a header that expands to an IRI
+/// is an annotation property column, even for an IRI that names an object or
+/// data property or none at all. `rdf:type` is the type column. As ROBOT 1.9.11
+/// writes `export-terms.columns.tsv`.
+#[test]
+fn export_resolves_property_columns_as_robot_does() {
+    let args = with_export_prefixes(&[
+        "-n",
+        "classes individuals",
+        "-c",
+        "ID|part of|has  two   spaces|weight|see also|EX:ap|BFO:0000051|EX:dp|rdfs:subClassOf|rdf:type|obo",
+    ]);
+    assert_eq!(
+        export_text("export-terms.ofn", "export-terms.columns.tsv", &args),
+        fixture_text("export-terms.columns.tsv")
+    );
+}
+
+/// A column's tag sets how it renders entities and which values it holds, in
+/// either case; `ID`, `CURIE`, `IRI` and `LABEL` columns keep their own
+/// rendering whatever the tag says of an expression. With no `--include`,
+/// individuals have rows as classes do. As ROBOT 1.9.11 writes
+/// `export-terms.tags.tsv`.
+#[test]
+fn export_column_tags_set_rendering_and_selection() {
+    let args = with_export_prefixes(&[
+        "-c",
+        "ID [NAME]|ID [LABEL]|ID [IRI]|CURIE|IRI [ID]|LABEL [ID]|label|SubClass Of [NAMED]|SubClass Of [ANON]|SubClass Of [id anon]",
+    ]);
+    assert_eq!(export_text("export-terms.ofn", "export-terms.tags.tsv", &args), fixture_text("export-terms.tags.tsv"));
+}
+
+/// Rows the sort leaves tied stay in the order the entity set holds them — by
+/// hash bucket, then by bucket of the larger set they were gathered from, then
+/// kind by kind in IRI order — which a column empty for every row exposes
+/// whole: here three buckets hold two entities or more, and two pairs share
+/// both. As ROBOT 1.9.11 writes `export-terms.ties.tsv`.
+#[test]
+fn export_keeps_tied_rows_in_the_entity_sets_order() {
+    let args = ["-n", "classes properties individuals", "-c", "BFO:0000051|ID [IRI]|Type [IRI]"];
+    assert_eq!(export_text("export-terms.ofn", "export-terms.ties.tsv", &args), fixture_text("export-terms.ties.tsv"));
+}
+
+/// `--sort` names several columns, `^` reverses one, and the last named orders
+/// the rows while the earlier ones break its ties; an empty value sorts last,
+/// or first in reverse. As ROBOT 1.9.11 writes `export-terms.sort.tsv`.
+#[test]
+fn export_sorts_on_several_columns_and_in_reverse() {
+    let args = with_export_prefixes(&["-n", "classes", "-c", "ID|LABEL|SubClass Of", "-s", "^LABEL|SubClass Of"]);
+    assert_eq!(export_text("export-terms.ofn", "export-terms.sort.tsv", &args), fixture_text("export-terms.sort.tsv"));
+}
+
+/// HTML links every entity and escapes its name, JSON writes `ID`, `CURIE` and
+/// `IRI` as single values and every other column as an array, and CSV quotes as
+/// TSV does; the format is read from the file's extension. As ROBOT 1.9.11
+/// writes each.
+#[test]
+fn export_writes_html_json_and_csv_as_robot_does() {
+    let html = with_export_prefixes(&[
+        "-n",
+        "classes properties individuals",
+        "-c",
+        "ID|LABEL|SubClass Of|Disjoint With|Type|see also|weight|part of|IRI",
+    ]);
+    assert_eq!(export_text("export-terms.ofn", "export-terms.html", &html), fixture_text("export-terms.html"));
+    let json = with_export_prefixes(&[
+        "-n",
+        "classes properties individuals",
+        "-c",
+        "ID|LABEL|SubClass Of|Disjoint With|Type|see also|weight|part of|IRI|CURIE",
+    ]);
+    assert_eq!(export_text("export-terms.ofn", "export-terms.json", &json), fixture_text("export-terms.json"));
+    let csv = with_export_prefixes(&["-n", "classes properties individuals", "-c", "ID|LABEL|SubClass Of|SYNONYMS", "-S", " | "]);
+    assert_eq!(export_text("export-terms.ofn", "export-terms.csv", &csv), fixture_text("export-terms.csv"));
+}
+
+/// An `.xlsx` export is a workbook whose sheet and shared strings are those
+/// ROBOT 1.9.11 writes, and the same rows make the same bytes.
+#[test]
+fn export_writes_a_workbook_with_robots_sheet() {
+    let args = with_export_prefixes(&[
+        "-n",
+        "classes properties individuals",
+        "-c",
+        "ID|LABEL|SubClass Of|SYNONYMS|see also|weight",
+    ]);
+    let book = export_fixture("export-terms.ofn", "export-terms.xlsx", &args);
+    assert_eq!(zip_part(&book, "xl/worksheets/sheet1.xml").unwrap(), fixture_text("export-terms.xlsx.sheet1.xml"));
+    assert_eq!(zip_part(&book, "xl/sharedStrings.xml").unwrap(), fixture_text("export-terms.xlsx.sharedStrings.xml"));
+    assert_eq!(book, export_fixture("export-terms.ofn", "export-terms.xlsx", &args));
+}
+
+/// IRIs are shortened against the built-in prefix map and the prefixes the
+/// command line binds — never the document's own — the longest namespace
+/// winning; `--noprefixes` leaves only the ones bound on the command line, and
+/// an IRI no namespace starts stays whole. `owl:Thing` has no row. As ROBOT
+/// 1.9.11 writes each.
+#[test]
+fn export_shortens_iris_with_the_built_in_and_given_prefixes() {
+    let base = ["-c", "ID|SubClass Of", "-E", "ID"];
+    assert_eq!(
+        export_text("export-prefixes.ofn", "export-prefixes.default.tsv", &base),
+        fixture_text("export-prefixes.default.tsv")
+    );
+    let none: Vec<&str> = base.iter().copied().chain(["--noprefixes"]).collect();
+    assert_eq!(
+        export_text("export-prefixes.ofn", "export-prefixes.noprefixes.tsv", &none),
+        fixture_text("export-prefixes.noprefixes.tsv")
+    );
+    let ex: Vec<&str> = base.iter().copied().chain(["--prefix", "ex: http://example.org/ns/"]).collect();
+    assert_eq!(export_text("export-prefixes.ofn", "export-prefixes.ex.tsv", &ex), fixture_text("export-prefixes.ex.tsv"));
+}
+
+/// A TSV or CSV cell holding a quote, its delimiter or a line break is quoted,
+/// its quotes doubled, so a tab in a label never moves the cells after it; JSON
+/// escapes control characters. As ROBOT 1.9.11 writes each.
+#[test]
+fn export_quotes_cells_holding_quotes_delimiters_and_line_breaks() {
+    let args = ["-c", "ID|LABEL", "--prefix", "EX: http://purl.obolibrary.org/obo/EX_"];
+    for out in ["export-quoting.tsv", "export-quoting.csv", "export-quoting.json"] {
+        assert_eq!(export_fixture("export-quoting.ofn", out, &args), std::fs::read(robot_fixture(out)).unwrap(), "{out}");
+    }
+}
+
+/// What ROBOT 1.9.11 refuses, `export` refuses, writing nothing: no header, a
+/// column that names nothing, an unknown entity format, selection, output format
+/// or tag, two format tags, an `--include` that names no kind, a sort column
+/// some rows have no value in, and a sort position that names no column.
+#[test]
+fn export_refuses_what_robot_refuses() {
+    let src = robot_fixture("export-terms.ofn");
+    for (args, says) in [
+        (vec![], "--header is a required option"),
+        (vec!["-c", "ID|no such column"], "unable to find property for column header 'no such column'"),
+        (vec!["-c", "ID|Definition"], "unable to find property for column header 'Definition'"),
+        (vec!["-c", "ID", "-E", "CURIE"], "'CURIE' is not a valid entity rendering format"),
+        (vec!["-c", "ID", "-l", "ALL"], "'ALL' is not a valid entity selection"),
+        (vec!["-c", "ID", "-f", "yaml"], "--format yaml must be one of"),
+        (vec!["-c", "ID", "-f", "TSV"], "--format TSV must be one of"),
+        (vec!["-c", "ID|SubClass Of [CURIE]"], "unknown rendering tag: CURIE"),
+        (vec!["-c", "ID|SubClass Of [ID IRI]"], "more than one entity format tag"),
+        (vec!["-c", "ID|SubClass Of [NAMED ANON]"], "more than one entity selection tag"),
+        (vec!["-c", "ID", "-n", "things"], "names no kind of entity"),
+        (vec!["-c", "ID|SubClass Of", "-s", "SubClass Of"], "cannot sort on column 'SubClass Of'"),
+        (vec!["-c", "ID|LABEL", "-s", "label"], "sort position 1 names no column"),
+        (vec!["-c", "ID|LABEL", "-s", "nosuch|LABEL"], "sort position 1 names no column"),
+    ] {
+        let out = tmp("export-refused.tsv");
+        let _ = std::fs::remove_file(&out);
+        let run = bin().args(["export", "-i"]).arg(&src).args(&args).arg("--export").arg(&out).output().unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success(), "{args:?} succeeded");
+        assert!(stderr.contains(says), "{args:?}: {stderr}");
+        assert!(!out.exists(), "{args:?} wrote {}", out.display());
+    }
 }
 
 /// Manchester syntax keeps what an ontology says about its terms — every

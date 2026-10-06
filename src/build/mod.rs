@@ -806,6 +806,11 @@ const ROBOT_1_9_9: (u32, u32, u32) = (1, 9, 9);
 /// prefixes. A version emulated with the other version's map is not approximately
 /// right, it is a different answer.
 ///
+/// The built-in prefix map, `obo_context.jsonld`, is a data asset of the same
+/// kind with boundaries of its own, at 1.9.9 and at 1.9.11: it decides the CURIE
+/// every report, export and term expansion writes or reads, so it is selected from
+/// the same recorded version.
+///
 /// One convention reads the ODK release instead: a build that emulates one neither
 /// writes nor reads OBO `[Instance]` frames, because that release does neither.
 ///
@@ -840,6 +845,7 @@ pub fn set_emulation(emulation: Option<Emulation>) {
     crate::io::obograph::set_nest_axiom_anns(post_1_9_9.unwrap_or(false));
     crate::cmd::query::set_update_keeps_prefixes(post_1_9_9.unwrap_or(true));
     crate::sssom::converter::set_obo_epm(post_1_9_9.unwrap_or(true));
+    crate::report::set_obo_context(emulation.map(|e| e.robot));
     crate::io::obo::set_instance_frames(emulation.is_none_or(|e| e.odk.is_none()));
     *EMULATION.lock().unwrap_or_else(|e| e.into_inner()) = emulation;
 }

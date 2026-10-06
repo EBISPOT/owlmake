@@ -1,0 +1,4 @@
+ID	SubClass Of
+http://example.org/ns/A	http://purl.obolibrary.org/obo/GO_0005634
+http://purl.obolibrary.org/obo/GO_0005634	
+http://purl.obolibrary.org/obo/ex_thing	

@@ -1,0 +1,18 @@
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://x.org/x>
+Declaration(Class(obo:EX_1))
+Declaration(Class(obo:EX_2))
+Declaration(Class(obo:EX_3))
+Declaration(Class(obo:EX_4))
+Declaration(Class(obo:EX_5))
+Declaration(Class(obo:EX_6))
+AnnotationAssertion(rdfs:label obo:EX_1 "a & <b> \"q\" 's")
+AnnotationAssertion(rdfs:label obo:EX_2 " lead")
+AnnotationAssertion(rdfs:label obo:EX_3 "trail ")
+AnnotationAssertion(rdfs:label obo:EX_4 "tab	here")
+AnnotationAssertion(rdfs:label obo:EX_5 "nl
+x
+y")
+AnnotationAssertion(rdfs:label obo:EX_6 "ctl end _x0041_ é😀")
+)

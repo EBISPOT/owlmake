@@ -154,7 +154,7 @@ pub enum Command {
     Template(cmd::template::Args),
     /// Bulk-rename entity IRIs.
     Rename(cmd::rename::Args),
-    /// Export ontology entities to a spreadsheet (TSV/CSV).
+    /// Export ontology entities as a table: TSV, CSV, HTML, JSON or an Excel workbook.
     Export(cmd::export::Args),
     /// Dump the prefix map as a JSON-LD context.
     ExportPrefixes(cmd::export_prefixes::Args),

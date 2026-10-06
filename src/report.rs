@@ -20,7 +20,7 @@
 //! one there skips the rule (or the row) as defence, degrading the report instead
 //! of aborting a build.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -94,11 +94,38 @@ const QUERIES: &[(&str, &str)] = &[
 /// The default `report_profile.txt`, embedded at compile time.
 const PROFILE: &str = include_str!("report_queries/report_profile.txt");
 
-/// The bundled `obo_context.jsonld`, embedded at compile time. Report CURIEs are
-/// shortened with THIS prefix map, not with the input document's — so an entity
-/// reports under the same CURIE whatever prefixes the file it came from happens
-/// to declare.
-const OBO_CONTEXT: &str = include_str!("report_queries/obo_context.jsonld");
+/// The built-in prefix map, `obo_context.jsonld`, in each of its versions: the
+/// one of the 1.9.8 release, the one 1.9.9 and 1.9.10 carry, and the one of 1.9.11
+/// onward, which moves `CHEMINF`, `FMA`, `MAMO` and `SWO` off the OBO PURL space
+/// and adds `EMRO`, `PAIN`, `PBPKO` and `PREFER`. Report CURIEs are shortened with
+/// this map, not with the input document's — so an entity reports under the same
+/// CURIE whatever prefixes the file it came from happens to declare. Re-vendor a
+/// version by copying the file out of that release unchanged.
+const OBO_CONTEXTS: [&str; 3] = [
+    include_str!("report_queries/obo_context-1.9.8.jsonld"),
+    include_str!("report_queries/obo_context-1.9.9.jsonld"),
+    include_str!("report_queries/obo_context-1.9.11.jsonld"),
+];
+
+/// Which of [`OBO_CONTEXTS`] is in hand: the newest unless a plan's
+/// `emulate_robot_version` says otherwise ([`set_obo_context`]).
+static OBO_CONTEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(2);
+
+/// Select the built-in prefix map of the release `robot` names, or the newest
+/// when no release is named. Set by `build::set_emulation`, with the other
+/// version-dependent behaviours.
+pub fn set_obo_context(robot: Option<(u32, u32, u32)>) {
+    OBO_CONTEXT.store(obo_context_index(robot), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The index into [`OBO_CONTEXTS`] of the map release `robot` carries.
+fn obo_context_index(robot: Option<(u32, u32, u32)>) -> usize {
+    match robot {
+        Some(v) if v < (1, 9, 9) => 0,
+        Some(v) if v < (1, 9, 11) => 1,
+        _ => 2,
+    }
+}
 
 /// The base of each bundled rule's published documentation page. A bundled rule's
 /// URL is this plus the rule name; a `file:` rule has none.
@@ -242,13 +269,29 @@ pub fn default_profile() -> Vec<ReportRule> {
     parse_profile(PROFILE).expect("vendored report_profile.txt names an unknown rule")
 }
 
-/// The prefix map report CURIEs are rendered with: the bundled
-/// `obo_context.jsonld`. Both JSON-LD term forms count — the plain
-/// `"prefix": "namespace"` entries and the
+/// The prefix map report CURIEs are rendered with: the built-in
+/// `obo_context.jsonld` of the selected release, in its own order. Both JSON-LD
+/// term forms count — the plain `"prefix": "namespace"` entries and the
 /// `"prefix": {"@id": "…", "@prefix": true}` ones — while the empty key and the
 /// `@`-keywords are skipped.
-pub fn obo_context_prefixes() -> Vec<(String, String)> {
-    let json: serde_json::Value = match serde_json::from_str(OBO_CONTEXT) {
+pub fn obo_context_prefixes() -> &'static [(String, String)] {
+    static PARSED: [std::sync::OnceLock<Vec<(String, String)>>; 3] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    let i = OBO_CONTEXT.load(std::sync::atomic::Ordering::Relaxed);
+    PARSED[i].get_or_init(|| parse_context(OBO_CONTEXTS[i]))
+}
+
+/// The namespace each prefix of [`obo_context_prefixes`] binds, by prefix.
+pub fn obo_context_map() -> &'static BTreeMap<String, String> {
+    static MAPS: [std::sync::OnceLock<BTreeMap<String, String>>; 3] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    let i = OBO_CONTEXT.load(std::sync::atomic::Ordering::Relaxed);
+    MAPS[i].get_or_init(|| obo_context_prefixes().iter().cloned().collect())
+}
+
+/// The prefix bindings of a JSON-LD context document, in document order.
+fn parse_context(text: &str) -> Vec<(String, String)> {
+    let json: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
@@ -294,15 +337,11 @@ impl ReportResult {
 
     /// The report as TSV: Level / Rule Name / Subject / Property / Value.
     pub fn to_tsv(&self) -> String {
-        let mut out = String::from("Level\tRule Name\tSubject\tProperty\tValue\n");
+        let mut out = crate::table::record(&["Level", "Rule Name", "Subject", "Property", "Value"], '\t');
         for r in &self.rows {
-            out.push_str(&format!(
-                "{}\t{}\t{}\t{}\t{}\n",
-                tsv_cell(r.level.label()),
-                tsv_cell(&r.rule),
-                tsv_cell(&r.subject),
-                tsv_cell(&r.property),
-                tsv_cell(&r.value)
+            out.push_str(&crate::table::record(
+                &[r.level.label(), &r.rule, &r.subject, &r.property, &r.value],
+                '\t',
             ));
         }
         out
@@ -310,16 +349,12 @@ impl ReportResult {
 
     /// The same table as CSV, with RFC-4180 quoting.
     pub fn to_csv(&self) -> String {
-        let mut out = String::new();
-        out.push_str(&csv_row(&["Level", "Rule Name", "Subject", "Property", "Value"]));
+        let mut out = crate::table::record(&["Level", "Rule Name", "Subject", "Property", "Value"], ',');
         for r in &self.rows {
-            out.push_str(&csv_row(&[
-                r.level.label(),
-                &r.rule,
-                &r.subject,
-                &r.property,
-                &r.value,
-            ]));
+            out.push_str(&crate::table::record(
+                &[r.level.label(), &r.rule, &r.subject, &r.property, &r.value],
+                ',',
+            ));
         }
         out
     }
@@ -386,21 +421,6 @@ impl ReportResult {
             }));
         }
         serde_json::to_string_pretty(&levels).unwrap_or_else(|_| "[]".to_string())
-    }
-}
-
-fn csv_row(cells: &[&str]) -> String {
-    let escaped: Vec<String> = cells.iter().map(|c| escape_csv(c)).collect();
-    let mut s = escaped.join(",");
-    s.push('\n');
-    s
-}
-
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
     }
 }
 
@@ -578,17 +598,6 @@ pub fn run_report_with_profile(model: &Model, rules: &[ReportRule]) -> Result<Re
     Ok(ReportResult { rows })
 }
 
-/// A TSV cell: quoted only when it holds the tab separator, a quote or a line
-/// break, with an embedded quote doubled. A reported value can contain a newline
-/// — MP's `MP:0030295` definition runs across two lines — and writing that bare
-/// would split one violation into two rows.
-fn tsv_cell(s: &str) -> String {
-    if s.contains('\t') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
 
 /// Order the rows a rule's `ORDER BY` leaves TIED.
 ///
@@ -707,14 +716,6 @@ mod tests {
     }
 
     #[test]
-    fn csv_quoting_escapes_specials() {
-        assert_eq!(escape_csv("plain"), "plain");
-        assert_eq!(escape_csv("a,b"), "\"a,b\"");
-        assert_eq!(escape_csv("a\"b"), "\"a\"\"b\"");
-        assert_eq!(escape_csv("a\nb"), "\"a\nb\"");
-    }
-
-    #[test]
     fn builtin_detection() {
         // RDFS and OWL are skipped — by substring — and NOTHING else.
         assert!(is_builtin("http://www.w3.org/2002/07/owl#Class"));
@@ -761,5 +762,23 @@ mod tests {
         // A report prints `dc:title`, not `terms:title`, because the context
         // binds `dc` to the DCMI TERMS namespace.
         assert_eq!(ns("dc"), Some("http://purl.org/dc/terms/"));
+    }
+
+    /// Each emulated release reads the map that release carries: `EXMO` arrives
+    /// with 1.9.9, and 1.9.11 moves `FMA` off the OBO PURL space and adds `PAIN`.
+    /// A run no plan governs reads the newest.
+    #[test]
+    fn the_prefix_map_is_the_emulated_releases() {
+        let map = |robot| parse_context(OBO_CONTEXTS[obo_context_index(robot)]);
+        let ns = |robot, prefix: &str| {
+            map(robot).into_iter().find(|(k, _)| k == prefix).map(|(_, v)| v)
+        };
+        assert_eq!(ns(Some((1, 9, 8)), "EXMO"), None);
+        assert_eq!(ns(Some((1, 9, 9)), "EXMO").as_deref(), Some("http://purl.obolibrary.org/obo/EXMO_"));
+        assert_eq!(ns(Some((1, 9, 10)), "FMA").as_deref(), Some("http://purl.obolibrary.org/obo/FMA_"));
+        assert_eq!(ns(Some((1, 9, 10)), "PAIN"), None);
+        assert_eq!(ns(Some((1, 9, 11)), "FMA").as_deref(), Some("http://purl.org/sig/ont/fma/"));
+        assert_eq!(ns(Some((1, 9, 11)), "PAIN").as_deref(), Some("http://purl.obolibrary.org/obo/PAIN_"));
+        assert_eq!(ns(None, "FMA"), ns(Some((1, 9, 11)), "FMA"));
     }
 }

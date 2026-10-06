@@ -1,0 +1,38 @@
+[
+  {
+    "ID": "EX:1",
+    "LABEL": [
+      "a & <b> \"q\" 's"
+    ]
+  },
+  {
+    "ID": "EX:2",
+    "LABEL": [
+      " lead"
+    ]
+  },
+  {
+    "ID": "EX:3",
+    "LABEL": [
+      "trail "
+    ]
+  },
+  {
+    "ID": "EX:4",
+    "LABEL": [
+      "tab\there"
+    ]
+  },
+  {
+    "ID": "EX:5",
+    "LABEL": [
+      "nl\nx\r\ny"
+    ]
+  },
+  {
+    "ID": "EX:6",
+    "LABEL": [
+      "ctl\u0001\u001f end _x0041_ é😀"
+    ]
+  }
+]

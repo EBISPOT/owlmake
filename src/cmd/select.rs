@@ -152,11 +152,7 @@ pub fn expand(model: &Model, s: &str) -> String {
 
 /// The namespace `obo_context.jsonld` binds `prefix` to, if any.
 fn obo_context_namespace(prefix: &str) -> Option<&'static str> {
-    static MAP: std::sync::OnceLock<std::collections::HashMap<String, String>> =
-        std::sync::OnceLock::new();
-    MAP.get_or_init(|| crate::report::obo_context_prefixes().into_iter().collect())
-        .get(prefix)
-        .map(|s| s.as_str())
+    crate::report::obo_context_map().get(prefix).map(|s| s.as_str())
 }
 
 /// The keyword `--select` selectors owlmake recognises (so any other token is an

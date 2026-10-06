@@ -1,0 +1,23 @@
+ID	LABEL	SubClass Of	Equivalent Class	Disjoint With	SubProperty Of	Domain	Range	Type	SYNONYMS	SubClasses	Equivalent Property
+EX:1	alpha & <beta>			epsilon|gamma|linetwo				Class	Alpha|zeta|	epsilon|epsilon	
+EX:100	individual one							'part of' some linetwo|alpha & <beta>			
+EX:101								Named individual			
+EX:2	"line
+two"	 inverse ('part of') some 'alpha & <beta>'|'has two spaces' some (gamma and epsilon)|weight some xsd:integer[>= 1 , < 9]|weight value 5		alpha & <beta>|gamma				Class			
+EX:3	gamma	'part of' exactly 1 (' lead space' or EX:6)|'part of' min 2 epsilon|'part of' only (not (EX:7))|'part of' value 'individual one'|weight max 3 xsd:decimal|weight some xsd:string|{'individual one' , EX:101}		alpha & <beta>|linetwo				Class			
+EX:4	epsilon	alpha & <beta>|alpha & <beta>		alpha & <beta>				Class			
+EX:5	 lead space		EX:6|EX:7					Class			
+EX:6		"'part of' Self |weight some (xsd:integer or xsd:string)|weight some not xsd:string|weight some {""a"" , ""b""}|weight value ""2020-01-01""^^xsd:date|weight value ""a \""quoted\"" \\ value""|weight value ""text""@en|weight value 1.5f|weight value 2.5|weight value true"	 lead space|EX:7					Class			
+EX:7			 lead space|EX:6					Class		'part of' some EX:8	
+EX:8			'alpha & <beta>' and ('part of' some (linetwo and gamma))					Class			
+EX:ap	see also				rdfs:seeAlso	<http://purl.obolibrary.org/obo/EX_1>	<http://www.w3.org/2001/XMLSchema#string>	Annotation property			
+EX:dp	weight					alpha & <beta>	xsd:integer	Data property			
+IAO:0000118								Annotation property			
+RO:1	part of			 inverse ('has two spaces')		'alpha & <beta>' or linetwo	gamma	Object property			has two spaces
+RO:2	has  two   spaces				 inverse ('part of')|part of			Object property			part of
+ex:Punned								linetwo			
+ex:Punned								Class			
+oboInOwl:hasRelatedSynonym								Annotation property			
+rdfs:comment								Annotation property			
+rdfs:label								Annotation property			
+rdfs:seeAlso								Annotation property			

@@ -1,0 +1,23 @@
+ID	LABEL	SubClass Of	Equivalent Class	Disjoint With	SubProperty Of	Domain	Range	Type	SYNONYMS	SubClasses	Equivalent Property
+EX:1	alpha & <beta>			EX:2|EX:3|EX:4				owl:Class	Alpha|zeta|	EX:4|EX:4	
+EX:100	individual one							EX:1|RO:1 some EX:2			
+EX:101								owl:NamedIndividual			
+EX:2	"line
+two"	 inverse (RO:1) some EX:1|EX:dp some xsd:integer[>= 1 , < 9]|EX:dp value 5|RO:2 some (EX:3 and EX:4)		EX:1|EX:3				owl:Class			
+EX:3	gamma	EX:dp max 3 xsd:decimal|EX:dp some xsd:string|RO:1 exactly 1 (EX:5 or EX:6)|RO:1 min 2 EX:4|RO:1 only (not (EX:7))|RO:1 value EX:100|{EX:100 , EX:101}		EX:1|EX:2				owl:Class			
+EX:4	epsilon	EX:1|EX:1		EX:1				owl:Class			
+EX:5	 lead space		EX:6|EX:7					owl:Class			
+EX:6		"EX:dp some (xsd:integer or xsd:string)|EX:dp some not xsd:string|EX:dp some {""a"" , ""b""}|EX:dp value ""2020-01-01""^^xsd:date|EX:dp value ""a \""quoted\"" \\ value""|EX:dp value ""text""@en|EX:dp value 1.5f|EX:dp value 2.5|EX:dp value true|RO:1 Self "	EX:5|EX:7					owl:Class			
+EX:7			EX:5|EX:6					owl:Class		RO:1 some EX:8	
+EX:8			EX:1 and (RO:1 some (EX:2 and EX:3))					owl:Class			
+EX:ap	see also				rdfs:seeAlso	<http://purl.obolibrary.org/obo/EX_1>	<http://www.w3.org/2001/XMLSchema#string>	owl:AnnotationProperty			
+EX:dp	weight					EX:1	xsd:integer	owl:DatatypeProperty			
+IAO:0000118								owl:AnnotationProperty			
+RO:1	part of			 inverse (RO:2)		EX:1 or EX:2	EX:3	owl:ObjectProperty			RO:2
+RO:2	has  two   spaces				 inverse (RO:1)|RO:1			owl:ObjectProperty			RO:1
+ex:Punned								EX:2			
+ex:Punned								owl:Class			
+oboInOwl:hasRelatedSynonym								owl:AnnotationProperty			
+rdfs:comment								owl:AnnotationProperty			
+rdfs:label								owl:AnnotationProperty			
+rdfs:seeAlso								owl:AnnotationProperty			
