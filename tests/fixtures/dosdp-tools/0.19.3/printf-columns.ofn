@@ -1,0 +1,40 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000010>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000011>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000012>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000010> (cog (cog wheel))
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000010> "EX:0000010 in plain text"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "cog (cog wheel)"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000010> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000011> (sprocket (sprocket))
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000011> "EX:0000011 in EX:0000009"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000011> "sprocket (sprocket)"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000011> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000012> (gear ())
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000012> "EX:0000012 in "^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000012> "gear ()"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000012> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

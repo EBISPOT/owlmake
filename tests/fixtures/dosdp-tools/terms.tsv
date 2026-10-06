@@ -1,0 +1,17 @@
+# Each case: the term list dosdp-tools `terms` writes, as 0.19.3/<list> and
+# 0.20.0/<list>; the pattern and table it lists the terms of; and the options of
+# the run (spelled the same for om). Every run also reads prefixes.yaml.
+# Regenerate the lists with scripts/gen_dosdp_fixtures.sh.
+labels.txt	labels.yaml	labels.tsv
+collapse.txt	collapse.yaml	collapse.tsv
+entity-ranges.txt	entity-ranges.yaml	entity-ranges.tsv
+schemes.txt	schemes.yaml	schemes.tsv
+lists.txt	lists.yaml	lists.tsv
+internal.txt	internal.yaml	internal.tsv
+minted.txt	minted.yaml	minted-dc.tsv
+cells.csv.txt	cells.yaml	cells.csv	--table-format=csv
+terms-order.txt	terms-order.yaml	terms-header.tsv
+terms-listed.txt	terms-listed.yaml	terms-header.tsv
+repeated-vars.txt	repeated-vars.yaml	repeated.tsv
+merged-vars.txt	merged-vars.yaml	repeated.tsv
+repeated-elsewhere.txt	repeated-elsewhere.yaml	repeated.tsv

@@ -632,12 +632,13 @@ Ontology(
     std::fs::write(
         root.join("src/patterns/dosdp-patterns/part_of_x.yaml"),
         r#"pattern_name: part_of_x
+pattern_iri: http://purl.obolibrary.org/obo/cl/patterns/part_of_x.yaml
 classes:
   cell: CL:0000000
 relations:
   part_of: BFO:0000050
 vars:
-  part: "'thing'"
+  part: "'cell'"
 name:
   text: "%s cell"
   vars: [part]

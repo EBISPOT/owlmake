@@ -1,80 +1,47 @@
-//! DOSDP (Dead Simple OWL Design Patterns) generation — the `generate` step
-//! CL/UBERON/MONDO use to produce logical definitions and annotations from a
-//! pattern + a TSV data table.
+//! DOSDP (Dead Simple OWL Design Patterns): a pattern and a data table
+//! generate OWL axioms, one set for each row of the table.
 //!
 //! A pattern YAML declares entity dictionaries (`classes`, `relations`/
 //! `objectProperties`, `dataProperties`, `annotationProperties`), variables
-//! (`vars`, `list_vars`, `data_vars`, `data_list_vars`), text/annotation
-//! templates (`name`, `def`, `comment`, `*_synonym`, `xref`, `annotations`), and
-//! logical templates (`equivalentTo`, `subClassOf`, `disjointWith`, `GCI`, and
-//! the general `logical_axioms` list). Templates are printf-style (`%s` filled
-//! positionally from a `vars` list). Each data row instantiates the pattern: the
-//! logical templates become Manchester class expressions (parsed by
-//! [`crate::io::manchester`]) and the text templates become annotation axioms.
+//! (`vars`, `list_vars`, `data_vars`, `data_list_vars`, `internal_vars`,
+//! `substitutions`), text templates (`name`, `def`, `comment`, `namespace`,
+//! the synonym and `xref` fields, `annotations`) and logical templates
+//! (`equivalentTo`, `subClassOf`, `disjointWith`, `GCI`, and the general
+//! `logical_axioms` list). A template is printf text filled from its `vars`,
+//! or a `multi_clause` of such texts. Each row of a table fills the pattern
+//! (see [`render`]): its logical text is read as a Manchester-syntax class
+//! expression or axiom (see [`expression`]), its text templates become
+//! annotation assertions on the row's defined class.
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use horned_owl::model::{
     Annotation, AnnotatedComponent, AnnotationAssertion, AnnotationSubject, AnnotationValue, Build,
-    ClassExpression as CE, Component, DeclareClass, DisjointClasses, EquivalentClasses, Literal,
-    MutableOntology, RcStr, SubClassOf,
+    ClassExpression as CE, Component, DeclareClass, Literal, MutableOntology, RcStr,
 };
 use horned_owl::ontology::set::SetOntology;
-use regex::Regex;
 use serde::Deserialize;
 
-use crate::io::manchester;
+mod docs;
+mod expression;
+mod java;
+mod render;
+mod table;
 use crate::model::{default_prefixes, Model};
 
-/// Deserialize a field written as either a single `T` or a sequence of `T` into a
-/// `Vec<T>`. Patterns write `generated_synonyms:` (and friends) as a YAML
-/// **list**; a bare object is also accepted, for leniency.
-fn de_one_or_many<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum OneOrMany<T> {
-        One(T),
-        Many(Vec<T>),
-    }
-    Ok(match OneOrMany::<T>::deserialize(d)? {
-        OneOrMany::One(x) => vec![x],
-        OneOrMany::Many(v) => v,
-    })
-}
-
-/// Deserialize a field written as either a single string or a sequence of strings
-/// into a `Vec<String>`. Patterns write `xrefs:` as a **string** (a column
-/// reference); a list is also accepted.
-fn de_string_or_seq<'de, D>(d: D) -> Result<Vec<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum StrOrSeq {
-        Str(String),
-        Seq(Vec<String>),
-    }
-    Ok(match StrOrSeq::deserialize(d)? {
-        StrOrSeq::Str(s) => vec![s],
-        StrOrSeq::Seq(v) => v,
-    })
-}
+pub use docs::{docs_batch, docs_page, DocsOptions};
+pub use render::Prefixes;
+pub use table::TableFormat;
 
 const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
-const IAO_DEF: &str = "http://purl.obolibrary.org/obo/IAO_0000115";
-const OBO_IN_OWL: &str = "http://www.geneontology.org/formats/oboInOwl#";
-/// Default property for `--add-axiom-source-annotation`.
+/// The property a source annotation uses unless a run names another.
 const OBO_SOURCE: &str = "http://www.geneontology.org/formats/oboInOwl#source";
+/// The property a prototype titles its pattern's IRI with.
+const DCT_TITLE: &str = "http://purl.org/dc/terms/title";
 
 /// Which kinds of axioms `generate` emits (`--restrict-axioms-to`).
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Restrict {
     #[default]
     All,
@@ -83,11 +50,14 @@ pub enum Restrict {
 }
 
 impl Restrict {
-    pub fn parse(s: &str) -> Restrict {
+    /// `all`, `logical` or `annotation`, in any case. Anything else is refused:
+    /// a run asked for kinds of axioms it does not name.
+    pub fn parse(s: &str) -> Result<Restrict> {
         match s.to_ascii_lowercase().as_str() {
-            "logical" => Restrict::Logical,
-            "annotation" | "annotations" => Restrict::Annotation,
-            _ => Restrict::All,
+            "all" => Ok(Restrict::All),
+            "logical" => Ok(Restrict::Logical),
+            "annotation" => Ok(Restrict::Annotation),
+            _ => bail!("`{s}` is not a kind of axioms: all, logical or annotation"),
         }
     }
     fn allows_logical(self) -> bool {
@@ -99,42 +69,64 @@ impl Restrict {
 }
 
 /// Options for `generate`.
-#[derive(Default)]
 pub struct GenerateOptions {
     /// Emit only logical / only annotation / all axioms.
     pub restrict_axioms: Restrict,
-    /// A TSV column whose truthy value restricts that row to logical axioms
-    /// (`--restrict-axioms-column`).
+    /// A table column (`--restrict-axioms-column`) whose cell sets its row's
+    /// kinds of axioms: `all`, `logical` or `annotation`, in any case. An empty
+    /// cell, or a table without the column, takes [`restrict_axioms`](Self::restrict_axioms).
     pub restrict_axioms_column: Option<String>,
-    /// Annotate each generated axiom with its source pattern IRI.
+    /// Annotate each generated axiom with the pattern's `pattern_iri`.
     pub add_axiom_source_annotation: bool,
-    /// Property to use for the source annotation (default oboInOwl:source).
+    /// The property the source annotation uses, as an IRI or a CURIE;
+    /// `oboInOwl:source` when none is named. It has to name an IRI whether or
+    /// not the run annotates.
     pub axiom_source_annotation_property: Option<String>,
-    /// Auto-generate the `defined_class` IRI from `base_IRI` + a hash of the
-    /// variable fillers when the TSV has no `defined_class` column.
+    /// Mint each row's defined class from the pattern's `pattern_iri` and the
+    /// row's bindings, whatever its `defined_class` cell holds.
     pub generate_defined_class: bool,
-    /// Index for `permutations`: filler term IRI → (annotation property IRI →
-    /// values), built from the supplied ontology. Empty disables permutations.
+    /// The literal annotation values of the supplied ontology: term IRI →
+    /// property IRI → values. Readable identifiers other than `rdfs:label`
+    /// and `permutations` read it.
     pub annotation_index: HashMap<String, HashMap<String, Vec<String>>>,
-    /// Extra CURIE prefixes (e.g. a repo's `config/prefixes.yaml`: `SLM`, `LM`),
-    /// merged over the standard DOSDP set for entity expansion.
-    pub extra_prefixes: Vec<(String, String)>,
-    /// Per-VARIABLE display text, overriding the filler IRI's label. `prototype`
-    /// needs this: two variables may share one range class (OBA's `entity` and
-    /// `stimulus` are both `owl:Thing`), and each must still print as its own
-    /// name — a map keyed by filler IRI cannot express that.
-    pub var_labels: HashMap<String, String>,
-    /// Per-VARIABLE range EXPRESSION, substituted verbatim (names resolved,
-    /// no parentheses added) for the variable's `%s` in a logical template.
-    /// `prototype` fills a variable ranging over `'anatomical entity' or
-    /// 'cell'` this way, and the substituted text then parses under Manchester
-    /// precedence exactly as it stands in the template.
-    pub var_range_exprs: HashMap<String, String>,
-    /// Variables an `annotationProperty … var:` annotation is NOT written
-    /// for. `prototype` lists its class variables whose range names one of the
-    /// pattern's own classes or relations: a prototype carries such an
-    /// annotation only where the variable's range is an IRI of its own.
-    pub iri_annotation_skip: std::collections::HashSet<String>,
+    /// How a CURIE becomes an IRI.
+    pub prefixes: Prefixes,
+    /// How the data table separates and quotes its cells.
+    pub table_format: TableFormat,
+}
+
+impl Default for GenerateOptions {
+    /// Every axiom, OBO prefixes, a TSV table.
+    fn default() -> Self {
+        GenerateOptions {
+            restrict_axioms: Restrict::All,
+            restrict_axioms_column: None,
+            add_axiom_source_annotation: false,
+            axiom_source_annotation_property: None,
+            generate_defined_class: false,
+            annotation_index: HashMap::new(),
+            prefixes: Prefixes::obo(),
+            table_format: TableFormat::Tsv,
+        }
+    }
+}
+
+// ── The pattern ─────────────────────────────────────────────────────────────
+//
+// A pattern file is read into these as it states itself: a key the model does
+// not know is ignored, a key whose value is `null` is absent, and a key of the
+// wrong shape refuses the whole pattern. A list or text a pattern may leave out
+// is an `Option`, so a template that writes `vars: []` is a different template
+// from one that writes no `vars` (two OBO fields whose templates are the same
+// are one field, see `render`).
+
+/// A value a pattern may write as `null`, read as its default.
+fn nullable<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Deserialize, Default)]
@@ -143,66 +135,42 @@ struct Pattern {
     pattern_name: Option<String>,
     #[serde(default)]
     pattern_iri: Option<String>,
-    #[serde(rename = "base_IRI", default)]
-    base_iri: Option<String>,
+    #[serde(default)]
+    contributors: Option<Vec<String>>,
     #[serde(default)]
     description: Option<String>,
+    /// The annotation properties whose values stand for an entity in text, in
+    /// order of preference; `rdfs:label` when none are named.
     #[serde(default)]
+    readable_identifiers: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "nullable")]
     classes: BTreeMap<String, String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     relations: BTreeMap<String, String>,
-    #[serde(rename = "objectProperties", default)]
+    #[serde(rename = "objectProperties", default, deserialize_with = "nullable")]
     object_properties: BTreeMap<String, String>,
-    #[serde(rename = "dataProperties", default)]
+    #[serde(rename = "dataProperties", default, deserialize_with = "nullable")]
     data_properties: BTreeMap<String, String>,
-    #[serde(rename = "annotationProperties", default)]
+    #[serde(rename = "annotationProperties", default, deserialize_with = "nullable")]
     annotation_properties: BTreeMap<String, String>,
 
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable")]
     vars: BTreeMap<String, String>,
-    #[serde(rename = "list_vars", default)]
+    #[serde(default, deserialize_with = "nullable")]
     list_vars: BTreeMap<String, String>,
-    #[serde(rename = "data_vars", default)]
+    #[serde(default, deserialize_with = "nullable")]
     data_vars: BTreeMap<String, String>,
-    #[serde(rename = "data_list_vars", default)]
+    #[serde(default, deserialize_with = "nullable")]
     data_list_vars: BTreeMap<String, String>,
-
-    #[serde(default)]
-    name: Option<Template>,
-    #[serde(default)]
-    def: Option<Template>,
-    #[serde(default)]
-    comment: Option<Template>,
-    #[serde(default)]
-    namespace: Option<Template>,
-    #[serde(rename = "exact_synonym", default)]
-    exact_synonym: Option<Template>,
-    #[serde(rename = "narrow_synonym", default)]
-    narrow_synonym: Option<Template>,
-    #[serde(rename = "related_synonym", default)]
-    related_synonym: Option<Template>,
-    #[serde(rename = "broad_synonym", default)]
-    broad_synonym: Option<Template>,
-    #[serde(default)]
-    xref: Option<Template>,
-    #[serde(rename = "generated_synonyms", default, deserialize_with = "de_one_or_many")]
-    generated_synonyms: Vec<Template>,
-    #[serde(rename = "generated_narrow_synonyms", default, deserialize_with = "de_one_or_many")]
-    generated_narrow_synonyms: Vec<Template>,
-    #[serde(rename = "generated_broad_synonyms", default, deserialize_with = "de_one_or_many")]
-    generated_broad_synonyms: Vec<Template>,
-    #[serde(rename = "generated_related_synonyms", default, deserialize_with = "de_one_or_many")]
-    generated_related_synonyms: Vec<Template>,
-    #[serde(default)]
-    annotations: Vec<AnnotationDef>,
-
-    #[serde(default)]
-    substitutions: Vec<Substitution>,
-    #[serde(rename = "internal_vars", default)]
+    #[serde(default, deserialize_with = "nullable")]
     internal_vars: Vec<InternalVar>,
-    #[serde(rename = "instance_graph", default)]
-    instance_graph: Option<InstanceGraph>,
+    #[serde(default, deserialize_with = "nullable")]
+    substitutions: Vec<Substitution>,
 
+    #[serde(default, deserialize_with = "nullable")]
+    annotations: Vec<AnnotationDef>,
+    #[serde(default, deserialize_with = "nullable")]
+    logical_axioms: Vec<LogicalAxiom>,
     #[serde(rename = "equivalentTo", default)]
     equivalent_to: Option<AxiomTemplate>,
     #[serde(rename = "subClassOf", default)]
@@ -211,642 +179,770 @@ struct Pattern {
     disjoint_with: Option<AxiomTemplate>,
     #[serde(rename = "GCI", default)]
     gci: Option<AxiomTemplate>,
-    #[serde(rename = "logical_axioms", default)]
-    logical_axioms: Vec<LogicalAxiom>,
+
+    #[serde(default)]
+    name: Option<Template>,
+    #[serde(default)]
+    comment: Option<Template>,
+    #[serde(default)]
+    def: Option<Template>,
+    #[serde(default)]
+    namespace: Option<Template>,
+    #[serde(default)]
+    exact_synonym: Option<ListAnnotationObo>,
+    #[serde(default)]
+    narrow_synonym: Option<ListAnnotationObo>,
+    #[serde(default)]
+    related_synonym: Option<ListAnnotationObo>,
+    #[serde(default)]
+    broad_synonym: Option<ListAnnotationObo>,
+    #[serde(default, deserialize_with = "nullable")]
+    generated_synonyms: Vec<Template>,
+    #[serde(default, deserialize_with = "nullable")]
+    generated_narrow_synonyms: Vec<Template>,
+    #[serde(default, deserialize_with = "nullable")]
+    generated_broad_synonyms: Vec<Template>,
+    #[serde(default, deserialize_with = "nullable")]
+    generated_related_synonyms: Vec<Template>,
+    #[serde(default)]
+    xref: Option<ListAnnotationObo>,
+
+    /// Read for its shape alone: an instance graph generates nothing.
+    #[serde(default)]
+    #[allow(dead_code)]
+    instance_graph: Option<InstanceGraph>,
 }
 
-#[derive(Deserialize, Default, Clone)]
+/// A printf OBO annotation (`name`, `def`, `comment`, `namespace` and each
+/// `generated_*synonyms` entry): `text` filled from `vars`, else its
+/// `multi_clause`. Each item of the list variable `xrefs` names becomes a
+/// `hasDbXref` annotation on what it generates, beside its own `annotations`.
+#[derive(Deserialize, Default, Clone, PartialEq)]
 struct Template {
     #[serde(default)]
-    text: String,
+    annotations: Option<Vec<AnnotationDef>>,
     #[serde(default)]
-    vars: Vec<String>,
-    /// `def`-style cross-references attached as axiom annotations. Patterns
-    /// write this as a single string (a column reference); a list is also taken.
-    #[serde(default, deserialize_with = "de_string_or_seq")]
-    xrefs: Vec<String>,
+    xrefs: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    vars: Option<Vec<String>>,
     #[serde(default)]
     multi_clause: Option<MultiClause>,
-    /// `permutations`: generate extra annotation values by substituting, for a
-    /// variable, the values of the filler term's own annotation properties (e.g.
-    /// its synonyms) drawn from the supplied ontology — combinatorially with the
-    /// label.
-    #[serde(default)]
-    permutations: Vec<Permutation>,
-    /// A list variable: one annotation per item (e.g.
-    /// `exact_synonym: {value: exact_synonyms}`).
-    #[serde(default)]
-    value: Option<String>,
-    /// A single variable whose filler IRI becomes the annotation object (an
-    /// IRI-valued annotation).
-    #[serde(default)]
-    var: Option<String>,
-    /// Axiom annotations attached to the generated assertion — e.g. a `def`'s
-    /// nested `annotations:` carrying its `xref` provenance.
-    #[serde(default)]
-    annotations: Vec<AnnotationDef>,
+    /// Extra values for a variable: its filler's values of the named
+    /// annotation properties in the supplied ontology, beside its readable
+    /// identifier.
+    #[serde(default, deserialize_with = "permutations_field")]
+    permutations: Option<Vec<Permutation>>,
 }
 
-/// A permutation spec (`permutations`): for `var`, also substitute the filler
-/// term's values of the listed annotation properties (by their pattern
-/// short-names), in addition to its label.
-#[derive(Deserialize, Default, Clone)]
+/// A list OBO annotation (`exact_synonym`, `narrow_synonym`, `related_synonym`,
+/// `broad_synonym`, `xref`): one annotation per item of the list variable
+/// `value` names, each carrying the `hasDbXref` items of the list variable
+/// `xrefs` names. A printf object (`text` and `vars`) names no `value`, so it is
+/// refused here: printf synonyms are written under `generated_*`.
+#[derive(Deserialize, Clone, PartialEq)]
+#[serde(expecting = "a list annotation: a mapping with `value` (a list variable) and optionally `xrefs`")]
+struct ListAnnotationObo {
+    value: String,
+    #[serde(default)]
+    xrefs: Option<String>,
+}
+
+/// A template's `permutations`. Before dosdp-tools 0.20.0 a template has none,
+/// so the key is not read at all.
+fn permutations_field<'de, D>(d: D) -> Result<Option<Vec<Permutation>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    if writes_as_0_20() {
+        Option::<Vec<Permutation>>::deserialize(d)
+    } else {
+        serde::de::IgnoredAny::deserialize(d).map(|_| None)
+    }
+}
+
+/// `permutations`: for `var`, also its filler's values of the annotation
+/// properties named.
+#[derive(Deserialize, Clone, PartialEq)]
 struct Permutation {
     var: String,
-    #[serde(rename = "annotationProperties", default)]
+    #[serde(rename = "annotationProperties")]
     annotation_properties: Vec<String>,
 }
 
-/// A repeating-clause template (`multi_clause`): each clause is filled (a list
-/// variable repeats it), and the results are joined by `sep`.
-#[derive(Deserialize, Default, Clone)]
+/// A repeating template (`multi_clause`): each clause filled (a list variable
+/// repeats it), the results joined by `sep`.
+#[derive(Deserialize, Clone, PartialEq)]
 struct MultiClause {
     #[serde(default)]
     sep: Option<String>,
     #[serde(default)]
-    clauses: Vec<Clause>,
+    clauses: Option<Vec<Clause>>,
 }
 
-#[derive(Deserialize, Default, Clone)]
+#[derive(Deserialize, Clone, PartialEq)]
 struct Clause {
+    text: String,
     #[serde(default)]
-    text: Option<String>,
+    vars: Option<Vec<String>>,
     #[serde(default)]
-    vars: Vec<String>,
-    #[serde(default)]
-    sub_clauses: Vec<MultiClause>,
+    sub_clauses: Option<Vec<MultiClause>>,
 }
 
-/// A regex substitution producing a derived variable (`substitutions`).
-#[derive(Deserialize, Default, Clone)]
+/// A regex substitution (`substitutions`): the value of `in` rewritten into
+/// the variable `out`.
+#[derive(Deserialize, Clone, PartialEq)]
 struct Substitution {
     #[serde(rename = "in")]
     input: String,
     out: String,
-    #[serde(rename = "match", default)]
+    #[serde(rename = "match")]
     match_: String,
-    #[serde(default)]
     sub: String,
 }
 
-/// A derived variable computed from others (`internal_vars`): either a regex
-/// substitution over one input, or a join of several inputs.
-#[derive(Deserialize, Default, Clone)]
+/// An internal variable (`internal_vars`): the value `apply` gives the list
+/// variable `input`.
+#[derive(Deserialize, Clone, PartialEq)]
 struct InternalVar {
-    var: String,
+    var_name: String,
     #[serde(default)]
-    input: Option<String>,
-    #[serde(rename = "match", default)]
-    match_: Option<String>,
-    #[serde(default)]
-    sub: Option<String>,
-    #[serde(default)]
-    join: Option<Join>,
+    apply: Option<Function>,
+    input: String,
 }
 
-#[derive(Deserialize, Default, Clone)]
+/// An internal variable's function: `join` the input's items, or `regex`,
+/// which gives the empty string.
+#[derive(Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+enum Function {
+    Join { join: Join },
+    Regex {
+        #[allow(dead_code)]
+        regex: Substitution,
+    },
+}
+
+/// `join`: the items, separated by `sep`.
+#[derive(Deserialize, Clone, PartialEq)]
 struct Join {
-    #[serde(default)]
-    sep: Option<String>,
-    #[serde(default)]
-    vars: Vec<String>,
+    sep: String,
 }
 
-/// An instance graph (`instance_graph`): nodes become typed individuals and
-/// edges become object-property assertions.
-#[derive(Deserialize, Default, Clone)]
-struct InstanceGraph {
-    #[serde(default)]
-    nodes: BTreeMap<String, String>,
-    #[serde(default)]
-    edges: Vec<Vec<String>>,
-}
-
-#[derive(Deserialize, Default, Clone)]
+/// A logical template under `equivalentTo`, `subClassOf`, `disjointWith` or
+/// `GCI`. Its `multi_clause` joins its clauses with ` and ` or ` or `.
+#[derive(Deserialize, Default, Clone, PartialEq)]
 struct AxiomTemplate {
     #[serde(default)]
-    text: String,
-    #[serde(default)]
-    vars: Vec<String>,
-    #[serde(default)]
-    annotations: Vec<AnnotationDef>,
-    #[serde(default)]
-    multi_clause: Option<MultiClause>,
-}
-
-#[derive(Deserialize, Default, Clone)]
-struct LogicalAxiom {
-    #[serde(default)]
-    axiom_type: String,
-    #[serde(default)]
-    text: String,
-    #[serde(default)]
-    vars: Vec<String>,
-    #[serde(default)]
-    annotations: Vec<AnnotationDef>,
-    #[serde(default)]
-    multi_clause: Option<MultiClause>,
-}
-
-#[derive(Deserialize, Default, Clone)]
-struct AnnotationDef {
-    #[serde(rename = "annotationProperty", default)]
-    annotation_property: Option<String>,
+    annotations: Option<Vec<AnnotationDef>>,
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]
-    vars: Vec<String>,
-    /// A single variable whose filler IRI becomes the annotation object.
-    #[serde(default)]
-    var: Option<String>,
-    /// A list variable: one annotation axiom per list item.
-    #[serde(default)]
-    value: Option<String>,
-    #[serde(default, deserialize_with = "de_string_or_seq")]
-    xrefs: Vec<String>,
+    vars: Option<Vec<String>>,
     #[serde(default)]
     multi_clause: Option<MultiClause>,
-    #[serde(default)]
-    permutations: Vec<Permutation>,
-    /// `override`: a data column whose value, when present, supplies this
-    /// annotation's value directly, overriding the template.
-    #[serde(rename = "override", default)]
-    override_column: Option<String>,
-    /// Nested axiom annotations on this annotation (e.g. a generated synonym's
-    /// `xref` provenance).
-    #[serde(default)]
-    annotations: Vec<AnnotationDef>,
 }
 
-/// Parse a DOSDP pattern YAML robustly: strip a leading UTF-8 BOM (some OBO
-/// pattern files carry one) and take the first YAML document (tolerating stray
-/// `---` separators), which `serde_yaml::from_str` otherwise rejects.
-fn parse_pattern(yaml: &str) -> Result<Pattern> {
-    use serde::de::Deserialize;
-    let yaml = yaml.strip_prefix('\u{feff}').unwrap_or(yaml);
-    let mut last_err = None;
-    for doc in serde_yaml::Deserializer::from_str(yaml) {
-        match Pattern::deserialize(doc) {
-            Ok(p) => return Ok(p),
-            Err(e) => last_err = Some(e),
+/// An entry of `logical_axioms`.
+#[derive(Deserialize, Clone, PartialEq)]
+struct LogicalAxiom {
+    #[serde(default)]
+    annotations: Option<Vec<AnnotationDef>>,
+    axiom_type: AxiomType,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    vars: Option<Vec<String>>,
+    #[serde(default)]
+    multi_clause: Option<MultiClause>,
+}
+
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+enum AxiomType {
+    #[serde(rename = "equivalentTo")]
+    EquivalentTo,
+    #[serde(rename = "subClassOf")]
+    SubClassOf,
+    #[serde(rename = "disjointWith")]
+    DisjointWith,
+    #[serde(rename = "GCI")]
+    Gci,
+}
+
+impl AxiomType {
+    /// The name a pattern gives the kind.
+    fn name(self) -> &'static str {
+        match self {
+            AxiomType::EquivalentTo => "equivalentTo",
+            AxiomType::SubClassOf => "subClassOf",
+            AxiomType::DisjointWith => "disjointWith",
+            AxiomType::Gci => "GCI",
         }
     }
-    match last_err {
-        Some(e) => Err(anyhow!("parsing DOSDP pattern: {e}")),
-        None => bail!("empty DOSDP pattern"),
+}
+
+/// An entry of `annotations`: a list annotation when it names a `value`, else
+/// an IRI-valued one when it names a `var`, else a printf one. Each names its
+/// `annotationProperty`.
+#[derive(Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+enum AnnotationDef {
+    List {
+        #[serde(default)]
+        annotations: Option<Vec<AnnotationDef>>,
+        #[serde(rename = "annotationProperty")]
+        annotation_property: String,
+        value: String,
+    },
+    Iri {
+        #[serde(default)]
+        annotations: Option<Vec<AnnotationDef>>,
+        #[serde(rename = "annotationProperty")]
+        annotation_property: String,
+        var: String,
+    },
+    Printf {
+        #[serde(default)]
+        annotations: Option<Vec<AnnotationDef>>,
+        #[serde(rename = "annotationProperty")]
+        annotation_property: String,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        vars: Option<Vec<String>>,
+        /// A column whose cell, when it holds anything, is the annotation's
+        /// value in place of the template's.
+        #[serde(rename = "override", default)]
+        override_column: Option<String>,
+        #[serde(default)]
+        multi_clause: Option<MultiClause>,
+        #[serde(default, deserialize_with = "permutations_field")]
+        permutations: Option<Vec<Permutation>>,
+    },
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct InstanceGraph {
+    nodes: BTreeMap<String, String>,
+    edges: Vec<InstanceEdge>,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct InstanceEdge {
+    edge: Vec<String>,
+    #[serde(default)]
+    annotations: Option<Vec<AnnotationDef>>,
+    #[serde(default)]
+    not: Option<bool>,
+}
+
+/// The YAML documents of `text`, a leading byte-order mark aside, each read
+/// into one value.
+///
+/// A mapping that names a key more than once keeps the last mention: its
+/// value, at its place. A `<<` entry merges the mapping it holds, or each
+/// mapping of the sequence it holds in turn, in at its own place. A merged key
+/// takes the value of the first mapping that merges it, and a key the mapping
+/// names itself takes its own value, at whichever place names the key first.
+/// A scalar is the string, number, boolean or null its YAML form resolves to,
+/// so a number is not text.
+pub(crate) fn yaml_documents(text: &str) -> Result<Vec<serde_yaml::Value>> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    serde_yaml::Deserializer::from_str(text)
+        .map(|document| Ok(Resolved::deserialize(document)?.0))
+        .collect()
+}
+
+/// A YAML value read as [`yaml_documents`] reads one.
+struct Resolved(serde_yaml::Value);
+
+impl<'de> Deserialize<'de> for Resolved {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde_yaml::Value;
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Resolved;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a YAML value")
+            }
+            fn visit_bool<E>(self, b: bool) -> Result<Resolved, E> {
+                Ok(Resolved(Value::Bool(b)))
+            }
+            fn visit_i64<E>(self, n: i64) -> Result<Resolved, E> {
+                Ok(Resolved(Value::Number(n.into())))
+            }
+            fn visit_u64<E>(self, n: u64) -> Result<Resolved, E> {
+                Ok(Resolved(Value::Number(n.into())))
+            }
+            fn visit_f64<E>(self, n: f64) -> Result<Resolved, E> {
+                Ok(Resolved(Value::Number(n.into())))
+            }
+            fn visit_str<E>(self, s: &str) -> Result<Resolved, E> {
+                Ok(Resolved(Value::String(s.to_string())))
+            }
+            fn visit_string<E>(self, s: String) -> Result<Resolved, E> {
+                Ok(Resolved(Value::String(s)))
+            }
+            fn visit_unit<E>(self) -> Result<Resolved, E> {
+                Ok(Resolved(Value::Null))
+            }
+            fn visit_none<E>(self) -> Result<Resolved, E> {
+                Ok(Resolved(Value::Null))
+            }
+            fn visit_some<D: serde::Deserializer<'de>>(self, d: D) -> Result<Resolved, D::Error> {
+                Resolved::deserialize(d)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Resolved, A::Error> {
+                let mut items = Vec::new();
+                while let Some(Resolved(item)) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(Resolved(Value::Sequence(items)))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Resolved, A::Error> {
+                let mut entries: Vec<(Value, Value)> = Vec::new();
+                while let Some((Resolved(key), Resolved(value))) = map.next_entry()? {
+                    if !is_merge_key(&key) {
+                        entries.retain(|(k, _)| *k != key);
+                    }
+                    entries.push((key, value));
+                }
+                let mut out = serde_yaml::Mapping::new();
+                merge_entries(&mut out, entries, true).map_err(serde::de::Error::custom)?;
+                Ok(Resolved(Value::Mapping(out)))
+            }
+        }
+        d.deserialize_any(Visitor)
     }
+}
+
+fn is_merge_key(key: &serde_yaml::Value) -> bool {
+    key.as_str() == Some("<<")
+}
+
+/// Add `entries` to `out` in order, merging in what each `<<` entry holds. An
+/// entry whose key `out` already has replaces its value only when `own`: the
+/// entries are the mapping's own rather than merged in.
+fn merge_entries(
+    out: &mut serde_yaml::Mapping,
+    entries: impl IntoIterator<Item = (serde_yaml::Value, serde_yaml::Value)>,
+    own: bool,
+) -> Result<(), String> {
+    use serde_yaml::Value;
+    for (key, value) in entries {
+        if is_merge_key(&key) {
+            match value {
+                Value::Mapping(m) => merge_entries(out, m, false)?,
+                Value::Sequence(items) => {
+                    for item in items {
+                        let Value::Mapping(m) = item else {
+                            return Err("a `<<` sequence merges mappings, and this holds something else".into());
+                        };
+                        merge_entries(out, m, false)?;
+                    }
+                }
+                _ => return Err("a `<<` entry merges a mapping or a sequence of mappings".into()),
+            }
+        } else if own || !out.contains_key(&key) {
+            out.insert(key, value);
+        }
+    }
+    Ok(())
+}
+
+/// The one YAML document of a pattern.
+fn pattern_document(yaml: &str) -> Result<serde_yaml::Value> {
+    let mut documents = yaml_documents(yaml).map_err(|e| anyhow!("parsing DOSDP pattern: {e}"))?.into_iter();
+    let Some(document) = documents.next() else { bail!("empty DOSDP pattern") };
+    if documents.next().is_some() {
+        bail!("parsing DOSDP pattern: a pattern is one YAML document, and this holds more than one");
+    }
+    Ok(document)
+}
+
+/// `value` decoded as a `T`, an error naming the path to the value it could
+/// not decode.
+pub(crate) fn decode<T: serde::de::DeserializeOwned>(value: serde_yaml::Value) -> Result<T> {
+    serde_path_to_error::deserialize(value).map_err(|e| {
+        let path = e.path().to_string();
+        if path == "." {
+            anyhow!("{}", e.inner())
+        } else {
+            anyhow!("{path}: {}", e.inner())
+        }
+    })
+}
+
+/// Read a pattern from its one YAML document (see [`yaml_documents`]).
+fn parse_pattern(yaml: &str) -> Result<Pattern> {
+    let pattern: Pattern =
+        decode(pattern_document(yaml)?).map_err(|e| anyhow!("parsing DOSDP pattern: {e}"))?;
+    for (key, template) in [
+        ("equivalentTo", &pattern.equivalent_to),
+        ("subClassOf", &pattern.subclass_of),
+        ("disjointWith", &pattern.disjoint_with),
+        ("GCI", &pattern.gci),
+    ] {
+        if let Some(mc) = template.as_ref().and_then(|t| t.multi_clause.as_ref()) {
+            let sep = mc.sep.as_deref().unwrap_or("");
+            if sep != " and " && sep != " or " {
+                bail!("parsing DOSDP pattern: {key}: a multi_clause joins logical expressions with ' and ' or ' or ', not '{sep}'");
+            }
+        }
+    }
+    Ok(pattern)
 }
 
 /// Schema-validate a DOSDP pattern YAML — the check every
 /// `dosdp-patterns/*.yaml` in a repo has to pass before generation.
 ///
 /// This is a REAL schema check, against the DOSDP JSON Schema (see
-/// [`crate::cmd::validate_patterns`]). `parse_pattern(yaml)` validates nothing
-/// and cannot stand in for it: [`Pattern`] has no `deny_unknown_fields` and
-/// `#[serde(default)]` on every field, so any YAML mapping at all deserializes
-/// successfully and a schema-invalid pattern would report PASS.
-///
-/// [`parse_pattern`] itself stays permissive on purpose — generation runs after
-/// validation, so it must load every pattern that got past this gate.
+/// [`crate::cmd::validate_patterns`]). Reading a pattern for generation is not
+/// one: the generator ignores keys it does not know.
 pub fn validate(yaml: &str) -> Result<()> {
     crate::cmd::validate_patterns::validate_text(yaml)
 }
 
-/// Prefix map for DOSDP generation: the standard set plus the OBO-pattern
-/// aliases (`oio`, `dct`, `skos`), which OBO patterns use ubiquitously and never
-/// declare themselves — `oio:hasExactSynonym`, `dct:contributor`, etc.
-fn dosdp_prefixes() -> horned_owl::curie::PrefixMapping {
-    let mut p = default_prefixes();
-    let _ = p.add_prefix("oio", "http://www.geneontology.org/formats/oboInOwl#");
-    let _ = p.add_prefix("dct", "http://purl.org/dc/terms/");
-    let _ = p.add_prefix("skos", "http://www.w3.org/2004/02/skos/core#");
-    p
+/// Whether output follows the dosdp-tools 0.20.0 generator: data variables fill
+/// logical text unquoted and name IRIs for IRI-valued annotations, and
+/// `permutations` add annotations.
+fn writes_as_0_20() -> bool {
+    dosdp_tools_version() >= (0, 20, 0)
 }
 
-/// Generate OWL from a DOSDP pattern + a TSV data table with default options.
-/// `labels` optionally maps filler IRIs to labels for the text templates.
-pub fn generate(
-    pattern_yaml: &str,
-    data_tsv: &str,
-    labels: &HashMap<String, String>,
-) -> Result<Model> {
-    generate_with(pattern_yaml, data_tsv, labels, &GenerateOptions::default())
+/// The keys of a pattern's `key` mapping (`vars:`, `data_vars:`, …) in the
+/// order the mapping iterates (see [`scala_map_key_order`]): the order the
+/// pattern writes them, beyond four by their hash.
+fn ordered_keys(pattern_yaml: &str, key: &str, dict: &BTreeMap<String, String>) -> Vec<String> {
+    let written = pattern_key_order(pattern_yaml, key);
+    let keys: Vec<String> = if written.len() == dict.len() && written.iter().all(|k| dict.contains_key(k)) {
+        written
+    } else {
+        dict.keys().cloned().collect()
+    };
+    scala_map_key_order(&keys).into_iter().map(|i| keys[i].clone()).collect()
 }
 
-/// Parse a delimited table into records, honoring RFC 4180 quoting — a field
-/// wrapped in `"` has its surrounding quotes stripped and doubled `""`
-/// unescaped, and a quoted field may contain the delimiter or a newline. A
-/// naive `split('\t')` would keep a curator's surrounding quotes (e.g. a
-/// comma-bearing `def` column written `"A venule, …"`), emitting a literal
-/// `\"…\"` value and, worse, mis-splitting on tabs inside a quote. Blank lines
-/// are dropped before parsing.
-fn parse_table_records(text: &str, delim: char) -> Vec<Vec<String>> {
-    let cleaned: String = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if cleaned.is_empty() {
-        return Vec::new();
-    }
-
-    let mut records: Vec<Vec<String>> = Vec::new();
-    let mut record: Vec<String> = Vec::new();
-    let mut field = String::new();
-    let mut in_quotes = false;
-    let mut at_field_start = true;
-    let mut chars = cleaned.chars().peekable();
-    while let Some(c) = chars.next() {
-        if in_quotes {
-            if c == '"' {
-                if chars.peek() == Some(&'"') {
-                    field.push('"');
-                    chars.next();
-                } else {
-                    in_quotes = false;
-                }
-            } else {
-                field.push(c);
-            }
-        } else if c == '"' && at_field_start {
-            in_quotes = true;
-            at_field_start = false;
-        } else if c == delim {
-            record.push(std::mem::take(&mut field));
-            at_field_start = true;
-        } else if c == '\n' {
-            record.push(std::mem::take(&mut field));
-            records.push(std::mem::take(&mut record));
-            at_field_start = true;
-        } else if c != '\r' {
-            field.push(c);
-            at_field_start = false;
-        }
-    }
-    record.push(field);
-    records.push(record);
-    records
+/// The least of `values` as text compares in UTF-16 code units.
+fn least<'a>(values: impl IntoIterator<Item = &'a String>) -> Option<&'a String> {
+    values.into_iter().min_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()))
 }
 
-/// Generate OWL from a DOSDP pattern + a TSV data table, honoring `gopts`.
+// ── Generating ──────────────────────────────────────────────────────────────
+
+/// Generate OWL from a pattern and a data table with the default options:
+/// every axiom, OBO prefixes, a TSV table. `labels` maps a term IRI to its
+/// `rdfs:label`.
+pub fn generate(pattern_yaml: &str, data: &str, labels: &HashMap<String, String>) -> Result<Model> {
+    generate_with(pattern_yaml, data, labels, &GenerateOptions::default())
+}
+
+/// Generate OWL from a pattern and a data table under `gopts`.
+///
+/// The table's lines that hold nothing above U+0020 are dropped before it is
+/// read (see [`table`]); its first record names the columns.
 pub fn generate_with(
     pattern_yaml: &str,
-    data_tsv: &str,
+    data: &str,
     labels: &HashMap<String, String>,
     gopts: &GenerateOptions,
 ) -> Result<Model> {
-    let pattern: Pattern =
-        parse_pattern(pattern_yaml)?;
-    let source_prop = gopts
-        .axiom_source_annotation_property
-        .clone()
-        .unwrap_or_else(|| OBO_SOURCE.to_string());
-
-    // Merge every entity dictionary into one short-name → IRI map for Manchester
-    // substitution — object, data and annotation properties included, not just
-    // classes and relations.
-    let mut names: BTreeMap<String, String> = BTreeMap::new();
-    for dict in [
-        &pattern.classes,
-        &pattern.relations,
-        &pattern.object_properties,
-        &pattern.data_properties,
-        &pattern.annotation_properties,
-    ] {
-        for (k, v) in dict {
-            names.insert(k.clone(), v.clone());
-        }
-    }
-
-    let records = parse_table_records(data_tsv, '\t');
-    let mut records = records.into_iter();
-    let header: Vec<String> = records
-        .next()
-        .ok_or_else(|| anyhow!("empty DOSDP data table"))?
-        .into_iter()
-        .map(|c| c.trim().to_string())
-        .collect();
-    let dc_idx = header.iter().position(|h| h == "defined_class" || h == "defined class");
-    if dc_idx.is_none() && !gopts.generate_defined_class {
-        bail!("DOSDP data table needs a `defined_class` column (or --generate-defined-class)");
-    }
-    let col = |name: &str| header.iter().position(|h| h == name);
-
+    let source_property = match &gopts.axiom_source_annotation_property {
+        Some(p) => gopts
+            .prefixes
+            .iri(p)
+            .ok_or_else(|| anyhow!("the axiom source annotation property `{p}` names no IRI"))?,
+        None => OBO_SOURCE.to_string(),
+    };
+    let pattern = parse_pattern(pattern_yaml)?;
+    let (_, rows) = table::read_generator_table(data, gopts.table_format)?;
     let b = Build::new();
-    let mut prefixes = dosdp_prefixes();
-    // A repo's custom prefixes (`config/prefixes.yaml`: `SLM`, `LM`, …) win over
-    // the standard set, so `SLM:000043005` expands to its SwissLipids IRI.
-    for (p, ns) in &gopts.extra_prefixes {
-        let _ = prefixes.add_prefix(p, ns);
-    }
-    let mut ont: SetOntology<RcStr> = SetOntology::new();
-
-    for cells in records {
-        let line = cells.join("\t");
-        let cells: Vec<&str> = cells.iter().map(String::as_str).collect();
-        // The defined class IRI: from the `defined_class` cell, or — under
-        // --generate-defined-class — minted from base_IRI + a hash of the row.
-        let dc_iri = match dc_idx.and_then(|i| cells.get(i)).map(|v| v.trim()) {
-            Some(v) if !v.is_empty() => expand(&prefixes, v),
-            _ if gopts.generate_defined_class => mint_defined_class(&pattern, &line),
-            _ => continue,
+    let mut ont = generate_rows(&b, &pattern, pattern_yaml, &rows, labels, gopts)?;
+    if gopts.add_axiom_source_annotation {
+        // The pattern's `pattern_iri` as written, on every generated axiom,
+        // beside the annotations it already carries.
+        let Some(pattern_iri) = pattern.pattern_iri.as_deref() else {
+            bail!("--add-axiom-source-annotation needs the pattern's `pattern_iri`, and this pattern has none");
         };
-        ont.insert(Component::DeclareClass(DeclareClass(b.class(dc_iri.clone()))));
-
-        // Raw cell value(s), split on `|`.
-        let raw_cell = |var: &str| -> Vec<String> {
-            let Some(idx) = col(var) else { return Vec::new() };
-            let Some(raw) = cells.get(idx).map(|c| c.trim()) else { return Vec::new() };
-            if raw.is_empty() {
-                return Vec::new();
-            }
-            raw.split('|').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
+        let source = Annotation {
+            ap: b.annotation_property(source_property),
+            av: AnnotationValue::IRI(b.iri(pattern_iri.to_string())),
+            ann: Default::default(),
         };
-        // Whole (un-split) cell value of a column, if present and non-empty. Used
-        // for OBO **override columns** (`defined_class_name`, …): when the data
-        // table has such a column with a value, it overrides the field's
-        // template, so a curator can hand-write one row's label or definition.
-        let cell_value = |colname: &str| -> Option<String> {
-            let v = col(colname).and_then(|i| cells.get(i)).map(|c| c.trim())?;
-            (!v.is_empty()).then(|| v.to_string())
-        };
-        // Derived variables from `substitutions` and `internal_vars` (regex_sub
-        // / join), computed once per row and consulted before the TSV columns.
-        let derived = compute_derived(&pattern, &raw_cell);
-
-        let is_list = |var: &str| {
-            pattern.list_vars.contains_key(var) || pattern.data_list_vars.contains_key(var)
-        };
-        // A variable is a *data* variable when it is declared in `data_vars` /
-        // `data_list_vars`, is regex-derived, OR is declared under `vars` /
-        // `list_vars` with a **datatype range** (e.g. `usage_notes: xsd:string`):
-        // DOSDP keys data-ness on the range, not the dictionary it sits in.
-        let is_data = |var: &str| {
-            derived.contains_key(var)
-                || pattern.data_vars.contains_key(var)
-                || pattern.data_list_vars.contains_key(var)
-                || pattern.vars.get(var).is_some_and(|r| is_datatype_range(r))
-                || pattern.list_vars.get(var).is_some_and(|r| is_datatype_range(r))
-        };
-
-        // Raw filler value(s) for a variable: a derived value, else the cell
-        // (split on `|` for list vars). Data/derived vars stay literal; entity
-        // vars are expanded to IRIs.
-        let var_values = |var: &str| -> Vec<String> {
-            if let Some(v) = derived.get(var) {
-                return v.clone();
-            }
-            let parts = raw_cell(var);
-            if parts.is_empty() {
-                return Vec::new();
-            }
-            let parts = if is_list(var) { parts } else { parts.into_iter().take(1).collect() };
-            parts.into_iter().map(|p| if is_data(var) { p } else { expand(&prefixes, &p) }).collect()
-        };
-
-        // A DOSDP variable must be *declared* to be usable: `var:`/`value:`
-        // resolve only against the declared dictionaries, so a reference to a
-        // bare TSV column contributes nothing. CL's `cyclingCellStates` pattern
-        // has `annotationProperty: contributor` / `var: creator` with no
-        // `creator` declaration anywhere, and so must yield no
-        // `terms:contributor` axiom at all.
-        let is_declared = |var: &str| {
-            derived.contains_key(var)
-                || pattern.vars.contains_key(var)
-                || pattern.list_vars.contains_key(var)
-                || pattern.data_vars.contains_key(var)
-                || pattern.data_list_vars.contains_key(var)
-        };
-
-        let raw_values = |var: &str| -> Vec<String> {
-            if let Some(v) = derived.get(var) {
-                return v.clone();
-            }
-            raw_cell(var)
-        };
-
-        let ctx = RowCtx {
-            b: &b,
-            prefixes: &prefixes,
-            names: &names,
-            labels,
-            var_labels: &gopts.var_labels,
-            var_range_exprs: &gopts.var_range_exprs,
-            iri_annotation_skip: &gopts.iri_annotation_skip,
-            var_values: &var_values,
-            is_declared: &is_declared,
-            raw_values: &raw_values,
-            is_data: &is_data,
-            is_list: &is_list,
-            annotation_index: &gopts.annotation_index,
-            cell_value: &cell_value,
-        };
-
-        // ── Logical axioms ───────────────────────────────────────────────
-        let mut logical: Vec<(String, AxiomTemplate)> = Vec::new();
-        if let Some(t) = &pattern.equivalent_to {
-            logical.push(("equivalentTo".into(), t.clone()));
-        }
-        if let Some(t) = &pattern.subclass_of {
-            logical.push(("subClassOf".into(), t.clone()));
-        }
-        if let Some(t) = &pattern.disjoint_with {
-            logical.push(("disjointWith".into(), t.clone()));
-        }
-        if let Some(t) = &pattern.gci {
-            logical.push(("GCI".into(), t.clone()));
-        }
-        for la in &pattern.logical_axioms {
-            logical.push((
-                la.axiom_type.clone(),
-                AxiomTemplate {
-                    text: la.text.clone(),
-                    vars: la.vars.clone(),
-                    annotations: la.annotations.clone(),
-                    multi_clause: la.multi_clause.clone(),
-                },
-            ));
-        }
-
-        // Per-row axiom restriction: a truthy `--restrict-axioms-column` cell
-        // forces this row to logical axioms only.
-        let row_restrict = match &gopts.restrict_axioms_column {
-            Some(c) if col(c).and_then(|i| cells.get(i)).map(|v| is_truthy(v.trim())).unwrap_or(false) => {
-                Restrict::Logical
-            }
-            _ => gopts.restrict_axioms,
-        };
-        // Optional per-axiom source annotation (= the pattern IRI).
-        let source_ann: Option<Annotation<RcStr>> =
-            if gopts.add_axiom_source_annotation {
-                pattern.pattern_iri.as_ref().map(|piri| Annotation { ann: Default::default(),
-                    ap: b.annotation_property(source_prop.clone()),
-                    av: AnnotationValue::IRI(b.iri(expand(&prefixes, piri))),
-                })
-            } else {
-                None
-            };
-
-        if row_restrict.allows_logical() {
-            for (axiom_type, t) in &logical {
-                emit_logical(&mut ont, &ctx, &dc_iri, axiom_type, t, source_ann.as_ref());
-            }
-            if let Some(ig) = &pattern.instance_graph {
-                emit_instance_graph(&mut ont, &ctx, &dc_iri, ig);
-            }
-        }
-        if !row_restrict.allows_annotation() {
-            continue;
-        }
-
-        // Emit a single template field as one annotation per filled value, unless
-        // its OBO **override column** is set in the data row (then that value wins,
-        // template skipped). `name`/`comment`/`namespace`/`def`/`generated_*` have
-        // override columns; the plain `*_synonym`/`xref` fields do not (`None`).
-        let emit_field = |ont: &mut SetOntology<RcStr>, t: &Template, prop: &str, ovcol: Option<&str>| {
-            // The axiom-annotation set: `xref` provenance plus any nested
-            // `annotations:` (e.g. a `def`'s `xref: "AUTO:patterns/…"`).
-            let mut ann = ctx.axiom_annotations(&t.annotations);
-            for x in ctx.resolve_xrefs(&t.xrefs) {
-                ann.insert(Annotation { ann: Default::default(),
-                    ap: b.annotation_property(format!("{OBO_IN_OWL}hasDbXref")),
-                    av: AnnotationValue::Literal(Literal::Simple { literal: x }),
-                });
-            }
-            // An override column value wins over everything (when present).
-            if let Some(v) = ovcol.and_then(cell_value) {
-                assert_text_ann(&b, ont, &dc_iri, prop, &v, ann);
-                return;
-            }
-            // `value`: a list variable → one annotation per item (e.g.
-            // `exact_synonym: {value: exact_synonyms}`).
-            if let Some(var) = &t.value {
-                for v in (ctx.var_values)(var) {
-                    let val = if (ctx.is_data)(var) {
-                        v
-                    } else {
-                        ctx.display(var, &v)
-                    };
-                    assert_text_ann(&b, ont, &dc_iri, prop, &val, ann.clone());
-                }
-                return;
-            }
-            // `var`: an IRI-valued annotation (the filler IRI is the object).
-            if let Some(var) = &t.var {
-                if let Some(iri) = (ctx.var_values)(var).into_iter().next() {
-                    ont.insert(AnnotatedComponent {
-                        component: Component::AnnotationAssertion(AnnotationAssertion {
-                            subject: AnnotationSubject::IRI(b.iri(dc_iri.clone())),
-                            ann: Annotation { ann: Default::default(),
-                                ap: b.annotation_property(prop.to_string()),
-                                av: AnnotationValue::IRI(b.iri(iri)),
-                            },
-                        }),
-                        ann,
-                    });
-                }
-                return;
-            }
-            for text in ctx.fill_text_values(t) {
-                assert_text_ann(&b, ont, &dc_iri, prop, &text, ann.clone());
-            }
-        };
-
-        // ── OBO convenience annotation fields ────────────────────────────
-        for (field, prop, ovcol) in [
-            (&pattern.name, RDFS_LABEL, Some("defined_class_name")),
-            (&pattern.comment, RDFS_COMMENT, Some("defined_class_comment")),
-            (&pattern.namespace, &*format!("{OBO_IN_OWL}hasOBONamespace"), Some("defined_class_namespace")),
-            (&pattern.exact_synonym, &*format!("{OBO_IN_OWL}hasExactSynonym"), None),
-            (&pattern.narrow_synonym, &*format!("{OBO_IN_OWL}hasNarrowSynonym"), None),
-            (&pattern.related_synonym, &*format!("{OBO_IN_OWL}hasRelatedSynonym"), None),
-            (&pattern.broad_synonym, &*format!("{OBO_IN_OWL}hasBroadSynonym"), None),
-            (&pattern.xref, &*format!("{OBO_IN_OWL}hasDbXref"), None),
-        ] {
-            if let Some(t) = field {
-                emit_field(&mut ont, t, prop, ovcol);
-            }
-        }
-        // `generated_*synonyms` (each a YAML list of templates) are processed
-        // exactly like the regular `*_synonym` fields — same printf/multi_clause
-        // path — because they land on the same annotation property; the only
-        // distinction is that they have an override column. So a bare-`%s` list
-        // var yields nothing, and per-item synonyms come only from
-        // `multi_clause`; a raw IRI is never used as a synonym value.
-        for (templates, prop, ovcol) in [
-            (&pattern.generated_synonyms, &*format!("{OBO_IN_OWL}hasExactSynonym"), "defined_class_exact_synonym"),
-            (&pattern.generated_narrow_synonyms, &*format!("{OBO_IN_OWL}hasNarrowSynonym"), "defined_class_narrow_synonym"),
-            (&pattern.generated_broad_synonyms, &*format!("{OBO_IN_OWL}hasBroadSynonym"), "defined_class_broad_synonym"),
-            (&pattern.generated_related_synonyms, &*format!("{OBO_IN_OWL}hasRelatedSynonym"), "defined_class_related_synonym"),
-        ] {
-            for t in templates {
-                emit_field(&mut ont, t, prop, Some(ovcol));
-            }
-        }
-        // `def` carries its own xref axiom-annotations.
-        if let Some(t) = &pattern.def {
-            emit_field(&mut ont, t, IAO_DEF, Some("defined_class_definition"));
-        }
-
-        // ── Free-form annotations list ───────────────────────────────────
-        for ann in &pattern.annotations {
-            emit_annotation(&mut ont, &ctx, &dc_iri, ann);
-        }
-    }
-
-    // A row the pattern cannot fill produces NOTHING — not even a declaration.
-    // The defined class is declared up front here (the loop needs it before it
-    // knows whether the row will yield anything), so drop the declarations that
-    // ended up standing alone. MP's `obstructedAnatomicalEntity` pattern reads a
-    // var named `anatomical_space` from a table whose column is
-    // `anatomical_entity`: all fourteen of its rows fill nothing, and without
-    // this sweep `definitions.owl` would carry fourteen bare
-    // `Declaration(Class(MP_…))` for classes it asserts nothing else about.
-    {
-        let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for ac in ont.iter() {
-            if matches!(ac.component, Component::DeclareClass(_)) {
-                continue;
-            }
-            referenced.extend(crate::sig::signature(&ac.component));
-            for a in ac.ann.iter() {
-                referenced.insert(a.ap.0.as_ref().to_string());
-            }
-        }
-        let orphans: Vec<_> = ont
-            .iter()
-            .filter(|ac| match &ac.component {
-                Component::DeclareClass(d) => !referenced.contains(d.0 .0.as_ref()),
-                _ => false,
-            })
-            .cloned()
-            .collect();
-        for ac in orphans {
+        let generated: Vec<_> = ont.iter().cloned().collect();
+        for mut ac in generated {
             ont.remove(&ac);
+            ac.ann.insert(source.clone());
+            ont.insert(ac);
         }
     }
-
-    // Emit a `Declaration(...)` for every entity in the generated ontology's
-    // signature — the defined classes, the filler classes (CHEBI, …), the
-    // relation object properties (RO, …), and the annotation properties used
-    // (IAO_0000115, oboInOwl:hasExactSynonym). Built-in vocabulary (rdfs:label,
-    // owl:Thing, xsd:string, …) is never declared. The set is exact, not merely
-    // sufficient: released `definitions.owl` files carry precisely these
-    // declarations, so a regenerated one has to be axiom-identical and not just
-    // logically equivalent, or every rebuild is a whole-file diff.
-    declare_signature(&mut ont, &b);
-
-    let mut m = Model::from_parts(ont, prefixes);
-    // The generated module declares only the structural prefixes and spells
-    // every other IRI in full. That matters downstream, not here:
-    // `om merge -i <module>… -o definitions.ofn` keeps the FIRST input's prefix
-    // map, so a module carrying om's whole CURIE table would put `oio`, `dct`,
-    // `LM`, `SLM` and friends into the released `patterns/definitions.owl`,
-    // which should declare only `:`/owl/rdf/xml/xsd/rdfs.
-    m.format_prefixes_cleared = true;
-    Ok(m)
+    Ok(generated_model(ont, &b))
 }
 
+/// The axioms `rows` generate from `pattern`.
+fn generate_rows(
+    b: &Build<RcStr>,
+    pattern: &Pattern,
+    pattern_yaml: &str,
+    rows: &[table::Row],
+    labels: &HashMap<String, String>,
+    gopts: &GenerateOptions,
+) -> Result<SetOntology<RcStr>> {
+    let readable = render::Readable { labels, index: &gopts.annotation_index };
+    let renderer = render::Renderer::new(b, pattern, pattern_yaml, &gopts.prefixes, readable, writes_as_0_20())?;
+    renderer.check_readable()?;
+    let options = render::RowOptions {
+        restrict_axioms: gopts.restrict_axioms,
+        restrict_axioms_column: gopts.restrict_axioms_column.as_deref(),
+        generate_defined_class: gopts.generate_defined_class,
+    };
+    let mut ont: SetOntology<RcStr> = SetOntology::new();
+    for (i, row) in rows.iter().enumerate() {
+        let (logical, annotation) = renderer.render(row, &options).with_context(|| format!("row {} of the table", i + 1))?;
+        for ac in logical.into_iter().chain(annotation) {
+            ont.insert(ac);
+        }
+    }
+    Ok(ont)
+}
+
+/// The generated axioms as a model: every entity they name declared, the
+/// prefix map left for the writer to choose.
+fn generated_model(mut ont: SetOntology<RcStr>, b: &Build<RcStr>) -> Model {
+    // Every entity of the signature is declared — the defined classes, the
+    // fillers, the relations and annotation properties used — and no built-in
+    // vocabulary (rdfs:label, owl:Thing, xsd:string, …). A declaration names
+    // nothing else, so a regenerated module is axiom-identical to the last one
+    // and not merely equivalent to it.
+    declare_signature(&mut ont, b);
+    let mut m = Model::from_parts(ont, default_prefixes());
+    // The generated module declares only the structural prefixes and spells
+    // every other IRI in full. That matters downstream: `om merge -i <module>…`
+    // keeps the FIRST input's prefix map, so a module carrying a CURIE table
+    // would put its prefixes into the released `definitions.owl`.
+    m.format_prefixes_cleared = true;
+    m
+}
+
+/// The terms a pattern and its data table name, as a set of IRIs with OBO
+/// prefixes and a TSV table (see [`terms_with`]).
+pub fn terms(pattern_yaml: &str, data: &str) -> Result<Vec<String>> {
+    terms_with(pattern_yaml, data, &Prefixes::obo(), TableFormat::Tsv)
+}
+
+/// The terms a pattern and its data table name: every entity of the pattern's
+/// logical axioms, each variable filled with its placeholder and the defined
+/// class unnamed, other than those placeholders; and the IRI each row's
+/// `vars` cells, each item of its `list_vars` cells, and its `defined_class`
+/// cell name. The table is read as written, blank lines and all, and a row
+/// with no `defined_class` cell is an error.
+///
+/// The terms are a set: up to four in the order they were found, beyond that
+/// in the order a hash set of the IRIs iterates (see [`crate::hash_trie`]).
+/// They are found axiom by axiom, each axiom's entities in the order a mutable
+/// hash set of their IRIs iterates (see `scala_mutable_set_order`), and then
+/// row by row.
+pub fn terms_with(pattern_yaml: &str, data: &str, prefixes: &Prefixes, format: TableFormat) -> Result<Vec<String>> {
+    let pattern = parse_pattern(pattern_yaml)?;
+    let b = Build::new();
+    let labels = HashMap::new();
+    let index = HashMap::new();
+    let readable = render::Readable { labels: &labels, index: &index };
+    let renderer = render::Renderer::new(&b, &pattern, pattern_yaml, prefixes, readable, writes_as_0_20())?;
+    let mut found: Vec<String> = Vec::new();
+    for ac in renderer.pattern_logical_axioms()? {
+        let named: Vec<String> =
+            owl_signature(&ac).into_iter().filter(|iri| !iri.starts_with(render::VARIABLE_NS)).collect();
+        for iri in scala_mutable_set_order(named, crate::owlapi_hash::iri_hash) {
+            if !found.contains(&iri) {
+                found.push(iri);
+            }
+        }
+    }
+    let (_, rows) = table::read_table(data, format)?;
+    let vars = ordered_keys(pattern_yaml, "vars", &pattern.vars);
+    let list_vars = ordered_keys(pattern_yaml, "list_vars", &pattern.list_vars);
+    let mut identifiers: Vec<String> = Vec::new();
+    for row in &rows {
+        let mut of_row: Vec<String> = Vec::new();
+        for v in &vars {
+            if let Some(cell) = row.get(v) {
+                of_row.push(render::java_trim(cell).to_string());
+            }
+        }
+        for v in &list_vars {
+            if let Some(cell) = row.get(v) {
+                of_row.extend(render::split_list(cell).into_iter().map(|i| render::java_trim(i).to_string()));
+            }
+        }
+        let defined = row.get("defined_class").ok_or_else(|| anyhow!("a row of the table has no `defined_class` cell"))?;
+        of_row.push(render::java_trim(defined).to_string());
+        identifiers.extend(of_row);
+    }
+    for id in scala_set_order(identifiers) {
+        if let Some(iri) = prefixes.iri(&id) {
+            if !found.contains(&iri) {
+                found.push(iri);
+            }
+        }
+    }
+    if found.len() <= 4 {
+        return Ok(found);
+    }
+    let items: Vec<(String, i32)> = found
+        .into_iter()
+        .map(|t| {
+            let h = crate::owlapi_hash::java_string_hash(&t);
+            (t, h)
+        })
+        .collect();
+    Ok(crate::hash_trie::order(&items))
+}
+
+/// Every entity an axiom names, its annotations' properties and the datatypes
+/// of its literals included.
+fn owl_signature(ac: &AnnotatedComponent<RcStr>) -> Vec<String> {
+    use horned_owl::visitor::immutable::{Visit, Walk};
+    #[derive(Default)]
+    struct Entities {
+        iris: Vec<String>,
+    }
+    impl Visit<RcStr> for Entities {
+        fn visit_class(&mut self, c: &horned_owl::model::Class<RcStr>) {
+            self.iris.push(c.0.to_string());
+        }
+        fn visit_object_property(&mut self, p: &horned_owl::model::ObjectProperty<RcStr>) {
+            self.iris.push(p.0.to_string());
+        }
+        fn visit_data_property(&mut self, p: &horned_owl::model::DataProperty<RcStr>) {
+            self.iris.push(p.0.to_string());
+        }
+        fn visit_named_individual(&mut self, i: &horned_owl::model::NamedIndividual<RcStr>) {
+            self.iris.push(i.0.to_string());
+        }
+        fn visit_datatype(&mut self, d: &horned_owl::model::Datatype<RcStr>) {
+            self.iris.push(d.0.to_string());
+        }
+        fn visit_annotation_property(&mut self, p: &horned_owl::model::AnnotationProperty<RcStr>) {
+            self.iris.push(p.0.to_string());
+        }
+        fn visit_literal(&mut self, l: &Literal<RcStr>) {
+            self.iris.push(match l {
+                Literal::Simple { .. } => "http://www.w3.org/2001/XMLSchema#string".to_string(),
+                Literal::Language { .. } => "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral".to_string(),
+                Literal::Datatype { datatype_iri, .. } => datatype_iri.to_string(),
+            });
+        }
+    }
+    let mut walk = Walk::new(Entities::default());
+    walk.component(&ac.component);
+    for a in ac.ann.iter() {
+        walk.annotation(a);
+    }
+    let mut out: Vec<String> = Vec::new();
+    for iri in walk.into_visit().iris {
+        if !out.contains(&iri) {
+            out.push(iri);
+        }
+    }
+    out
+}
+
+/// Generate prototypical axioms from a pattern with OBO prefixes (see
+/// [`prototype_with`]).
+pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result<Model> {
+    let b = Build::new();
+    let ont = prototype_axioms(&b, pattern_yaml, labels, &HashMap::new(), &Prefixes::obo())?;
+    Ok(generated_model(ont, &b))
+}
+
+/// Generate prototypical axioms from a pattern with no data: what one row
+/// generates in which each variable holds its range as the pattern writes it
+/// (a name declared under two dictionaries holds the later one's range) and
+/// `defined_class` holds the pattern's `pattern_iri`, with the pattern's name
+/// as that IRI's title.
+pub fn prototype_with(
+    pattern_yaml: &str,
+    labels: &HashMap<String, String>,
+    index: &HashMap<String, HashMap<String, Vec<String>>>,
+    prefixes: &Prefixes,
+) -> Result<Model> {
+    let b = Build::new();
+    let ont = prototype_axioms(&b, pattern_yaml, labels, index, prefixes)?;
+    Ok(generated_model(ont, &b))
+}
+
+fn prototype_axioms(
+    b: &Build<RcStr>,
+    pattern_yaml: &str,
+    labels: &HashMap<String, String>,
+    index: &HashMap<String, HashMap<String, Vec<String>>>,
+    prefixes: &Prefixes,
+) -> Result<SetOntology<RcStr>> {
+    let pattern = parse_pattern(pattern_yaml)?;
+    let Some(iri) = pattern.pattern_iri.clone() else {
+        bail!("a pattern needs a `pattern_iri` to be prototyped");
+    };
+    let mut header: Vec<String> = Vec::new();
+    let mut cells: Vec<String> = Vec::new();
+    for (key, dict) in [
+        ("vars", &pattern.vars),
+        ("list_vars", &pattern.list_vars),
+        ("data_vars", &pattern.data_vars),
+        ("data_list_vars", &pattern.data_list_vars),
+    ] {
+        for var in ordered_keys(pattern_yaml, key, dict) {
+            header.push(var.clone());
+            cells.push(dict[&var].clone());
+        }
+    }
+    header.push("defined_class".to_string());
+    cells.push(iri.clone());
+    let row = table::Row::from_record(&header, &cells);
+    let gopts = GenerateOptions { annotation_index: index.clone(), prefixes: prefixes.clone(), ..Default::default() };
+    let mut ont = generate_rows(b, &pattern, pattern_yaml, &[row], labels, &gopts)?;
+    if let Some(name) = &pattern.pattern_name {
+        // The title's subject is the `pattern_iri` as written, even where it is
+        // not an absolute IRI.
+        ont.insert(AnnotatedComponent {
+            component: Component::AnnotationAssertion(AnnotationAssertion {
+                subject: AnnotationSubject::IRI(b.iri(iri)),
+                ann: Annotation {
+                    ap: b.annotation_property(DCT_TITLE),
+                    av: AnnotationValue::Literal(Literal::Simple { literal: name.clone() }),
+                    ann: Default::default(),
+                },
+            }),
+            ann: Default::default(),
+        });
+    }
+    Ok(ont)
+}
+
+/// The patterns of a directory `prototype --template` names: each regular file
+/// whose name ends `.yaml` or `.yml` in any case, hidden ones too, sorted by
+/// name.
+pub fn pattern_files_in(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut out: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| anyhow!("reading template directory {}: {e}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file() && is_pattern_file_name(p))
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+/// Whether a file's name ends `.yaml` or `.yml`, in any case.
+pub fn is_pattern_file_name(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
+    name.rsplit_once('.').is_some_and(|(_, ext)| {
+        let ext = ext.to_lowercase();
+        ext == "yaml" || ext == "yml"
+    })
+}
 /// Declare every signature entity of `ont`, skipping built-in vocabulary and
 /// anything already declared.
 fn declare_signature(ont: &mut SetOntology<RcStr>, b: &Build<RcStr>) {
@@ -951,1144 +1047,6 @@ fn is_builtin_vocabulary(iri: &str) -> bool {
     BUILTIN_NS.iter().any(|ns| iri.starts_with(ns))
 }
 
-/// The operands of a union or intersection are a SET: a duplicate operand
-/// collapses, and an n-ary expression left with a single operand IS that
-/// operand. Applied to every class expression a logical template builds.
-fn canonicalize_sets(ce: CE<RcStr>) -> CE<RcStr> {
-    let fold = |v: Vec<CE<RcStr>>| -> Vec<CE<RcStr>> {
-        let mut seen: Vec<CE<RcStr>> = Vec::new();
-        for x in v.into_iter().map(canonicalize_sets) {
-            if !seen.contains(&x) {
-                seen.push(x);
-            }
-        }
-        seen
-    };
-    match ce {
-        CE::ObjectUnionOf(v) => {
-            let mut v = fold(v);
-            if v.len() == 1 { v.pop().unwrap() } else { CE::ObjectUnionOf(v) }
-        }
-        CE::ObjectIntersectionOf(v) => {
-            let mut v = fold(v);
-            if v.len() == 1 { v.pop().unwrap() } else { CE::ObjectIntersectionOf(v) }
-        }
-        CE::ObjectSomeValuesFrom { ope, bce } => {
-            CE::ObjectSomeValuesFrom { ope, bce: Box::new(canonicalize_sets(*bce)) }
-        }
-        CE::ObjectAllValuesFrom { ope, bce } => {
-            CE::ObjectAllValuesFrom { ope, bce: Box::new(canonicalize_sets(*bce)) }
-        }
-        CE::ObjectComplementOf(b) => CE::ObjectComplementOf(Box::new(canonicalize_sets(*b))),
-        other => other,
-    }
-}
-
-/// Per-row substitution context.
-struct RowCtx<'a> {
-    b: &'a Build<RcStr>,
-    prefixes: &'a horned_owl::curie::PrefixMapping,
-    names: &'a BTreeMap<String, String>,
-    labels: &'a HashMap<String, String>,
-    /// Per-variable display text (see [`GenerateOptions::var_labels`]).
-    var_labels: &'a HashMap<String, String>,
-    /// Per-variable range expression (see [`GenerateOptions::var_range_exprs`]).
-    var_range_exprs: &'a HashMap<String, String>,
-    /// Variables whose IRI-valued annotations are not written (see
-    /// [`GenerateOptions::iri_annotation_skip`]).
-    iri_annotation_skip: &'a std::collections::HashSet<String>,
-    var_values: &'a dyn Fn(&str) -> Vec<String>,
-    /// Whether a variable name is declared by the pattern (see `is_declared`).
-    is_declared: &'a dyn Fn(&str) -> bool,
-    /// Unexpanded cell value(s) (split on `|`) — used for xrefs, which stay as
-    /// literal CURIE strings rather than being expanded to IRIs.
-    raw_values: &'a dyn Fn(&str) -> Vec<String>,
-    is_data: &'a dyn Fn(&str) -> bool,
-    is_list: &'a dyn Fn(&str) -> bool,
-    /// `permutations` index: filler IRI → (annotation property IRI → values).
-    annotation_index: &'a HashMap<String, HashMap<String, Vec<String>>>,
-    /// Whole (un-split) value of a data column, if present and non-empty — for
-    /// `override` columns on free-form annotations.
-    cell_value: &'a dyn Fn(&str) -> Option<String>,
-}
-
-impl RowCtx<'_> {
-    /// How `var`'s filler prints in text: the variable's own override first, then
-    /// the filler IRI's label, else the IRI itself.
-    fn display(&self, var: &str, filler: &str) -> String {
-        self.var_labels
-            .get(var)
-            .or_else(|| self.labels.get(filler))
-            .cloned()
-            .unwrap_or_else(|| filler.to_string())
-    }
-
-    /// Substitute entity short-names and `%s` fillers (or a `multi_clause`), then
-    /// parse Manchester. A `multi_clause` whose clauses iterate a list variable
-    /// yields several expressions; they are combined with `ObjectIntersectionOf`,
-    /// because a list in a logical context is a conjunction, e.g.
-    /// `(part_of some X) and (part_of some Y)`.
-    fn build_ce(&self, t: &AxiomTemplate) -> Option<CE<RcStr>> {
-        let texts = match &t.multi_clause {
-            Some(mc) => self.fill_multi_clause(mc, true),
-            None => self.substitute_logical(&t.text, &t.vars).into_iter().collect(),
-        };
-        let mut ces: Vec<CE<RcStr>> = Vec::new();
-        for txt in &texts {
-            ces.push(canonicalize_sets(manchester::parse_class_expression(
-                self.b,
-                self.prefixes,
-                txt,
-            )?));
-        }
-        match ces.len() {
-            0 => None,
-            1 => ces.pop(),
-            _ => Some(CE::ObjectIntersectionOf(ces)),
-        }
-    }
-
-    /// Replace `'name'`/bareword entity references with `<IRI>`. Longest name
-    /// first, and *every* quoted form before *any* bareword form: one dictionary
-    /// name is often a word-prefix of another (`cell` / `cell cycle process`),
-    /// and substituting the short one as a bareword first would rewrite the
-    /// inside of the longer quoted reference — `'cell cycle process'` becomes
-    /// `'<…CL_0000000> cycle process'`, which then parses as a single bogus
-    /// entity name.
-    fn substitute_names(&self, text: &str) -> String {
-        let mut names: Vec<(&String, &String)> = self.names.iter().collect();
-        names.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
-        let mut text = text.to_string();
-        for (name, iri) in &names {
-            text = text.replace(&format!("'{name}'"), &format!("<{}>", expand(self.prefixes, iri)));
-        }
-        for (name, iri) in &names {
-            text = replace_word(&text, name, &format!("<{}>", expand(self.prefixes, iri)));
-        }
-        text
-    }
-
-    /// Replace `'name'`/bareword entity references with `<IRI>`, then each `%s`
-    /// with its filler (a data var becomes a quoted literal). A **list** variable
-    /// used via a bare `%s` (rather than a `multi_clause`) yields no axiom: a
-    /// list expands only through `multi_clause`, and a bare `%s` has no one
-    /// value to stand for the whole list.
-    fn substitute_logical(&self, text: &str, vars: &[String]) -> Option<String> {
-        if vars.iter().any(|v| (self.is_list)(v)) {
-            return None;
-        }
-        let mut text = self.substitute_names(text);
-        for var in vars {
-            // A variable carrying a whole range expression substitutes as that
-            // expression, names resolved and no parentheses added — the result
-            // parses under Manchester precedence exactly as written.
-            if let Some(expr) = self.var_range_exprs.get(var) {
-                text = replace_first(&text, "%s", &self.substitute_names(expr));
-                continue;
-            }
-            let vals = (self.var_values)(var);
-            if vals.is_empty() {
-                return None;
-            }
-            let sub = if (self.is_data)(var) {
-                format!("\"{}\"", vals[0])
-            } else {
-                format!("<{}>", vals[0])
-            };
-            text = replace_first(&text, "%s", &sub);
-        }
-        Some(text)
-    }
-
-    /// Fill one clause occurrence: substitute `%s` positionally, using the value
-    /// at `idx` for a repeating (list) var and the first value otherwise. In
-    /// `logical` mode entities render as `<IRI>` / quoted literals; otherwise as
-    /// labels / literals.
-    fn fill_clause_once(&self, text: &str, vars: &[String], idx: usize, logical: bool) -> Option<String> {
-        let mut text = if logical { self.substitute_names(text) } else { text.to_string() };
-        for var in vars {
-            if logical {
-                if let Some(expr) = self.var_range_exprs.get(var) {
-                    text = replace_first(&text, "%s", &self.substitute_names(expr));
-                    continue;
-                }
-            }
-            let vals = (self.var_values)(var);
-            if vals.is_empty() {
-                return None;
-            }
-            let v = vals.get(idx).or_else(|| vals.first()).unwrap();
-            let sub = if logical {
-                if (self.is_data)(var) {
-                    format!("\"{v}\"")
-                } else {
-                    format!("<{v}>")
-                }
-            } else if (self.is_data)(var) {
-                v.clone()
-            } else {
-                self.display(var, v)
-            };
-            text = replace_first(&text, "%s", &sub);
-        }
-        Some(text)
-    }
-
-    /// Fill a `multi_clause`, returning the SET of filled strings. Each clause
-    /// yields its own set (a list variable multiplies it — one filled string per
-    /// item); the multi_clause result is the **cartesian product** of the
-    /// clause-sets, each tuple joined by `sep`. So distinct clauses are joined by
-    /// `sep`, while a list-var iteration produces separate results: an annotation
-    /// emits one axiom per result, and a logical axiom conjoins the results (see
-    /// [`build_ce`]).
-    fn fill_multi_clause(&self, mc: &MultiClause, logical: bool) -> Vec<String> {
-        let sep = mc.sep.clone().unwrap_or_else(|| " ".to_string());
-        let mut acc: Vec<String> = Vec::new();
-        let mut produced = false;
-        for clause in &mc.clauses {
-            // The clause's own text, filled — a list variable yields one variant
-            // per item.
-            let mut variants: Vec<String> = Vec::new();
-            if let Some(text) = &clause.text {
-                let repeat = clause
-                    .vars
-                    .iter()
-                    .map(|v| (self.var_values)(v).len())
-                    .max()
-                    .unwrap_or(1)
-                    .max(1);
-                for i in 0..repeat {
-                    if let Some(filled) = self.fill_clause_once(text, &clause.vars, i, logical) {
-                        variants.push(filled);
-                    }
-                }
-            }
-            // Sub-clauses are each rendered (recursively) and **appended** to the
-            // clause text, joined by `sep` — not treated as alternatives.
-            let subs: Vec<String> = clause
-                .sub_clauses
-                .iter()
-                .flat_map(|sub| self.fill_multi_clause(sub, logical))
-                .collect();
-            let clause_vals: Vec<String> = if variants.is_empty() {
-                if subs.is_empty() {
-                    continue;
-                }
-                vec![subs.join(&sep)]
-            } else if subs.is_empty() {
-                variants
-            } else {
-                variants
-                    .into_iter()
-                    .map(|v| {
-                        std::iter::once(v).chain(subs.iter().cloned()).collect::<Vec<_>>().join(&sep)
-                    })
-                    .collect()
-            };
-            // Distinct clauses combine by cartesian product, each tuple joined by
-            // `sep`; a single clause's list-var variants stay separate.
-            acc = if !produced {
-                clause_vals
-            } else {
-                let mut next = Vec::with_capacity(acc.len() * clause_vals.len());
-                for a in &acc {
-                    for c in &clause_vals {
-                        next.push(format!("{a}{sep}{c}"));
-                    }
-                }
-                next
-            };
-            produced = true;
-        }
-        acc
-    }
-
-    /// Fill a text template, returning the SET of filled strings (one per axiom).
-    /// A `multi_clause` yields its cartesian set; a plain printf template yields a
-    /// single string (data vars: their literal value; class vars: the filler's
-    /// rdfs:label, falling back to its IRI). A **list** variable used via a bare
-    /// `%s` (no `multi_clause`) yields nothing.
-    fn fill_text_values(&self, t: &Template) -> Vec<String> {
-        if let Some(mc) = &t.multi_clause {
-            return self.fill_multi_clause(mc, false);
-        }
-        // `permutations`: substitute each var's label AND the filler term's values
-        // of the listed annotation properties (from the supplied ontology),
-        // combinatorially. With no permutations declared this is skipped; with an
-        // empty index it degenerates to the plain label fill.
-        if !t.permutations.is_empty() && !t.vars.iter().any(|v| (self.is_list)(v)) {
-            return self.fill_permutations(&t.text, &t.vars, &t.permutations);
-        }
-        if t.vars.iter().any(|v| (self.is_list)(v)) {
-            return Vec::new();
-        }
-        let mut text = t.text.clone();
-        for var in &t.vars {
-            let vals = (self.var_values)(var);
-            if vals.is_empty() {
-                return Vec::new();
-            }
-            let rendered = if (self.is_data)(var) {
-                vals[0].clone()
-            } else {
-                self.display(var, &vals[0])
-            };
-            text = replace_first(&text, "%s", &rendered);
-        }
-        vec![text]
-    }
-
-    /// Fill a printf template with `permutations`: for each variable, the value
-    /// set is its label (or literal) PLUS the filler term's values of the
-    /// permutation's annotation properties (looked up in the ontology index by the
-    /// filler IRI). The annotation texts are the cartesian product over the
-    /// variables' value sets.
-    fn fill_permutations(&self, text: &str, vars: &[String], perms: &[Permutation]) -> Vec<String> {
-        let perm_by_var: std::collections::HashMap<&str, &Permutation> =
-            perms.iter().map(|p| (p.var.as_str(), p)).collect();
-        let mut value_lists: Vec<Vec<String>> = Vec::new();
-        for var in vars {
-            let fillers = (self.var_values)(var);
-            let Some(filler) = fillers.first() else { return Vec::new() };
-            let base = if (self.is_data)(var) {
-                filler.clone()
-            } else {
-                self.display(var, filler)
-            };
-            let mut vals = vec![base];
-            if let Some(p) = perm_by_var.get(var.as_str()) {
-                if let Some(props) = self.annotation_index.get(filler) {
-                    for prop_name in &p.annotation_properties {
-                        let prop_iri = self
-                            .names
-                            .get(prop_name)
-                            .map(|i| expand(self.prefixes, i))
-                            .unwrap_or_else(|| expand(self.prefixes, prop_name));
-                        if let Some(pv) = props.get(&prop_iri) {
-                            for v in pv {
-                                if !vals.contains(v) {
-                                    vals.push(v.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            value_lists.push(vals);
-        }
-        // Cartesian product of the per-variable value sets.
-        let mut combos: Vec<Vec<String>> = vec![Vec::new()];
-        for vl in &value_lists {
-            let mut next = Vec::with_capacity(combos.len() * vl.len());
-            for c in &combos {
-                for v in vl {
-                    let mut cc = c.clone();
-                    cc.push(v.clone());
-                    next.push(cc);
-                }
-            }
-            combos = next;
-        }
-        let mut out: Vec<String> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for combo in combos {
-            let mut s = text.to_string();
-            for v in &combo {
-                s = replace_first(&s, "%s", v);
-            }
-            if seen.insert(s.clone()) {
-                out.push(s);
-            }
-        }
-        out
-    }
-
-    /// Resolve `def`/annotation xref entries: a var name yields the row's
-    /// value(s) (unexpanded, kept as literal CURIEs); anything else is taken as a
-    /// literal xref string.
-    fn resolve_xrefs(&self, xrefs: &[String]) -> Vec<String> {
-        let mut out = Vec::new();
-        for x in xrefs {
-            let vals = (self.raw_values)(x);
-            if vals.is_empty() {
-                out.push(x.clone());
-            } else {
-                out.extend(vals);
-            }
-        }
-        out
-    }
-
-    /// Resolve an annotation-property reference (short name in a dictionary, a
-    /// known OBO field name, or a CURIE/IRI) to a full IRI.
-    fn resolve_ann_prop(&self, name: &str) -> String {
-        if let Some(iri) = self.names.get(name) {
-            return expand(self.prefixes, iri);
-        }
-        match name {
-            "label" | "name" => RDFS_LABEL.to_string(),
-            "comment" => RDFS_COMMENT.to_string(),
-            "definition" | "def" => IAO_DEF.to_string(),
-            "exact_synonym" => format!("{OBO_IN_OWL}hasExactSynonym"),
-            "narrow_synonym" => format!("{OBO_IN_OWL}hasNarrowSynonym"),
-            "related_synonym" => format!("{OBO_IN_OWL}hasRelatedSynonym"),
-            "broad_synonym" => format!("{OBO_IN_OWL}hasBroadSynonym"),
-            "xref" => format!("{OBO_IN_OWL}hasDbXref"),
-            _ => expand(self.prefixes, name),
-        }
-    }
-
-    /// Build the axiom-annotation set for a logical axiom's nested `annotations`.
-    fn axiom_annotations(&self, anns: &[AnnotationDef]) -> std::collections::BTreeSet<Annotation<RcStr>> {
-        let mut set = std::collections::BTreeSet::new();
-        for a in anns {
-            let Some(prop_name) = &a.annotation_property else { continue };
-            let prop = self.resolve_ann_prop(prop_name);
-            if let Some(text) = &a.text {
-                let t = Template { text: text.clone(), vars: a.vars.clone(), xrefs: Vec::new(), multi_clause: a.multi_clause.clone(), permutations: a.permutations.clone(), value: None, var: None, annotations: Vec::new() };
-                for filled in self.fill_text_values(&t) {
-                    set.insert(Annotation { ann: Default::default(),
-                        ap: self.b.annotation_property(prop.clone()),
-                        av: AnnotationValue::Literal(Literal::Simple { literal: filled }),
-                    });
-                }
-            } else if let Some(var) = a.value.as_ref().filter(|v| (self.is_declared)(v)) {
-                // A nested `value:` naming a variable — one axiom annotation per
-                // item, the same as `value:` on a top-level annotation. CL's
-                // ExtendedDescription pattern needs it: `annotationProperty:
-                // xref` / `value: pubs` (a data_list_var) is what carries the
-                // `{xref="DOI:…"}` provenance on its several hundred
-                // `terms:description` values.
-                for v in (self.var_values)(var) {
-                    let val = if (self.is_data)(var) {
-                        v
-                    } else {
-                        self.display(var, &v)
-                    };
-                    set.insert(Annotation { ann: Default::default(),
-                        ap: self.b.annotation_property(prop.clone()),
-                        av: AnnotationValue::Literal(Literal::Simple { literal: val }),
-                    });
-                }
-            } else if let Some(var) = a.var.as_ref().filter(|v| (self.is_declared)(v)) {
-                if self.iri_annotation_skip.contains(var) {
-                    continue;
-                }
-                if let Some(iri) = (self.var_values)(var).into_iter().next() {
-                    set.insert(Annotation { ann: Default::default(),
-                        ap: self.b.annotation_property(prop),
-                        av: AnnotationValue::IRI(self.b.iri(iri)),
-                    });
-                }
-            }
-        }
-        set
-    }
-}
-
-/// Emit a logical axiom for a `dc` from a template, attaching any axiom
-/// annotations. `disjointWith` becomes `DisjointClasses(dc, CE)`; `GCI` splits the
-/// text on `SubClassOf`/`EquivalentTo` into a general inclusion between two
-/// expressions; the rest produce equivalent/subclass axioms.
-fn emit_logical(
-    ont: &mut SetOntology<RcStr>,
-    ctx: &RowCtx,
-    dc_iri: &str,
-    axiom_type: &str,
-    t: &AxiomTemplate,
-    source_ann: Option<&Annotation<RcStr>>,
-) {
-    let dc = || CE::Class(ctx.b.class(dc_iri.to_string()));
-    let mut ann = ctx.axiom_annotations(&t.annotations);
-    if let Some(s) = source_ann {
-        ann.insert(s.clone());
-    }
-    let mut comp = match axiom_type {
-        "GCI" => {
-            // A general class inclusion between two arbitrary expressions.
-            let text = match ctx.substitute_logical(&t.text, &t.vars) {
-                Some(s) => s,
-                None => return,
-            };
-            let (lhs, rhs, equiv) = if let Some((l, r)) = split_kw(&text, "SubClassOf") {
-                (l, r, false)
-            } else if let Some((l, r)) = split_kw(&text, "EquivalentTo") {
-                (l, r, true)
-            } else {
-                return;
-            };
-            let (Some(lc), Some(rc)) = (
-                manchester::parse_class_expression(ctx.b, ctx.prefixes, &lhs),
-                manchester::parse_class_expression(ctx.b, ctx.prefixes, &rhs),
-            ) else {
-                return;
-            };
-            if equiv {
-                Component::EquivalentClasses(EquivalentClasses(vec![lc, rc]))
-            } else {
-                Component::SubClassOf(SubClassOf { sub: lc, sup: rc })
-            }
-        }
-        other => {
-            let Some(ce) = ctx.build_ce(t) else { return };
-            match other {
-                "subClassOf" => Component::SubClassOf(SubClassOf { sub: dc(), sup: ce }),
-                "disjointWith" => Component::DisjointClasses(DisjointClasses(vec![dc(), ce])),
-                // default + "equivalentTo"
-                _ => Component::EquivalentClasses(EquivalentClasses(vec![dc(), ce])),
-            }
-        }
-    };
-    canon_component(&mut comp);
-    ont.insert(AnnotatedComponent { component: comp, ann });
-}
-
-/// Recursively put the operands of the commutative class-expression operators
-/// (`ObjectIntersectionOf`, `ObjectUnionOf`) into a canonical order: sorted by
-/// their OWL functional-syntax rendering. The operators are commutative, so the
-/// order a pattern happens to write its clauses in carries no meaning; fixing
-/// the order means a pattern with two relation clauses (e.g. `… some X and …
-/// some Y`) serializes the same way every time, and a regenerated
-/// `definitions.owl` diffs only where content really changed.
-fn canon_ce(ce: &mut CE<RcStr>) {
-    use horned_owl::io::ofn::writer::AsFunctional;
-    match ce {
-        CE::ObjectIntersectionOf(v) | CE::ObjectUnionOf(v) => {
-            for c in v.iter_mut() {
-                canon_ce(c);
-            }
-            v.sort_by_cached_key(|c| c.as_functional().to_string());
-        }
-        CE::ObjectComplementOf(b) => canon_ce(b),
-        CE::ObjectSomeValuesFrom { bce, .. }
-        | CE::ObjectAllValuesFrom { bce, .. }
-        | CE::ObjectMinCardinality { bce, .. }
-        | CE::ObjectMaxCardinality { bce, .. }
-        | CE::ObjectExactCardinality { bce, .. } => canon_ce(bce),
-        _ => {}
-    }
-}
-
-/// Canonicalize every class expression carried by a class axiom (see
-/// [`canon_ce`]). The axiom's own operand list is left as built.
-fn canon_component(c: &mut Component<RcStr>) {
-    match c {
-        Component::EquivalentClasses(EquivalentClasses(v))
-        | Component::DisjointClasses(DisjointClasses(v)) => {
-            for ce in v.iter_mut() {
-                canon_ce(ce);
-            }
-            // The axiom's operands are a SET, read back with named classes in
-            // IRI order ahead of anonymous expressions — which also decides the
-            // frame a two-named-class equivalence files under.
-            v.sort_by_key(|ce| match ce {
-                CE::Class(c) => (0u8, c.0.as_ref().to_string()),
-                _ => (1, String::new()),
-            });
-        }
-        Component::SubClassOf(sc) => {
-            canon_ce(&mut sc.sub);
-            canon_ce(&mut sc.sup);
-        }
-        _ => {}
-    }
-}
-
-/// Emit an annotation axiom (or several, for a list `value`) from an annotations
-/// list entry.
-fn emit_annotation(ont: &mut SetOntology<RcStr>, ctx: &RowCtx, dc_iri: &str, ann: &AnnotationDef) {
-    let Some(prop_name) = &ann.annotation_property else { return };
-    let prop = ctx.resolve_ann_prop(prop_name);
-    let xrefs = ctx.resolve_xrefs(&ann.xrefs);
-    // Axiom annotations: `xref` provenance plus any nested `annotations:`.
-    let mut axiom_ann = ctx.axiom_annotations(&ann.annotations);
-    for x in &xrefs {
-        axiom_ann.insert(Annotation { ann: Default::default(),
-            ap: ctx.b.annotation_property(format!("{OBO_IN_OWL}hasDbXref")),
-            av: AnnotationValue::Literal(Literal::Simple { literal: x.clone() }),
-        });
-    }
-
-    if let Some(var) = ann.value.as_ref().filter(|v| (ctx.is_declared)(v)) {
-        // One annotation per list item.
-        for v in (ctx.var_values)(var) {
-            let val = if (ctx.is_data)(var) {
-                v
-            } else {
-                ctx.display(var, &v)
-            };
-            assert_text_ann(ctx.b, ont, dc_iri, &prop, &val, axiom_ann.clone());
-        }
-    } else if let Some(var) = ann.var.as_ref().filter(|v| (ctx.is_declared)(v)) {
-        // IRI-valued annotation (object is the filler IRI).
-        if ctx.iri_annotation_skip.contains(var) {
-            return;
-        }
-        if let Some(iri) = (ctx.var_values)(var).into_iter().next() {
-            ont.insert(AnnotatedComponent {
-                component: Component::AnnotationAssertion(AnnotationAssertion {
-                    subject: AnnotationSubject::IRI(ctx.b.iri(dc_iri.to_string())),
-                    ann: Annotation { ann: Default::default(),
-                        ap: ctx.b.annotation_property(prop),
-                        av: AnnotationValue::IRI(ctx.b.iri(iri)),
-                    },
-                }),
-                ann: axiom_ann,
-            });
-        }
-    } else if let Some(v) = ann.override_column.as_deref().and_then(|c| (ctx.cell_value)(c)) {
-        // An explicit `override` column value supersedes the template.
-        assert_text_ann(ctx.b, ont, dc_iri, &prop, &v, axiom_ann);
-    } else if ann.text.is_some() || ann.multi_clause.is_some() {
-        let t = Template {
-            text: ann.text.clone().unwrap_or_default(),
-            vars: ann.vars.clone(),
-            xrefs: Vec::new(),
-            multi_clause: ann.multi_clause.clone(),
-            permutations: ann.permutations.clone(),
-            value: None,
-            var: None,
-            annotations: Vec::new(),
-        };
-        for filled in ctx.fill_text_values(&t) {
-            assert_text_ann(ctx.b, ont, dc_iri, &prop, &filled, axiom_ann.clone());
-        }
-    }
-}
-
-/// Like [`assert_text`] but with a pre-built axiom-annotation set (xrefs plus any
-/// nested `annotations:`).
-fn assert_text_ann(
-    b: &Build<RcStr>,
-    ont: &mut SetOntology<RcStr>,
-    subj: &str,
-    prop: &str,
-    val: &str,
-    ann: std::collections::BTreeSet<Annotation<RcStr>>,
-) {
-    // A filled template is trimmed. A pattern writes its text for reading, and
-    // the spacing that separates a `%s` from what follows it is part of the
-    // template, not of the value: uPheno's `abnormalMorphologyOfCellularComponent\
-    // InLocation` ends `name.text` with `"… in %s "`, and the label it stands for
-    // has no trailing space.
-    let val = val.trim();
-    ont.insert(AnnotatedComponent {
-        component: Component::AnnotationAssertion(AnnotationAssertion {
-            subject: AnnotationSubject::IRI(b.iri(subj.to_string())),
-            ann: Annotation { ann: Default::default(),
-                ap: b.annotation_property(prop.to_string()),
-                av: AnnotationValue::Literal(Literal::Simple { literal: val.to_string() }),
-            },
-        }),
-        ann,
-    });
-}
-
-/// Split a GCI text on a Manchester keyword (` SubClassOf `/` EquivalentTo `),
-/// case-insensitively, into (lhs, rhs).
-fn split_kw(text: &str, kw: &str) -> Option<(String, String)> {
-    let lower = text.to_ascii_lowercase();
-    let needle = format!(" {} ", kw.to_ascii_lowercase());
-    let pos = lower.find(&needle)?;
-    Some((text[..pos].trim().to_string(), text[pos + needle.len()..].trim().to_string()))
-}
-
-/// Compute derived variables for a row from `substitutions` (regex over one
-/// input var) and `internal_vars` (regex_sub or join). Later entries may build
-/// on earlier ones.
-fn compute_derived(
-    pattern: &Pattern,
-    raw_cell: &dyn Fn(&str) -> Vec<String>,
-) -> BTreeMap<String, Vec<String>> {
-    let mut derived: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let get = |derived: &BTreeMap<String, Vec<String>>, v: &str| -> Vec<String> {
-        derived.get(v).cloned().unwrap_or_else(|| raw_cell(v))
-    };
-    let apply_re = |vals: Vec<String>, pat: &str, sub: &str| -> Vec<String> {
-        match Regex::new(pat) {
-            Ok(re) => vals.iter().map(|v| re.replace_all(v, sub).to_string()).collect(),
-            Err(_) => vals,
-        }
-    };
-    for s in &pattern.substitutions {
-        let vals = get(&derived, &s.input);
-        derived.insert(s.out.clone(), apply_re(vals, &s.match_, &s.sub));
-    }
-    for iv in &pattern.internal_vars {
-        if let Some(j) = &iv.join {
-            let sep = j.sep.clone().unwrap_or_default();
-            let joined = j
-                .vars
-                .iter()
-                .map(|v| get(&derived, v).first().cloned().unwrap_or_default())
-                .collect::<Vec<_>>()
-                .join(&sep);
-            derived.insert(iv.var.clone(), vec![joined]);
-        } else if let (Some(inp), Some(m), Some(sub)) = (&iv.input, &iv.match_, &iv.sub) {
-            let vals = get(&derived, inp);
-            derived.insert(iv.var.clone(), apply_re(vals, m, sub));
-        }
-    }
-    derived
-}
-
-/// Emit an instance graph: each node becomes a named individual (IRI derived
-/// from the defined class) typed by its class/var filler, and each `[s, rel, o]`
-/// edge becomes an object-property assertion.
-fn emit_instance_graph(ont: &mut SetOntology<RcStr>, ctx: &RowCtx, dc_iri: &str, ig: &InstanceGraph) {
-    use horned_owl::model::{
-        ClassAssertion, Individual, NamedIndividual, ObjectPropertyAssertion,
-        ObjectPropertyExpression as OPE,
-    };
-    let node_iri = |name: &str| format!("{dc_iri}#{name}");
-    // Nodes → typed individuals.
-    for (name, ty) in &ig.nodes {
-        let ind = Individual::Named(NamedIndividual(ctx.b.iri(node_iri(name))));
-        ont.insert(Component::DeclareNamedIndividual(
-            horned_owl::model::DeclareNamedIndividual(NamedIndividual(ctx.b.iri(node_iri(name)))),
-        ));
-        // The type is a class short-name/CURIE or a variable filler.
-        let class_iri = ctx
-            .names
-            .get(ty)
-            .map(|i| expand(ctx.prefixes, i))
-            .or_else(|| (ctx.var_values)(ty).into_iter().next())
-            .unwrap_or_else(|| expand(ctx.prefixes, ty.trim_matches('\'')));
-        ont.insert(Component::ClassAssertion(ClassAssertion {
-            ce: CE::Class(ctx.b.class(class_iri)),
-            i: ind,
-        }));
-    }
-    // Edges → object-property assertions between node individuals.
-    for edge in &ig.edges {
-        if edge.len() != 3 {
-            continue;
-        }
-        let (s, rel, o) = (&edge[0], &edge[1], &edge[2]);
-        let rel_iri = ctx.names.get(rel).map(|i| expand(ctx.prefixes, i)).unwrap_or_else(|| expand(ctx.prefixes, rel));
-        ont.insert(Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
-            ope: OPE::ObjectProperty(ctx.b.object_property(rel_iri)),
-            from: Individual::Named(NamedIndividual(ctx.b.iri(node_iri(s)))),
-            to: Individual::Named(NamedIndividual(ctx.b.iri(node_iri(o)))),
-        }));
-    }
-}
-
-/// Whether a DOSDP variable range denotes a datatype (`xsd:*`, the XSD IRI, or
-/// `rdfs:Literal`) rather than a class — used to classify a `vars`/`list_vars`
-/// entry as a *data* variable (DOSDP keys data-ness on the range).
-fn is_datatype_range(range: &str) -> bool {
-    let r = range.trim().trim_matches('\'').trim();
-    r.starts_with("xsd:")
-        || r.starts_with("http://www.w3.org/2001/XMLSchema#")
-        || r == "rdfs:Literal"
-        || r == "http://www.w3.org/2000/01/rdf-schema#Literal"
-}
-
-fn is_truthy(s: &str) -> bool {
-    matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1" | "t" | "y")
-}
-
-/// Mint a `defined_class` IRI from the pattern's `base_IRI` and a stable hash of
-/// the data row (`--generate-defined-class`).
-fn mint_defined_class(pattern: &Pattern, row: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    row.hash(&mut h);
-    pattern.pattern_iri.hash(&mut h);
-    let base = pattern
-        .base_iri
-        .clone()
-        .or_else(|| pattern.pattern_iri.clone())
-        .unwrap_or_else(|| "urn:dosdp:".to_string());
-    format!("{base}{:016x}", h.finish())
-}
-
-fn expand(prefixes: &horned_owl::curie::PrefixMapping, s: &str) -> String {
-    let s = s.trim();
-    if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
-        return s.to_string();
-    }
-    if let Ok(e) = prefixes.expand_curie_string(s) {
-        return e;
-    }
-    crate::io::obo::expand_id(s)
-}
-
-fn replace_first(haystack: &str, needle: &str, with: &str) -> String {
-    match haystack.find(needle) {
-        Some(i) => format!("{}{}{}", &haystack[..i], with, &haystack[i + needle.len()..]),
-        None => haystack.to_string(),
-    }
-}
-
-/// Replace whole-word occurrences of `word` (not inside another identifier).
-/// Whether `word` appears in `haystack` as a whole token — a DOSDP template
-/// names a dictionary key either quoted (`'anatomical entity'`) or bare
-/// (`part_of`), and a bare name must not match inside a longer identifier.
-/// The entity names a class-expression text mentions, tokenized as a Manchester
-/// parser reads them: a `'…'` run is one name whatever it contains, and outside
-/// quotes each maximal run of name characters is a name. Keywords (`some`,
-/// `and`, `that`, …) come out too — harmless, because the caller only asks
-/// whether a name is a dictionary key.
-fn expression_names(text: &str) -> std::collections::HashSet<String> {
-    let mut out: std::collections::HashSet<String> = Default::default();
-    let mut rest = text;
-    while let Some(open) = rest.find('\'') {
-        for w in split_names(&rest[..open]) {
-            out.insert(w);
-        }
-        let after = &rest[open + 1..];
-        match after.find('\'') {
-            Some(close) => {
-                out.insert(after[..close].to_string());
-                rest = &after[close + 1..];
-            }
-            // An unbalanced quote: the remainder is not a quoted name.
-            None => {
-                for w in split_names(after) {
-                    out.insert(w);
-                }
-                return out;
-            }
-        }
-    }
-    for w in split_names(rest) {
-        out.insert(w);
-    }
-    out
-}
-
-/// Maximal runs of name characters (letters, digits, `_`, `:`, `-`, `.`, `/`,
-/// `#`) — enough to keep a CURIE or an IRI in one piece.
-fn split_names(s: &str) -> Vec<String> {
-    s.split(|c: char| {
-        !(c.is_alphanumeric() || matches!(c, '_' | ':' | '-' | '.' | '/' | '#'))
-    })
-    .filter(|w| !w.is_empty())
-    .map(str::to_string)
-    .collect()
-}
-
-fn contains_word(haystack: &str, word: &str) -> bool {
-    if word.is_empty() {
-        return false;
-    }
-    let bytes = haystack.as_bytes();
-    let mut from = 0;
-    while let Some(i) = haystack[from..].find(word) {
-        let start = from + i;
-        let end = start + word.len();
-        let before_ok = start == 0 || !is_name_byte(bytes[start - 1]);
-        let after_ok = end >= bytes.len() || !is_name_byte(bytes[end]);
-        if before_ok && after_ok {
-            return true;
-        }
-        from = start + 1;
-    }
-    false
-}
-
-fn is_name_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-fn replace_word(haystack: &str, word: &str, with: &str) -> String {
-    let mut out = String::with_capacity(haystack.len());
-    let bytes = haystack.as_bytes();
-    let mut i = 0;
-    let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    while i < haystack.len() {
-        if haystack[i..].starts_with(word) {
-            let before_ok = i == 0 || !is_word(bytes[i - 1]);
-            let after = i + word.len();
-            let after_ok = after >= haystack.len() || !is_word(bytes[after]);
-            if before_ok && after_ok {
-                out.push_str(with);
-                i = after;
-                continue;
-            }
-        }
-        let ch = haystack[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
-}
-
-/// Dump the term IRIs referenced by a pattern and its data table: the
-/// entity-dictionary IRIs, the defined classes, and the entity-reference fillers
-/// in the data rows. Returns sorted, unique IRIs.
-pub fn terms(pattern_yaml: &str, data_tsv: &str) -> Result<Vec<String>> {
-    let pattern: Pattern =
-        parse_pattern(pattern_yaml)?;
-    let prefixes = dosdp_prefixes();
-    let mut out: std::collections::BTreeSet<String> = Default::default();
-    // Only the dictionary entries the LOGICAL axioms name — not every entry in
-    // every dictionary. HPO's `fracturedAnatomicalEntity` declares
-    // `anatomical_entity` with range `UBERON_0001062` and an `exact_synonym`
-    // annotation, and neither belongs in its `.txt`: the five terms it emits are
-    // exactly those its `equivalent_to` references. Emitting the whole
-    // dictionary would seed the imports with `UBERON_0001062` and
-    // `oboInOwl:hasExactSynonym`, dragging two terms the ⊥-module has no use for
-    // into the extraction.
-    let mut logical = String::new();
-    for t in [&pattern.equivalent_to, &pattern.subclass_of, &pattern.gci] {
-        if let Some(t) = t {
-            logical.push(' ');
-            logical.push_str(&t.text);
-        }
-    }
-    for la in &pattern.logical_axioms {
-        logical.push(' ');
-        logical.push_str(&la.text);
-        // A repeating clause names its relation in the clause, not in the
-        // axiom's own text: UBERON's vein pattern says `'tributary of' some %s`
-        // only under `multi_clause`, and the relation belongs in the seed as
-        // much as one a plain `text` names.
-        if let Some(mc) = &la.multi_clause {
-            clause_texts(mc, &mut logical);
-        }
-    }
-    // A dictionary KEY is what a template names (`'fractured'`, `part_of`); map
-    // the ones that appear to their IRIs. What "appears" means is decided by the
-    // expression's own tokens, not by a substring search: a `'…'` run is ONE name
-    // however many words it holds. Searching for a bare word anywhere finds
-    // `cell` inside `'cell cycle process'`, so CL's `cyclingCellStates` seeded the
-    // imports with `CL:0000000` — a term its equivalence axiom never names.
-    let names = expression_names(&logical);
-    for dict in [
-        &pattern.classes,
-        &pattern.relations,
-        &pattern.object_properties,
-        &pattern.data_properties,
-        &pattern.annotation_properties,
-    ] {
-        for (k, v) in dict.iter() {
-            if names.contains(k.as_str()) {
-                out.insert(expand(&prefixes, v));
-            }
-        }
-    }
-    // Entity-reference variable columns (not data vars) + defined_class are IRIs.
-    // Data-ness is keyed on the RANGE, not on which map the variable is declared
-    // in: OBA's `entity_attribute_location` declares `usage_notes` under `vars`
-    // with range `xsd:string`, and its column holds a sentence. Read as an entity
-    // column it becomes `obo:` + that sentence — a term in the pattern seed, and
-    // so in the import seed.
-    let entity_vars: std::collections::HashSet<&str> = pattern
-        .vars
-        .iter()
-        .chain(pattern.list_vars.iter())
-        .filter(|(_, range)| !is_datatype_range(range))
-        .map(|(k, _)| k.as_str())
-        .collect();
-    // The same RFC 4180 reader `generate` uses, not a split on every tab: CL's
-    // `ExtendedDescription.tsv` writes its descriptions as quoted fields that run
-    // over 2,446 physical lines for 432 records, and splitting those lines gives
-    // fragments of prose where a column should be — `obo:` + half a sentence,
-    // each one a term in the pattern seed and so in the import seed.
-    let records = parse_table_records(data_tsv, '\t');
-    if let Some(hl) = records.first() {
-        let header: Vec<&str> = hl.iter().map(|c| c.trim()).collect();
-        for cells in records.iter().skip(1) {
-            for (i, h) in header.iter().enumerate() {
-                let is_dc = *h == "defined_class" || *h == "defined class";
-                if !is_dc && !entity_vars.contains(*h) {
-                    continue;
-                }
-                let Some(raw) = cells.get(i).map(|c| c.trim()) else { continue };
-                for part in raw.split('|').map(str::trim).filter(|p| !p.is_empty()) {
-                    out.insert(expand(&prefixes, part));
-                }
-            }
-        }
-    }
-    // The list is a SET of IRIs, and a set's order is its hash trie's — not the
-    // alphabet's. Collected in sorted order so the trie is built from the same
-    // elements every run, then walked.
-    let items: Vec<(String, i32)> =
-        out.into_iter().map(|t| { let h = crate::owlapi_hash::java_string_hash(&t); (t, h) }).collect();
-    Ok(crate::hash_trie::order(&items))
-}
-
-/// Every `text` under a repeating clause, sub-clauses included, appended to
-/// `out` as logical text.
-fn clause_texts(mc: &MultiClause, out: &mut String) {
-    for c in &mc.clauses {
-        if let Some(t) = &c.text {
-            out.push(' ');
-            out.push_str(t);
-        }
-        for sub in &c.sub_clauses {
-            clause_texts(sub, out);
-        }
-    }
-}
-
-/// Generate prototypical axioms from a pattern with no data: each variable is
-/// filled with its range class, and the defined class is the pattern IRI.
-pub fn prototype(pattern_yaml: &str, labels: &HashMap<String, String>) -> Result<Model> {
-    let pattern: Pattern =
-        parse_pattern(pattern_yaml)?;
-    let prefixes = dosdp_prefixes();
-    // A pattern whose `pattern_iri` is missing — or is not an absolute IRI, as in
-    // OBA's `pattern_iri: entity_homeostasis_trait.yaml` — has no defined class to
-    // name, so a fixed placeholder stands in; resolving the relative form against
-    // some base would invent an IRI the pattern never claimed.
-    let dc = match pattern.pattern_iri.as_deref() {
-        Some(iri) if iri.contains(':') => iri.to_string(),
-        _ => "urn:dosdp:defined_class".to_string(),
-    };
-    let mut header = vec!["defined_class".to_string()];
-    let mut row = vec![dc.clone()];
-    // With no `--ontology` there are no real labels, so a filler in `name:`/`def:`
-    // text renders as the var's RANGE EXPRESSION exactly as the pattern writes it
-    // — `'behavior'`, quotes included — rather than as a bare IRI, which would
-    // make the prototype unreadable. Seed those as labels (a supplied ontology's
-    // label still wins).
-    let mut var_labels: HashMap<String, String> = HashMap::new();
-    let mut var_range_exprs: HashMap<String, String> = HashMap::new();
-    let mut iri_annotation_skip: std::collections::HashSet<String> = Default::default();
-    for (var, range) in pattern.vars.iter().chain(pattern.list_vars.iter()) {
-        header.push(var.clone());
-        // A variable ranging over one of the pattern's own classes or relations
-        // fills the logical axioms and nothing else; only a range that is an
-        // IRI of its own is written as an annotation value.
-        let r = range.trim().trim_matches('\'').trim();
-        if [&pattern.classes, &pattern.relations, &pattern.object_properties].iter().any(|d| d.contains_key(r))
-            || !(r.contains(':') || r.starts_with("http"))
-        {
-            iri_annotation_skip.insert(var.clone());
-        }
-        // …but only for a range that is not itself an identifier. A range written
-        // as a CURIE (`cell: CL:0000000`) IS the filler, so the text shows the
-        // IRI it expands to; a range written as a label (`'behavior'`) names
-        // nothing on its own and stands in the text as written.
-        let raw = range.trim();
-        if !(raw.contains(':') || raw.starts_with("http")) {
-            var_labels.insert(var.clone(), raw.to_string());
-        }
-        // A range that is itself an EXPRESSION (`'anatomical entity' or 'cell'`)
-        // substitutes verbatim into the logical templates, where it parses under
-        // Manchester precedence as written.
-        if raw.contains(" or ") || raw.contains(" and ") {
-            var_range_exprs.insert(var.clone(), raw.to_string());
-        }
-        row.push(range_filler(&pattern, &prefixes, range));
-    }
-    // A data var stands in for itself: it is filled with its declared range
-    // (`xsd:anyURI`, `xsd:string`), so the prototype shows what shape the column
-    // takes.
-    for (var, range) in pattern.data_vars.iter().chain(pattern.data_list_vars.iter()) {
-        header.push(var.clone());
-        row.push(range.trim().to_string());
-    }
-    let tsv = format!("{}\n{}\n", header.join("\t"), row.join("\t"));
-    let gopts = GenerateOptions { var_labels, var_range_exprs, iri_annotation_skip, ..Default::default() };
-    let mut model = generate_with(pattern_yaml, &tsv, labels, &gopts)?;
-    // Each prototype is titled with the pattern's name — the one annotation
-    // `prototype` adds that `generate` does not.
-    if let Some(name) = pattern.pattern_name.as_ref() {
-        // The title's subject is the pattern's OWN `pattern_iri`, written verbatim
-        // even when it is not a valid absolute IRI — only the axioms fall back to
-        // the `urn:dosdp:defined_class` placeholder.
-        let iri = pattern.pattern_iri.as_ref().unwrap_or(&dc);
-        let b = Build::new();
-        model.ont.insert(AnnotatedComponent {
-            component: Component::AnnotationAssertion(AnnotationAssertion {
-                subject: AnnotationSubject::IRI(b.iri(iri.clone())),
-                ann: Annotation {
-                    ann: Default::default(),
-                    ap: b.annotation_property("http://purl.org/dc/terms/title"),
-                    av: AnnotationValue::Literal(Literal::Datatype {
-                        literal: name.clone(),
-                        datatype_iri: b.iri("http://www.w3.org/2001/XMLSchema#string"),
-                    }),
-                },
-            }),
-            ann: Default::default(),
-        });
-        model.ont.insert(AnnotatedComponent {
-            component: Component::DeclareAnnotationProperty(
-                horned_owl::model::DeclareAnnotationProperty(
-                    b.annotation_property("http://purl.org/dc/terms/title"),
-                ),
-            ),
-            ann: Default::default(),
-        });
-    }
-    Ok(type_annotation_literals_as_string(model))
-}
-
-/// Give every untyped annotation literal the `xsd:string` datatype.
-///
-/// `pattern.owl` spells the datatype out on every annotation literal, so it
-/// reads `"Part of 'example'"^^xsd:string`. The generator builds bare
-/// `Literal::Simple` values, which denote the same thing but render without the
-/// datatype; only the `dcterms:title` [`prototype`] adds is typed already.
-/// Retyping the rest keeps one document from mixing both spellings.
-/// `definitions.owl` is written with the datatype implicit and is unaffected.
-fn type_annotation_literals_as_string(model: Model) -> Model {
-    use horned_owl::model::MutableOntology;
-    let b: Build<crate::model::Str> = Build::new();
-    let xsd = b.iri("http://www.w3.org/2001/XMLSchema#string");
-    let retype = |av: &mut AnnotationValue<crate::model::Str>| {
-        if let AnnotationValue::Literal(Literal::Simple { literal }) = av {
-            *av = AnnotationValue::Literal(Literal::Datatype {
-                literal: literal.clone(),
-                datatype_iri: xsd.clone(),
-            });
-        }
-    };
-    let mut out = Model { ont: Default::default(), ..model.clone() };
-    out.ont = horned_owl::ontology::set::SetOntology::new();
-    for ac in model.ont.iter() {
-        let mut ac = ac.clone();
-        if let Component::AnnotationAssertion(aa) = &mut ac.component {
-            retype(&mut aa.ann.av);
-        }
-        for a in std::mem::take(&mut ac.ann).into_iter() {
-            let mut a = a;
-            retype(&mut a.av);
-            ac.ann.insert(a);
-        }
-        out.ont.insert(ac);
-    }
-    out
-}
-
-/// Every pattern YAML in a directory, sorted by filename — `prototype`'s
-/// `--template` accepts a directory and renders the whole pattern set into one
-/// ontology (a repo's `patterns/pattern.owl`).
-fn pattern_files_in(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
-    let mut out: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| anyhow!("reading template directory {}: {e}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("yaml"))
-        .collect();
-    out.sort();
-    Ok(out)
-}
-
-/// Resolve a variable's range expression to a single prototypical filler IRI.
-fn range_filler(pattern: &Pattern, prefixes: &horned_owl::curie::PrefixMapping, range: &str) -> String {
-    let r = range.trim().trim_matches('\'').trim();
-    for dict in [&pattern.classes, &pattern.relations, &pattern.object_properties] {
-        if let Some(iri) = dict.get(r) {
-            return expand(prefixes, iri);
-        }
-    }
-    if r.contains(':') || r.starts_with("http") {
-        return expand(prefixes, r);
-    }
-    "http://www.w3.org/2002/07/owl#Thing".to_string()
-}
-
-/// Namespace for the placeholder classes that stand in for pattern variables
-/// while unifying the pattern's logical template against an ontology.
-const VAR_NS: &str = "https://www.ebi.ac.uk/spot/owlmake/dosdp/var/";
-
 /// The result of a `query`: the variable column names and one row of fillers per
 /// match (the first column is always `defined_class`).
 pub struct QueryResult {
@@ -2110,41 +1068,21 @@ impl QueryResult {
 }
 
 /// Query an ontology for terms matching a pattern's logical definition: the
-/// pattern's primary logical axiom becomes a template with a placeholder per
-/// variable, which is unified against each class's equivalent/subclass axioms.
-/// Returns the bound fillers (as IRIs).
+/// pattern's primary logical template (see [`render::Renderer::primary_expression`]),
+/// each variable its placeholder, is unified against each class's equivalence
+/// or subclass axioms. Returns the bound fillers (as IRIs).
 pub fn query(pattern_yaml: &str, ontology: &Model) -> Result<QueryResult> {
-    let pattern: Pattern =
-        parse_pattern(pattern_yaml)?;
-    let prefixes = dosdp_prefixes();
+    let pattern = parse_pattern(pattern_yaml)?;
+    let prefixes = Prefixes::obo();
     let b = Build::new();
-    let mut names: BTreeMap<String, String> = BTreeMap::new();
-    for dict in [
-        &pattern.classes,
-        &pattern.relations,
-        &pattern.object_properties,
-        &pattern.data_properties,
-        &pattern.annotation_properties,
-    ] {
-        for (k, v) in dict {
-            names.insert(k.clone(), v.clone());
-        }
-    }
-
-    // Pick the primary logical axiom (equivalentTo preferred, then subClassOf).
-    let (atype, text, vars) = pick_primary(&pattern)
+    let (labels, index) = (HashMap::new(), HashMap::new());
+    let readable = render::Readable { labels: &labels, index: &index };
+    let renderer = render::Renderer::new(&b, &pattern, pattern_yaml, &prefixes, readable, writes_as_0_20())?;
+    let (kind, template, vars) = renderer
+        .primary_expression()?
         .ok_or_else(|| anyhow!("pattern has no equivalentTo/subClassOf logical axiom to query"))?;
 
-    // Build the template CE: substitute entity short-names, then replace each
-    // `%s` with a placeholder var class.
-    let mut tt = substitute_names_in(&names, &prefixes, &text);
-    for v in &vars {
-        tt = replace_first(&tt, "%s", &format!("<{VAR_NS}{v}>"));
-    }
-    let template = manchester::parse_class_expression(&b, &prefixes, &tt)
-        .ok_or_else(|| anyhow!("could not parse the pattern's logical template: {tt}"))?;
-
-    let want_equiv = atype == "equivalentTo";
+    let want_equiv = kind == AxiomType::EquivalentTo;
     let mut rows: std::collections::BTreeSet<Vec<String>> = Default::default();
     for ac in ontology.ont.iter() {
         let (defined, definition) = match (&ac.component, want_equiv) {
@@ -2171,7 +1109,7 @@ pub fn query(pattern_yaml: &str, ontology: &Model) -> Result<QueryResult> {
         if unify(&template, &definition, &mut binds) {
             let mut row = vec![defined];
             for v in &vars {
-                row.push(binds.get(v).cloned().unwrap_or_default());
+                row.push(binds.get(&render::variable_iri(v)).cloned().unwrap_or_default());
             }
             rows.insert(row);
         }
@@ -2182,21 +1120,6 @@ pub fn query(pattern_yaml: &str, ontology: &Model) -> Result<QueryResult> {
     Ok(QueryResult { columns, rows: rows.into_iter().collect() })
 }
 
-/// The pattern's primary logical axiom as (axiom_type, text, vars).
-fn pick_primary(pattern: &Pattern) -> Option<(String, String, Vec<String>)> {
-    if let Some(t) = &pattern.equivalent_to {
-        return Some(("equivalentTo".into(), t.text.clone(), t.vars.clone()));
-    }
-    if let Some(t) = &pattern.subclass_of {
-        return Some(("subClassOf".into(), t.text.clone(), t.vars.clone()));
-    }
-    pattern
-        .logical_axioms
-        .iter()
-        .find(|la| matches!(la.axiom_type.as_str(), "equivalentTo" | "subClassOf"))
-        .map(|la| (la.axiom_type.clone(), la.text.clone(), la.vars.clone()))
-}
-
 fn named_class(ce: &CE<RcStr>) -> Option<&str> {
     match ce {
         CE::Class(c) => Some(c.0.as_ref()),
@@ -2204,27 +1127,14 @@ fn named_class(ce: &CE<RcStr>) -> Option<&str> {
     }
 }
 
-fn substitute_names_in(
-    names: &BTreeMap<String, String>,
-    prefixes: &horned_owl::curie::PrefixMapping,
-    text: &str,
-) -> String {
-    let mut text = text.to_string();
-    for (name, iri) in names {
-        let full = format!("<{}>", expand(prefixes, iri));
-        text = text.replace(&format!("'{name}'"), &full);
-        text = replace_word(&text, name, &full);
-    }
-    text
-}
-
-/// Unify a template class expression (with `VAR_NS` placeholder classes) against
-/// a target expression, recording variable → filler IRI bindings. Supports
-/// classes, existential restrictions, and intersections (matched as sets).
+/// Unify a template class expression (with variable placeholder classes)
+/// against a target expression, recording placeholder IRI → filler IRI
+/// bindings. Supports classes, existential restrictions, and intersections
+/// (matched as sets).
 fn unify(template: &CE<RcStr>, target: &CE<RcStr>, binds: &mut BTreeMap<String, String>) -> bool {
     match template {
-        CE::Class(c) if c.0.as_ref().starts_with(VAR_NS) => {
-            let var = c.0.as_ref()[VAR_NS.len()..].to_string();
+        CE::Class(c) if c.0.as_ref().starts_with(render::VARIABLE_NS) => {
+            let var = c.0.as_ref().to_string();
             // Bind to a named class filler (the common case) or, for a complex
             // filler, its Manchester rendering. A variable that recurs in the
             // template must bind consistently everywhere.
@@ -2294,7 +1204,6 @@ fn set_unify(tparts: &[CE<RcStr>], gparts: &[CE<RcStr>], binds: &mut BTreeMap<St
 /// query variable matches a complex expression (so the match is reported rather
 /// than silently dropped).
 fn render_filler(ce: &CE<RcStr>) -> String {
-    use horned_owl::model::ObjectPropertyExpression as OPE;
     let ope = |o: &horned_owl::model::ObjectPropertyExpression<RcStr>| match o {
         horned_owl::model::ObjectPropertyExpression::ObjectProperty(p) => p.0.as_ref().to_string(),
         horned_owl::model::ObjectPropertyExpression::InverseObjectProperty(p) => format!("inverse {}", p.0.as_ref()),
@@ -2315,7 +1224,7 @@ fn render_filler(ce: &CE<RcStr>) -> String {
 
 fn has_var(ce: &CE<RcStr>) -> bool {
     match ce {
-        CE::Class(c) => c.0.as_ref().starts_with(VAR_NS),
+        CE::Class(c) => c.0.as_ref().starts_with(render::VARIABLE_NS),
         CE::ObjectSomeValuesFrom { bce, .. } | CE::ObjectAllValuesFrom { bce, .. } => has_var(bce),
         CE::ObjectIntersectionOf(ps) | CE::ObjectUnionOf(ps) => ps.iter().any(has_var),
         CE::ObjectComplementOf(b) => has_var(b),
@@ -2323,486 +1232,91 @@ fn has_var(ce: &CE<RcStr>) -> bool {
     }
 }
 
-/// Render a simple Markdown document for a pattern.
-// ─────────────────────────────── dosdp docs ─────────────────────────────────
-//
-// `om dosdp docs` renders each pattern of a batch as a Markdown page — the
-// pattern's variables, its text templates with `%s` fillers shown as `{var}`
-// placeholders, its logical definition in Manchester syntax with every entity a
-// Markdown link, and a preview of the first five data rows — plus an `index.md`
-// over the batch. The page layout, the expression spacing and the preview's
-// column order are all part of the bytes a repo's docs tree pins.
-
-/// The IRI namespace a docs page's prototypical fillers live in; an entity in
-/// it renders as its bare `{var}` placeholder rather than a link.
-const DOCS_FILLER_NS: &str = "http://dosdp.org/filler/";
-
-/// Scala's `Hashing.improve` bit-mixer, the hash a `scala.collection.immutable`
-/// hash trie buckets by.
-fn scala_improve(hcode: i32) -> i32 {
-    let mut h = hcode.wrapping_add(!(hcode << 9));
-    h ^= ((h as u32) >> 14) as i32;
-    h = h.wrapping_add(h << 4);
-    h ^ (((h as u32) >> 10) as i32)
-}
-
-/// The iteration order of a `scala.collection.immutable.Map[String, _]` built
-/// by inserting `keys` in order: up to four entries the small-map classes keep
-/// insertion order; beyond that the hash trie orders keys by ascending 5-bit
-/// slices of the improved hash, level by level (ties within a slice descend a
-/// level; full-hash collisions keep insertion order). A docs page's data
-/// preview reads its column set through such a map, so the column ORDER of a
-/// wide table is this order, not the file's.
+/// The iteration order of a Scala immutable map (or set) of string keys built
+/// by inserting `keys` in order. Up to four keys iterate in the order they were
+/// inserted. Beyond four, the order is a hash trie's (see [`crate::hash_trie`]),
+/// keyed by each key's improved Java string hash: at each level, first the keys
+/// alone in their five-bit slot, in slot order, then each slot holding several,
+/// ordered the same way one level down; keys with equal hashes keep their
+/// insertion order.
 fn scala_map_key_order(keys: &[String]) -> Vec<usize> {
     if keys.len() <= 4 {
         return (0..keys.len()).collect();
     }
-    fn sort_level(idx: &mut [usize], hashes: &[i32], shift: u32) {
-        if idx.len() <= 1 || shift >= 32 {
+    fn walk(idx: &[usize], hashes: &[u32], shift: u32, out: &mut Vec<usize>) {
+        if idx.len() == 1 || shift >= 32 {
+            out.extend_from_slice(idx);
             return;
         }
-        idx.sort_by_key(|&i| ((hashes[i] as u32) >> shift) & 31);
-        let mut s = 0;
-        while s < idx.len() {
-            let mask = ((hashes[idx[s]] as u32) >> shift) & 31;
-            let mut e = s + 1;
-            while e < idx.len() && ((hashes[idx[e]] as u32) >> shift) & 31 == mask {
-                e += 1;
-            }
-            if e - s > 1 {
-                sort_level(&mut idx[s..e], hashes, shift + 5);
-            }
-            s = e;
+        let mut slots: Vec<Vec<usize>> = vec![Vec::new(); 32];
+        for &i in idx {
+            slots[((hashes[i] >> shift) & 31) as usize].push(i);
+        }
+        for slot in slots.iter().filter(|s| s.len() == 1) {
+            out.push(slot[0]);
+        }
+        for slot in slots.iter().filter(|s| s.len() > 1) {
+            walk(slot, hashes, shift + 5, out);
         }
     }
-    let hashes: Vec<i32> = keys
+    let hashes: Vec<u32> = keys
         .iter()
-        .map(|k| scala_improve(crate::owlapi_hash::java_string_hash(k)))
+        .map(|k| crate::hash_trie::improve(crate::owlapi_hash::java_string_hash(k)))
         .collect();
-    let mut idx: Vec<usize> = (0..keys.len()).collect();
-    sort_level(&mut idx, &hashes, 0);
-    idx
-}
-
-/// HTML4 entity escaping as applied to docs literal text: the four markup
-/// characters. (Full HTML4 escaping also maps non-ASCII letters to named
-/// entities; none of the pattern corpora carry any.)
-fn escape_html4(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
-}
-
-/// Manchester-syntax renderer producing Markdown-linked entity names.
-///
-/// Newlines are part of the syntax writer's wrapping (a conjunction wraps
-/// before each `and`, an intersection filler is indented four further columns);
-/// the docs page flattens each rendered expression to one line by replacing
-/// every newline with a space, which is where the double spaces around `and`
-/// come from.
-struct MdRenderer<'a> {
-    labels: &'a HashMap<String, String>,
-    out: String,
-    tabs: Vec<usize>,
-}
-
-impl<'a> MdRenderer<'a> {
-    fn new(labels: &'a HashMap<String, String>) -> Self {
-        MdRenderer { labels, out: String::new(), tabs: vec![0] }
-    }
-
-    fn entity_text(&self, iri: &str) -> String {
-        if let Some(var) = iri.strip_prefix(DOCS_FILLER_NS) {
-            return format!("`{{{var}}}`");
-        }
-        let label = self
-            .labels
-            .get(iri)
-            .cloned()
-            .unwrap_or_else(|| crate::owlapi_hash::iri_split(iri).1.to_string());
-        format!("[{label}]({iri})")
-    }
-
-    fn newline(&mut self) {
-        self.out.push('\n');
-        for _ in 0..*self.tabs.last().unwrap_or(&0) {
-            self.out.push(' ');
-        }
-    }
-
-    fn literal(&mut self, text: &str) {
-        self.out.push('"');
-        self.out.push_str(&escape_html4(text));
-        self.out.push('"');
-        self.out.push_str("^^");
-        let xsd = "http://www.w3.org/2001/XMLSchema#string";
-        let e = self.entity_text(xsd);
-        self.out.push_str(&e);
-    }
-
-    fn ce(&mut self, ce: &CE<RcStr>) {
-        match ce {
-            CE::Class(c) => {
-                let e = self.entity_text(c.0.as_ref());
-                self.out.push_str(&e);
-            }
-            CE::ObjectIntersectionOf(ops) => self.junction(ops, "and", true),
-            CE::ObjectUnionOf(ops) => self.junction(ops, "or", false),
-            CE::ObjectComplementOf(op) => {
-                self.out.push_str(if matches!(**op, CE::Class(_)) { "not" } else { "not " });
-                self.wrapped(op);
-            }
-            CE::ObjectSomeValuesFrom { ope, bce } => self.restriction(ope, "some", bce),
-            CE::ObjectAllValuesFrom { ope, bce } => self.restriction(ope, "only", bce),
-            CE::ObjectHasValue { ope, i } => {
-                self.ope(ope);
-                self.out.push_str(" value ");
-                if let horned_owl::model::Individual::Named(n) = i {
-                    let e = self.entity_text(n.0.as_ref());
-                    self.out.push_str(&e);
-                }
-            }
-            other => self.out.push_str(&format!("{other:?}")),
-        }
-    }
-
-    fn ope(&mut self, ope: &horned_owl::model::ObjectPropertyExpression<RcStr>) {
-        match ope {
-            horned_owl::model::ObjectPropertyExpression::ObjectProperty(p) => {
-                let e = self.entity_text(p.0.as_ref());
-                self.out.push_str(&e);
-            }
-            horned_owl::model::ObjectPropertyExpression::InverseObjectProperty(p) => {
-                self.out.push_str("inverse ");
-                let e = self.entity_text(p.0.as_ref());
-                self.out.push_str(&e);
-            }
-        }
-    }
-
-    fn junction(&mut self, ops: &[CE<RcStr>], word: &str, wrap: bool) {
-        let mut sorted: Vec<&CE<RcStr>> = ops.iter().collect();
-        sorted.sort_by(|a, b| crate::owlapi_hash::owl_cmp(a, b));
-        let mut first = true;
-        for op in sorted {
-            if !first {
-                if wrap {
-                    self.newline();
-                }
-                self.out.push(' ');
-                self.out.push_str(word);
-                self.out.push(' ');
-            }
-            first = false;
-            self.wrapped(op);
-        }
-    }
-
-    /// Parenthesize an anonymous operand.
-    fn wrapped(&mut self, op: &CE<RcStr>) {
-        if matches!(op, CE::Class(_)) {
-            self.ce(op);
-        } else {
-            self.out.push('(');
-            self.ce(op);
-            self.out.push(')');
-        }
-    }
-
-    fn restriction(&mut self, ope: &horned_owl::model::ObjectPropertyExpression<RcStr>, word: &str, filler: &CE<RcStr>) {
-        self.ope(ope);
-        self.out.push(' ');
-        self.out.push_str(word);
-        self.out.push(' ');
-        match filler {
-            CE::Class(_) => self.ce(filler),
-            CE::ObjectIntersectionOf(_) | CE::ObjectUnionOf(_) => {
-                let base = *self.tabs.last().unwrap_or(&0);
-                self.tabs.push(base + 4);
-                self.newline();
-                self.out.push('(');
-                self.ce(filler);
-                self.out.push(')');
-                self.tabs.pop();
-            }
-            _ => {
-                self.out.push('(');
-                self.ce(filler);
-                self.out.push(')');
-            }
-        }
-    }
-
-    /// Render one expression on one line (the wrapping newlines become spaces).
-    fn render(labels: &'a HashMap<String, String>, ce: &CE<RcStr>) -> String {
-        let mut r = MdRenderer::new(labels);
-        r.ce(ce);
-        r.out.replace('\n', " ")
-    }
-}
-
-/// Fill a text template for a docs page: each `%s` becomes its variable's
-/// `{var}` placeholder, whatever kind of variable it is.
-fn docs_fill_text(text: &str, vars: &[String]) -> String {
-    let mut out = text.to_string();
-    for v in vars {
-        out = replace_first(&out, "%s", &format!("`{{{v}}}`"));
-    }
+    let idx: Vec<usize> = (0..keys.len()).collect();
+    let mut out = Vec::with_capacity(keys.len());
+    walk(&idx, &hashes, 0, &mut out);
     out
 }
 
-/// Parse a logical template into a class expression over `{var}` filler
-/// entities.
-fn docs_template_ce(
-    pattern: &Pattern,
-    prefixes: &horned_owl::curie::PrefixMapping,
-    b: &Build<RcStr>,
-    t: &AxiomTemplate,
-) -> Option<CE<RcStr>> {
-    let mut names: BTreeMap<String, String> = BTreeMap::new();
-    for dict in [
-        &pattern.classes,
-        &pattern.relations,
-        &pattern.object_properties,
-        &pattern.data_properties,
-    ] {
-        for (k, v) in dict {
-            names.insert(k.clone(), v.clone());
+/// The distinct `items` in the order a Scala mutable hash set built by adding
+/// them in order iterates: by bucket, the bucket of an item the low bits of
+/// its spread `hash` (`h ^ h >>> 16`), and within a bucket by that spread hash,
+/// items with equal hashes in the order added. The table has 16 buckets and
+/// doubles whenever an addition would fill three quarters of it.
+fn scala_mutable_set_order(items: Vec<String>, hash: impl Fn(&str) -> i32) -> Vec<String> {
+    let mut distinct: Vec<String> = Vec::new();
+    for item in items {
+        if !distinct.contains(&item) {
+            distinct.push(item);
         }
     }
-    // Quoted references first (longest name first), then barewords — one
-    // dictionary name is often a word-prefix of another.
-    let mut sorted: Vec<(&String, &String)> = names.iter().collect();
-    sorted.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(b.0)));
-    let mut text = t.text.clone();
-    for (name, iri) in &sorted {
-        text = text.replace(&format!("'{name}'"), &format!("<{}>", expand(prefixes, iri)));
+    let mut buckets = 16usize;
+    while distinct.len() >= buckets * 3 / 4 {
+        buckets *= 2;
     }
-    for (name, iri) in &sorted {
-        text = replace_word(&text, name, &format!("<{}>", expand(prefixes, iri)));
-    }
-    for var in &t.vars {
-        text = replace_first(&text, "%s", &format!("<{DOCS_FILLER_NS}{var}>"));
-    }
-    manchester::parse_class_expression(b, prefixes, &text)
+    let mut keyed: Vec<(usize, i32, String)> = distinct
+        .into_iter()
+        .map(|item| {
+            let h = hash(&item);
+            let spread = h ^ ((h as u32) >> 16) as i32;
+            ((spread as u32 as usize) & (buckets - 1), spread, item)
+        })
+        .collect();
+    keyed.sort_by_key(|(bucket, spread, _)| (*bucket, *spread));
+    keyed.into_iter().map(|(_, _, item)| item).collect()
 }
 
-/// The `vars:` (and `data_vars:`) keys of a pattern document, in document
-/// order. The `Pattern` struct's maps are sorted; the docs table shows the
-/// variables as the pattern writes them.
-fn docs_var_order(pattern_yaml: &str, key: &str) -> Vec<String> {
-    let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(pattern_yaml) else {
-        return Vec::new();
-    };
+/// The distinct `items` in the order a Scala immutable set built by inserting
+/// them in order iterates (see [`scala_map_key_order`]).
+fn scala_set_order(items: Vec<String>) -> Vec<String> {
+    let mut distinct: Vec<String> = Vec::new();
+    for item in items {
+        if !distinct.contains(&item) {
+            distinct.push(item);
+        }
+    }
+    scala_map_key_order(&distinct).into_iter().map(|i| distinct[i].clone()).collect()
+}
+
+/// The keys of a pattern document's `key` mapping (`vars:`, `data_vars:`, …),
+/// in document order. The `Pattern` struct's maps are sorted; a docs table
+/// shows the variables as the pattern writes them, and the order a generator
+/// reads a row's labels in starts from it.
+fn pattern_key_order(pattern_yaml: &str, key: &str) -> Vec<String> {
+    let Ok(v) = pattern_document(pattern_yaml) else { return Vec::new() };
     let Some(m) = v.get(key).and_then(|m| m.as_mapping()) else { return Vec::new() };
     m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect()
-}
-
-/// The `contributors:` list of a pattern document, present only when declared.
-fn docs_contributors(pattern_yaml: &str) -> Option<Vec<String>> {
-    let v = serde_yaml::from_str::<serde_yaml::Value>(pattern_yaml).ok()?;
-    let seq = v.get("contributors")?.as_sequence()?;
-    Some(seq.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
-}
-
-/// A docs data-preview cell: an `http…` value or a CURIE links to its IRI
-/// (any unknown CURIE prefix expands under the OBO namespace); anything else
-/// stands as written.
-fn docs_cell(v: &str) -> String {
-    if v.starts_with("http") {
-        return format!("[{v}]({v})");
-    }
-    if let Some((prefix, local)) = v.split_once(':') {
-        let ns = match prefix {
-            "rdf" => "http://www.w3.org/1999/02/22-rdf-syntax-ns#".to_string(),
-            "rdfs" => "http://www.w3.org/2000/01/rdf-schema#".to_string(),
-            "owl" => "http://www.w3.org/2002/07/owl#".to_string(),
-            "xsd" => "http://www.w3.org/2001/XMLSchema#".to_string(),
-            "dc" => "http://purl.org/dc/elements/1.1/".to_string(),
-            "dct" => "http://purl.org/dc/terms/".to_string(),
-            "skos" => "http://www.w3.org/2004/02/skos/core#".to_string(),
-            "obo" => "http://purl.obolibrary.org/obo/".to_string(),
-            "oio" | "oboInOwl" => "http://www.geneontology.org/formats/oboInOwl#".to_string(),
-            other => format!("http://purl.obolibrary.org/obo/{other}_"),
-        };
-        return format!("[{v}]({ns}{local})");
-    }
-    v.to_string()
-}
-
-/// One pattern's docs page.
-fn docs_markdown(
-    pattern_yaml: &str,
-    labels: &HashMap<String, String>,
-    data_tsv: &str,
-    data_location: &str,
-) -> Result<String> {
-    let pattern: Pattern = parse_pattern(pattern_yaml)?;
-    let prefixes = dosdp_prefixes();
-    let b: Build<RcStr> = Build::new();
-
-    let name = pattern.pattern_name.clone().unwrap_or_default();
-    let iri_text =
-        pattern.pattern_iri.clone().unwrap_or_else(|| "Missing pattern IRI".to_string());
-    let iri_link = pattern.pattern_iri.clone().unwrap_or_default();
-    let desc = pattern.description.clone().unwrap_or_else(|| "*No description*".to_string());
-
-    let contributors = docs_contributors(pattern_yaml);
-    let contrib_header =
-        if contributors.is_some() { "## Contributors\n".to_string() } else { String::new() };
-    let contrib_list = contributors
-        .unwrap_or_default()
-        .iter()
-        .map(|c| format!("- {c}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Variables table: object/list variables render their range expression;
-    // data variables show their declared range as written.
-    let mut var_rows: Vec<String> = Vec::new();
-    for key in ["vars", "list_vars"] {
-        let dict = if key == "vars" { &pattern.vars } else { &pattern.list_vars };
-        for v in docs_var_order(pattern_yaml, key) {
-            let Some(range) = dict.get(&v) else { continue };
-            let rendered = match docs_template_ce(
-                &pattern,
-                &prefixes,
-                &b,
-                &AxiomTemplate { text: range.clone(), ..Default::default() },
-            ) {
-                Some(ce) => MdRenderer::render(labels, &ce),
-                None => range.clone(),
-            };
-            var_rows.push(format!("| `{{{v}}}` | {rendered} |"));
-        }
-    }
-    for key in ["data_vars", "data_list_vars"] {
-        let dict = if key == "data_vars" { &pattern.data_vars } else { &pattern.data_list_vars };
-        for v in docs_var_order(pattern_yaml, key) {
-            let Some(range) = dict.get(&v) else { continue };
-            var_rows.push(format!("| `{{{v}}}` | {range} |"));
-        }
-    }
-
-    let render_literal = |t: &Template| -> String {
-        let mut r = MdRenderer::new(labels);
-        r.literal(&docs_fill_text(&t.text, &t.vars));
-        r.out.replace('\n', " ")
-    };
-    let names = pattern.name.as_ref().map(|t| render_literal(t)).unwrap_or_default();
-    let defs = pattern.def.as_ref().map(|t| render_literal(t)).unwrap_or_default();
-
-    let mut ann_bullets: Vec<String> = Vec::new();
-    for a in &pattern.annotations {
-        let (Some(prop), Some(text)) = (&a.annotation_property, &a.text) else { continue };
-        let prop_iri = pattern
-            .annotation_properties
-            .get(prop)
-            .map(|c| expand(&prefixes, c))
-            .unwrap_or_else(|| expand(&prefixes, prop));
-        let mut r = MdRenderer::new(labels);
-        let e = r.entity_text(&prop_iri);
-        r.out.push_str(&e);
-        r.out.push_str(": ");
-        r.literal(&docs_fill_text(text, &a.vars));
-        ann_bullets.push(format!("- {}", r.out.replace('\n', " ")));
-    }
-
-    let equivs = pattern
-        .equivalent_to
-        .as_ref()
-        .and_then(|t| docs_template_ce(&pattern, &prefixes, &b, t))
-        .map(|ce| MdRenderer::render(labels, &ce))
-        .unwrap_or_default();
-    let subs = pattern
-        .subclass_of
-        .as_ref()
-        .and_then(|t| docs_template_ce(&pattern, &prefixes, &b, t))
-        .map(|ce| MdRenderer::render(labels, &ce))
-        .unwrap_or_default();
-    let sub_header =
-        if pattern.subclass_of.is_some() { "## Subclass of\n".to_string() } else { String::new() };
-
-    // Data preview: header + first five rows, columns in the order a
-    // string-keyed map yields them.
-    let lines: Vec<&str> = data_tsv.lines().filter(|l| !l.trim().is_empty()).collect();
-    // The column set is the header zipped with the FIRST data row: a header
-    // name with no cell under it (a table whose rows stop short of a trailing
-    // empty column) is not a column of the preview. A table with no data rows
-    // previews no columns at all.
-    let header: Vec<String> =
-        lines.first().map(|h| h.split('\t').map(str::to_string).collect()).unwrap_or_default();
-    let first_row_len = lines.get(1).map(|r| r.split('\t').count()).unwrap_or(0);
-    let file_cols: Vec<String> =
-        header.into_iter().take(first_row_len).collect();
-    let order = scala_map_key_order(&file_cols);
-    let cols: Vec<&String> = order.iter().map(|&i| &file_cols[i]).collect();
-    let mut data_rows: Vec<String> = Vec::new();
-    for line in lines.iter().skip(1).take(5) {
-        let cells: Vec<&str> = line.split('\t').collect();
-        let row: Vec<String> = order
-            .iter()
-            .map(|&i| docs_cell(cells.get(i).copied().unwrap_or("")))
-            .collect();
-        data_rows.push(format!("| {} |", row.join(" | ")));
-    }
-    let header_row = format!("| {} |", cols.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(" | "));
-    let sep_row = cols.iter().map(|_| "|:--").collect::<String>();
-
-    Ok(format!(
-        "# {name}\n\n[{iri_text}]({iri_link})\n\n## Description\n\n{desc}\n\n{contrib_header}\n{contrib_list}\n\n## Variables\n\n| Variable name | Allowed type |\n|:--------------|:-------------|\n{var_rows}\n\n## Name\n\n{names}\n\n## Annotations\n\n{anns}\n\n## Definition\n\n{defs}\n\n## Equivalent to\n\n{equivs}\n\n{sub_header}\n{subs}\n\n{other_header}\n{others}\n\n## Data preview\n\n*See full table [here]({data_location})*\n\n{header_row}\n{sep_row}|\n{data_rows}\n\n",
-        var_rows = var_rows.join("\n"),
-        anns = ann_bullets.join("\n"),
-        other_header = "",
-        others = "",
-        data_rows = data_rows.join("\n"),
-    ))
-}
-
-/// Render every pattern of a batch to `<outdir>/<pattern>.md`, plus an
-/// `index.md` over the batch (sorted by pattern name, stably).
-pub fn docs_batch(
-    template_dir: &std::path::Path,
-    infile_dir: &std::path::Path,
-    patterns: &[String],
-    outdir: &std::path::Path,
-    data_location_prefix: &str,
-    labels: &HashMap<String, String>,
-    table_ext: &str,
-) -> Result<()> {
-    let mut index: Vec<(Option<String>, Option<String>, String)> = Vec::new();
-    for p in patterns {
-        let yaml_path = template_dir.join(format!("{p}.yaml"));
-        let yaml = std::fs::read_to_string(&yaml_path)
-            .map_err(|e| anyhow!("reading pattern {}: {e}", yaml_path.display()))?;
-        let data_path = infile_dir.join(format!("{p}.{table_ext}"));
-        let data = std::fs::read_to_string(&data_path)
-            .map_err(|e| anyhow!("reading data {}: {e}", data_path.display()))?;
-        let data_location =
-            format!("{data_location_prefix}{}", data_path.file_name().unwrap().to_string_lossy());
-        let md = docs_markdown(&yaml, labels, &data, &data_location)?;
-        std::fs::write(outdir.join(format!("{p}.md")), md)?;
-        let pat: Pattern = parse_pattern(&yaml)?;
-        index.push((pat.pattern_name.clone(), pat.description.clone(), format!("{p}.md")));
-    }
-    if !patterns.is_empty() {
-        let mut sorted = index.clone();
-        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-        let rows: Vec<String> = sorted
-            .iter()
-            .map(|(name, desc, file)| {
-                format!(
-                    "| [{}]({file}) | {} |",
-                    name.as_deref().unwrap_or("*unnamed*"),
-                    desc.as_deref().unwrap_or("*no description*")
-                )
-            })
-            .collect();
-        let md = format!(
-            "# Design Patterns\n\n| Pattern | Description |\n|:--------|:------------|\n{}\n",
-            rows.join("\n")
-        );
-        std::fs::write(outdir.join("index.md"), md)?;
-    }
-    Ok(())
 }
 
 // ──────────────────────────────── dosdp CLI ─────────────────────────────────
@@ -2842,7 +1356,7 @@ pub fn cli_main(args: &[String]) -> i32 {
     match run_cli(args) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("dosdp: {e}");
+            eprintln!("dosdp: {e:#}");
             1
         }
     }
@@ -2869,155 +1383,136 @@ fn run_cli(args: &[String]) -> Result<i32> {
         return Ok(crate::cmd::validate_patterns::validate_main(rest));
     }
     let val = |names: &[&str]| -> Option<String> { cli_opt(rest, names) };
-    let flag = |names: &[&str]| -> bool { cli_flag(rest, names) };
+    let flag = |names: &[&str]| -> Result<bool> { cli_bool(rest, names) };
 
     let template = val(&["--template", "--pattern", "-t"]);
     let read_template = || -> Result<String> {
         let p = template.clone().ok_or_else(|| anyhow!("--template is required"))?;
-        Ok(std::fs::read_to_string(&p).map_err(|e| anyhow!("reading template {p}: {e}"))?)
+        std::fs::read_to_string(&p).map_err(|e| anyhow!("reading template {p}: {e}"))
     };
     let outfile = val(&["--outfile", "--output", "-o"]);
+    // How CURIEs become IRIs: the `--prefixes` file's, then, with
+    // `--obo-prefixes`, the OBO ones.
+    let prefixes = || -> Result<Prefixes> {
+        let named = match val(&["--prefixes"]) {
+            Some(p) => Prefixes::read_file(std::path::Path::new(&p))?,
+            None => Vec::new(),
+        };
+        Ok(Prefixes::new(named, flag(&["--obo-prefixes"])?))
+    };
+    let table_format = || -> Result<TableFormat> {
+        val(&["--table-format"]).map_or(Ok(TableFormat::Tsv), |f| TableFormat::parse(&f).context("--table-format"))
+    };
+    // The supplied ontology, its imports through `--catalog` included: the
+    // fillers' readable identifiers and permutation values.
+    let ontology_index = || -> Result<HashMap<String, HashMap<String, Vec<String>>>> {
+        annotation_index_from_with_catalog(
+            val(&["--ontology", "--input", "-i"]).as_deref(),
+            val(&["--catalog", "-c"]).as_deref().map(std::path::Path::new),
+        )
+    };
 
     match sub.as_str() {
         "generate" => {
-            let csv = val(&["--table-format"]).as_deref() == Some("csv");
-            // One ontology load yields both the label map and the permutation
-            // index, and it follows `owl:imports` through `--catalog` — that is
-            // where the fillers' labels live.
-            let catalog = val(&["--catalog", "-c"]);
-            let annotation_index = annotation_index_from_with_catalog(
-                val(&["--ontology", "--input", "-i"]).as_deref(),
-                catalog.as_deref().map(std::path::Path::new),
-            )?;
-            let labels: HashMap<String, String> = annotation_index
-                .iter()
-                .filter_map(|(iri, props)| {
-                    // The lexicographic MINIMUM of a term's labels — not the
-                    // first one the axiom order happens to yield, which would
-                    // make the generated text depend on load order.
-                    props.get(RDFS_LABEL).and_then(|v| v.iter().min()).map(|l| (iri.clone(), l.clone()))
-                })
-                .collect();
-            // `--prefixes FILE`: a YAML CURIE map (e.g. `config/prefixes.yaml`).
-            let extra_prefixes: Vec<(String, String)> = val(&["--prefixes"])
-                .and_then(|p| std::fs::read_to_string(&p).ok())
-                .and_then(|t| {
-                    serde_yaml::from_str::<std::collections::BTreeMap<String, String>>(&t).ok()
-                })
-                .map(|m| m.into_iter().collect())
+            let restrict_axioms = val(&["--restrict-axioms-to"])
+                .map(|s| Restrict::parse(&s).context("--restrict-axioms-to"))
+                .transpose()?
                 .unwrap_or_default();
+            let generate_defined_class = flag(&["--generate-defined-class"])?;
+            let add_axiom_source_annotation = flag(&["--add-axiom-source-annotation"])?;
+            let annotation_index = ontology_index()?;
+            let labels = labels_of(&annotation_index);
             let gopts = GenerateOptions {
-                restrict_axioms: val(&["--restrict-axioms-to"]).map(|s| Restrict::parse(&s)).unwrap_or_default(),
+                restrict_axioms,
                 restrict_axioms_column: val(&["--restrict-axioms-column"]),
-                add_axiom_source_annotation: flag(&["--add-axiom-source-annotation"]),
+                add_axiom_source_annotation,
                 axiom_source_annotation_property: val(&["--axiom-source-annotation-property"]),
-                generate_defined_class: flag(&["--generate-defined-class"]),
+                generate_defined_class,
                 annotation_index,
-                extra_prefixes,
-                var_labels: HashMap::new(),
-                iri_annotation_skip: Default::default(),
-                var_range_exprs: HashMap::new(),
+                prefixes: prefixes()?,
+                table_format: table_format()?,
             };
-            let read_data = |path: &str| -> Result<String> {
-                let mut d = std::fs::read_to_string(path).map_err(|e| anyhow!("reading infile {path}: {e}"))?;
-                if csv {
-                    d = csv_to_tsv(&d);
-                }
-                Ok(d)
-            };
-            // Batch mode (`--batch-patterns`): for each pattern NAME,
-            // template = <template-dir>/NAME.yaml, data = <infile-dir>/NAME.tsv,
-            // output = <outfile-dir>/NAME.ofn.
+            let read_data =
+                |path: &str| std::fs::read_to_string(path).map_err(|e| anyhow!("reading infile {path}: {e}"));
+            // Batch mode (`--batch-patterns`): for each pattern NAME, template
+            // <template>/NAME.yaml, data <infile>/NAME.<table format>, output
+            // <outfile>/NAME.ofn. The names are separated by single spaces.
             if let Some(batch) = val(&["--batch-patterns"]) {
-                // In batch mode the template DIRECTORY is usually spelled
-                // `--template` (OBA: `--template=../patterns/dosdp-patterns
-                // --batch-patterns="…"`), so accept either that or the explicit
-                // `--template-dir`.
+                if batch.trim().is_empty() {
+                    bail!("--batch-patterns names no pattern");
+                }
+                let names: Vec<&str> = batch.split(' ').collect();
                 let tdir = val(&["--template-dir"])
-                    .or_else(|| val(&["--template", "--pattern", "-t"]))
-                    .ok_or_else(|| {
-                        anyhow!("--template-dir (or --template) is required with --batch-patterns")
-                    })?;
-                let indir = val(&["--infile", "--data"]).ok_or_else(|| anyhow!("--infile (directory) is required with --batch-patterns"))?;
-                let outdir = outfile.clone().ok_or_else(|| anyhow!("--outfile (directory) is required with --batch-patterns"))?;
-                std::fs::create_dir_all(&outdir).ok();
-                for name in batch.split([' ', ',']).map(str::trim).filter(|n| !n.is_empty()) {
+                    .or_else(|| template.clone())
+                    .ok_or_else(|| anyhow!("--template (a directory) is required with --batch-patterns"))?;
+                for name in &names {
+                    if !std::path::Path::new(&format!("{tdir}/{name}.yaml")).exists() {
+                        bail!("--batch-patterns: there is no pattern `{name}` in {tdir}");
+                    }
+                }
+                let indir = val(&["--infile", "--data"]).unwrap_or_else(|| "fillers.tsv".to_string());
+                let outdir = outfile.clone().unwrap_or_else(|| "dosdp.out".to_string());
+                for (dir, what) in [(&tdir, "--template"), (&indir, "--infile"), (&outdir, "--outfile")] {
+                    if !std::path::Path::new(dir).is_dir() {
+                        bail!("{what} must be a directory with --batch-patterns, and {dir} is not one");
+                    }
+                }
+                let ext = gopts.table_format.extension();
+                for (i, name) in names.iter().enumerate() {
                     let pat = std::fs::read_to_string(format!("{tdir}/{name}.yaml"))
                         .map_err(|e| anyhow!("reading template {tdir}/{name}.yaml: {e}"))?;
-                    let data = read_data(&format!("{indir}/{name}.tsv"))?;
-                    let mut model = generate_with(&pat, &data, &labels, &gopts)?;
-                    crate::io::save(&mut model, std::path::Path::new(&format!("{outdir}/{name}.ofn")))?;
+                    let data = read_data(&format!("{indir}/{name}.{ext}"))?;
+                    let model = generate_with(&pat, &data, &labels, &gopts).with_context(|| format!("pattern {name}"))?;
+                    let mut model = numbered_ontology(model, i + 1)?;
+                    write_generated(&mut model, Some(std::path::Path::new(&format!("{outdir}/{name}.ofn"))))?;
                     eprintln!("dosdp generate: wrote {outdir}/{name}.ofn");
                 }
                 return Ok(0);
             }
             let pattern = read_template()?;
-            let infile = val(&["--infile", "--data"]).ok_or_else(|| anyhow!("--infile is required"))?;
+            let infile = val(&["--infile", "--data"]).unwrap_or_else(|| "fillers.tsv".to_string());
             let data = read_data(&infile)?;
-            let mut model = generate_with(&pattern, &data, &labels, &gopts)?;
-            write_model(&mut model, outfile.as_deref())?;
+            let mut model = numbered_ontology(generate_with(&pattern, &data, &labels, &gopts)?, 1)?;
+            write_generated(&mut model, outfile.as_deref().map(std::path::Path::new))?;
             Ok(0)
         }
         "prototype" => {
-            let labels = labels_from(
-                val(&["--ontology", "--input", "-i"]).as_deref(),
-                val(&["--catalog", "-c"]).as_deref().map(std::path::Path::new),
-            )?;
             let tpath = template.clone().ok_or_else(|| anyhow!("--template is required"))?;
             let tpath = std::path::Path::new(&tpath);
-            let mut model = if tpath.is_dir() {
-                // A directory renders the whole pattern set into one ontology,
-                // named `urn:unnamed:ontology#ont1` — the IRI committed
-                // `patterns/pattern.owl` files already carry, so regenerating
-                // one is not a whole-file diff.
-                let mut merged = crate::model::Model::default();
-                for f in pattern_files_in(tpath)? {
-                    let text = std::fs::read_to_string(&f)
-                        .map_err(|e| anyhow!("reading template {}: {e}", f.display()))?;
-                    let m = prototype(&text, &labels)
-                        .map_err(|e| anyhow!("pattern {}: {e}", f.display()))?;
-                    merge_into(&mut merged, m);
-                }
-                type_literals_as_xsd_string(&mut merged);
-                crate::cmd::annotate::annotate(
-                    merged,
-                    Some("urn:unnamed:ontology#ont1"),
-                    None,
-                    &[],
-                    &[],
-                    false,
-                )?
-            } else {
-                prototype(&read_template()?, &labels)?
-            };
-            if tpath.is_dir() {
-                model.prefixes = crate::io::robot_ofn_prefixes(&model);
-                // Bind `:` to the ontology IRI VERBATIM — no trailing `#`
-                // appended. The default `:` derived on the line above is the
-                // ontology IRI with `#` appended, so binding it explicitly here
-                // is what keeps that `#` out of the emitted prefix line.
-                let _ = model.prefixes.add_prefix("", "urn:unnamed:ontology#ont1");
+            let files = if tpath.is_dir() { pattern_files_in(tpath)? } else { vec![tpath.to_path_buf()] };
+            let prefixes = prefixes()?;
+            let index = ontology_index()?;
+            let labels = labels_of(&index);
+            // Every pattern is read before any is rendered.
+            let mut patterns: Vec<(std::path::PathBuf, String)> = Vec::new();
+            for f in files {
+                let text = std::fs::read_to_string(&f).map_err(|e| anyhow!("reading template {}: {e}", f.display()))?;
+                parse_pattern(&text).with_context(|| format!("pattern {}", f.display()))?;
+                patterns.push((f, text));
             }
-            // `pattern.owl` renders `^^xsd:string` explicitly. The switch is
-            // process-wide, so turn it off again immediately — a `definitions.owl`
-            // written later in the same `om make` run must not gain the datatype.
-            horned_owl::io::ofn::writer::set_write_xsd_string(true);
-            let r = write_model(&mut model, outfile.as_deref());
-            horned_owl::io::ofn::writer::set_write_xsd_string(false);
-            r?;
+            let b = Build::new();
+            let mut ont: SetOntology<RcStr> = SetOntology::new();
+            for (f, text) in &patterns {
+                let axioms = prototype_axioms(&b, text, &labels, &index, &prefixes)
+                    .with_context(|| format!("pattern {}", f.display()))?;
+                for ac in axioms.iter() {
+                    ont.insert(ac.clone());
+                }
+            }
+            let mut model = numbered_ontology(generated_model(ont, &b), 1)?;
+            write_generated(&mut model, outfile.as_deref().map(std::path::Path::new))?;
             Ok(0)
         }
         "terms" => {
             let pattern = read_template()?;
-            let mut data = val(&["--infile", "--data"])
-                .map(|p| std::fs::read_to_string(&p).map_err(|e| anyhow!("reading infile {p}: {e}")))
-                .transpose()?
-                .unwrap_or_default();
-            if val(&["--table-format"]).as_deref() == Some("csv") {
-                data = csv_to_tsv(&data);
-            }
-            let terms = terms(&pattern, &data)?;
-            write_text(format!("{}\n", terms.join("\n")), outfile.as_deref())?;
+            let prefixes = prefixes()?;
+            let format = table_format()?;
+            let infile = val(&["--infile", "--data"]).unwrap_or_else(|| "fillers.tsv".to_string());
+            // The file as it is: a byte that is not UTF-8 reads as U+FFFD.
+            let bytes = std::fs::read(&infile).map_err(|e| anyhow!("reading infile {infile}: {e}"))?;
+            let terms = terms_with(&pattern, &String::from_utf8_lossy(&bytes), &prefixes, format)?;
+            let body: String = terms.iter().map(|t| format!("{t}\n")).collect();
+            write_text(body, outfile.as_deref())?;
             Ok(0)
         }
         "query" => {
@@ -3029,50 +1524,41 @@ fn run_cli(args: &[String]) -> Result<i32> {
             if let Some(r) = val(&["--reasoner"]) {
                 model = crate::cmd::reason::reason(model, &r, false, true)?;
             }
-            if flag(&["--print-query"]) {
-                if let Some((atype, text, vars)) = pick_primary(
-                    &parse_pattern(&pattern)?,
-                ) {
-                    eprintln!("dosdp query: structural match on {atype} `{text}` binding {vars:?}");
-                }
+            if flag(&["--print-query"])? {
+                eprintln!("dosdp query: a structural match on the pattern's primary logical template");
             }
             let result = query(&pattern, &model)?;
             write_text(result.to_tsv(), outfile.as_deref())?;
             Ok(0)
         }
         "docs" => {
-            let template_dir = template.clone().ok_or_else(|| anyhow!("--template is required"))?;
+            // A batch names the directories of its patterns, tables and pages;
+            // without one, `--template`, `--infile` and `--outfile` name one
+            // pattern, its table and its page.
+            let template = template.clone().ok_or_else(|| anyhow!("--template is required"))?;
             let infile = val(&["--infile", "-i"]).ok_or_else(|| anyhow!("--infile is required"))?;
-            let outdir = outfile.clone().ok_or_else(|| anyhow!("--outfile is required"))?;
+            let outfile = outfile.clone().ok_or_else(|| anyhow!("--outfile is required"))?;
             let batch: Vec<String> = val(&["--batch-patterns"])
                 .map(|s| s.split_whitespace().map(str::to_string).collect())
                 .unwrap_or_default();
-            if batch.is_empty() {
-                bail!("docs: --batch-patterns is required (single-file mode is not supported)");
-            }
-            let data_location_prefix =
-                val(&["--data-location-prefix"]).unwrap_or_else(|| "http://example.org/".to_string());
-            let table_ext = val(&["--table-format"]).unwrap_or_else(|| "tsv".to_string()).to_lowercase();
-            let catalog = val(&["--catalog", "-c"]);
-            let annotation_index = annotation_index_from_with_catalog(
+            let ontology = supplied_ontology(
                 val(&["--ontology", "--input"]).as_deref(),
-                catalog.as_deref().map(std::path::Path::new),
+                val(&["--catalog", "-c"]).as_deref().map(std::path::Path::new),
             )?;
-            let labels: HashMap<String, String> = annotation_index
-                .iter()
-                .filter_map(|(iri, props)| {
-                    props.get(RDFS_LABEL).and_then(|v| v.iter().min()).map(|l| (iri.clone(), l.clone()))
-                })
-                .collect();
-            docs_batch(
-                std::path::Path::new(&template_dir),
-                std::path::Path::new(&infile),
-                &batch,
-                std::path::Path::new(&outdir),
-                &data_location_prefix,
-                &labels,
-                &table_ext,
-            )?;
+            let opts = DocsOptions {
+                ontology: ontology.as_ref(),
+                prefixes: prefixes()?,
+                table_format: table_format()?,
+                data_location_prefix: val(&["--data-location-prefix"])
+                    .unwrap_or_else(|| "http://example.org/".to_string()),
+            };
+            let (template, infile, outfile) =
+                (std::path::Path::new(&template), std::path::Path::new(&infile), std::path::Path::new(&outfile));
+            if batch.is_empty() {
+                docs_page(template, infile, outfile, &opts)?;
+            } else {
+                docs_batch(template, infile, &batch, outfile, &opts)?;
+            }
             Ok(0)
         }
         other => bail!("unknown dosdp subcommand '{other}'"),
@@ -3097,35 +1583,27 @@ fn cli_opt(args: &[String], names: &[&str]) -> Option<String> {
     None
 }
 
-/// Whether a boolean flag is present. A bare flag is presence-only (`true`); the
-/// next token is consumed as the value only if it is an explicit boolean literal
-/// (so `--flag --other` does not read `--other` as the flag's value).
-fn cli_flag(args: &[String], names: &[&str]) -> bool {
-    for (i, a) in args.iter().enumerate() {
-        for n in names {
-            if a == n {
-                return match args.get(i + 1) {
-                    Some(v) if is_bool_word(v) => is_truthy(v),
-                    _ => true,
-                };
-            }
-            if let Some(v) = a.strip_prefix(&format!("{n}=")) {
-                return is_truthy(v);
-            }
-        }
+/// A boolean option: false when absent, else its value — `true`, `false`, `1`
+/// or `0`, in any case — given as `--name=value` or as the next argument.
+fn cli_bool(args: &[String], names: &[&str]) -> Result<bool> {
+    let present = args.iter().any(|a| names.iter().any(|n| a == n || a.starts_with(&format!("{n}="))));
+    if !present {
+        return Ok(false);
     }
-    false
+    let value = cli_opt(args, names).ok_or_else(|| anyhow!("{} needs a value: true or false", names[0]))?;
+    match value.to_lowercase().as_str() {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => bail!("{}: `{value}` is not a boolean value: true, false, 1 or 0", names[0]),
+    }
 }
 
-fn is_bool_word(s: &str) -> bool {
-    matches!(
-        s.trim().to_ascii_lowercase().as_str(),
-        "true" | "false" | "yes" | "no" | "1" | "0" | "t" | "f" | "y" | "n"
-    )
-}
-
-fn csv_to_tsv(data: &str) -> String {
-    data.lines().map(|l| l.replace(',', "\t")).collect::<Vec<_>>().join("\n")
+/// Each term's least `rdfs:label` (see [`least`]) in `index`.
+fn labels_of(index: &HashMap<String, HashMap<String, Vec<String>>>) -> HashMap<String, String> {
+    index
+        .iter()
+        .filter_map(|(iri, props)| props.get(RDFS_LABEL).and_then(least).map(|l| (iri.clone(), l.clone())))
+        .collect()
 }
 
 /// Build the `(labels, annotation_index)` from already-loaded models — the edit
@@ -3164,7 +1642,7 @@ pub fn ontology_context_from_models(
             // minimum, so the choice is deterministic regardless of import/axiom
             // order (e.g. CHEBI_22470 → "alpha-tocopherol" wins over
             // "α-tocopherol").
-            props.get(RDFS_LABEL).and_then(|v| v.iter().min()).map(|l| (iri.clone(), l.clone()))
+            props.get(RDFS_LABEL).and_then(least).map(|l| (iri.clone(), l.clone()))
         })
         .collect();
     (labels, index)
@@ -3185,7 +1663,7 @@ pub fn ontology_context(
             // minimum, so the choice is deterministic regardless of import/axiom
             // order (e.g. CHEBI_22470 → "alpha-tocopherol" wins over
             // "α-tocopherol").
-            props.get(RDFS_LABEL).and_then(|v| v.iter().min()).map(|l| (iri.clone(), l.clone()))
+            props.get(RDFS_LABEL).and_then(least).map(|l| (iri.clone(), l.clone()))
         })
         .collect();
     Ok((labels, index))
@@ -3213,116 +1691,71 @@ fn annotation_index_from_with_catalog(
     path: Option<&str>,
     catalog: Option<&std::path::Path>,
 ) -> Result<HashMap<String, HashMap<String, Vec<String>>>> {
+    Ok(supplied_ontology(path, catalog)?.map(|m| annotation_index_of(&m)).unwrap_or_default())
+}
+
+/// The ontology at `path`, if one is named, its `owl:imports` resolved through
+/// `catalog`.
+fn supplied_ontology(path: Option<&str>, catalog: Option<&std::path::Path>) -> Result<Option<Model>> {
+    let Some(p) = path else { return Ok(None) };
+    let p = std::path::Path::new(p);
+    let mut m = crate::io::load(p)?;
+    if let Some(cat) = catalog {
+        crate::cmd::merge_import_closure(&mut m, cat, Some(p))?;
+    }
+    Ok(Some(m))
+}
+
+/// Every literal `AnnotationAssertion` of `model` as term IRI → (annotation
+/// property IRI → values).
+fn annotation_index_of(model: &Model) -> HashMap<String, HashMap<String, Vec<String>>> {
     let mut idx: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
-    if let Some(p) = path {
-        let p = std::path::Path::new(p);
-        let mut m = crate::io::load(p)?;
-        if let Some(cat) = catalog {
-            crate::cmd::merge_import_closure(&mut m, cat, Some(p))?;
-        }
-        let m = m;
-        for ac in m.ont.iter() {
-            if let Component::AnnotationAssertion(aa) = &ac.component {
-                if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(lit)) =
-                    (&aa.subject, &aa.ann.av)
-                {
-                    let val = match lit {
-                        Literal::Simple { literal }
-                        | Literal::Language { literal, .. }
-                        | Literal::Datatype { literal, .. } => literal.clone(),
-                    };
-                    idx.entry(s.as_ref().to_string())
-                        .or_default()
-                        .entry(aa.ann.ap.0.as_ref().to_string())
-                        .or_default()
-                        .push(val);
-                }
-            }
-        }
-    }
-    Ok(idx)
-}
-
-fn labels_from(
-    path: Option<&str>,
-    catalog: Option<&std::path::Path>,
-) -> Result<HashMap<String, String>> {
-    let mut labels = HashMap::new();
-    if let Some(p) = path {
-        let p = std::path::Path::new(p);
-        let mut m = crate::io::load(p)?;
-        if let Some(cat) = catalog {
-            crate::cmd::merge_import_closure(&mut m, cat, Some(p))?;
-        }
-        for ac in m.ont.iter() {
-            if let Component::AnnotationAssertion(aa) = &ac.component {
-                if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                    if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(lit)) =
-                        (&aa.subject, &aa.ann.av)
-                    {
-                        let t = match lit {
-                            Literal::Simple { literal }
-                            | Literal::Language { literal, .. }
-                            | Literal::Datatype { literal, .. } => literal.clone(),
-                        };
-                        // Keep the lexicographic minimum among all of a term's
-                        // labels, so the choice does not depend on axiom order.
-                        labels
-                            .entry(s.as_ref().to_string())
-                            .and_modify(|cur: &mut String| {
-                                if t < *cur {
-                                    *cur = t.clone();
-                                }
-                            })
-                            .or_insert(t);
+    for ac in model.ont.iter() {
+        if let Component::AnnotationAssertion(aa) = &ac.component {
+            if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(lit)) = (&aa.subject, &aa.ann.av) {
+                let val = match lit {
+                    Literal::Simple { literal } | Literal::Language { literal, .. } | Literal::Datatype { literal, .. } => {
+                        literal.clone()
                     }
-                }
+                };
+                idx.entry(s.as_ref().to_string())
+                    .or_default()
+                    .entry(aa.ann.ap.0.as_ref().to_string())
+                    .or_default()
+                    .push(val);
             }
         }
     }
-    Ok(labels)
+    idx
 }
 
-/// [`type_literals_as_xsd_string`] for a model the caller owns.
-pub(crate) fn typed_as_xsd_string(mut model: Model) -> Model {
-    type_literals_as_xsd_string(&mut model);
-    model
-}
-
-/// Retype every plain literal as `xsd:string`. The merged prototype document
-/// types its annotation literals explicitly, while the generator produces bare
-/// `Literal::Simple`, which denotes the same thing but renders without the
-/// datatype.
-pub(crate) fn type_literals_as_xsd_string(model: &mut Model) {
+/// Retype every plain annotation literal as `xsd:string`: the value of each
+/// annotation assertion and each axiom annotation. The generator builds bare
+/// `Literal::Simple` values, which denote the same thing but render without
+/// the datatype.
+fn type_literals_as_xsd_string(model: &mut Model) {
     use horned_owl::model::{AnnotatedComponent, Component, MutableOntology};
     let b = Build::new();
     let xsd = b.iri("http://www.w3.org/2001/XMLSchema#string");
-    let retype = |av: &mut AnnotationValue<_>| {
-        if let AnnotationValue::Literal(Literal::Simple { literal }) = av {
-            *av = AnnotationValue::Literal(Literal::Datatype {
-                literal: std::mem::take(literal),
-                datatype_iri: xsd.clone(),
-            });
-        }
-    };
+    // An annotation's value and its own annotations', at any depth.
+    fn retype(a: &Annotation<RcStr>, xsd: &horned_owl::model::IRI<RcStr>) -> Annotation<RcStr> {
+        let av = match &a.av {
+            AnnotationValue::Literal(Literal::Simple { literal }) => {
+                AnnotationValue::Literal(Literal::Datatype { literal: literal.clone(), datatype_iri: xsd.clone() })
+            }
+            other => other.clone(),
+        };
+        Annotation { ap: a.ap.clone(), av, ann: a.ann.iter().map(|n| retype(n, xsd)).collect() }
+    }
     let comps: Vec<AnnotatedComponent<_>> = model.ont.iter().cloned().collect();
     for old in comps {
         let mut new = old.clone();
         if let Component::AnnotationAssertion(aa) = &mut new.component {
-            retype(&mut aa.ann.av);
+            aa.ann = retype(&aa.ann, &xsd);
         }
         // Axiom annotations too — a DOSDP `annotations:` entry with an `xref`
         // renders as `Annotation(oio:hasDbXref "…"^^xsd:string)` on the assertion.
-        let axiom_anns: Vec<_> = new
-            .ann
-            .iter()
-            .cloned()
-            .map(|mut a| {
-                retype(&mut a.av);
-                a
-            })
-            .collect();
-        new.ann = axiom_anns.into_iter().collect();
+        new.ann = new.ann.iter().map(|a| retype(a, &xsd)).collect();
         if new != old {
             model.ont.remove(&old);
             model.ont.insert(new);
@@ -3330,40 +1763,59 @@ pub(crate) fn type_literals_as_xsd_string(model: &mut Model) {
     }
 }
 
-/// Merge `other`'s axioms and prefixes into `model`, dropping its ontology header.
-fn merge_into(model: &mut Model, other: Model) {
-    use horned_owl::model::{Component, MutableOntology};
-    for ac in other.ont.iter() {
-        if matches!(
-            ac.component,
-            Component::OntologyID(_) | Component::DocIRI(_) | Component::OntologyAnnotation(_)
-        ) {
-            continue;
-        }
-        model.ont.insert(ac.clone());
-    }
-    for (prefix, value) in other.prefixes.mappings() {
-        let _ = model.prefixes.add_prefix(prefix, value);
-    }
+/// The dosdp-tools release generation writes as: the one the emulated ODK
+/// release ships, else the newest release owlmake models.
+fn dosdp_tools_version() -> (u32, u32, u32) {
+    crate::build::emulation()
+        .and_then(|e| e.odk)
+        .map_or((0, 20, 0), crate::odk::workflows::odk_dosdp_tools_version)
 }
 
-fn write_model(model: &mut Model, outfile: Option<&str>) -> Result<()> {
-    // Always serialize OWL Functional Syntax, whatever the outfile is named — a
-    // repo's `patterns/pattern.owl` and `definitions.owl` are both functional
-    // under a `.owl` name. Writing RDF/XML for a `.owl` suffix would not round-trip
-    // identically (reification absorbs a plain assertion that duplicates an
-    // annotated one).
-    match outfile {
-        Some(p) => {
-            crate::io::save_as(model, std::path::Path::new(p), crate::io::Format::Functional)?
-        }
+/// Write `model` as a generator writes an ontology: in functional syntax,
+/// whatever `outfile` is named (`pattern.owl` and `definitions.owl` are both
+/// functional under a `.owl` name), to stdout without one; and before
+/// dosdp-tools 0.20.0, with `^^xsd:string` spelled out on its string literals.
+pub(crate) fn write_generated(model: &mut Model, outfile: Option<&std::path::Path>) -> Result<()> {
+    let typed = dosdp_tools_version() < (0, 20, 0);
+    if typed {
+        type_literals_as_xsd_string(model);
+    }
+    horned_owl::io::ofn::writer::set_write_xsd_string(typed);
+    let written = match outfile {
+        Some(p) => crate::io::save_as(model, p, crate::io::Format::Functional),
         None => {
             let mut buf = Vec::new();
-            crate::io::write_to_ref(model, &mut buf, crate::io::Format::Functional)?;
-            print!("{}", String::from_utf8_lossy(&buf));
+            crate::io::write_to_ref(model, &mut buf, crate::io::Format::Functional)
+                .map(|()| print!("{}", String::from_utf8_lossy(&buf)))
+        }
+    };
+    // The switch is process-wide, and what this process writes next is not a
+    // generator's ontology.
+    horned_owl::io::ofn::writer::set_write_xsd_string(false);
+    written
+}
+
+/// `model` as the `n`th ontology (from 1) one generator run writes: named
+/// `urn:unnamed:ontology#ont<n>`, with the five standard prefixes and `:` bound
+/// to that IRI as written. A run numbers its ontologies in the order it writes
+/// them, so a batch's second pattern is `#ont2`.
+pub(crate) fn numbered_ontology(model: Model, n: usize) -> Result<Model> {
+    let iri = format!("urn:unnamed:ontology#ont{n}");
+    let mut model = crate::cmd::annotate::annotate(model, Some(&iri), None, &[], &[], false)?;
+    // `:` is the IRI VERBATIM. The default the writer derives from an ontology
+    // IRI carries a trailing `#`, so the binding goes in first, the derived set is
+    // copied over it minus its own `:`, and the model is marked as carrying its
+    // own prefixes, so the writer does not derive them again.
+    let mut prefixes = horned_owl::curie::PrefixMapping::default();
+    let _ = prefixes.add_prefix("", &iri);
+    for (p, ns) in crate::io::robot_ofn_prefixes(&model).mappings() {
+        if !p.is_empty() {
+            let _ = prefixes.add_prefix(p, ns);
         }
     }
-    Ok(())
+    model.prefixes = prefixes;
+    model.format_prefixes_cleared = false;
+    Ok(model)
 }
 
 fn write_text(text: impl AsRef<str>, outfile: Option<&str>) -> Result<()> {

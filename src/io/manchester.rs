@@ -194,6 +194,62 @@ pub fn parse_class_expression(
     parse_ce(b, prefixes, s)
 }
 
+/// Parse a Manchester class expression whose names are all resolved: each an
+/// `<IRI>`, an IRI beginning `http`, or a CURIE. It reads `and`, `or`, `not`,
+/// parentheses, `some`, `only` and `value`. A name of any other form, any other
+/// word, or text after the expression is an error naming it.
+pub fn parse_resolved_class_expression(
+    b: &Build<RcStr>,
+    prefixes: &horned_owl::curie::PrefixMapping,
+    s: &str,
+) -> std::result::Result<CE<RcStr>, String> {
+    if let Some(name) = quoted_name(s) {
+        return Err(format!("{name} names no entity"));
+    }
+    let toks = tokenize(s);
+    for t in &toks {
+        if matches!(t.as_str(), "(" | ")" | "and" | "or" | "not" | "some" | "only" | "value")
+            || t.starts_with('<')
+            || (t.starts_with("http") && t.len() > 4)
+            || t.contains(':')
+        {
+            continue;
+        }
+        return Err(
+            if matches!(t.as_str(), "min" | "max" | "exactly" | "that" | "inverse" | "Self")
+                || t.starts_with(|c: char| c.is_ascii_digit() || c == '"')
+            {
+                format!("`{t}` is not read here: a class expression here is made of names, parentheses, and, or, not, some, only and value")
+            } else {
+                format!("`{t}` names no entity")
+            },
+        );
+    }
+    let mut p = Parser { toks, pos: 0, b, prefixes };
+    let ce = p.parse_or().ok_or_else(|| "the class expression is incomplete".to_string())?;
+    if p.pos < p.toks.len() {
+        return Err(format!("`{}` follows the class expression", p.toks[p.pos..].join(" ")));
+    }
+    Ok(ce)
+}
+
+/// The first name in single quotes outside an `<IRI>`, quotes included.
+fn quoted_name(s: &str) -> Option<&str> {
+    let mut in_iri = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => in_iri = true,
+            '>' => in_iri = false,
+            '\'' if !in_iri => {
+                let end = s[i + 1..].find('\'').map_or(s.len(), |j| i + j + 2);
+                return Some(&s[i..end]);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 struct Parser<'a> {
     toks: Vec<String>,
     pos: usize,

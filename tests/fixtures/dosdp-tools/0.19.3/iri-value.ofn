@@ -1,0 +1,45 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000010>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000011>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000012>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000013>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/EX_ref>))
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000010> (<http://purl.obolibrary.org/obo/EX_0000010>)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/EX_ref> <http://purl.obolibrary.org/obo/EX_0000010> <http://purl.obolibrary.org/obo/EX_0000010>)
+AnnotationAssertion(rdfs:seeAlso <http://purl.obolibrary.org/obo/EX_0000010> <http://purl.obolibrary.org/obo/EX_0000002>)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000010> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000011> (<http://purl.obolibrary.org/obo/EX_0000011>)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/EX_ref> <http://purl.obolibrary.org/obo/EX_0000011> <http://purl.obolibrary.org/obo/EX_0000011>)
+AnnotationAssertion(rdfs:seeAlso <http://purl.obolibrary.org/obo/EX_0000011> <http://purl.obolibrary.org/obo/EX_0000003>)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000011> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000012> (<http://purl.obolibrary.org/obo/EX_0000012>)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/EX_ref> <http://purl.obolibrary.org/obo/EX_0000012> <http://purl.obolibrary.org/obo/EX_0000012>)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000012> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000013> (<http://purl.obolibrary.org/obo/EX_0000013>)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/EX_ref> <http://purl.obolibrary.org/obo/EX_0000013> <http://purl.obolibrary.org/obo/EX_0000013>)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000013> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

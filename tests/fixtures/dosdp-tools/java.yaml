@@ -1,0 +1,28 @@
+pattern_name: java
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/java.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+data_vars:
+  code: xsd:string
+substitutions:
+  - {in: code, out: code_a, match: "(?i)^([a-z]++)-(\\d+)$", sub: "\\2 of \\1"}
+  - {in: code, out: code_b, match: "\\p{Upper}\\w*", sub: "upper \\0"}
+  - {in: code, out: code_c, match: "\\Qa.b\\E", sub: "literal"}
+  - {in: code, out: code_d, match: "\\$.*", sub: "got \\0"}
+  - {in: code, out: code_e, match: "(\\w)\\1", sub: "double \\1"}
+name:
+  text: "%s: 100%% %S"
+  vars: [part, code]
+comment:
+  text: "%2$s then %1$s"
+  vars: [code_a, code_b]
+def:
+  text: "%-8s|%8s|%b%n"
+  vars: [code, code_c, code_d]
+generated_synonyms:
+  - text: "%s %s"
+    vars: [code_e, code_d]
+subClassOf:
+  text: "'widget'"

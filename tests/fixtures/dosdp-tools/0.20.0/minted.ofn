@@ -1,0 +1,40 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000003>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f82d5030ae2cf6b9a09068b0a8b217f3439c2b5b>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f8c1c1d8d032fa6f954c195a6dcf26ed5b17c89b>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#3f58020791b9124a5e5b437962964b3ab228f00d>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f82d5030ae2cf6b9a09068b0a8b217f3439c2b5b> (cog widget c1)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f82d5030ae2cf6b9a09068b0a8b217f3439c2b5b> "cog widget c1")
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f82d5030ae2cf6b9a09068b0a8b217f3439c2b5b> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>))
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f8c1c1d8d032fa6f954c195a6dcf26ed5b17c89b> (cog widget c1)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f8c1c1d8d032fa6f954c195a6dcf26ed5b17c89b> "cog widget c1")
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#f8c1c1d8d032fa6f954c195a6dcf26ed5b17c89b> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>))
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#3f58020791b9124a5e5b437962964b3ab228f00d> (gear widget c2)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#3f58020791b9124a5e5b437962964b3ab228f00d> "gear widget c2")
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/minted.yaml#3f58020791b9124a5e5b437962964b3ab228f00d> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000003>))
+
+
+)

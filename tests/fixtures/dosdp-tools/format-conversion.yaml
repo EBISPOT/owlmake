@@ -1,0 +1,11 @@
+pattern_name: format_conversion
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/format-conversion.yaml
+classes:
+  widget: EX:0000001
+data_vars:
+  code: xsd:string
+name:
+  text: "%d widget"
+  vars: [code]
+subClassOf:
+  text: "'widget'"

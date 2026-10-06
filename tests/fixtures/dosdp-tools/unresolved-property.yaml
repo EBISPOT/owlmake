@@ -1,0 +1,12 @@
+pattern_name: unresolved_property
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/unresolved-property.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+annotations:
+  - annotationProperty: nowhere
+    text: "%s"
+    vars: [part]
+subClassOf:
+  text: "'widget'"

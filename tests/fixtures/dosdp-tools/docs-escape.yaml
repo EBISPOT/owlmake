@@ -1,0 +1,22 @@
+pattern_name: docs-escape
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/docs-escape.yaml
+description: "Text with markup & letters beyond ASCII."
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+dataProperties:
+  size: EX:0000201
+vars:
+  part: "'widget'"
+data_vars:
+  code: xsd:string
+name:
+  text: "β-%s & <café> \"%s\""
+  vars: [part, code]
+def:
+  text: "A widget—with %s—costs 5 €."
+  vars: [part]
+equivalentTo:
+  text: "'widget' and ('has part' some %s) and ('size' value 5) and ('size' some {\"a\", \"b\"})"
+  vars: [part]

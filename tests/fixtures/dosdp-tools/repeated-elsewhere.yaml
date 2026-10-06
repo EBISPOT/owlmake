@@ -1,0 +1,15 @@
+pattern_name: repeated-elsewhere
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/repeated-elsewhere.yaml
+classes:
+  widget: EX:0000001
+  widget: EX:0000001
+vars:
+  c: "'widget'"
+  a: "'widget'"
+  b: "'widget'"
+name:
+  text: "%s %s %s"
+  vars: [a, b, c]
+subClassOf:
+  text: "%s"
+  vars: [a]

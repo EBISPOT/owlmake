@@ -1,0 +1,17 @@
+pattern_name: repeated-keys
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/repeated-keys.yaml
+classes:
+  widget: EX:0000001
+  gadget: EX:0000002
+  widget: EX:0000003
+vars:
+  a: "'widget'"
+  b: "'gadget'"
+name:
+  text: "first %s"
+  vars: [a]
+subClassOf:
+  text: "'widget'"
+name:
+  text: "last %s and %s"
+  vars: [a, b]

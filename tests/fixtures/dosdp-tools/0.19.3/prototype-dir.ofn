@@ -1,0 +1,57 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/C.YAML>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/a.yaml>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/b.yml>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/d.Yml>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ex/patterns/.hidden.yaml>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/title>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/C.YAML> (C with 'widget')
+
+AnnotationAssertion(<http://purl.org/dc/terms/title> <http://purl.obolibrary.org/obo/ex/patterns/C.YAML> "proto_C"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/C.YAML> "C with 'widget'"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/C.YAML> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000001>))
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/a.yaml> (a with 'widget')
+
+AnnotationAssertion(<http://purl.org/dc/terms/title> <http://purl.obolibrary.org/obo/ex/patterns/a.yaml> "proto_a"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/a.yaml> "a with 'widget'"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/a.yaml> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000001>))
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/b.yml> (b with 'widget')
+
+AnnotationAssertion(<http://purl.org/dc/terms/title> <http://purl.obolibrary.org/obo/ex/patterns/b.yml> "proto_b"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/b.yml> "b with 'widget'"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/b.yml> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000001>))
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/d.Yml> (d with 'widget')
+
+AnnotationAssertion(<http://purl.org/dc/terms/title> <http://purl.obolibrary.org/obo/ex/patterns/d.Yml> "proto_d"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/d.Yml> "d with 'widget'"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/d.Yml> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000001>))
+
+# Class: <http://purl.obolibrary.org/obo/ex/patterns/.hidden.yaml> (hidden with 'widget')
+
+AnnotationAssertion(<http://purl.org/dc/terms/title> <http://purl.obolibrary.org/obo/ex/patterns/.hidden.yaml> "proto_hidden"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/ex/patterns/.hidden.yaml> "hidden with 'widget'"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/ex/patterns/.hidden.yaml> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000001>))
+
+
+)

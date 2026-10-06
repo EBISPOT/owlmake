@@ -1,0 +1,25 @@
+pattern_name: readable_named
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/readable-named.yaml
+readable_identifiers: [syn, "rdfs:label"]
+annotationProperties:
+  syn: oio:hasExactSynonym
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+list_vars:
+  parts: "'widget'"
+internal_vars:
+  - var_name: joined
+    input: parts
+    apply:
+      join:
+        sep: ", "
+name:
+  text: "widget with %s"
+  vars: [part]
+comment:
+  text: "parts %s"
+  vars: [joined]
+subClassOf:
+  text: "'widget'"

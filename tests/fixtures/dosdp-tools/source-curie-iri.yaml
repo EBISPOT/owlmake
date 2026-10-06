@@ -1,0 +1,37 @@
+pattern_name: source_curie_iri
+pattern_iri: EX:pat
+description: "Test pattern."
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+annotationProperties:
+  comment: rdfs:comment
+vars:
+  part: "'widget'"
+data_vars:
+  note: xsd:string
+data_list_vars:
+  syns: xsd:string
+  refs: xsd:string
+name:
+  text: "widget with %s"
+  vars: [part]
+def:
+  text: "A widget with %s."
+  vars: [part]
+  xrefs: refs
+exact_synonym:
+  value: syns
+  xrefs: refs
+annotations:
+  - annotationProperty: comment
+    text: "%s"
+    vars: [note]
+subClassOf:
+  text: "'widget' and 'has part' some %s"
+  vars: [part]
+  annotations:
+    - annotationProperty: comment
+      text: "sc %s"
+      vars: [note]

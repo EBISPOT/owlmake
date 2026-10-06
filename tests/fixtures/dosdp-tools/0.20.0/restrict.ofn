@@ -1,0 +1,47 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000003>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000011>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000012>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000013>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000014>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000011> (<http://purl.obolibrary.org/obo/EX_0000011>)
+
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000011> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/EX_0000001> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>)))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000012> (widget with cog)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000012> "widget with cog")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000012> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/EX_0000001> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>)))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000013> (widget with gear)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000013> "widget with gear")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000013> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/EX_0000001> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000003>)))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000014> (<http://purl.obolibrary.org/obo/EX_0000014>)
+
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000014> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/EX_0000001> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000003>)))
+
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "widget with cog")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000015> "widget with gear")
+)

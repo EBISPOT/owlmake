@@ -1,0 +1,35 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000010>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000115>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasDbXref>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000010> (widget with cog)
+
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:1"^^xsd:string) Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:2"^^xsd:string) <http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000010> "A widget with cog."^^xsd:string)
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:1"^^xsd:string) Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:2"^^xsd:string) <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "s1"^^xsd:string)
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:1"^^xsd:string) Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:2"^^xsd:string) <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "s2"^^xsd:string)
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000010> "a note"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "widget with cog"^^xsd:string)
+SubClassOf(Annotation(rdfs:comment "sc a note"^^xsd:string) <http://purl.obolibrary.org/obo/EX_0000010> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/EX_0000001> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>)))
+
+
+)

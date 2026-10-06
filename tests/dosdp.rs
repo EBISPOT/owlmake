@@ -159,9 +159,9 @@ fn dosdp_terms_prototype_query() {
     assert!(terms.iter().any(|t| t == "http://purl.obolibrary.org/obo/CL_1000001"));
     assert!(terms.iter().any(|t| t == "http://purl.obolibrary.org/obo/UBERON_0000955"));
 
-    // prototype: a defined class with the equivalentTo filled by the var's range.
-    let proto = dosdp::prototype(PATTERN, &HashMap::new()).unwrap();
-    assert!(proto.ont.iter().any(|ac| matches!(&ac.component, Component::EquivalentClasses(_))));
+    // prototype: a pattern with no `pattern_iri` names no class to prototype.
+    let err = dosdp::prototype(PATTERN, &HashMap::new()).expect_err("a pattern with no pattern_iri was prototyped");
+    assert!(format!("{err:#}").contains("pattern_iri"), "{err:#}");
 
     // query: generate the def into a model, then recover the bindings.
     let model = dosdp::generate(PATTERN, DATA, &HashMap::new()).unwrap();
@@ -177,9 +177,10 @@ fn dosdp_terms_prototype_query() {
 
 // ───────────────────────────────────────────────────────────────────────────
 // Feature coverage for the rest of `dosdp`: subClassOf / GCI / data_vars /
-// substitutions / internal_vars / instance_graph / generated_synonyms /
-// multi_clause / annotations(var,value) / def / document. Each test pins the
-// axioms a pattern must generate for a given TSV row.
+// generated_synonyms / multi_clause / annotations(var,value) / def / document.
+// Each test pins the axioms a pattern must generate for a given TSV row.
+// Substitutions, internal variables and instance graphs are covered against
+// dosdp-tools below.
 // ───────────────────────────────────────────────────────────────────────────
 
 use horned_owl::model::AnnotationValue;
@@ -250,54 +251,6 @@ subClassOf: {text: "'cell'"}
     let m = dosdp::generate(P, "defined_class\tn\nT:1\t42\n", &HashMap::new()).unwrap();
     assert!(has_literal_ann(&m, "http://www.w3.org/2000/01/rdf-schema#label", "cell number 42"),
         "expected label literal using the data var verbatim");
-}
-
-/// `substitutions` (regex over one input) and `internal_vars` `join` derive new
-/// variables usable in templates.
-#[test]
-fn dosdp_substitutions_and_internal_join() {
-    const P: &str = r#"
-pattern_name: sub
-classes: {cell: CL:0000000}
-annotationProperties: {label: rdfs:label}
-data_vars: {raw: "xsd:string"}
-substitutions:
-  - {in: raw, out: upper, match: "(.*)", sub: "X-$1"}
-internal_vars:
-  - var: joined
-    join: {sep: "/", vars: [raw, upper]}
-name:
-  text: "%s | %s"
-  vars: [upper, joined]
-subClassOf: {text: "'cell'"}
-"#;
-    let m = dosdp::generate(P, "defined_class\traw\nT:1\tfoo\n", &HashMap::new()).unwrap();
-    assert!(has_literal_ann(&m, "http://www.w3.org/2000/01/rdf-schema#label", "X-foo | foo/X-foo"),
-        "expected substitution (X-foo) and join (foo/X-foo)");
-}
-
-/// `instance_graph`: nodes → typed named individuals, edges → object-property
-/// assertions between them.
-#[test]
-fn dosdp_instance_graph() {
-    const P: &str = r#"
-pattern_name: ig
-classes: {cell: CL:0000000, neuron: CL:0000540}
-relations: {part_of: BFO:0000050}
-vars: {part: "'cell'"}
-instance_graph:
-  nodes: {n1: cell, n2: part}
-  edges:
-    - [n1, part_of, n2]
-subClassOf: {text: "'cell'"}
-"#;
-    let m = dosdp::generate(P, "defined_class\tpart\nT:1\tCL:0000540\n", &HashMap::new()).unwrap();
-    let inds = m.ont.iter().filter(|ac| matches!(&ac.component, Component::DeclareNamedIndividual(_))).count();
-    let casserts = m.ont.iter().filter(|ac| matches!(&ac.component, Component::ClassAssertion(_))).count();
-    let opa = m.ont.iter().filter(|ac| matches!(&ac.component, Component::ObjectPropertyAssertion(_))).count();
-    assert_eq!(inds, 2, "two named individuals");
-    assert_eq!(casserts, 2, "two class assertions (cell, neuron-filler)");
-    assert_eq!(opa, 1, "one part_of edge assertion");
 }
 
 /// `generated_synonyms`: one synonym annotation PER list item (not one joined).
@@ -399,18 +352,19 @@ fn dosdp_docs_and_validate() {
     for d in [&tpl, &data, &out] {
         std::fs::create_dir_all(d).unwrap();
     }
-    std::fs::write(tpl.join("part_of_x.yaml"), PATTERN).unwrap();
+    // A page names the pattern's IRI, and reads each variable's range.
+    let pattern = PATTERN
+        .replace("pattern_name: part_of_x\n", "pattern_name: part_of_x\npattern_iri: http://purl.obolibrary.org/obo/ex/part_of_x.yaml\n")
+        .replace("part: \"'thing'\"", "part: \"'cell'\"");
+    std::fs::write(tpl.join("part_of_x.yaml"), pattern).unwrap();
     std::fs::write(data.join("part_of_x.tsv"), "defined_class\tpart\nCL:1\tUBERON:1\n").unwrap();
-    dosdp::docs_batch(
-        &tpl,
-        &data,
-        &["part_of_x".to_string()],
-        &out,
-        "http://example.org/",
-        &HashMap::new(),
-        "tsv",
-    )
-    .unwrap();
+    let opts = dosdp::DocsOptions {
+        ontology: None,
+        prefixes: dosdp::Prefixes::obo(),
+        table_format: dosdp::TableFormat::Tsv,
+        data_location_prefix: "http://example.org/".to_string(),
+    };
+    dosdp::docs_batch(&tpl, &data, &["part_of_x".to_string()], &out, &opts).unwrap();
     let md = std::fs::read_to_string(out.join("part_of_x.md")).unwrap();
     assert!(md.contains("# part_of_x"), "docs page should be titled with the pattern name");
     assert!(md.contains("## Data preview"), "docs page should carry the data preview");
@@ -488,10 +442,10 @@ subClassOf: {text: "'cell'"}
         "expected one xref annotation per list item");
 }
 
-/// Schema leniency for the shorthand forms that patterns in the wild use:
-/// `generated_synonyms` as a YAML list of templates, and `xrefs` as a single
-/// string (a column reference). Both must parse, not be rejected as schema
-/// violations.
+/// The schema's forms: `generated_synonyms` as a YAML list of templates, and
+/// `xrefs` as the name of a list variable, whose items become the `def`'s
+/// `hasDbXref` axiom annotations. A column the pattern does not declare holds
+/// no list, so `xrefs` naming one gives no xref.
 #[test]
 fn dosdp_native_schema_forms_parse() {
     const P: &str = r#"
@@ -500,6 +454,7 @@ classes: {cell: CL:0000000}
 annotationProperties: {syn: oboInOwl:hasExactSynonym}
 vars: {syn1: "'cell'"}
 data_vars: {x: "xsd:string"}
+data_list_vars: {refcol: "xsd:string"}
 def:
   text: "def %s"
   vars: [x]
@@ -511,15 +466,30 @@ subClassOf: {text: "'cell'"}
 "#;
     let mut labels = HashMap::new();
     labels.insert("http://purl.obolibrary.org/obo/CL_0000100".to_string(), "a".to_string());
-    let m = dosdp::generate(P, "defined_class\tsyn1\tx\trefcol\nT:1\tCL:0000100\thi\tPMID:9\n", &labels).unwrap();
+    let def_xrefs = |m: &owlmake::model::Model| -> Vec<String> {
+        m.ont
+            .iter()
+            .filter(|ac| matches!(&ac.component,
+                Component::AnnotationAssertion(aa)
+                    if aa.ann.ap.0.as_ref() == "http://purl.obolibrary.org/obo/IAO_0000115"))
+            .flat_map(|ac| ac.ann.iter())
+            .filter_map(|a| match &a.av {
+                AnnotationValue::Literal(l) => Some(l.literal().to_string()),
+                _ => None,
+            })
+            .collect()
+    };
+    let data = "defined_class\tsyn1\tx\trefcol\nT:1\tCL:0000100\thi\tPMID:9|PMID:10\n";
+    let m = dosdp::generate(P, data, &labels).unwrap();
     // array generated_synonyms parsed and produced the synonym
     assert!(has_literal_ann(&m, "http://www.geneontology.org/formats/oboInOwl#hasExactSynonym", "a cell"));
-    // string xref `refcol` resolved to the column value as an axiom annotation on the def
-    let def_has_xref = m.ont.iter().any(|ac| matches!(&ac.component,
-        Component::AnnotationAssertion(aa)
-            if aa.ann.ap.0.as_ref() == "http://purl.obolibrary.org/obo/IAO_0000115")
-        && ac.ann.iter().any(|a| matches!(&a.av, AnnotationValue::Literal(l) if l.literal() == "PMID:9")));
-    assert!(def_has_xref, "string xref column ref should resolve to the cell value as a def xref");
+    let mut xrefs = def_xrefs(&m);
+    xrefs.sort();
+    assert_eq!(xrefs, ["PMID:10", "PMID:9"], "one def xref per item of the `refcol` list");
+
+    let undeclared = P.replace("data_list_vars: {refcol: \"xsd:string\"}\n", "");
+    let m = dosdp::generate(&undeclared, data, &labels).unwrap();
+    assert!(def_xrefs(&m).is_empty(), "an undeclared column is no list of xrefs");
 }
 
 /// OBO **override columns**: a data column named `defined_class_<field>` supplies
@@ -789,4 +759,363 @@ equivalentTo:
         ],
         "both conjuncts survive and 'cell cycle process' resolves to GO:0022402"
     );
+}
+
+// ── Against dosdp-tools ──────────────────────────────────────────────────────
+//
+// `tests/fixtures/dosdp-tools` holds patterns and tables with the documents
+// each dosdp-tools release writes for them (`scripts/gen_dosdp_fixtures.sh`):
+// `generate` once per line of its `cases.tsv`, `prototype` once per line of its
+// `prototypes.tsv`. A run writes as 0.19.3 when it emulates an ODK release that
+// ships it, and as 0.20.0 otherwise.
+
+/// Each release the fixtures hold, with the emulation `om` is run under to
+/// write as it does.
+const RELEASES: [(&str, &[&str]); 2] = [
+    ("0.20.0", &[]),
+    ("0.19.3", &["__emulate-robot-version=1.9.10", "__emulate-odk-version=1.6.1"]),
+];
+
+fn dosdp_tools_fixtures() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dosdp-tools")
+}
+
+/// `om dosdp <args>` in the fixture directory under `emulation`, writing to a
+/// file of its own; the run, and the document it wrote.
+fn dosdp_fixture_run(emulation: &[&str], args: &[String]) -> (std::process::Output, String) {
+    static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let out = std::env::temp_dir().join(format!("owlmake_dosdp_{}_{run}.ofn", std::process::id()));
+    let _ = std::fs::remove_file(&out);
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+        .current_dir(dosdp_tools_fixtures())
+        .args(emulation)
+        .arg("dosdp")
+        .args(args)
+        .arg(format!("--outfile={}", out.display()))
+        .output()
+        .unwrap();
+    let written = std::fs::read_to_string(&out).unwrap_or_default();
+    let _ = std::fs::remove_file(&out);
+    (run, written)
+}
+
+/// `om dosdp generate` over a fixture `pattern` and `table` under `emulation`,
+/// reading the fixture labels and prefixes, with `options` spelled as in
+/// `cases.tsv`.
+fn generate_fixture_as(
+    emulation: &[&str],
+    pattern: &str,
+    table: &str,
+    options: &[&str],
+) -> (std::process::Output, String) {
+    let mut args = vec![
+        "generate".to_string(),
+        "--obo-prefixes=true".to_string(),
+        format!("--template={pattern}"),
+        format!("--infile={table}"),
+        "--ontology=widgets.ofn".to_string(),
+        "--prefixes=prefixes.yaml".to_string(),
+    ];
+    args.extend(options.iter().map(|o| o.to_string()));
+    dosdp_fixture_run(emulation, &args)
+}
+
+/// [`generate_fixture_as`] under no emulation.
+fn generate_fixture(pattern: &str, table: &str, options: &[&str]) -> (std::process::Output, String) {
+    generate_fixture_as(&[], pattern, table, options)
+}
+
+/// What `written` lacks and adds against `reference`, unless they are equal.
+fn document_difference(name: &str, reference: &str, written: &str) -> Option<String> {
+    if written == reference {
+        return None;
+    }
+    let (want, got): (Vec<&str>, Vec<&str>) = (reference.lines().collect(), written.lines().collect());
+    let missing: Vec<_> = want.iter().filter(|l| !got.contains(l)).collect();
+    let extra: Vec<_> = got.iter().filter(|l| !want.contains(l)).collect();
+    Some(format!("{name}:\n  missing {missing:#?}\n  extra {extra:#?}\n  (or the same lines in another order)"))
+}
+
+/// The lines of a fixture list, split on tabs, without comments and blanks.
+fn fixture_list(name: &str) -> Vec<Vec<String>> {
+    std::fs::read_to_string(dosdp_tools_fixtures().join(name))
+        .unwrap()
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split('\t').map(str::to_string).collect())
+        .collect()
+}
+
+/// Every case in `cases.tsv`, as a whole document, as each release writes it:
+/// the list annotations (`value` and `xrefs` read list variables only), a
+/// printf field with no text, the source annotation under each
+/// `--restrict-axioms-to`, a CURIE property and a CURIE `pattern_iri`, a row's
+/// `--restrict-axioms-column` cell in each kind and case, empty, and with the
+/// column absent; a row's `<var>_label` cells, printf over columns the pattern
+/// does not declare, substitutions, internal variables, IRI-valued
+/// annotations, an instance graph (which generates nothing), a defined class
+/// and fillers that name no IRI, and what 0.20.0 adds over 0.19.3: data
+/// variables in logical axioms and IRI-valued annotations, and permutations.
+/// Then: class expressions, data restrictions, facets and general axioms;
+/// `vars` with a datatype range, which stand for entities all the same; IRIs
+/// of other schemes and CURIEs of unknown prefixes; Java's regular expressions
+/// and format strings; empty list items and clauses over several lists;
+/// defined classes minted from the bindings, with and without a
+/// `defined_class` column; readable identifiers; OBO fields that collapse into
+/// one, and annotations on annotations; and a table's cells read as the
+/// generator reads them, in TSV and in CSV.
+#[test]
+fn generate_writes_what_dosdp_tools_writes() {
+    let cases = fixture_list("cases.tsv");
+    assert!(!cases.is_empty(), "cases.tsv names no case");
+    let mut wrong = Vec::new();
+    for (release, emulation) in RELEASES {
+        for case in &cases {
+            let [expected, pattern, table, rest @ ..] = case.as_slice() else {
+                panic!("cases.tsv: malformed line {case:?}");
+            };
+            let options: Vec<&str> = rest.iter().flat_map(|o| o.split_whitespace()).collect();
+            let (run, written) = generate_fixture_as(emulation, pattern, table, &options);
+            assert!(run.status.success(), "{release}/{expected}: {}", String::from_utf8_lossy(&run.stderr));
+            let reference = std::fs::read_to_string(dosdp_tools_fixtures().join(release).join(expected)).unwrap();
+            wrong.extend(document_difference(&format!("{release}/{expected}"), &reference, &written));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every pattern in `prototypes.tsv`, as a whole document, as each release's
+/// `prototype` writes it.
+#[test]
+fn prototype_writes_what_dosdp_tools_writes() {
+    let cases = fixture_list("prototypes.tsv");
+    assert!(!cases.is_empty(), "prototypes.tsv names no case");
+    let mut wrong = Vec::new();
+    for (release, emulation) in RELEASES {
+        for case in &cases {
+            let [expected, pattern] = case.as_slice() else {
+                panic!("prototypes.tsv: malformed line {case:?}");
+            };
+            let (run, written) =
+                dosdp_fixture_run(emulation, &["prototype".to_string(), "--obo-prefixes=true".to_string(), format!("--template={pattern}")]);
+            assert!(run.status.success(), "{release}/{expected}: {}", String::from_utf8_lossy(&run.stderr));
+            let reference = std::fs::read_to_string(dosdp_tools_fixtures().join(release).join(expected)).unwrap();
+            wrong.extend(document_difference(&format!("{release}/{expected}"), &reference, &written));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every case in `terms.tsv`, as each release's `terms` lists it: the entities
+/// of the pattern's logical axioms and their annotations, each variable its
+/// placeholder, then what the rows name.
+#[test]
+fn terms_lists_what_dosdp_tools_lists() {
+    let cases = fixture_list("terms.tsv");
+    assert!(!cases.is_empty(), "terms.tsv names no case");
+    let mut wrong = Vec::new();
+    for (release, emulation) in RELEASES {
+        for case in &cases {
+            let [expected, pattern, table, rest @ ..] = case.as_slice() else {
+                panic!("terms.tsv: malformed line {case:?}");
+            };
+            let mut args = vec![
+                "terms".to_string(),
+                "--obo-prefixes=true".to_string(),
+                format!("--template={pattern}"),
+                format!("--infile={table}"),
+                "--prefixes=prefixes.yaml".to_string(),
+            ];
+            args.extend(rest.iter().flat_map(|o| o.split_whitespace()).map(str::to_string));
+            let (run, written) = dosdp_fixture_run(emulation, &args);
+            assert!(run.status.success(), "{release}/{expected}: {}", String::from_utf8_lossy(&run.stderr));
+            let reference = std::fs::read_to_string(dosdp_tools_fixtures().join(release).join(expected)).unwrap();
+            wrong.extend(document_difference(&format!("{release}/{expected}"), &reference, &written));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every case in `docs.tsv`, as each release it names writes the page: the
+/// variables and their ranges, the sections the generated axioms fall into for
+/// a row of placeholders — named, escaped and ordered as dosdp-tools writes
+/// them — and the preview of the table.
+#[test]
+fn docs_writes_what_dosdp_tools_writes() {
+    let cases = fixture_list("docs.tsv");
+    assert!(!cases.is_empty(), "docs.tsv names no case");
+    let mut wrong = Vec::new();
+    for (release, emulation) in RELEASES {
+        for case in &cases {
+            let [expected, releases, pattern, table, rest @ ..] = case.as_slice() else {
+                panic!("docs.tsv: malformed line {case:?}");
+            };
+            if !releases.split(',').any(|r| r == release) {
+                continue;
+            }
+            let mut args = vec![
+                "docs".to_string(),
+                "--obo-prefixes=true".to_string(),
+                format!("--template={pattern}"),
+                format!("--infile={table}"),
+                "--ontology=widgets.ofn".to_string(),
+                "--prefixes=prefixes.yaml".to_string(),
+            ];
+            args.extend(rest.iter().flat_map(|o| o.split_whitespace()).map(str::to_string));
+            let (run, written) = dosdp_fixture_run(emulation, &args);
+            assert!(run.status.success(), "{release}/{expected}: {}", String::from_utf8_lossy(&run.stderr));
+            let reference = std::fs::read_to_string(dosdp_tools_fixtures().join(release).join(expected)).unwrap();
+            wrong.extend(document_difference(&format!("{release}/{expected}"), &reference, &written));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every case in `refusals.tsv` is refused under each release it names, and
+/// nothing is written: a pattern the generator cannot read, a table it cannot
+/// read, a name, format or group a template cannot fill.
+#[test]
+fn refuses_what_dosdp_tools_refuses() {
+    let cases = fixture_list("refusals.tsv");
+    assert!(!cases.is_empty(), "refusals.tsv names no case");
+    let mut accepted = Vec::new();
+    for (release, emulation) in RELEASES {
+        for case in &cases {
+            let [command, releases, pattern, table, rest @ ..] = case.as_slice() else {
+                panic!("refusals.tsv: malformed line {case:?}");
+            };
+            if !releases.split(',').any(|r| r == release) {
+                continue;
+            }
+            let mut args = vec![
+                command.to_string(),
+                "--obo-prefixes=true".to_string(),
+                format!("--template={pattern}"),
+                format!("--infile={table}"),
+                "--prefixes=prefixes.yaml".to_string(),
+            ];
+            if command == "generate" {
+                args.push("--ontology=widgets.ofn".to_string());
+            }
+            args.extend(rest.iter().flat_map(|o| o.split_whitespace()).map(str::to_string));
+            let (run, written) = dosdp_fixture_run(emulation, &args);
+            if run.status.success() || !written.is_empty() {
+                accepted.push(format!("{release}: {}", case.join(" ")));
+            }
+        }
+    }
+    assert!(accepted.is_empty(), "accepted:\n{}", accepted.join("\n"));
+}
+
+/// `exact_synonym`, `narrow_synonym`, `related_synonym`, `broad_synonym` and
+/// `xref` are list annotations: a printf object (`text` + `vars`) in any of
+/// them names no `value`, so it is refused, as dosdp-tools and the schema
+/// refuse it, and the error names the field.
+#[test]
+fn generate_refuses_a_printf_object_in_a_list_annotation_field() {
+    let printf = std::fs::read_to_string(dosdp_tools_fixtures().join("printf-list-field.yaml")).unwrap();
+    let table = "defined_class\tpart\tcode\nEX:0000010\tEX:0000002\tw2\n";
+    for field in ["exact_synonym", "narrow_synonym", "related_synonym", "broad_synonym", "xref"] {
+        let pattern = printf.replace("\nexact_synonym:", &format!("\n{field}:"));
+        let err = match dosdp::generate(&pattern, table, &HashMap::new()) {
+            Ok(_) => panic!("{field}: a printf object was taken as a list annotation"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains(&format!("{field}: missing field `value`")), "{field}: {err}");
+    }
+    // A field that is not a mapping at all is described by the shape it needs.
+    let sequence = printf.replace("exact_synonym:\n  text:", "exact_synonym:\n  - text:").replace(
+        "\n  vars: [code]",
+        "\n    vars: [code]",
+    );
+    let err = dosdp::generate(&sequence, table, &HashMap::new()).err().expect("a sequence is refused").to_string();
+    assert!(
+        err.contains("exact_synonym: invalid type: sequence, expected a list annotation: a mapping with `value`"),
+        "{err}"
+    );
+}
+
+/// `--add-axiom-source-annotation` annotates with the pattern's `pattern_iri`,
+/// so a pattern without one is refused rather than written unannotated.
+#[test]
+fn generate_refuses_a_source_annotation_without_a_pattern_iri() {
+    let (run, written) = generate_fixture("source-no-iri.yaml", "source.tsv", &["--add-axiom-source-annotation=true"]);
+    assert!(!run.status.success() && written.is_empty(), "the pattern has no pattern_iri");
+    let err = String::from_utf8_lossy(&run.stderr);
+    assert!(err.contains("--add-axiom-source-annotation needs the pattern's `pattern_iri`"), "{err}");
+    let (run, written) = generate_fixture("source-no-iri.yaml", "source.tsv", &[]);
+    assert!(run.status.success() && !written.is_empty(), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+/// A run numbers the ontologies it writes from `urn:unnamed:ontology#ont1`, in
+/// the order it writes them: a batch's second pattern is `#ont2`, and is
+/// otherwise the document a run of that pattern alone writes.
+#[test]
+fn a_batch_numbers_its_ontologies_in_order() {
+    let out = std::env::temp_dir().join(format!("owlmake_dosdp_batch_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).unwrap();
+    let dir = dosdp_tools_fixtures();
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_om"))
+        .current_dir(&dir)
+        .args(["dosdp", "generate", "--obo-prefixes=true", "--template=.", "--infile=.", "--batch-patterns=list-values list-xrefs"])
+        .args(["--ontology=widgets.ofn", "--prefixes=prefixes.yaml"])
+        .arg(format!("--outfile={}", out.display()))
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    for (name, n) in [("list-values", 1), ("list-xrefs", 2)] {
+        let written = std::fs::read_to_string(out.join(format!("{name}.ofn"))).unwrap();
+        let alone = std::fs::read_to_string(dir.join("0.20.0").join(format!("{name}.ofn"))).unwrap();
+        assert_eq!(written, alone.replace("#ont1>", &format!("#ont{n}>")), "{name}");
+    }
+    let _ = std::fs::remove_dir_all(&out);
+}
+
+/// A run's kinds of axioms are `all`, `logical` or `annotation`, from
+/// `--restrict-axioms-to` or a row's `--restrict-axioms-column` cell. Any other
+/// value is refused and nothing is written, as dosdp-tools refuses it.
+#[test]
+fn generate_refuses_an_unknown_kind_of_axioms() {
+    let (run, written) =
+        generate_fixture("restrict.yaml", "restrict-bad.tsv", &["--restrict-axioms-column=restrict"]);
+    assert!(!run.status.success() && written.is_empty(), "the cell `yes` names no kind of axioms");
+    let err = String::from_utf8_lossy(&run.stderr);
+    assert!(err.contains("`yes` is not a kind of axioms: all, logical or annotation"), "{err}");
+    let (run, written) = generate_fixture("restrict.yaml", "restrict.tsv", &["--restrict-axioms-to=annotations"]);
+    assert!(!run.status.success() && written.is_empty(), "`annotations` names no kind of axioms");
+    let err = String::from_utf8_lossy(&run.stderr);
+    assert!(err.contains("--restrict-axioms-to: `annotations` is not a kind of axioms"), "{err}");
+}
+
+/// A pattern that is not YAML is refused with the parser's error, and reading
+/// it ends.
+#[test]
+fn a_malformed_pattern_is_refused() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = dosdp::generate("pattern_name: x\nname: \"a [ \"b\" ]\"\n", "defined_class\nEX:1\n", &HashMap::new());
+        let _ = tx.send(result.map(|_| ()).map_err(|e| e.to_string()));
+    });
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("reading a malformed pattern did not finish");
+    let err = result.expect_err("a malformed pattern was accepted");
+    assert!(err.contains("parsing DOSDP pattern"), "{err}");
+}
+
+/// A logical axiom naming something that is neither an entity of the pattern
+/// nor an IRI or CURIE is refused, whether a row's cell names it or a range a
+/// prototype fills in.
+#[test]
+fn a_logical_axiom_naming_nothing_is_refused() {
+    let err = dosdp::generate(PATTERN, "defined_class\tpart\nCL:1000001\tbrain\n", &HashMap::new())
+        .expect_err("a cell naming nothing was accepted");
+    let err = format!("{err:#}");
+    assert!(err.contains("row 1 of the table: the equivalentTo axiom"), "{err}");
+    assert!(err.contains("`'brain'` is no class or class expression"), "{err}");
+    let pattern = format!("pattern_iri: http://purl.obolibrary.org/obo/ex/part_of_x.yaml\n{PATTERN}");
+    let err = dosdp::prototype(&pattern, &HashMap::new()).expect_err("a range naming nothing was accepted");
+    assert!(format!("{err:#}").contains("`'thing'` is no class or class expression"), "{err:#}");
 }

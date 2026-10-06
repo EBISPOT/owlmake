@@ -1,0 +1,11 @@
+pattern_name: boolean-text
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/boolean-text.yaml
+classes:
+  widget: EX:0000001
+vars:
+  a: "'widget'"
+name:
+  text: true
+  vars: []
+subClassOf:
+  text: "'widget'"

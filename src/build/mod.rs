@@ -1647,19 +1647,6 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
             .collect();
     sources.extend(other_models.iter());
     let (labels, index) = crate::dosdp::ontology_context_from_models(&sources);
-    // The repo's custom CURIE prefixes, read from the prefix files the PLAN names
-    // (`config/prefixes.yaml` and the like).
-    // A named file that cannot be read or parsed is an error: the generated
-    // definitions would silently carry bare IRIs instead of CURIEs.
-    let mut extra_prefixes: Vec<(String, String)> = Vec::new();
-    for pf in &dosdp.prefixes {
-        let pfile = repo.dir.join(pf);
-        let text = std::fs::read_to_string(&pfile)
-            .with_context(|| format!("reading DOSDP prefixes {}", pfile.display()))?;
-        let map: std::collections::BTreeMap<String, String> = serde_yaml::from_str(&text)
-            .with_context(|| format!("parsing DOSDP prefixes {}", pfile.display()))?;
-        extra_prefixes.extend(map);
-    }
     let mut defs = empty_model();
     // Each data DIRECTORY is one generator invocation, and each invocation numbers
     // its own modules from `urn:unnamed:ontology#ont1`. HPO runs two — `data/default`
@@ -1677,13 +1664,23 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
         // The generator's options are the PLAN's, not this executor's defaults:
         // `--restrict-axioms-to logical` is why MP's `definitions.owl` carries
         // 3,052 equivalences and not one annotation assertion.
+        // How the invocation reads CURIEs: the prefix file it names, then, with
+        // `--obo-prefixes`, the OBO ones. A named file that cannot be read is an
+        // error, not a file with no prefixes.
+        let named = match &pattern.prefixes {
+            Some(pf) => crate::dosdp::Prefixes::read_file(&repo.dir.join(pf))
+                .with_context(|| format!("dosdp pattern `{}`", pattern.name))?,
+            None => Vec::new(),
+        };
         let gopts = crate::dosdp::GenerateOptions {
             annotation_index: index.clone(),
-            extra_prefixes: extra_prefixes.clone(),
+            prefixes: crate::dosdp::Prefixes::new(named, pattern.obo_prefixes),
             restrict_axioms: pattern
                 .restrict_axioms
                 .as_deref()
                 .map(crate::dosdp::Restrict::parse)
+                .transpose()
+                .with_context(|| format!("dosdp pattern `{}`: restrict_axioms", pattern.name))?
                 .unwrap_or_default(),
             restrict_axioms_column: pattern.restrict_axioms_column.clone(),
             add_axiom_source_annotation: pattern.add_axiom_source_annotation,
@@ -1703,42 +1700,13 @@ fn regenerate_patterns_planned(repo: &Repo, plan: &Plan) -> Result<bool> {
         // up-to-date test above has nothing to compare against otherwise, and a
         // repo that inspects the modules after a build finds them.
         //
-        // Each module is an unnamed ontology numbered by its position in the
-        // batch — `urn:unnamed:ontology#ont1` for the first — and, like the
-        // prototype beside it, spells `^^xsd:string` out where the definitions
-        // leave it implicit. The IRI does not reach `definitions.owl`: that is
-        // annotated with its own, so the module keeps its own identity here.
-        let iri = format!("urn:unnamed:ontology#ont{}", i + 1);
-        let mut module = crate::cmd::annotate::annotate(
-            crate::dosdp::typed_as_xsd_string(m.clone()),
-            Some(&iri),
-            None,
-            &[],
-            &[],
-            false,
-        )?;
-        // `:` is the module's own IRI VERBATIM. The default the writer derives
-        // from an ontology IRI carries a trailing `#`, so the binding is put in
-        // first and the derived set copied over it minus its own `:` — and the
-        // model is marked as carrying its own prefixes, which the generator's
-        // output is not, or the writer derives the set again and the `#` returns.
-        let mut pm = horned_owl::curie::PrefixMapping::default();
-        let _ = pm.add_prefix("", &iri);
-        for (p, ns) in crate::io::robot_ofn_prefixes(&module).mappings() {
-            if !p.is_empty() {
-                let _ = pm.add_prefix(p, ns);
-            }
-        }
-        module.prefixes = pm;
-        module.format_prefixes_cleared = false;
-        horned_owl::io::ofn::writer::set_write_xsd_string(true);
-        let wrote = crate::io::save_as(
-            &mut module,
-            &repo.dir.join(&pattern.data).with_extension("ofn"),
-            crate::io::Format::Functional,
-        );
-        horned_owl::io::ofn::writer::set_write_xsd_string(false);
-        wrote.with_context(|| format!("writing the `{name}` pattern module"))?;
+        // Each module is numbered by its position in the batch — `#ont1` for the
+        // first — and written as the generator writes it. The IRI does not reach
+        // `definitions.owl`: that is annotated with its own, so the module keeps
+        // its own identity here.
+        let mut module = crate::dosdp::numbered_ontology(m.clone(), i + 1)?;
+        crate::dosdp::write_generated(&mut module, Some(&repo.dir.join(&pattern.data).with_extension("ofn")))
+            .with_context(|| format!("writing the `{name}` pattern module"))?;
         merge_model_into(&mut defs, m);
     }
 
@@ -1854,37 +1822,18 @@ fn write_pattern_seed_files(repo: &Repo, dosdp: &crate::spec::DosdpSpec) -> Resu
         let labels = std::collections::HashMap::new();
         let mut proto = crate::model::Model::default();
         for y in &yamls {
-            let Ok(text) = std::fs::read_to_string(y) else { continue };
-            let Ok(m) = crate::dosdp::prototype(&text, &labels) else { continue };
+            let text = std::fs::read_to_string(y).with_context(|| format!("reading {}", y.display()))?;
+            let m = crate::dosdp::prototype(&text, &labels)
+                .with_context(|| format!("prototyping dosdp pattern {}", y.display()))?;
             merge_model_into(&mut proto, m);
         }
-        let mut proto = crate::cmd::annotate::annotate(
-            proto,
-            Some("urn:unnamed:ontology#ont1"),
-            None,
-            &[],
-            &[],
-            false,
-        )?;
-        proto.prefixes = crate::io::robot_ofn_prefixes(&proto);
-        let _ = proto.prefixes.add_prefix("", "urn:unnamed:ontology#ont1");
-        // FUNCTIONAL syntax, whatever the `.owl` extension says: the prototype
-        // ontology is written in functional syntax, so the committed
-        // `pattern.owl` opens `Prefix(:=<urn:unnamed:ontology#ont1>)`.
-        //
-        // And with `^^xsd:string` spelled out, which is how a prototype renders a
-        // string literal even though the datatype is implicit everywhere else. The
-        // switch is process-wide, so turn it off again immediately: the
-        // `definitions.owl` written beside it must not gain the datatype. (`om
-        // dosdp prototype` does the same thing on the CLI path; this is the build
-        // path.)
-        horned_owl::io::ofn::writer::set_write_xsd_string(true);
-        let wrote = crate::io::save_as(&mut proto, &pattern_owl, crate::io::Format::Functional);
-        horned_owl::io::ofn::writer::set_write_xsd_string(false);
-        wrote?;
+        let mut proto = crate::dosdp::numbered_ontology(proto, 1)?;
+        // Written as `om dosdp prototype` writes it (see `write_generated`): the
+        // committed `pattern.owl` opens `Prefix(:=<urn:unnamed:ontology#ont1>)`.
+        crate::dosdp::write_generated(&mut proto, Some(&pattern_owl))?;
         // The seed is a query over the FILE (`query -i $(PATTERNDIR)/pattern.owl`),
-        // and reading it back is not a formality: a template that declares no
-        // `pattern_iri` is named by a bare filename, which the prototype holds as a
+        // and reading it back is not a formality: a template whose `pattern_iri`
+        // is a bare filename titles that filename, which the prototype holds as a
         // relative IRI and a reader resolves against the default prefix. Querying
         // the in-memory prototype would seed `entity_homeostasis_trait.yaml` where
         // the file yields `urn:unnamed:ontology#ont1entity_homeostasis_trait.yaml`.
@@ -1917,9 +1866,8 @@ fn write_pattern_seed_files(repo: &Repo, dosdp: &crate::spec::DosdpSpec) -> Resu
         let data = repo.dir.join(&pattern.data);
         let yaml = std::fs::read_to_string(repo.dir.join(&pattern.template))
             .with_context(|| format!("reading DOSDP template {}", pattern.template))?;
-        let tsv = std::fs::read_to_string(&data)
-            .with_context(|| format!("reading DOSDP data {}", pattern.data))?;
-        let terms = crate::dosdp::terms(&yaml, &tsv)
+        let tsv = std::fs::read(&data).with_context(|| format!("reading DOSDP data {}", pattern.data))?;
+        let terms = crate::dosdp::terms(&yaml, &String::from_utf8_lossy(&tsv))
             .with_context(|| format!("dosdp terms for `{}`", pattern.name))?;
         let body: String = terms.iter().map(|t| format!("{t}\n")).collect();
         write_target(&data.with_extension("txt"), body.as_bytes())?;
@@ -4498,7 +4446,7 @@ fn import_seed(repo: &Repo, plan: &Plan) -> Result<std::collections::HashSet<Str
             }
         }
     }
-    seed.extend(pattern_seed_terms(repo));
+    seed.extend(pattern_seed_terms(repo)?);
     // `terms.sparql` selects TRIPLE SUBJECTS and OBJECTS, never predicates, so an
     // annotation property reaches the seed through its DECLARATION's `rdf:type`
     // triple — and `$(SRCMERGED)` is written with a synthesized declaration for
@@ -4566,37 +4514,21 @@ fn declared_in_sources(sources: &[PathBuf]) -> std::collections::HashSet<String>
 /// terms, and their absence both drops `BFO_0000001` from `merged_import.owl`
 /// and leaves stray CHEBI branches in it, because a ⊥-module over a different
 /// signature is a different module — not a subset of the right one.
-fn pattern_seed_terms(repo: &Repo) -> std::collections::HashSet<String> {
+fn pattern_seed_terms(repo: &Repo) -> Result<std::collections::HashSet<String>> {
     let mut out = std::collections::HashSet::new();
-    let dir = match repo.var("PATTERNDIR") {
-        "" => repo.dir.join("../patterns"),
-        v => repo.dir.join(v),
-    };
-    let templates = dir.join("dosdp-patterns");
-    if !templates.is_dir() {
-        return out;
-    }
+    // The template set and the (template, table) pairs are the PLAN's: a repo
+    // whose plan builds no patterns seeds none.
+    let Some(dosdp) = repo.plan.dosdp.as_ref() else { return Ok(out) };
     // `prototype --template=<dir>` renders every pattern in the directory into
     // one ontology; the seed only wants that ontology's signature, so render
     // them one at a time and union the IRIs rather than building pattern.owl.
     let labels = std::collections::HashMap::new();
-    // The template SET and the (template, table) pairs below are the PLAN's; the
-    // directory sweep is only for a repo whose plan carries no DOSDP section at
-    // all.
-    let dosdp = repo.plan.dosdp.as_ref();
-    let mut yamls: Vec<PathBuf> = match dosdp.filter(|d| !d.templates.is_empty()) {
-        Some(d) => d.templates.iter().map(|t| repo.dir.join(t)).collect(),
-        None => std::fs::read_dir(&templates)
-            .into_iter()
-            .flatten()
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("yaml"))
-            .collect(),
-    };
+    let mut yamls: Vec<PathBuf> = dosdp.templates.iter().map(|t| repo.dir.join(t)).collect();
     yamls.sort();
     for y in &yamls {
-        let Ok(text) = std::fs::read_to_string(y) else { continue };
-        let Ok(m) = crate::dosdp::prototype(&text, &labels) else { continue };
+        let text = std::fs::read_to_string(y).with_context(|| format!("reading {}", y.display()))?;
+        let m = crate::dosdp::prototype(&text, &labels)
+            .with_context(|| format!("prototyping dosdp pattern {}", y.display()))?;
         for ac in m.ont.iter() {
             if matches!(
                 ac.component,
@@ -4612,31 +4544,19 @@ fn pattern_seed_terms(repo: &Repo) -> std::collections::HashSet<String> {
     // `$(DOSDP_TERM_FILES_*)` — the term list of each data table, which adds the
     // fillers the rows actually reference (and the minted classes). One pair per
     // module the plan names, across every data directory the generator runs over.
-    let pairs: Vec<(PathBuf, PathBuf)> = match dosdp {
-        Some(d) => d
-            .patterns
-            .iter()
-            .map(|pat| (repo.dir.join(&pat.template), repo.dir.join(&pat.data)))
-            .collect(),
-        None => std::fs::read_dir(dir.join("data/default"))
-            .into_iter()
-            .flatten()
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("tsv"))
-            .filter_map(|p| {
-                let stem = p.file_stem()?.to_str()?.to_string();
-                Some((templates.join(format!("{stem}.yaml")), p))
-            })
-            .collect(),
-    };
-    for (tpl, data) in pairs {
-        let Ok(yaml) = std::fs::read_to_string(&tpl) else { continue };
-        let Ok(tsv) = std::fs::read_to_string(&data) else { continue };
-        if let Ok(terms) = crate::dosdp::terms(&yaml, &tsv) {
-            out.extend(terms);
-        }
+    // A table or template that cannot be read, or whose terms cannot be
+    // listed, fails the seed: the import would otherwise be extracted over a
+    // signature short of that pattern's terms.
+    for pattern in &dosdp.patterns {
+        let yaml = std::fs::read_to_string(repo.dir.join(&pattern.template))
+            .with_context(|| format!("reading DOSDP template {}", pattern.template))?;
+        let tsv = std::fs::read(repo.dir.join(&pattern.data))
+            .with_context(|| format!("reading DOSDP data {}", pattern.data))?;
+        let terms = crate::dosdp::terms(&yaml, &String::from_utf8_lossy(&tsv))
+            .with_context(|| format!("dosdp terms for `{}`", pattern.name))?;
+        out.extend(terms);
     }
-    out
+    Ok(out)
 }
 
 /// The import rule's `remove --select complement --select annotation-properties`

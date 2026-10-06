@@ -1,0 +1,29 @@
+pattern_name: entity_ranges
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/entity-ranges.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: xsd:string
+list_vars:
+  parts: rdfs:Literal
+name:
+  text: "widget with %s"
+  vars: [part]
+generated_synonyms:
+  - multi_clause:
+      sep: " "
+      clauses:
+        - text: "%s widget"
+          vars: [parts]
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]
+logical_axioms:
+  - axiom_type: subClassOf
+    multi_clause:
+      sep: " or "
+      clauses:
+        - text: "%s"
+          vars: [parts]

@@ -1,0 +1,5 @@
+defined_class	part	parts	code	codes	undeclared
+EX:0000010	EX:0000002	EX:0000002|EX:0000003	w2	EX:0000005|EX:0000006	EX:0000007
+EX:0000011	EX:0000003	EX:0000004	EX:0000008		
+EX:0000012		EX:0000004	http://example.org/x	w	
+EX:0000013	foo		bar		

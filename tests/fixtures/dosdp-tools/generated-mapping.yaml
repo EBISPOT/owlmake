@@ -1,0 +1,11 @@
+pattern_name: generated_mapping
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/generated-mapping.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+generated_synonyms:
+  text: "%s widget"
+  vars: [part]
+subClassOf:
+  text: "'widget'"

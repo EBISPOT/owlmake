@@ -1,0 +1,15 @@
+pattern_name: cells
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/cells.yaml
+classes:
+  widget: EX:0000001
+data_vars:
+  text: xsd:string
+data_list_vars:
+  items: xsd:string
+name:
+  text: "[%s]"
+  vars: [text]
+exact_synonym:
+  value: items
+subClassOf:
+  text: "'widget'"

@@ -24,6 +24,61 @@ const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const RDFS: &str = "http://www.w3.org/2000/01/rdf-schema#";
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
+/// The label an entity is named by: the first literal among its `rdfs:label`
+/// assertions, in the order its assertions are held; an IRI value stands until
+/// a literal follows it.
+pub(crate) enum HeldLabel<'m> {
+    Literal(&'m str),
+    Iri(&'m str),
+}
+
+/// The label of every entity of `model` that has one (see [`HeldLabel`]).
+pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
+    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component};
+    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+    let mut assertions = 0usize;
+    let mut per_subject: HashMap<&str, usize> = HashMap::new();
+    let mut candidates: HashMap<&str, Vec<(i32, &AnnotationValue<RcStr>)>> = HashMap::new();
+    for ac in model.ont.iter() {
+        if let Component::AnnotationAssertion(aa) = &ac.component {
+            if let AnnotationSubject::IRI(s) = &aa.subject {
+                assertions += 1;
+                *per_subject.entry(s.as_ref()).or_default() += 1;
+                if aa.ann.ap.0.as_ref() == RDFS_LABEL {
+                    candidates.entry(s.as_ref()).or_default().push((
+                        crate::owlapi_hash::annotation_assertion_hash(s.as_ref(), RDFS_LABEL, &aa.ann.av, &ac.ann),
+                        &aa.ann.av,
+                    ));
+                }
+            }
+        }
+    }
+    let mut labels: HashMap<&str, HeldLabel> = HashMap::new();
+    for (subject, cands) in &candidates {
+        let ordered: Vec<usize> = if cands.len() == 1 {
+            vec![0]
+        } else {
+            let hashes: Vec<i32> = cands.iter().map(|c| c.0).collect();
+            crate::owlapi_hash::subject_assertion_order(&hashes, per_subject[subject], assertions)
+        };
+        let mut found: Option<HeldLabel> = None;
+        for i in ordered {
+            match cands[i].1 {
+                AnnotationValue::Literal(l) => {
+                    found = Some(HeldLabel::Literal(l.literal().as_str()));
+                    break;
+                }
+                AnnotationValue::IRI(iri) => found = Some(HeldLabel::Iri(iri.as_ref())),
+                AnnotationValue::AnonymousIndividual(_) => {}
+            }
+        }
+        if let Some(f) = found {
+            labels.insert(*subject, f);
+        }
+    }
+    labels
+}
+
 /// The node ID an anonymous individual is written with: its label, after `_:`.
 pub fn node_id(label: &str) -> Cow<'_, str> {
     if label.starts_with("_:") {

@@ -509,9 +509,21 @@ impl<'m> Entries<'m> {
 
 // === Objects =============================================================
 
-/// How an entity is named where an object is written.
+/// How an entity is named where an object is written, and how a literal and
+/// an IRI that names no entity are written when not as the writer writes them.
 pub(crate) trait Names {
     fn entity(&self, iri: &str) -> String;
+
+    /// A literal of the datatype `datatype`, when it is written otherwise than
+    /// the writer's own way.
+    fn literal(&self, _l: &Literal<RcStr>, _datatype: &str) -> Option<String> {
+        None
+    }
+
+    /// An IRI that names no entity: an annotation value or subject.
+    fn iri(&self, iri: &str) -> String {
+        format!("<{iri}>")
+    }
 }
 
 impl Names for ShortForms {
@@ -559,6 +571,10 @@ impl Objects<'_> {
 
     fn literal(&mut self, l: &Literal<RcStr>) {
         let dt = self.literal_datatype(l).to_string();
+        if let Some(text) = self.names.literal(l, &dt) {
+            self.out.write(&text);
+            return;
+        }
         let lex = l.literal();
         if dt == XSD_DECIMAL || dt == XSD_INTEGER || dt == XSD_BOOLEAN {
             self.out.write(lex);
@@ -804,10 +820,19 @@ impl Objects<'_> {
     }
 }
 
-/// One object written on its own, the way a frame writes it but on one line:
-/// an intersection breaks no line before its `and`s, and no line is indented. A
-/// restriction on a conjunction or disjunction still breaks its line before the
-/// opening bracket, as every rendering of it does.
+/// How an object written on its own is laid out.
+#[derive(Clone, Copy)]
+pub(crate) enum Layout {
+    /// On one line: an intersection breaks no line before its `and`s, and no
+    /// line is indented. A restriction on a conjunction or disjunction still
+    /// breaks its line before the opening bracket, as every rendering of it does.
+    OneLine,
+    /// As a frame lays it out: an intersection breaks its line before each
+    /// `and`, and a new line is indented to the column its list started at.
+    Frame,
+}
+
+/// One object written on its own.
 #[derive(Clone, Copy)]
 pub(crate) enum Object<'a> {
     Ce(&'a CE<RcStr>),
@@ -819,19 +844,246 @@ pub(crate) enum Object<'a> {
     Iri(&'a str),
 }
 
-pub(crate) fn object_text(object: Object<'_>, order: NaturalOrder, names: &dyn Names) -> String {
+pub(crate) fn object_text(object: Object<'_>, order: NaturalOrder, names: &dyn Names, layout: Layout) -> String {
     let mut out = Out::new();
-    out.tabbing = false;
-    out.wrapping = false;
+    if let Layout::OneLine = layout {
+        out.tabbing = false;
+        out.wrapping = false;
+    }
     let mut o = Objects { out: &mut out, order, names };
     match object {
         Object::Ce(ce) => o.ce(ce),
         Object::Ope(ope) => o.ope(ope),
         Object::Dr(dr) => o.dr(dr),
         Object::Entity(iri) => o.entity(iri),
-        Object::Iri(iri) => o.out.write(&format!("<{iri}>")),
+        Object::Iri(iri) => {
+            let text = names.iri(iri);
+            o.out.write(&text);
+        }
     }
     out.text
+}
+
+/// One axiom written on its own, as a one-line frame: no line broken before an
+/// `and`, and none indented. A binary equivalence or disjointness is written
+/// `a EquivalentTo b`, a larger one as a keyword and a list, its members in
+/// natural order. The axiom's own annotations are not written. `None` for an
+/// axiom this has no form for.
+pub(crate) fn axiom_text(c: &Component<RcStr>, order: NaturalOrder, names: &dyn Names) -> Option<String> {
+    use horned_owl::model::DataProperty;
+    let mut out = Out::new();
+    out.tabbing = false;
+    out.wrapping = false;
+    let mut o = Objects { out: &mut out, order, names };
+    let dp_cmp = |a: &DataProperty<RcStr>, b: &DataProperty<RcStr>| crate::io::natural_order::iri_cmp(a.0.as_ref(), b.0.as_ref());
+    fn binary_or_list<'t, T>(
+        o: &mut Objects<'_>,
+        items: Vec<&'t T>,
+        binary: &str,
+        list: &str,
+        write: impl Fn(&mut Objects<'_>, &'t T),
+    ) {
+        if items.len() == 2 {
+            write(o, items[0]);
+            o.out.keyword(binary);
+            write(o, items[1]);
+        } else {
+            o.out.space();
+            o.out.section(list);
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    o.out.write(", ");
+                }
+                write(o, item);
+            }
+        }
+    }
+    let section = |o: &mut Objects<'_>, kw: &str| {
+        o.out.space();
+        o.out.section(kw);
+    };
+    match c {
+        Component::SubClassOf(x) => {
+            o.ce(&x.sub);
+            o.out.keyword("SubClassOf");
+            o.ce(&x.sup);
+        }
+        Component::EquivalentClasses(x) => {
+            let ces = sorted_set(&x.0, |a, b| order.ce(a, b));
+            binary_or_list(&mut o, ces, "EquivalentTo", "EquivalentClasses", |o, ce| o.ce(ce));
+        }
+        Component::DisjointClasses(x) => {
+            let ces = sorted_set(&x.0, |a, b| order.ce(a, b));
+            binary_or_list(&mut o, ces, "DisjointWith", "DisjointClasses", |o, ce| o.ce(ce));
+        }
+        Component::ClassAssertion(x) => {
+            o.individual(&x.i);
+            o.out.keyword("Type");
+            o.ce(&x.ce);
+        }
+        Component::SubObjectPropertyOf(x) => {
+            match &x.sub {
+                SOPE::ObjectPropertyExpression(ope) => o.ope(ope),
+                SOPE::ObjectPropertyChain(chain) => {
+                    for (i, ope) in chain.iter().enumerate() {
+                        if i > 0 {
+                            o.out.write(" o ");
+                        }
+                        o.ope(ope);
+                    }
+                }
+            }
+            section(&mut o, "SubPropertyOf");
+            o.ope(&x.sup);
+        }
+        Component::EquivalentObjectProperties(x) => {
+            let opes = sorted_set(&x.0, |a, b| order.ope(a, b));
+            binary_or_list(&mut o, opes, "EquivalentTo", "EquivalentProperties", |o, p| o.ope(p));
+        }
+        Component::DisjointObjectProperties(x) => {
+            let opes = sorted_set(&x.0, |a, b| order.ope(a, b));
+            binary_or_list(&mut o, opes, "DisjointWith", "DisjointProperties", |o, p| o.ope(p));
+        }
+        Component::InverseObjectProperties(x) => {
+            o.ope(&x.0);
+            o.out.keyword("InverseOf");
+            o.ope(&x.1);
+        }
+        Component::ObjectPropertyDomain(x) => {
+            o.ope(&x.ope);
+            o.out.keyword("Domain");
+            o.ce(&x.ce);
+        }
+        Component::ObjectPropertyRange(x) => {
+            o.ope(&x.ope);
+            o.out.keyword("Range");
+            o.ce(&x.ce);
+        }
+        Component::FunctionalObjectProperty(x) => {
+            section(&mut o, "Functional");
+            o.ope(&x.0);
+        }
+        Component::InverseFunctionalObjectProperty(x) => {
+            section(&mut o, "InverseFunctional");
+            o.ope(&x.0);
+        }
+        Component::SymmetricObjectProperty(x) => {
+            section(&mut o, "Symmetric");
+            o.ope(&x.0);
+        }
+        Component::AsymmetricObjectProperty(x) => {
+            section(&mut o, "Asymmetric");
+            o.ope(&x.0);
+        }
+        Component::TransitiveObjectProperty(x) => {
+            section(&mut o, "Transitive");
+            o.ope(&x.0);
+        }
+        Component::ReflexiveObjectProperty(x) => {
+            section(&mut o, "Reflexive");
+            o.ope(&x.0);
+        }
+        Component::IrreflexiveObjectProperty(x) => {
+            section(&mut o, "Irreflexive");
+            o.ope(&x.0);
+        }
+        Component::SubDataPropertyOf(x) => {
+            o.entity(x.sub.0.as_ref());
+            section(&mut o, "SubPropertyOf");
+            o.entity(x.sup.0.as_ref());
+        }
+        Component::EquivalentDataProperties(x) => {
+            o.out.section("EquivalentProperties");
+            for (i, dp) in sorted_set(&x.0, dp_cmp).iter().enumerate() {
+                if i > 0 {
+                    o.out.write(", ");
+                }
+                o.entity(dp.0.as_ref());
+            }
+        }
+        Component::DisjointDataProperties(x) => {
+            let dps = sorted_set(&x.0, dp_cmp);
+            binary_or_list(&mut o, dps, "DisjointWith", "DisjointProperties", |o, dp| o.entity(dp.0.as_ref()));
+        }
+        Component::DataPropertyDomain(x) => {
+            o.entity(x.dp.0.as_ref());
+            o.out.keyword("Domain");
+            o.ce(&x.ce);
+        }
+        Component::DataPropertyRange(x) => {
+            o.entity(x.dp.0.as_ref());
+            section(&mut o, "Range");
+            o.dr(&x.dr);
+        }
+        Component::FunctionalDataProperty(x) => {
+            section(&mut o, "Functional");
+            o.entity(x.0 .0.as_ref());
+        }
+        Component::SameIndividual(x) => {
+            let inds = sorted_set(&x.0, |a, b| order.individual(a, b));
+            binary_or_list(&mut o, inds, "SameAs", "SameIndividual", |o, i| o.individual(i));
+        }
+        Component::DifferentIndividuals(x) => {
+            let inds = sorted_set(&x.0, |a, b| order.individual(a, b));
+            binary_or_list(&mut o, inds, "DifferentFrom", "DifferentIndividuals", |o, i| o.individual(i));
+        }
+        Component::ObjectPropertyAssertion(x) => {
+            o.individual(&x.from);
+            o.out.space();
+            o.ope(&x.ope);
+            o.out.space();
+            o.individual(&x.to);
+        }
+        Component::NegativeObjectPropertyAssertion(x) => {
+            o.out.keyword("not");
+            o.out.write("(");
+            o.individual(&x.from);
+            o.out.space();
+            o.ope(&x.ope);
+            o.out.space();
+            o.individual(&x.to);
+            o.out.write(")");
+        }
+        Component::DataPropertyAssertion(x) => {
+            o.individual(&x.from);
+            o.out.space();
+            o.entity(x.dp.0.as_ref());
+            o.out.space();
+            o.literal(&x.to);
+        }
+        Component::NegativeDataPropertyAssertion(x) => {
+            o.out.keyword("not");
+            o.out.write("(");
+            o.individual(&x.from);
+            o.out.space();
+            o.entity(x.dp.0.as_ref());
+            o.out.space();
+            o.literal(&x.to);
+            o.out.write(")");
+        }
+        Component::AnnotationAssertion(x) => {
+            match &x.subject {
+                AnnotationSubject::IRI(iri) => {
+                    let text = names.iri(iri.as_ref());
+                    o.out.write(&text);
+                }
+                AnnotationSubject::AnonymousIndividual(a) => o.out.write(&entities::node_id(a.0.as_ref())),
+            }
+            o.out.space();
+            o.entity(x.ann.ap.0.as_ref());
+            o.out.space();
+            match &x.ann.av {
+                AnnotationValue::Literal(l) => o.literal(l),
+                AnnotationValue::IRI(iri) => {
+                    let text = names.iri(iri.as_ref());
+                    o.out.write(&text);
+                }
+                AnnotationValue::AnonymousIndividual(a) => o.out.write(&entities::node_id(a.0.as_ref())),
+            }
+        }
+        _ => return None,
+    }
+    Some(out.text)
 }
 
 // === Renderer ============================================================

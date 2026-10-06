@@ -1,0 +1,8 @@
+# Each case: the document dosdp-tools `prototype` writes for one pattern, as
+# 0.19.3/<document> and 0.20.0/<document>. Regenerate with
+# scripts/gen_dosdp_fixtures.sh.
+prototype-labels.ofn	labels.yaml
+prototype-list-xrefs.ofn	list-xrefs.yaml
+prototype-substitution.ofn	substitution.yaml
+prototype-internal.ofn	internal.yaml
+prototype-dir.ofn	protodir

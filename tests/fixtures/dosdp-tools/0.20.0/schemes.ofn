@@ -1,0 +1,62 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<httpfoo>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000011>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000012>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000013>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000014>))
+Declaration(Class(<http://purl.obolibrary.org/obo/_bare>))
+Declaration(Class(<http://purl.obolibrary.org/obo/urn_x>))
+Declaration(Class(<http://purl.obolibrary.org/obo/ftp_//host/x>))
+Declaration(Class(<http://purl.obolibrary.org/obo/mailto_a@b.org>))
+Declaration(Class(<http://purl.obolibrary.org/obo/urn_ex:10>))
+Declaration(Class(<https://example.org/y>))
+Declaration(Class(<httpx:13>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000011> (widget with http://purl.obolibrary.org/obo/mailto_a@b.org)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000011> "widget with http://purl.obolibrary.org/obo/mailto_a@b.org")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000011> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/mailto_a@b.org>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000012> (widget with http://purl.obolibrary.org/obo/ftp_//host/x)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000012> "widget with http://purl.obolibrary.org/obo/ftp_//host/x")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000012> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/ftp_//host/x>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000013> (widget with https://example.org/y)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000013> "widget with https://example.org/y")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000013> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <https://example.org/y>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000014> (widget with http://purl.obolibrary.org/obo/_bare)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000014> "widget with http://purl.obolibrary.org/obo/_bare")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000014> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/_bare>))
+
+# Class: <http://purl.obolibrary.org/obo/urn_ex:10> (widget with http://purl.obolibrary.org/obo/urn_x)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/urn_ex:10> "widget with http://purl.obolibrary.org/obo/urn_x")
+SubClassOf(<http://purl.obolibrary.org/obo/urn_ex:10> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/urn_x>))
+
+# Class: <httpx:13> (widget with httpfoo)
+
+AnnotationAssertion(rdfs:label <httpx:13> "widget with httpfoo")
+SubClassOf(<httpx:13> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <httpfoo>))
+
+
+)

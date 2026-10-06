@@ -464,9 +464,6 @@ impl ConditionSpec {
 pub struct DosdpSpec {
     /// Where the generated definitions go (`../patterns/definitions.owl`).
     pub output: String,
-    /// Prefix files pattern expansion reads (typically `config/prefixes.yaml`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub prefixes: Vec<String>,
     /// The query that derives the import seed's pattern half from the COMMITTED
     /// `output` when the DOSDP products are not regenerated (ODK `PAT=false`).
     ///
@@ -496,10 +493,11 @@ pub struct DosdpSpec {
     /// — that the repo never asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<StepEntry>,
-    /// Every template in the pattern directory — a SUPERSET of `patterns`,
-    /// because `dosdp validate` covers templates that have no data table yet.
-    /// Recorded separately so validation cannot silently check a subset while
-    /// reporting success.
+    /// Every template in the pattern directory — each regular file whose name
+    /// ends `.yaml` or `.yml` in any case — a SUPERSET of `patterns`: the
+    /// prototype `pattern.owl` renders them all, and `dosdp validate` covers
+    /// templates that have no data table yet. Recorded separately so neither
+    /// can silently cover a subset.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<String>,
 }
@@ -519,7 +517,8 @@ pub struct DosdpPattern {
     pub name: String,
     pub template: String,
     pub data: String,
-    /// `--restrict-axioms-to`: `all` (the default), `logical`, or `annotation`.
+    /// `--restrict-axioms-to`: `all` (the default), `logical`, or `annotation`,
+    /// in any case. Any other value fails the build.
     ///
     /// It decides WHICH AXIOMS this module contains, so it is as much a part of
     /// what this plan builds as the pattern itself. MP asks for `logical`;
@@ -527,8 +526,10 @@ pub struct DosdpPattern {
     /// `definitions.owl` and carries them into every artefact that merges it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restrict_axioms: Option<String>,
-    /// `--restrict-axioms-column`: a TSV column whose truthy value restricts that
-    /// ROW to logical axioms.
+    /// `--restrict-axioms-column`: a table column whose cell sets that ROW's
+    /// kinds of axioms, `all`, `logical` or `annotation` in any case. An empty
+    /// cell, or a table without the column, takes `restrict_axioms`; any other
+    /// value fails the build.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restrict_axioms_column: Option<String>,
     /// `--add-axiom-source-annotation`: annotate each generated axiom with the
@@ -538,10 +539,18 @@ pub struct DosdpPattern {
     /// `--axiom-source-annotation-property`: the property that annotation uses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axiom_source_annotation_property: Option<String>,
-    /// `--generate-defined-class`: mint the defined class IRI from `base_IRI`
-    /// plus a hash of the fillers when the table has no `defined_class` column.
+    /// `--generate-defined-class`: mint each row's defined class from the
+    /// pattern's `pattern_iri` and a hash of the row's fillers.
     #[serde(default)]
     pub generate_defined_class: bool,
+    /// `--obo-prefixes`: read a CURIE whose prefix no prefix file names as an
+    /// OBO identifier, and the standard prefixes (`rdfs`, `oio`, …) as theirs.
+    /// Without it such a CURIE names no IRI.
+    #[serde(default)]
+    pub obo_prefixes: bool,
+    /// `--prefixes`: the YAML file of CURIE prefixes the invocation reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefixes: Option<String>,
 }
 
 /// One release artefact and its build pipeline.
@@ -3625,7 +3634,18 @@ mod format_floor_tests {
         // A target's description now says when its file is read as an ontology.
         // Only the text changed; every plan means what it meant, so the floor
         // stays.
-        const PLAN_SCHEMA_DIGEST: &str = "288d90aaecc880bd";
+        //
+        // A dosdp module's `restrict_axioms` and `restrict_axioms_column` now say
+        // which values they take. The fields are unchanged and carry the
+        // options as the generator always read them, so the floor stays.
+        //
+        // A dosdp module carries the `--obo-prefixes` and `--prefixes` of the
+        // invocation that generates it (`obo_prefixes`, `prefixes`), and the
+        // pattern set no longer lists prefix files for every module. A module
+        // states `obo_prefixes` whatever its value, so a 0.4.8 build refuses
+        // any plan with a dosdp module, loudly (`DosdpPattern` denies unknown
+        // fields), and nothing is silently built differently: the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "f1c94e951aeb2f76";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

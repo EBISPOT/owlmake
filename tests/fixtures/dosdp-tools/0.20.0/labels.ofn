@@ -1,0 +1,68 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000004>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000006>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000007>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000008>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000010>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000011>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000012>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000013>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000014>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000115>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000010> (sprocket with cog)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000010> "A widget with sprocket, coded c1.")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "http://purl.obolibrary.org/obo/EX_0000005")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "sprocket")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "sprocket with cog")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000010> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000004>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000011> (http://purl.obolibrary.org/obo/EX_0000004 with flange)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000011> "A widget with http://purl.obolibrary.org/obo/EX_0000004, coded c2.")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000011> "http://purl.obolibrary.org/obo/EX_0000004")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000011> "http://purl.obolibrary.org/obo/EX_0000004 with flange")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000011> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000004>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000012> (padded with gear)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000012> "A widget with padded, coded c3.")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000012> "cog")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000012> "padded")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000012> "padded with gear")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000012> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000006>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000013> (seven with seven)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000013> "A widget with seven, coded c4.")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000013> "seven")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000013> "seven with seven")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000013> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000007>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000014> (ocho with ocho)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000014> "A widget with ocho, coded c5.")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000014> "ocho")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000014> "ocho with ocho")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000014> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000008>))
+
+
+)

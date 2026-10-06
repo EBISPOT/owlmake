@@ -1,0 +1,16 @@
+pattern_name: printf_no_text
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/printf_no_text.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+data_list_vars:
+  codes: xsd:string
+subClassOf:
+  text: "'widget'"
+name:
+  value: codes
+comment:
+  vars: [part]
+def:
+  xrefs: codes

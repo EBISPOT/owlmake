@@ -1,0 +1,28 @@
+pattern_name: generation
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/generation.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+annotationProperties:
+  seeAlso: rdfs:seeAlso
+  synonym: oio:hasExactSynonym
+vars:
+  part: "'widget'"
+data_vars:
+  other: xsd:string
+  link: xsd:anyURI
+name:
+  text: "%s widget"
+  vars: [part]
+  permutations:
+    - var: part
+      annotationProperties: [synonym]
+annotations:
+  - {annotationProperty: seeAlso, var: link}
+equivalentTo:
+  text: "'widget' and ('has part' some %s)"
+  vars: [other]
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]

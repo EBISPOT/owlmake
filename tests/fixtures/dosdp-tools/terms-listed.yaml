@@ -1,0 +1,19 @@
+pattern_name: terms-listed
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/terms-listed.yaml
+classes:
+  widget: EX:0000001
+  gadget: EX:0000002
+  sprocket: EX:0000003
+vars:
+  part: "'widget'"
+name:
+  text: "widget with %s"
+  vars: [part]
+logical_axioms:
+  - axiom_type: equivalentTo
+    text: "'gadget'"
+GCI:
+  text: "%s SubClassOf 'sprocket'"
+  vars: [part]
+subClassOf:
+  text: "'widget'"

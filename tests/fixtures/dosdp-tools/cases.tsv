@@ -1,0 +1,40 @@
+# Each case: the document dosdp-tools `generate` writes, as
+# 0.19.3/<document> and 0.20.0/<document>; the pattern and table it generates
+# from; and the options of the run (spelled the same for om). Every run also
+# reads widgets.ofn (labels) and prefixes.yaml.
+# Regenerate the documents with scripts/gen_dosdp_fixtures.sh.
+list-values.ofn	list-values.yaml	list-values.tsv
+list-xrefs.ofn	list-xrefs.yaml	list-xrefs.tsv
+list-substitution.ofn	list-substitution.yaml	list-substitution.tsv
+printf-no-text.ofn	printf-no-text.yaml	printf-no-text.tsv
+source.ofn	source.yaml	source.tsv	--add-axiom-source-annotation=true
+source.annotation.ofn	source.yaml	source.tsv	--add-axiom-source-annotation=true --restrict-axioms-to=annotation
+source.logical.ofn	source.yaml	source.tsv	--add-axiom-source-annotation=true --restrict-axioms-to=logical
+source.property.ofn	source.yaml	source.tsv	--add-axiom-source-annotation=true --axiom-source-annotation-property=EX:src
+source.off.ofn	source.yaml	source.tsv	--add-axiom-source-annotation=false
+source-curie-iri.ofn	source-curie-iri.yaml	source.tsv	--add-axiom-source-annotation=true
+restrict.ofn	restrict.yaml	restrict.tsv	--restrict-axioms-column=restrict
+restrict.logical.ofn	restrict.yaml	restrict.tsv	--restrict-axioms-column=restrict --restrict-axioms-to=logical
+restrict.absent.ofn	restrict.yaml	restrict.tsv	--restrict-axioms-column=absent --restrict-axioms-to=annotation
+labels.ofn	labels.yaml	labels.tsv
+printf-columns.ofn	printf-columns.yaml	printf-columns.tsv
+substitution.ofn	substitution.yaml	substitution.tsv
+internal.ofn	internal.yaml	internal.tsv
+iri-value.ofn	iri-value.yaml	iri-value.tsv
+generation.ofn	generation.yaml	generation.tsv
+instance-graph.ofn	instance-graph.yaml	instance-graph.tsv
+unnamed.ofn	labels.yaml	unnamed.tsv
+expressions.ofn	expressions.yaml	expressions.tsv
+entity-ranges.ofn	entity-ranges.yaml	entity-ranges.tsv
+schemes.ofn	schemes.yaml	schemes.tsv
+java.ofn	java.yaml	java.tsv
+lists.ofn	lists.yaml	lists.tsv
+minted.ofn	minted.yaml	minted.tsv	--generate-defined-class=true
+minted.column.ofn	minted.yaml	minted-dc.tsv	--generate-defined-class=true
+minted.unnamed.ofn	minted.yaml	minted-dc.tsv
+readable.ofn	readable.yaml	readable.tsv
+collapse.ofn	collapse.yaml	collapse.tsv
+cells.ofn	cells.yaml	cells.tsv
+cells.csv.ofn	cells.yaml	cells.csv	--table-format=CSV
+repeated-keys.ofn	repeated-keys.yaml	repeated.tsv
+merged-keys.ofn	merged-keys.yaml	repeated.tsv

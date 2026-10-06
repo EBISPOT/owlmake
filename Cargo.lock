@@ -1154,7 +1154,7 @@ checksum = "242402749acf71e6f32f5857598b7002c4058a4e3c3b22b4c7d51cab9aea754e"
 [[package]]
 name = "horned-catalog"
 version = "1.0.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=e05af36#e05af367efa91ed0582d9d63188d3c012389fb98"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=426698b#426698bbf8273e31e214f5881614feed9c1a8534"
 dependencies = [
  "quick-xml 0.37.5",
  "thiserror 1.0.69",
@@ -1163,7 +1163,7 @@ dependencies = [
 [[package]]
 name = "horned-owl"
 version = "4.0.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=e05af36#e05af367efa91ed0582d9d63188d3c012389fb98"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=426698b#426698bbf8273e31e214f5881614feed9c1a8534"
 dependencies = [
  "curie",
  "enum_meta",
@@ -1187,7 +1187,7 @@ dependencies = [
 [[package]]
 name = "horned-pretty-rdf"
 version = "2.0.1"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=e05af36#e05af367efa91ed0582d9d63188d3c012389fb98"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=426698b#426698bbf8273e31e214f5881614feed9c1a8534"
 dependencies = [
  "indexmap 1.9.3",
  "oxrdf",
@@ -1979,6 +1979,7 @@ dependencies = [
  "arrow-buffer",
  "arrow-schema",
  "clap",
+ "fancy-regex 0.17.0",
  "flate2",
  "getrandom 0.3.4",
  "grep",
@@ -2000,6 +2001,7 @@ dependencies = [
  "sed",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "serde_yaml",
  "sha1",
  "thiserror 1.0.69",
@@ -2950,6 +2952,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

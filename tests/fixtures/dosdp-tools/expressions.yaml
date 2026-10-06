@@ -1,0 +1,47 @@
+pattern_name: expressions
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/expressions.yaml
+classes:
+  widget: EX:0000001
+  cog: EX:0000002
+  gear: EX:0000003
+relations:
+  has part: BFO:0000051
+  part of: BFO:0000050
+dataProperties:
+  has size: EX:0000100
+  has name: EX:0000101
+vars:
+  part: "'widget'"
+  whole: "'widget'"
+data_vars:
+  size: xsd:integer
+  low: xsd:decimal
+logical_axioms:
+  - axiom_type: equivalentTo
+    text: "'widget' and ('has part' some %s) and ('has size' some xsd:integer[>= %s, < 100])"
+    vars: [part, size]
+  - axiom_type: subClassOf
+    text: "('has part' only (%s or 'cog')) and not 'gear'"
+    vars: [part]
+  - axiom_type: subClassOf
+    text: "'has part' min 2 %s"
+    vars: [part]
+  - axiom_type: subClassOf
+    text: "'has size' value %s"
+    vars: [size]
+  - axiom_type: subClassOf
+    text: "'has size' exactly 1 xsd:decimal[> %s]"
+    vars: [low]
+  - axiom_type: subClassOf
+    text: "'has name' some {\"a\", \"b\"}"
+  - axiom_type: subClassOf
+    text: "inverse ('part of') some %s"
+    vars: [whole]
+  - axiom_type: GCI
+    text: "%s and ('part of' some %s) SubClassOf 'gear'"
+    vars: [part, whole]
+  - axiom_type: disjointWith
+    text: "'cog' or 'gear'"
+GCI:
+  text: "'part of' some %s EquivalentTo %s"
+  vars: [whole, part]

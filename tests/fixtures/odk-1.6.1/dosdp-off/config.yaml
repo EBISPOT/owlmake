@@ -1,0 +1,5 @@
+id: pats
+use_dosdps: false
+import_group:
+  products:
+    - id: ro

@@ -1,0 +1,41 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000003>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000030>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000031>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000030> (widget with cog)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000030> "gear widget")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000030> "widget widget")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000030> "widget with cog")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000030> ObjectUnionOf(<http://purl.obolibrary.org/obo/EX_0000001> <http://purl.obolibrary.org/obo/EX_0000003>))
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000030> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000031> (widget with gear)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000031> "cog widget")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000031> "widget with gear")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000031> <http://purl.obolibrary.org/obo/EX_0000002>)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000031> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000003>))
+
+
+)

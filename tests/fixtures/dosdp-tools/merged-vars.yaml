@@ -1,0 +1,17 @@
+pattern_name: merged-vars
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/merged-vars.yaml
+ranges: &ab
+  a: "'widget'"
+  b: "'widget'"
+classes:
+  widget: EX:0000001
+vars:
+  c: "'widget'"
+  <<: *ab
+  a: "'widget'"
+name:
+  text: "%s %s %s"
+  vars: [a, b, c]
+subClassOf:
+  text: "%s"
+  vars: [a]

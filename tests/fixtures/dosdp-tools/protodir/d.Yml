@@ -1,0 +1,14 @@
+pattern_name: proto_d
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/d.Yml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+name:
+  text: "d with %s"
+  vars: [part]
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]

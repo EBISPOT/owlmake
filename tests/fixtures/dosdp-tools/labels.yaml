@@ -1,0 +1,24 @@
+pattern_name: labels
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/labels.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+  other: "'widget'"
+list_vars:
+  parts: "'widget'"
+data_vars:
+  code: xsd:string
+name:
+  text: "%s with %s"
+  vars: [part, other]
+def:
+  text: "A widget with %s, coded %s."
+  vars: [part, code]
+exact_synonym:
+  value: parts
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]

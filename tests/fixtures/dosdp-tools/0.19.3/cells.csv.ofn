@@ -1,0 +1,48 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000095>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000096>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000097>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000098>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000095> ([a, b])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000095> "x"^^xsd:string)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000095> "y"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000095> "[a, b]"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000095> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000096> ([c"d])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000096> "q,r"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000096> "[c\"d]"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000096> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000097> ([e\f])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000097> "s"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000097> "[e\\f]"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000097> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000098> ([g"h])
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000098> "[g\"h]"^^xsd:string)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000098> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

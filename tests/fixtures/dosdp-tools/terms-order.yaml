@@ -1,0 +1,21 @@
+pattern_name: terms-order
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/terms-order.yaml
+classes:
+  widget: EX:0000001
+  gadget: EX:0000002
+  sprocket: EX:0000003
+relations:
+  has_part: BFO:0000051
+vars:
+  part: "'widget'"
+name:
+  text: "widget with %s"
+  vars: [part]
+GCI:
+  text: "%s SubClassOf 'sprocket'"
+  vars: [part]
+disjointWith:
+  text: "'gadget'"
+equivalentTo:
+  text: "'widget' and ('has_part' some %s)"
+  vars: [part]

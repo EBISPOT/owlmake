@@ -1,0 +1,19 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "widget with cog"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000011> "widget with cog"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000012> "widget with cog"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000013> "widget with gear"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000014> "widget with gear"^^xsd:string)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000015> "widget with gear"^^xsd:string)
+)

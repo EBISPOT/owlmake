@@ -1,0 +1,11 @@
+pattern_name: docs-bad-range
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/docs-bad-range.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'gadget'"
+name:
+  text: "%s widget"
+  vars: [part]
+subClassOf:
+  text: "'widget'"

@@ -165,7 +165,14 @@ jobs:
           from owlmake import Ontology as O
           tdf = pd.DataFrame([{"ID":"ID","Label":"LABEL"},{"ID":"ex:1","Label":"One"},{"ID":"ex:2","Label":"Two"}])
           ot = O(); ot.template(tdf); assert len(ot.classes()) == 2
-          pat = "pattern_name: t\nclasses: {thing: owl:Thing}\nrelations: {}\nvars: {item: \"'thing'\"}\nname: {text: \"n %s\", vars: [item]}\nequivalentTo: {text: \"'thing' and ('thing' some %s)\", vars: [item]}\n"
+          pat = "pattern_name: t\nclasses: {thing: owl:Thing}\nrelations: {part_of: BFO:0000050}\nvars: {item: \"'thing'\"}\nname: {text: \"n %s\", vars: [item]}\nequivalentTo: {text: \"'thing' and ('part_of' some %s)\", vars: [item]}\n"
           assert len(owlmake.dosdp(pat, pl.DataFrame([{"defined_class":"ex:1","item":"ex:0"}]))) > 0
+          # A row the pattern cannot be generated for fails with every cause in
+          # the message, not only the row it is in.
+          try:
+              owlmake.dosdp(pat.replace("'part_of' some", "'thing' some"), pl.DataFrame([{"defined_class":"ex:1","item":"ex:0"}]))
+              raise AssertionError("dosdp generated a row whose relation is a class")
+          except RuntimeError as e:
+              assert "equivalentTo" in str(e), str(e)
           print("python smoke OK")
           PY

@@ -1,0 +1,22 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000115>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasDbXref>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#source>))
+
+
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:1") Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:2") Annotation(<http://www.geneontology.org/formats/oboInOwl#source> <http://purl.obolibrary.org/obo/ex/patterns/source.yaml>) <http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000010> "A widget with cog.")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:1") Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:2") Annotation(<http://www.geneontology.org/formats/oboInOwl#source> <http://purl.obolibrary.org/obo/ex/patterns/source.yaml>) <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "s1")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:1") Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "R:2") Annotation(<http://www.geneontology.org/formats/oboInOwl#source> <http://purl.obolibrary.org/obo/ex/patterns/source.yaml>) <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "s2")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> <http://purl.obolibrary.org/obo/ex/patterns/source.yaml>) rdfs:comment <http://purl.obolibrary.org/obo/EX_0000010> "a note")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> <http://purl.obolibrary.org/obo/ex/patterns/source.yaml>) rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "widget with cog")
+)

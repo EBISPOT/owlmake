@@ -1,0 +1,9 @@
+defined_class	text	items
+EX:0000090	a\b c\\d	x\	y|z
+EX:0000091	"quoted ""inner"" tab	here"	q
+EX:0000092	mid"quote	"multi
+
+line"
+  	 
+EX:0000093	 nbsp 	vt
+EX:0000094	end\

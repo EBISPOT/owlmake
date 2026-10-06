@@ -1,0 +1,7 @@
+pattern_name: axiom_type
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/axiom-type.yaml
+classes:
+  widget: EX:0000001
+logical_axioms:
+  - axiom_type: superClassOf
+    text: "'widget'"

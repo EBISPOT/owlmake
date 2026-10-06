@@ -31,8 +31,9 @@ use pyo3::wrap_pyfunction;
 /// Map an `owlmake::api::Error` to the right Python exception: a bad value for a
 /// closed-set parameter (reasoner / DL-query kind / format) becomes a
 /// `ValueError`; anything else (parse, reasoning, I/O, SPARQL) a `RuntimeError`.
+/// The message holds every cause, outermost first.
 fn pyerr(e: api::Error) -> PyErr {
-    let msg = e.to_string();
+    let msg = format!("{e:#}");
     match e {
         api::Error::Unknown { .. } => PyValueError::new_err(msg),
         _ => PyRuntimeError::new_err(msg),
@@ -107,7 +108,7 @@ fn coerce_tsv(table: &Bound<'_, PyAny>) -> PyResult<String> {
 /// Resolve a format name (`"ofn"`, `"owl"`, `"obo"`, `"ttl"`, …) the same way
 /// the CLI's `--format` does; an unknown name raises `ValueError`.
 fn fmt(name: &str) -> PyResult<Format> {
-    Format::from_name(name).map_err(|e| PyValueError::new_err(e.to_string()))
+    Format::from_name(name).map_err(|e| PyValueError::new_err(format!("{e:#}")))
 }
 
 /// An in-memory OWL ontology: the unit every operation reads and writes. Holds

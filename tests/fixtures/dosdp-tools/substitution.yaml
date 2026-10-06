@@ -1,0 +1,46 @@
+pattern_name: substitution
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/substitution.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+list_vars:
+  parts: "'widget'"
+data_vars:
+  code: xsd:string
+data_list_vars:
+  codes: xsd:string
+substitutions:
+  - {in: part, out: part_sub, match: "c(o)g", sub: "b\\1g"}
+  - {in: code, out: code_sub, match: "2", sub: "X"}
+  - {in: code, out: code_swap, match: "(\\w)(\\d)", sub: "\\2-\\1$"}
+  - {in: parts, out: parts_sub, match: "^(.)", sub: "\\1\\1"}
+  - {in: codes, out: codes_sub, match: "x", sub: "y"}
+  - {in: part_sub, out: part_sub2, match: "b", sub: "B"}
+  - {in: defined_class, out: dc_sub, match: "EX:(\\d+)", sub: "id \\1"}
+  - {in: part_label, out: label_sub, match: ".", sub: "L"}
+  - {in: missing, out: missing_sub, match: ".", sub: "M"}
+name:
+  text: "%s %s %s"
+  vars: [part_sub, code_sub, code_swap]
+comment:
+  text: "%s %s"
+  vars: [part_sub2, dc_sub]
+exact_synonym:
+  value: parts_sub
+narrow_synonym:
+  value: codes_sub
+generated_related_synonyms:
+  - text: "%s"
+    vars: [label_sub]
+  - text: "%s"
+    vars: [missing_sub]
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]
+logical_axioms:
+  - axiom_type: subClassOf
+    text: "'has part' some %s"
+    vars: [part_sub]

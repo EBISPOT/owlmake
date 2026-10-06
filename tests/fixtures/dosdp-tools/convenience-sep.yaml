@@ -1,0 +1,13 @@
+pattern_name: convenience_sep
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/convenience-sep.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+list_vars:
+  parts: "'widget'"
+subClassOf:
+  multi_clause:
+    clauses:
+      - text: "'has part' some %s"
+        vars: [parts]

@@ -1,0 +1,10 @@
+pattern_name: bad_regex
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/bad-regex.yaml
+classes:
+  widget: EX:0000001
+data_vars:
+  code: xsd:string
+substitutions:
+  - {in: code, out: code_x, match: "(", sub: "x"}
+subClassOf:
+  text: "'widget'"

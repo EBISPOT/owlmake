@@ -57,9 +57,9 @@ fn init() {
 }
 
 /// Map any displayable error (an `owlmake::api::Error`, `anyhow::Error`, …) into
-/// a JS exception.
+/// a JS exception whose message holds every cause, outermost first.
 fn js_err<E: std::fmt::Display>(e: E) -> JsError {
-    JsError::new(&e.to_string())
+    JsError::new(&format!("{e:#}"))
 }
 
 /// Resolve a format name (`"ofn"`, `"owl"`, `"obo"`, `"ttl"`, …) the same way

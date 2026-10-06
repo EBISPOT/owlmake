@@ -1,0 +1,56 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000090>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000091>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000092>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000093>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000094>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000090> ([a\b c\d])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000090> "x	y")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000090> "z")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000090> "[a\\b c\\d]")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000090> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000091> ([quoted "inner" tab	here])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000091> "q")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000091> "[quoted \"inner\" tab	here]")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000091> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000092> ([mid"quote])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000092> "multi
+line")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000092> "[mid\"quote]")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000092> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000093> ([ nbsp ])
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000093> "vt")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000093> "[ nbsp ]")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000093> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000094> ([end])
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000094> "[end]")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000094> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

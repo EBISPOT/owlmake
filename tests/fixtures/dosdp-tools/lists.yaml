@@ -1,0 +1,46 @@
+pattern_name: lists
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/lists.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+list_vars:
+  parts: "'widget'"
+  others: "'widget'"
+data_list_vars:
+  notes: xsd:string
+exact_synonym:
+  value: notes
+def:
+  multi_clause:
+    sep: "; "
+    clauses:
+      - text: "%s and %s"
+        vars: [parts, others]
+      - text: "others %s"
+        vars: [others]
+name:
+  multi_clause:
+    sep: " | "
+    clauses:
+      - text: "part %s"
+        vars: [parts]
+        sub_clauses:
+          - sep: ", "
+            clauses:
+              - text: "note %s"
+                vars: [notes]
+comment:
+  multi_clause:
+    clauses:
+      - text: "%s"
+        vars: [others]
+logical_axioms:
+  - axiom_type: subClassOf
+    multi_clause:
+      sep: " and "
+      clauses:
+        - text: "'has part' some %s"
+          vars: [parts]
+        - text: "'has part' some %s"
+          vars: [others]

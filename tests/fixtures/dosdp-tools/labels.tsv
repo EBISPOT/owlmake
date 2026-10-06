@@ -1,0 +1,6 @@
+defined_class	part	part_label	other	other_label	parts	parts_label	code
+EX:0000010	EX:0000004	sprocket	EX:0000002	not cog	EX:0000004|EX:0000005	ignored	c1
+EX:0000011	EX:0000004		EX:0000005	flange	EX:0000004	ignored	c2
+EX:0000012	EX:0000006	  padded  	EX:0000003		EX:0000006|EX:0000002		c3
+EX:0000013	http://purl.obolibrary.org/obo/EX_0000007	seven	EX:0000007		EX:0000007		c4
+EX:0000014	EX:0000008	eight	EX:0000008	ocho	EX:0000008		c5

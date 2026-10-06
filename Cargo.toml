@@ -50,6 +50,9 @@ serde = { version = "1", features = ["derive"] }
 # read, and it round-trips through a `serde_json::Value` to rebase its paths.
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"
+# The path to the value a DOSDP pattern could not be decoded at, for a pattern
+# decoded from a resolved YAML document rather than from the parser's events.
+serde_path_to_error = "0.1"
 # JSON-Schema derivation (schemars) + validation (jsonschema) for `owlmake.json`,
 # the declarative build plan that is the whole contract between planning and
 # execution.
@@ -59,6 +62,10 @@ rustc-hash = "2"
 # Used by `ubergraph` to apply ubergraph's biolink-model namespace rewrite
 # (`<…/vocab/PREFIX:LOCAL>` → `<…/obo/PREFIX_LOCAL>`); already in the dep tree.
 regex = "1"
+# A pattern's regular expressions, matched with the semantics of the Java
+# engine its substitutions are written for (`dosdp::java`): backreferences,
+# lookaround and possessive quantifiers. Already in the tree through deps/sed.
+fancy-regex = "0.17"
 # ureq (HTTP client) is declared in the per-OS `[target.*.dependencies]` tables
 # below the dependency list, because its `native-certs` feature is enabled on
 # every OS except macOS.
@@ -250,7 +257,7 @@ debug = 1
 # satisfies every requirement in the graph and keeps one shared model. Pinned
 # by rev, not by branch, so a build is reproducible without the lockfile; bump
 # it when devel moves.
-horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "e05af36" }
+horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "426698b" }
 # pretty_rdf is no longer a separate dependency: horned-owl now vendors it as the
 # `horned-pretty-rdf` workspace member, so no patch is needed here.
 # oxigraph SPARQL optimizer (sparopt) — kept in-tree under deps/ (the one

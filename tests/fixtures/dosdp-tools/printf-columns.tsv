@@ -1,0 +1,4 @@
+defined_class	part	part_label	note
+EX:0000010	EX:0000002	cog wheel	plain text
+EX:0000011	EX:0000004	sprocket	EX:0000009
+EX:0000012	EX:0000003		

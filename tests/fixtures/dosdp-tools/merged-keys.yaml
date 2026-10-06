@@ -1,0 +1,17 @@
+pattern_name: merged-keys
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/merged-keys.yaml
+first: &first
+  widget: EX:0000001
+second: &second
+  widget: EX:0000002
+  gadget: EX:0000004
+classes:
+  <<: [*first, *second]
+  gadget: EX:0000005
+vars:
+  a: "'widget'"
+name:
+  text: "merged %s"
+  vars: [a]
+subClassOf:
+  text: "'widget' and 'gadget'"

@@ -1,0 +1,62 @@
+pattern_name: collapse
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/collapse.yaml
+classes:
+  widget: EX:0000001
+annotationProperties:
+  comment: rdfs:comment
+  xref: oio:hasDbXref
+  source: oio:source
+vars:
+  part: "'widget'"
+list_vars:
+  refs: "'widget'"
+data_list_vars:
+  notes: xsd:string
+name:
+  text: "%s widget"
+  vars: [part]
+generated_synonyms:
+  - text: "%s widget"
+    vars: [part]
+  - text: "%s widget"
+    vars: [part]
+comment:
+  text: "%s thing"
+  vars: [part]
+  annotations:
+    - annotationProperty: comment
+      text: "on %s"
+      vars: [part]
+      annotations:
+        - annotationProperty: source
+          text: "deep %s"
+          vars: [part]
+def:
+  text: "%s def"
+  vars: [part]
+namespace:
+  text: "%s def"
+  vars: [part]
+  annotations: []
+exact_synonym:
+  value: notes
+xref:
+  value: notes
+annotations:
+  - annotationProperty: comment
+    text: "listed"
+    annotations:
+      - annotationProperty: xref
+        value: notes
+        annotations:
+          - annotationProperty: source
+            var: part
+subClassOf:
+  text: "'widget'"
+  annotations:
+    - annotationProperty: comment
+      text: "because %s"
+      vars: [part]
+      annotations:
+        - annotationProperty: xref
+          value: notes

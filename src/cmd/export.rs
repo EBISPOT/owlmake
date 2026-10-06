@@ -43,8 +43,8 @@ use horned_owl::model::{
     Individual, Literal, ObjectPropertyExpression as OPE, RcStr,
 };
 
-use crate::io::entities::Kind;
-use crate::io::manchester_write::{object_text, Names, Object, ShortForms};
+use crate::io::entities::{held_labels, HeldLabel, Kind};
+use crate::io::manchester_write::{object_text, Layout, Names, Object, ShortForms};
 use crate::io::natural_order::{iri_cmp, str_cmp, NaturalOrder};
 use crate::model::Model;
 use crate::owlapi_hash::{annotation_assertion_hash, java_hashset_capacity, java_string_hash};
@@ -355,12 +355,6 @@ struct Row {
 
 // === The ontology, indexed ================================================
 
-/// A label as an entity carries it.
-enum LabelValue<'m> {
-    Literal(&'m str),
-    Iri(&'m str),
-}
-
 /// Everything a table is built from: the prefix map, the labels, and the root
 /// document's axioms indexed by the entity they are about.
 struct Ctx<'m> {
@@ -373,7 +367,7 @@ struct Ctx<'m> {
     builtin_names: ShortForms,
     /// The prefixes a header's CURIE is expanded with, in the order given.
     terms: Vec<(String, String)>,
-    labels: HashMap<&'m str, LabelValue<'m>>,
+    labels: HashMap<&'m str, HeldLabel<'m>>,
     /// The root document's labels, by label: the IRI a header names.
     label_iris: HashMap<&'m str, &'m str>,
     /// Property names — short form and labels — by kind, over the whole
@@ -598,48 +592,7 @@ impl<'m> Ctx<'m> {
         let prefix_manager = ShortForms::new(&terms);
         let builtin_names = ShortForms::new(&[]);
 
-        // Labels: the first literal among an entity's label assertions, in the
-        // order its assertions are held; an IRI stands until a literal follows.
-        let mut assertions = 0usize;
-        let mut per_subject: HashMap<&str, usize> = HashMap::new();
-        let mut candidates: HashMap<&str, Vec<(i32, &AnnotationValue<RcStr>)>> = HashMap::new();
-        for ac in model.ont.iter() {
-            if let Component::AnnotationAssertion(aa) = &ac.component {
-                if let AnnotationSubject::IRI(s) = &aa.subject {
-                    assertions += 1;
-                    *per_subject.entry(s.as_ref()).or_default() += 1;
-                    if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                        candidates.entry(s.as_ref()).or_default().push((
-                            annotation_assertion_hash(s.as_ref(), RDFS_LABEL, &aa.ann.av, &ac.ann),
-                            &aa.ann.av,
-                        ));
-                    }
-                }
-            }
-        }
-        let mut labels: HashMap<&str, LabelValue> = HashMap::new();
-        for (subject, cands) in &candidates {
-            let ordered: Vec<usize> = if cands.len() == 1 {
-                vec![0]
-            } else {
-                let hashes: Vec<i32> = cands.iter().map(|c| c.0).collect();
-                crate::owlapi_hash::subject_assertion_order(&hashes, per_subject[subject], assertions)
-            };
-            let mut found: Option<LabelValue> = None;
-            for i in ordered {
-                match cands[i].1 {
-                    AnnotationValue::Literal(l) => {
-                        found = Some(LabelValue::Literal(l.literal().as_str()));
-                        break;
-                    }
-                    AnnotationValue::IRI(iri) => found = Some(LabelValue::Iri(iri.as_ref())),
-                    AnnotationValue::AnonymousIndividual(_) => {}
-                }
-            }
-            if let Some(f) = found {
-                labels.insert(*subject, f);
-            }
-        }
+        let labels = held_labels(model);
 
         // The root document's labels by label; of two entities with one label,
         // the one held later wins.
@@ -731,8 +684,8 @@ impl<'m> Ctx<'m> {
             Provider::Iri => iri.to_string(),
             Provider::Name => {
                 let name = match self.labels.get(iri) {
-                    Some(LabelValue::Literal(l)) => l.to_string(),
-                    Some(LabelValue::Iri(i)) => self.prefix_manager.prefixed_or_quoted(i),
+                    Some(HeldLabel::Literal(l)) => l.to_string(),
+                    Some(HeldLabel::Iri(i)) => self.prefix_manager.prefixed_or_quoted(i),
                     None => self.curie(iri),
                 };
                 if quoting && name.contains(' ') {
@@ -742,7 +695,7 @@ impl<'m> Ctx<'m> {
                 }
             }
             Provider::Label => match self.labels.get(iri) {
-                Some(LabelValue::Literal(l)) => l.to_string(),
+                Some(HeldLabel::Literal(l)) => l.to_string(),
                 _ => String::new(),
             },
         }
@@ -752,7 +705,7 @@ impl<'m> Ctx<'m> {
     /// quoted, and the whole is on one line with runs of spaces collapsed.
     fn render(&self, object: Object<'_>, anonymous: bool, provider: Provider, html: bool) -> String {
         let names = EntityNames { ctx: self, provider, quoting: anonymous && provider == Provider::Name, html };
-        let text = object_text(object, self.order, &names);
+        let text = object_text(object, self.order, &names, Layout::OneLine);
         collapse(&text)
     }
 

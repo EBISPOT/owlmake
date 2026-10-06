@@ -1,0 +1,19 @@
+pattern_name: list_substitution
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/list_substitution.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+data_vars:
+  code: xsd:string
+data_list_vars:
+  codes: xsd:string
+substitutions:
+  - {in: codes, out: codes_sub, match: "w", sub: "v"}
+  - {in: code, out: code_sub, match: "w", sub: "v"}
+exact_synonym:
+  value: codes_sub
+narrow_synonym:
+  value: code_sub
+subClassOf:
+  text: "'widget'"

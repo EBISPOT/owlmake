@@ -1,0 +1,44 @@
+pattern_name: internal
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/internal.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+list_vars:
+  parts: "'widget'"
+data_list_vars:
+  codes: xsd:string
+  refs: xsd:string
+internal_vars:
+  - var_name: parts_joined
+    input: parts
+    apply:
+      join:
+        sep: ", "
+  - var_name: codes_joined
+    input: codes
+    apply:
+      join:
+        sep: "+"
+  - var_name: refs_joined
+    input: refs
+    apply:
+      join:
+        sep: " "
+  - var_name: part_regex
+    input: parts
+    apply:
+      regex: {in: parts, out: x, match: "EX", sub: "Y"}
+substitutions:
+  - {in: parts_joined, out: parts_joined_sub, match: "^(\\w+)", sub: "first \\1"}
+name:
+  text: "widget with %s"
+  vars: [parts_joined]
+comment:
+  text: "refs %s; regex [%s]; %s"
+  vars: [refs_joined, part_regex, parts_joined_sub]
+generated_synonyms:
+  - text: "codes %s"
+    vars: [codes_joined]
+subClassOf:
+  text: "'widget'"

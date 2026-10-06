@@ -105,6 +105,12 @@ pub fn odk_robot_version(odk: Version) -> Version {
     if odk >= (1, 6, 1) { (1, 9, 10) } else { (1, 9, 8) }
 }
 
+/// The dosdp-tools release an ODK release ships: 0.19.3 up to v1.6.1, and the
+/// newest release owlmake models after it.
+pub fn odk_dosdp_tools_version(odk: Version) -> Version {
+    if odk > (1, 6, 1) { (0, 20, 0) } else { (0, 19, 3) }
+}
+
 /// Every `ontodev/robot/releases/download/v<version>/…` in one workflow file.
 fn robot_releases(text: &str) -> Vec<Version> {
     const MARKER: &str = "ontodev/robot/releases/download/v";

@@ -1,0 +1,31 @@
+pattern_name: iri_value
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/iri_value.yaml
+classes:
+  widget: EX:0000001
+annotationProperties:
+  seeAlso: rdfs:seeAlso
+  ref: EX:ref
+vars:
+  part: "'widget'"
+list_vars:
+  parts: "'widget'"
+data_vars:
+  code: xsd:string
+data_list_vars:
+  codes: xsd:string
+substitutions:
+  - {in: code, out: code_sub, match: "w", sub: "EX:0000009"}
+annotations:
+  - {annotationProperty: seeAlso, var: part}
+  - {annotationProperty: seeAlso, var: parts}
+  - {annotationProperty: ref, var: code}
+  - {annotationProperty: ref, var: codes}
+  - {annotationProperty: ref, var: code_sub}
+  - {annotationProperty: ref, var: defined_class}
+  - {annotationProperty: ref, var: undeclared}
+  - annotationProperty: seeAlso
+    var: part
+    annotations:
+      - {annotationProperty: ref, var: code}
+subClassOf:
+  text: "'widget'"

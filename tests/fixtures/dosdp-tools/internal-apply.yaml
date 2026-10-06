@@ -1,0 +1,12 @@
+pattern_name: internal_apply
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/internal-apply.yaml
+classes:
+  widget: EX:0000001
+list_vars:
+  parts: "'widget'"
+internal_vars:
+  - var_name: joined
+    input: parts
+    apply: {}
+subClassOf:
+  text: "'widget'"

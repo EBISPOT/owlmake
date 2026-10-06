@@ -1,0 +1,12 @@
+pattern_name: clause_text
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/clause-text.yaml
+classes:
+  widget: EX:0000001
+list_vars:
+  parts: "'widget'"
+name:
+  multi_clause:
+    clauses:
+      - vars: [parts]
+subClassOf:
+  text: "'widget'"

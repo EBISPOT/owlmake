@@ -1,0 +1,14 @@
+pattern_name: restrict
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/restrict.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+name:
+  text: "widget with %s"
+  vars: [part]
+subClassOf:
+  text: "'widget' and ('has part' some %s)"
+  vars: [part]

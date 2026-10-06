@@ -1,0 +1,16 @@
+pattern_name: list_values
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/list_values.yaml
+classes: {widget: EX:0000001}
+relations: {has part: BFO:0000051}
+annotationProperties: {comment: rdfs:comment}
+vars: {part: "'widget'"}
+list_vars: {parts: "'widget'"}
+data_vars: {code: xsd:string, ref: xsd:string}
+data_list_vars: {codes: xsd:string, refs: xsd:string}
+name: {text: "widget with %s", vars: [part]}
+exact_synonym: {value: codes, xrefs: refs}
+narrow_synonym: {value: code}
+related_synonym: {value: parts}
+broad_synonym: {value: part}
+xref: {value: undeclared}
+subClassOf: {text: "'widget' and 'has part' some %s", vars: [part]}

@@ -1,0 +1,15 @@
+pattern_name: repeated-vars
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/repeated-vars.yaml
+classes:
+  widget: EX:0000001
+vars:
+  a: "'widget'"
+  b: "'widget'"
+  c: "'widget'"
+  a: "'widget'"
+name:
+  text: "%s %s %s"
+  vars: [a, b, c]
+subClassOf:
+  text: "%s"
+  vars: [a]

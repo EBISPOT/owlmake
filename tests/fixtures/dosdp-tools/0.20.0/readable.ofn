@@ -1,0 +1,40 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000070>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000071>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000072>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000070> (widget with sprocket wheel)
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000070> "parts sprocket wheel, gear")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000070> "widget with sprocket wheel")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000070> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000071> (widget with gear)
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000071> "parts http://purl.obolibrary.org/obo/EX_0000009")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000071> "widget with gear")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000071> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000072> (widget with nine)
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000072> "parts sprocket wheel")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000072> "widget with nine")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000072> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

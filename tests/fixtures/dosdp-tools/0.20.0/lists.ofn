@@ -1,0 +1,52 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000003>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000050>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000051>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000052>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/BFO_0000051>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000050> (part gear)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000050> "")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000050> "a")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000050> "b")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000050> "widget")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000050> "part cog")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000050> "part gear")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000050> ObjectIntersectionOf(ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000001>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000003>)))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000051> (part gear)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000051> "")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000051> "x")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000051> "cog")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000051> "gear")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000051> "part gear")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000051> ObjectIntersectionOf(ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000003>)))
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000052> (part cog)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000052> "solo")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000052> "part cog")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000052> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/BFO_0000051> <http://purl.obolibrary.org/obo/EX_0000002>))
+
+
+)

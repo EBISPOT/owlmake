@@ -1,0 +1,17 @@
+pattern_name: permutation_var
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/permutation-var.yaml
+classes:
+  widget: EX:0000001
+annotationProperties:
+  synonym: oio:hasExactSynonym
+vars:
+  part: "'widget'"
+  other: "'widget'"
+name:
+  text: "%s widget"
+  vars: [part]
+  permutations:
+    - var: other
+      annotationProperties: [synonym]
+subClassOf:
+  text: "'widget'"

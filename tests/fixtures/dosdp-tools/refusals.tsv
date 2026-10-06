@@ -1,0 +1,32 @@
+# Each case: a run every release named refuses, as dosdp-tools refuses it: the
+# command, the releases, the pattern and table, and the options of the run
+# (spelled the same for om). Every run also reads widgets.ofn (generate) and
+# prefixes.yaml. scripts/gen_dosdp_fixtures.sh checks that dosdp-tools refuses
+# each case under each release named.
+generate	0.19.3,0.20.0	readable-named.yaml	readable.tsv
+generate	0.19.3,0.20.0	java-group.yaml	java.tsv
+generate	0.19.3,0.20.0	labels.yaml	defined-class-space.tsv
+generate	0.19.3,0.20.0	labels.yaml	short-row.tsv
+generate	0.19.3,0.20.0	labels.yaml	malformed.tsv
+generate	0.19.3,0.20.0	convenience-sep.yaml	lists.tsv
+generate	0.19.3,0.20.0	internal-apply.yaml	internal.tsv
+generate	0.19.3,0.20.0	two-documents.yaml	short.tsv
+generate	0.19.3,0.20.0	generated-mapping.yaml	short.tsv
+generate	0.19.3,0.20.0	unresolved-property.yaml	short.tsv
+generate	0.19.3,0.20.0	axiom-type.yaml	short.tsv
+generate	0.19.3,0.20.0	clause-text.yaml	lists.tsv
+generate	0.19.3,0.20.0	bad-regex.yaml	short.tsv
+generate	0.19.3,0.20.0	format-conversion.yaml	short.tsv
+generate	0.19.3,0.20.0	format-argument.yaml	short.tsv
+generate	0.20.0	permutation-var.yaml	short.tsv
+generate	0.19.3,0.20.0	labels.yaml	labels.tsv	--table-format=xlsx
+terms	0.19.3,0.20.0	expressions.yaml	expressions.tsv
+terms	0.19.3,0.20.0	labels.yaml	terms-blank.tsv
+generate	0.19.3,0.20.0	number-text.yaml	repeated.tsv
+generate	0.19.3,0.20.0	number-class.yaml	repeated.tsv
+generate	0.19.3,0.20.0	boolean-text.yaml	repeated.tsv
+generate	0.19.3,0.20.0	number-name.yaml	repeated.tsv
+docs	0.20.0	expressions.yaml	expressions.tsv
+docs	0.20.0	generation.yaml	generation.tsv
+docs	0.19.3,0.20.0	source-no-iri.yaml	source.tsv
+docs	0.19.3,0.20.0	docs-bad-range.yaml	docs-escape.tsv

@@ -1,0 +1,11 @@
+pattern_name: number-text
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/number-text.yaml
+classes:
+  widget: EX:0000001
+vars:
+  a: "'widget'"
+name:
+  text: 2024
+  vars: []
+subClassOf:
+  text: "'widget'"

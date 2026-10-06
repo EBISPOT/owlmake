@@ -1,0 +1,7 @@
+defined_class	part
+urn:ex:10	urn:x
+EX:0000011	mailto:a@b.org
+EX:0000012	ftp://host/x
+EX:0000013	https://example.org/y
+httpx:13	httpfoo
+EX:0000014	:bare

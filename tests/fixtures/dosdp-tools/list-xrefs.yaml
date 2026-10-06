@@ -1,0 +1,20 @@
+pattern_name: list_xrefs
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/list_xrefs.yaml
+classes: {widget: EX:0000001}
+relations: {has part: BFO:0000051}
+annotationProperties: {comment: rdfs:comment}
+vars: {part: "'widget'"}
+list_vars: {parts: "'widget'"}
+data_vars: {code: xsd:string, ref: xsd:string}
+data_list_vars: {codes: xsd:string, refs: xsd:string}
+exact_synonym: {value: codes, xrefs: ref}
+narrow_synonym: {value: codes, xrefs: undeclared}
+related_synonym: {value: codes, xrefs: "GOC:literal"}
+broad_synonym: {value: codes, xrefs: parts}
+def: {text: "A widget with %s.", vars: [part], xrefs: ref}
+comment: {text: "c %s.", vars: [part], xrefs: "GOC:lit"}
+annotations:
+  - {annotationProperty: comment, value: code}
+  - {annotationProperty: comment, value: codes}
+  - {annotationProperty: comment, value: undeclared}
+subClassOf: {text: "'widget' and 'has part' some %s", vars: [part]}

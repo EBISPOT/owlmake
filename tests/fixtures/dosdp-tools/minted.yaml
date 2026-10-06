@@ -1,0 +1,24 @@
+pattern_name: minted
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/minted.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+list_vars:
+  parts: "'widget'"
+data_vars:
+  code: xsd:string
+internal_vars:
+  - var_name: joined
+    input: parts
+    apply:
+      join:
+        sep: "+"
+name:
+  text: "%s widget %s"
+  vars: [part, code]
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]

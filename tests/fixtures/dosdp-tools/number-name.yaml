@@ -1,0 +1,11 @@
+pattern_name: 123
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/number-name.yaml
+classes:
+  widget: EX:0000001
+vars:
+  a: "'widget'"
+name:
+  text: "thing %s"
+  vars: [a]
+subClassOf:
+  text: "'widget'"

@@ -130,12 +130,18 @@ assert.ok(tont.classes().length >= 2);
 // --- DOSDP from a pattern + TSV data ---
 const pattern = `pattern_name: t
 classes: {thing: owl:Thing}
-relations: {}
+relations: {part_of: BFO:0000050}
 vars: {item: "'thing'"}
 name: {text: "named %s", vars: [item]}
-equivalentTo: {text: "'thing' and ('thing' some %s)", vars: [item]}
+equivalentTo: {text: "'thing' and ('part_of' some %s)", vars: [item]}
 `;
 const od = dosdp(pattern, "defined_class\titem\nex:1\tex:0\n");
 assert.ok(od.axiomCount() > 0);
+// A row the pattern cannot be generated for fails with every cause in the
+// message, not only the row it is in.
+assert.throws(
+  () => dosdp(pattern.replace("'part_of' some", "'thing' some"), "defined_class\titem\nex:1\tex:0\n"),
+  /equivalentTo/,
+);
 
 console.log("wasm smoke OK");

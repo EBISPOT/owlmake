@@ -493,16 +493,9 @@ pub fn build(repo: &OdkRepo, only: &[String]) -> Result<Plan> {
         } else if repo.own_build() {
             None
         } else {
-            let dir = make.expand("$(PATTERNDIR)");
-            let dir = dir.trim();
-            plan_dosdp(
-                &repo.dir,
-                if dir.is_empty() { "../patterns" } else { dir },
-                Some(make),
-                Some(repo),
-                &ontbase,
-                &version,
-            )
+            pattern_pipeline_dir(make).and_then(|dir| {
+                plan_dosdp(&repo.dir, &dir, Some(make), Some(repo), &ontbase, version)
+            })
         },
         id,
         // The DEFAULT release version. Every other string that needs it holds
@@ -1907,6 +1900,18 @@ fn cached_pattern_seed_query(repo: &OdkRepo) -> Option<String> {
     None
 }
 
+/// The pattern directory of a build that runs the DOSDP pipeline, which is a
+/// build with a rule for `<pattern directory>/definitions.owl`. A build without
+/// one generates no pattern products, whatever the repository holds on disk.
+fn pattern_pipeline_dir(make: &super::makefile::MakeModel) -> Option<String> {
+    let dir = make.expand("$(PATTERNDIR)");
+    let dir = match dir.trim() {
+        "" => "../patterns",
+        d => d,
+    };
+    make.rules.contains_key(&format!("{dir}/definitions.owl")).then(|| dir.to_string())
+}
+
 /// Enumerate the DOSDP pattern set, once, at plan time.
 ///
 /// `patterns` is what gets BUILT — a template paired with a data table, which is
@@ -1933,11 +1938,12 @@ fn plan_dosdp(
     let rel = |p: &std::path::Path| -> String {
         p.strip_prefix(dir).unwrap_or(p).to_string_lossy().replace('\\', "/")
     };
+    // Every pattern file `prototype` reads from the directory.
     let mut templates: Vec<String> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&tpl_dir) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.extension().is_some_and(|x| x == "yaml" || x == "yml") {
+            if p.is_file() && crate::dosdp::is_pattern_file_name(&p) {
                 templates.push(rel(&p));
             }
         }
@@ -1951,7 +1957,7 @@ fn plan_dosdp(
     let pipelines = make
         .map(|m| dosdp_pipelines(m, dir, pattern_dir))
         .filter(|p: &Vec<(std::path::PathBuf, DosdpGenerateOptions)>| !p.is_empty())
-        .unwrap_or_else(|| vec![(data_dir.clone(), DosdpGenerateOptions::default())]);
+        .unwrap_or_else(|| vec![(data_dir.clone(), DosdpGenerateOptions::standard())]);
 
     let mut patterns: Vec<DosdpPattern> = Vec::new();
     for (data_dir, opts) in &pipelines {
@@ -1976,6 +1982,8 @@ fn plan_dosdp(
                             .axiom_source_annotation_property
                             .clone(),
                         generate_defined_class: opts.generate_defined_class,
+                        obo_prefixes: opts.obo_prefixes,
+                        prefixes: opts.prefixes.clone(),
                     });
                 }
             }
@@ -1984,18 +1992,11 @@ fn plan_dosdp(
         patterns.extend(batch);
     }
 
-    let prefixes = ["config/prefixes.yaml"]
-        .into_iter()
-        .filter(|f| dir.join(f).is_file())
-        .map(str::to_string)
-        .collect();
-
     let output = rel(&root.join("definitions.owl"));
     let steps = dosdp_merge_steps(make, pattern_dir, ontbase, version);
 
     Some(DosdpSpec {
         output,
-        prefixes,
         cached_seed_query: repo.and_then(cached_pattern_seed_query),
         patterns,
         steps,
@@ -2035,7 +2036,7 @@ fn dosdp_pipelines(
                 .rules
                 .get(tok)
                 .map(|r| dosdp_generate_options(make, &[r]))
-                .unwrap_or_default();
+                .unwrap_or_else(DosdpGenerateOptions::standard);
             out.push((data_dir, opts));
         }
     }
@@ -2118,6 +2119,15 @@ struct DosdpGenerateOptions {
     add_axiom_source_annotation: bool,
     axiom_source_annotation_property: Option<String>,
     generate_defined_class: bool,
+    obo_prefixes: bool,
+    prefixes: Option<String>,
+}
+
+impl DosdpGenerateOptions {
+    /// The options of the standard pipeline: OBO prefixes, and nothing else.
+    fn standard() -> DosdpGenerateOptions {
+        DosdpGenerateOptions { obo_prefixes: true, ..Default::default() }
+    }
 }
 
 fn dosdp_generate_options(
@@ -2146,7 +2156,7 @@ fn dosdp_generate_options(
                     inline.clone().or_else(|| it.next().cloned())
                 };
                 let truthy = |v: Option<String>| {
-                    v.as_deref().map(|s| !matches!(s, "false" | "0")).unwrap_or(true)
+                    v.as_deref().map(|s| !matches!(s.to_lowercase().as_str(), "false" | "0")).unwrap_or(true)
                 };
                 match name {
                     "--restrict-axioms-to" => out.restrict_axioms = value(),
@@ -2158,6 +2168,8 @@ fn dosdp_generate_options(
                         out.axiom_source_annotation_property = value()
                     }
                     "--generate-defined-class" => out.generate_defined_class = truthy(value()),
+                    "--obo-prefixes" => out.obo_prefixes = truthy(value()),
+                    "--prefixes" => out.prefixes = value(),
                     _ => {}
                 }
             }
@@ -2289,19 +2301,20 @@ pub(crate) fn native_pattern_targets(
     make: &super::makefile::MakeModel,
     ontology_dir: &std::path::Path,
 ) -> std::collections::HashSet<String> {
-    let dir = |var: &str, dflt: &str| {
-        let d = make.expand(var);
-        let d = d.trim().to_string();
-        if d.is_empty() { dflt.to_string() } else { d }
+    // A build with no pattern pipeline, or a repo with no pattern directory,
+    // claims none of its targets: every path the plan names is a file the build
+    // can produce, and `--list-targets` offers only what is buildable.
+    let Some(patterndir) = pattern_pipeline_dir(make) else {
+        return Default::default();
     };
-    let patterndir = dir("$(PATTERNDIR)", "../patterns");
-    let tmpdir = dir("$(TMPDIR)", "tmp");
-    // A repo with no pattern directory runs no DOSDP pipeline and claims none of
-    // its targets: every path the plan names is a file the build can produce, and
-    // `--list-targets` offers only what is buildable.
     if !ontology_dir.join(&patterndir).is_dir() {
         return Default::default();
     }
+    let tmpdir = {
+        let d = make.expand("$(TMPDIR)");
+        let d = d.trim();
+        if d.is_empty() { "tmp".to_string() } else { d.to_string() }
+    };
     let mut out: std::collections::HashSet<String> = Default::default();
     let mut add = |t: String| {
         if let Some(rest) = t.strip_prefix("../") {
@@ -2712,10 +2725,14 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         }
     }
 
-    // The DOSDP products are a source of the release, exactly as an ODK Makefile
-    // puts `$(PATTERNDIR)/definitions.owl` in `$(OTHER_SRC)`. Without this the
-    // pattern step would write `definitions.owl` and nothing would merge it.
-    let dosdp = plan_dosdp(&repo.dir, "../patterns", None, None, &ontbase, &version);
+    // A configuration that uses DOSDP patterns builds `definitions.owl` and
+    // merges it into the release, as one of its sources; one that does not
+    // generates nothing from a pattern directory it happens to hold.
+    let dosdp = if repo.yaml.use_dosdps {
+        plan_dosdp(&repo.dir, "../patterns", None, None, &ontbase, version)
+    } else {
+        None
+    };
     if let Some(d) = &dosdp {
         if !d.patterns.is_empty() && !components.contains(&d.output) {
             components.push(d.output.clone());

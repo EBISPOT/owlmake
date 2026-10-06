@@ -1,0 +1,17 @@
+pattern_name: printf_columns
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/printf_columns.yaml
+classes:
+  widget: EX:0000001
+vars:
+  part: "'widget'"
+name:
+  text: "%s (%s)"
+  vars: [part, part_label]
+comment:
+  text: "%s in %s"
+  vars: [defined_class, note]
+def:
+  text: "%s"
+  vars: [missing_column]
+subClassOf:
+  text: "'widget'"

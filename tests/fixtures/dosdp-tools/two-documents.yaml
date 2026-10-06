@@ -1,0 +1,5 @@
+pattern_name: two_documents
+classes: {widget: EX:0000001}
+subClassOf: {text: "'widget'"}
+---
+pattern_name: second

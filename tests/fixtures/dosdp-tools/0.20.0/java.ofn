@@ -1,0 +1,61 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000040>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000041>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000042>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000043>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000115>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000040> (cog: 100% ABC-42)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000040> "Abc-42  |  Abc-42|true
+")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000040> "Abc-42 Abc-42")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000040> "upper Abc then 42 of Abc")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000040> "cog: 100% ABC-42")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000040> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000041> (gear: 100% XA.B)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000041> "xa.b    | literal|true
+")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000041> "xa.b xa.b")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000041> "xa.b then xa.b")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000041> "gear: 100% XA.B")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000041> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000042> (cog: 100% Q$1)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000042> "Q$1     |     Q$1|true
+")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000042> "Q$1 got 0")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000042> "upper Q then Q$1")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000042> "cog: 100% Q$1")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000042> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000043> (gear: 100% ZZZ)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/EX_0000043> "zzz     |     zzz|true
+")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000043> "double z zzz")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000043> "zzz then zzz")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000043> "gear: 100% ZZZ")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000043> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)

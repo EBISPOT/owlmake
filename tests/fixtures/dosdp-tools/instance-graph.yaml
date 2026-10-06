@@ -1,0 +1,20 @@
+pattern_name: instance_graph
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/instance_graph.yaml
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+instance_graph:
+  nodes:
+    n1: widget
+    n2: part
+  edges:
+    - edge: [n1, has part, n2]
+name:
+  text: "widget with %s"
+  vars: [part]
+subClassOf:
+  text: "'has part' some %s"
+  vars: [part]

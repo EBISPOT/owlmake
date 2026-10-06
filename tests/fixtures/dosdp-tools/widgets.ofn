@@ -1,0 +1,11 @@
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(EX:=<http://purl.obolibrary.org/obo/EX_>)
+Ontology(<http://purl.obolibrary.org/obo/ex.owl>
+Declaration(Class(EX:0000001))
+Declaration(Class(EX:0000002))
+Declaration(Class(EX:0000003))
+AnnotationAssertion(rdfs:label EX:0000001 "widget")
+AnnotationAssertion(rdfs:label EX:0000002 "cog")
+AnnotationAssertion(rdfs:label EX:0000003 "gear")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> EX:0000002 "sprocket wheel")
+)

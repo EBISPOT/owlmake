@@ -796,12 +796,18 @@ pub fn validate_file(path: &Path) -> Result<()> {
 /// Validate one pattern document. Reported errors carry the instance path
 /// (`/logical_axioms/0/axiom_type`) so a curator can find the offending key.
 pub fn validate_text(yaml: &str) -> Result<()> {
-    // A leading BOM defeats every YAML parser; `parse_pattern` strips one too.
-    let yaml = yaml.strip_prefix('\u{feff}').unwrap_or(yaml);
     // YAML → JSON value tree: the schema is JSON Schema, and YAML is a superset
     // of JSON, so a pattern validates in exactly the shape the schema describes.
-    let value: serde_json::Value = serde_yaml::from_str(yaml)
-        .map_err(|e| anyhow!("not valid YAML: {e}"))?;
+    // The document is read as every pattern is read, repeated keys and merges
+    // resolved.
+    let mut documents = crate::dosdp::yaml_documents(yaml)
+        .map_err(|e| anyhow!("not valid YAML: {e}"))?
+        .into_iter();
+    let document = documents.next().unwrap_or(serde_yaml::Value::Null);
+    if documents.next().is_some() {
+        bail!("not valid YAML: a pattern is one YAML document, and this holds more than one");
+    }
+    let value = serde_json::to_value(document).map_err(|e| anyhow!("not valid YAML: {e}"))?;
     if !value.is_object() {
         bail!("not a DOSDP pattern (the document is not a mapping)");
     }
@@ -941,6 +947,19 @@ equivalentTo:
         // The correct spelling passes, so the enum is being read, not the key.
         let ok = bad.replace("subclassOf", "subClassOf");
         validate_text(&ok).unwrap();
+    }
+
+    /// The document is read as every pattern is read: a `<<` entry merges the
+    /// mapping it holds, so the schema checks the names of the variables merged
+    /// in, not a variable named `<<`.
+    #[test]
+    fn merged_variables_are_checked_as_merged() {
+        let merged = GOOD.replace("  entity: \"'entity'\"\nname:", "  <<: {entity: \"'entity'\"}\nname:");
+        assert_ne!(merged, GOOD);
+        validate_text(&merged).unwrap();
+        let misnamed = merged.replace("<<: {entity:", "<<: {1entity:");
+        let e = validate_text(&misnamed).unwrap_err().to_string();
+        assert!(e.contains("1entity"), "{e}");
     }
 
     #[test]

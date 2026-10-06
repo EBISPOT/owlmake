@@ -1,0 +1,5 @@
+http://purl.obolibrary.org/obo/EX_0000098
+http://purl.obolibrary.org/obo/EX_0000097
+http://purl.obolibrary.org/obo/EX_0000096
+http://purl.obolibrary.org/obo/EX_0000095
+http://purl.obolibrary.org/obo/EX_0000001

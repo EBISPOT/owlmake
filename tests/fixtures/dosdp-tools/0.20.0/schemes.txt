@@ -1,0 +1,13 @@
+http://purl.obolibrary.org/obo/EX_0000013
+http://purl.obolibrary.org/obo/_bare
+http://purl.obolibrary.org/obo/urn_x
+httpx:13
+httpfoo
+http://purl.obolibrary.org/obo/ftp_//host/x
+https://example.org/y
+http://purl.obolibrary.org/obo/mailto_a@b.org
+http://purl.obolibrary.org/obo/urn_ex:10
+http://purl.obolibrary.org/obo/EX_0000014
+http://purl.obolibrary.org/obo/EX_0000011
+http://purl.obolibrary.org/obo/EX_0000012
+http://purl.obolibrary.org/obo/BFO_0000051

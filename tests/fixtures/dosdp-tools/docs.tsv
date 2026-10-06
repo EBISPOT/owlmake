@@ -1,0 +1,38 @@
+# Each case: the page dosdp-tools `docs` writes, as <release>/<page> for each
+# release named; the pattern and table it documents; and the options of the run
+# (spelled the same for om). Every run also reads widgets.ofn (labels) and
+# prefixes.yaml. Regenerate the pages with scripts/gen_dosdp_fixtures.sh.
+#
+# 0.19.3 documents `lists` with its comment and synonym in the order of a hash
+# map keyed by its fields' templates as Scala values, which owlmake does not
+# reproduce; 0.20.0 refuses `expressions` and `generation` (refusals.tsv).
+list-values.md	0.19.3,0.20.0	list-values.yaml	list-values.tsv
+list-xrefs.md	0.19.3,0.20.0	list-xrefs.yaml	list-xrefs.tsv
+list-substitution.md	0.19.3,0.20.0	list-substitution.yaml	list-substitution.tsv
+printf-no-text.md	0.19.3,0.20.0	printf-no-text.yaml	printf-no-text.tsv
+source.md	0.19.3,0.20.0	source.yaml	source.tsv
+source-curie-iri.md	0.19.3,0.20.0	source-curie-iri.yaml	source.tsv
+restrict.md	0.19.3,0.20.0	restrict.yaml	restrict.tsv
+labels.md	0.19.3,0.20.0	labels.yaml	labels.tsv
+printf-columns.md	0.19.3,0.20.0	printf-columns.yaml	printf-columns.tsv
+substitution.md	0.19.3,0.20.0	substitution.yaml	substitution.tsv
+internal.md	0.19.3,0.20.0	internal.yaml	internal.tsv
+iri-value.md	0.19.3,0.20.0	iri-value.yaml	iri-value.tsv
+generation.md	0.19.3	generation.yaml	generation.tsv
+instance-graph.md	0.19.3,0.20.0	instance-graph.yaml	instance-graph.tsv
+unnamed.md	0.19.3,0.20.0	labels.yaml	unnamed.tsv
+expressions.md	0.19.3	expressions.yaml	expressions.tsv
+entity-ranges.md	0.19.3,0.20.0	entity-ranges.yaml	entity-ranges.tsv
+schemes.md	0.19.3,0.20.0	schemes.yaml	schemes.tsv
+java.md	0.19.3,0.20.0	java.yaml	java.tsv
+lists.md	0.20.0	lists.yaml	lists.tsv
+minted.md	0.19.3,0.20.0	minted.yaml	minted.tsv
+minted.column.md	0.19.3,0.20.0	minted.yaml	minted-dc.tsv
+readable.md	0.19.3,0.20.0	readable.yaml	readable.tsv
+collapse.md	0.19.3,0.20.0	collapse.yaml	collapse.tsv
+cells.md	0.19.3,0.20.0	cells.yaml	cells.tsv
+cells.csv.md	0.19.3,0.20.0	cells.yaml	cells.csv	--table-format=CSV
+repeated-keys.md	0.19.3,0.20.0	repeated-keys.yaml	repeated.tsv
+merged-keys.md	0.19.3,0.20.0	merged-keys.yaml	repeated.tsv
+docs-escape.md	0.19.3,0.20.0	docs-escape.yaml	docs-escape.tsv
+docs-cells.md	0.19.3,0.20.0	docs-escape.yaml	docs-cells.csv	--table-format=csv

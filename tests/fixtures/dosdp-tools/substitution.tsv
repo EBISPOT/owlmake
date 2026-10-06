@@ -1,0 +1,4 @@
+defined_class	part	part_label	parts	code	codes
+EX:0000010	EX:0000002		EX:0000002|EX:0000003	w2	x1|y1|x2
+EX:0000011	EX:0000003		EX:0000004|EX:0000005	q	
+EX:0000012	EX:0000004	cogwheel	EX:0000004	a1	x

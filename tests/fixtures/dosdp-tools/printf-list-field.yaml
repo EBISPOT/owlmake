@@ -1,0 +1,22 @@
+pattern_name: widget_part_shape
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/widget_part_shape.yaml
+description: "Test pattern."
+classes:
+  widget: EX:0000001
+relations:
+  has part: BFO:0000051
+vars:
+  part: "'widget'"
+data_vars:
+  code: xsd:string
+data_list_vars:
+  codes: xsd:string
+name:
+  text: "widget with %s"
+  vars: [part]
+subClassOf:
+  text: "'widget' and 'has part' some %s"
+  vars: [part]
+exact_synonym:
+  text: "%s"
+  vars: [code]

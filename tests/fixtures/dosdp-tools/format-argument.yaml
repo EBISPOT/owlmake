@@ -1,0 +1,11 @@
+pattern_name: format_argument
+pattern_iri: http://purl.obolibrary.org/obo/ex/patterns/format-argument.yaml
+classes:
+  widget: EX:0000001
+data_vars:
+  code: xsd:string
+name:
+  text: "%s widget %s"
+  vars: [code]
+subClassOf:
+  text: "'widget'"

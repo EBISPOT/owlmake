@@ -729,6 +729,35 @@ fn a_shell_substitution_runs_the_bundled_tools() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A configuration that does not use DOSDP patterns generates nothing from a
+/// pattern directory the repository holds: the Makefile ODK generates for it
+/// has no pattern rule. Planned from that Makefile, from the built-in rules,
+/// from `owlmake.yaml` alone, and from the configuration and an edit file with
+/// no Makefile.
+#[test]
+fn a_configuration_without_dosdp_generates_no_patterns() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/odk-1.6.1/dosdp-off");
+    let root = repository_for(&fixture, "dosdp_off");
+    let ont = root.join("src/ontology");
+    let generates_none = |how: &str, repo: OdkRepo| {
+        let plan = repo.plan(&[]).expect("planning");
+        assert!(plan.dosdp.is_none(), "{how}: the plan generates patterns: {:?}", plan.dosdp);
+    };
+    generates_none("the generated Makefile", OdkRepo::load(&root).expect("loading"));
+    generates_none("the built-in rules", OdkRepo::load_with_builtin_rules(&root).expect("loading"));
+    let spec = OdkRepo::spec_for(&root).expect("writing the standard file");
+    owlmake::spec::save(&spec, &root.join("owlmake.yaml")).expect("saving owlmake.yaml");
+    let config = std::fs::read_to_string(ont.join("pats-odk.yaml")).unwrap();
+    std::fs::remove_file(ont.join("Makefile")).unwrap();
+    std::fs::remove_file(ont.join("pats-odk.yaml")).unwrap();
+    generates_none("owlmake.yaml alone", OdkRepo::load(&root).expect("loading"));
+    std::fs::remove_file(root.join("owlmake.yaml")).unwrap();
+    std::fs::write(ont.join("pats-odk.yaml"), config).unwrap();
+    std::fs::write(ont.join("pats-edit.owl"), "Ontology(<http://purl.obolibrary.org/obo/pats.owl>)\n").unwrap();
+    generates_none("the configuration and an edit file", OdkRepo::load(&root).expect("loading"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A two-class repository built from the `owlmake.yaml` given, in a scratch
 /// tree of its own; `name` keeps each test's tree apart.
 fn file_repo(name: &str, file: &str) -> std::path::PathBuf {

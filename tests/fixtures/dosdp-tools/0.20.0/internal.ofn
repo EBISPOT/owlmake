@@ -1,0 +1,41 @@
+Prefix(:=<urn:unnamed:ontology#ont1>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:unnamed:ontology#ont1>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000010>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000011>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_0000012>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000010> (widget with cog, gear, sprocket)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000010> "codes x1+y1")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/EX_0000010> "refs http://purl.obolibrary.org/obo/PMID_1 http://purl.obolibrary.org/obo/http_//example.org/x; regex []; first cog")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000010> "widget with cog, gear, sprocket")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000010> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000011> (widget with http://purl.obolibrary.org/obo/EX_0000005)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000011> "codes c")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_0000011> "widget with http://purl.obolibrary.org/obo/EX_0000005")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000011> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_0000012> (<http://purl.obolibrary.org/obo/EX_0000012>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/EX_0000012> "codes e+f+a+b+c+d")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_0000012> <http://purl.obolibrary.org/obo/EX_0000001>)
+
+
+)
