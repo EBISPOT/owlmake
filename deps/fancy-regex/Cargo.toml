@@ -1,0 +1,90 @@
+# Local in-tree copy of the `fancy-regex` crate v0.17.0, redirected from
+# crates.io by the root `[patch.crates-io]`.
+#
+# What differs from the published 0.17.0, all for owlmake's reading of
+# `java.util.regex` (src/dosdp/java.rs):
+#   * callouts: `(?C<n>)` calls the n-th function given to
+#     `RegexBuilder::callout` or `zero_width_callout`, which says where matching
+#     goes on from, or that it fails there. owlmake matches with them what no
+#     regex construct expresses: a grapheme cluster `\X`, a grapheme boundary
+#     `\b{g}`, and a case-insensitive back-reference compared as Java compares
+#     it. See src/vm.rs (`Insn::Callout`) and src/parse.rs (`parse_callout`).
+#   * look-behinds tried at each length in a range, the shortest first:
+#     `(?<1,3=…)` and `(?<1,3!…)` (`(?<1,=…)` for no most), run in the
+#     backtracking engine, which is how Java searches a look-behind. See
+#     src/vm.rs (`Insn::GoBackRange`).
+#   * a look-around may be repeated, as an assertion may.
+#
+# Trimmed for the in-tree copy: the example, test and bench targets and the
+# dev-dependencies (irrelevant to building fancy-regex as a library) are omitted.
+
+[package]
+edition = "2018"
+rust-version = "1.66"
+name = "fancy-regex"
+version = "0.17.0"
+authors = [
+    "Raph Levien <raph@google.com>",
+    "Robin Stocker <robin@nibor.org>",
+    "Keith Hall <keith.hall@available.systems>",
+]
+build = false
+exclude = [
+    "/.github/*",
+    "/Cargo.lock.msrv",
+]
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "An implementation of regexes, supporting a relatively rich set of features, including backreferences and look-around."
+documentation = "https://docs.rs/fancy-regex"
+readme = "README.md"
+categories = ["text-processing"]
+license = "MIT"
+repository = "https://github.com/fancy-regex/fancy-regex"
+
+[features]
+default = [
+    "unicode",
+    "perf",
+    "std",
+    "variable-lookbehinds",
+]
+perf = ["regex-automata/perf"]
+std = [
+    "regex-automata/std",
+    "regex-syntax/std",
+    "bit-set/std",
+]
+track_caller = []
+unicode = [
+    "regex-automata/unicode",
+    "regex-syntax/unicode",
+]
+variable-lookbehinds = ["regex-automata/dfa-search"]
+
+[lib]
+name = "fancy_regex"
+path = "src/lib.rs"
+
+[dependencies.bit-set]
+version = "0.8"
+default-features = false
+
+[dependencies.regex-automata]
+version = "0.4"
+features = [
+    "alloc",
+    "syntax",
+    "meta",
+    "nfa",
+    "dfa",
+    "hybrid",
+]
+default-features = false
+
+[dependencies.regex-syntax]
+version = "0.8"
+default-features = false

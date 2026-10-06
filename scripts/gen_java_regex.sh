@@ -1,12 +1,13 @@
 #!/bin/bash
-# Write the Unicode block and script names owlmake's reading of
-# `java.util.regex` resolves `\p{…}` against (src/dosdp/java/names.rs), and the
-# cases its tests hold it to (tests/fixtures/java-regex/cases.tsv), from the
-# running JDK.
+# Write what owlmake's reading of `java.util.regex` is built from — the Unicode
+# block and script names `\p{…}` resolves (src/dosdp/java/names.rs), what
+# `Character` says of each code point (src/dosdp/java/unicode.rs) and the
+# character names `\N{…}` takes (src/dosdp/java/charnames.z) — and the cases its
+# tests hold it to (tests/fixtures/java-regex/cases.tsv), from the running JDK.
 #
 #   scripts/gen_java_regex.sh
 #
-# Needs Java 21. Both outputs are committed, so the build and the tests need
+# Needs Java 21. Every output is committed, so the build and the tests need
 # neither Java nor this script.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,8 +19,11 @@ if [ "$java_major" != 21 ]; then
 fi
 run() {
   env -u JAVA_TOOL_OPTIONS java --add-opens java.base/java.lang=ALL-UNNAMED \
-    "$root/scripts/gen_java_regex.java" "$1"
+    --add-opens java.base/jdk.internal.util.regex=ALL-UNNAMED \
+    "$root/scripts/gen_java_regex.java" "$@"
 }
 mkdir -p "$root/src/dosdp/java" "$root/tests/fixtures/java-regex"
-run tables > "$root/src/dosdp/java/names.rs"
+run names > "$root/src/dosdp/java/names.rs"
+run unicode > "$root/src/dosdp/java/unicode.rs"
+run charnames "$root/src/dosdp/java/charnames.z"
 run cases > "$root/tests/fixtures/java-regex/cases.tsv"

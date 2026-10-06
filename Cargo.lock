@@ -751,8 +751,6 @@ dependencies = [
 [[package]]
 name = "fancy-regex"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -1995,6 +1993,7 @@ dependencies = [
  "quick-xml 0.37.5",
  "rayon",
  "regex",
+ "regex-syntax",
  "rusqlite",
  "rustc-hash 2.1.2",
  "schemars",

@@ -6,9 +6,12 @@
 //! Strings are measured in UTF-16 code units wherever the dialect measures
 //! them (a `%.3s` precision, a `%5s` width).
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 mod names;
+mod unicode;
 
 // ── java.util.Formatter ─────────────────────────────────────────────────────
 
@@ -287,9 +290,9 @@ fn utf16_prefix(s: &str, n: usize) -> String {
 /// A `java.util.regex` pattern, matched as Java matches it: `\w`, `\d`, `\s`
 /// and `\b` are ASCII, `.` stops at any line terminator, `$` also matches
 /// before a final line terminator, and case-insensitive matching folds ASCII
-/// letters only unless the pattern asks for Unicode case (`(?u)`). It refuses
-/// `\X` and `\N{…}`, and a case-insensitive back-reference matches text of
-/// its own length in UTF-8, in any case.
+/// letters only unless the pattern asks for Unicode case (`(?u)`). What a
+/// character is, its case and its type in a grapheme cluster are Java 21's
+/// (Unicode 15.0), from the tables in `unicode`.
 #[derive(Debug)]
 pub(crate) struct Regex {
     inner: fancy_regex::Regex,
@@ -322,10 +325,22 @@ impl Regex {
     pub(crate) fn new(pattern: &str) -> Result<Regex, String> {
         let mut t = Translator::new(pattern);
         t.translate()?;
-        let inner = fancy_regex::RegexBuilder::new(&t.out)
-            .backtrack_limit(10_000_000)
-            .build()
-            .map_err(|e| format!("`{pattern}` is not a regular expression this reads: {e}"))?;
+        let mut builder = fancy_regex::RegexBuilder::new(&t.out);
+        builder.backtrack_limit(10_000_000);
+        for callout in t.callouts {
+            match callout {
+                Callout::Grapheme => builder.callout(|text, at, _| Ok(grapheme::cluster_end(text, at))),
+                Callout::GraphemeBoundary => {
+                    builder.zero_width_callout(|text, at, _| grapheme::is_boundary(text, at, LAST_END.get()))
+                }
+                Callout::From(units) => builder.zero_width_callout(move |text, at, _| Ok(utf16_len(&text[..at]) >= units)),
+                Callout::Backref { group, unicode_case } => builder.callout(move |text, at, span| {
+                    Ok(span(group).and_then(|(lo, hi)| backref_end(text, at, text.get(lo..hi)?, unicode_case)))
+                }),
+            };
+        }
+        let inner =
+            builder.build().map_err(|e| format!("`{pattern}` is not a regular expression this reads: {e}"))?;
         Ok(Regex { inner, groups: t.groups, names: t.names })
     }
 
@@ -336,23 +351,34 @@ impl Regex {
 
     /// The first match in `text`.
     pub(crate) fn find<'t>(&self, text: &'t str) -> Result<Option<Match<'t>>, String> {
-        let caps = self.inner.captures(text).map_err(|e| format!("matching `{text}`: {e}"))?;
+        self.find_from(text, 0, 0)
+    }
+
+    /// The first match in `text` that starts at byte `from` or later, where
+    /// the matcher's previous match ended at byte `last`.
+    fn find_from<'t>(&self, text: &'t str, from: usize, last: usize) -> Result<Option<Match<'t>>, String> {
+        LAST_END.set(last);
+        let caps = self.inner.captures_from_pos(text, from).map_err(|e| format!("matching `{text}`: {e}"))?;
         Ok(caps.map(|c| Match {
             text,
             spans: (0..=self.groups).map(|i| c.get(i).map(|m| (m.start(), m.end()))).collect(),
         }))
     }
 
-    /// Every match in `text`, left to right, each starting where the last
-    /// ended (one further on after an empty match).
+    /// Every match in `text`, left to right, each found from where the last
+    /// ended (a character further on after an empty match).
     pub(crate) fn find_all<'t>(&self, text: &'t str) -> Result<Vec<Match<'t>>, String> {
-        let mut out = Vec::new();
-        for c in self.inner.captures_iter(text) {
-            let c = c.map_err(|e| format!("matching `{text}`: {e}"))?;
-            out.push(Match {
-                text,
-                spans: (0..=self.groups).map(|i| c.get(i).map(|m| (m.start(), m.end()))).collect(),
-            });
+        let mut out: Vec<Match<'t>> = Vec::new();
+        let mut from = 0;
+        while from <= text.len() {
+            let last = out.last().map_or(0, Match::end);
+            let Some(m) = self.find_from(text, from, last)? else { break };
+            from = if m.start() == m.end() {
+                m.end() + text[m.end()..].chars().next().map_or(1, char::len_utf8)
+            } else {
+                m.end()
+            };
+            out.push(m);
         }
         Ok(out)
     }
@@ -444,6 +470,26 @@ struct Flags {
     unicode_classes: bool,
 }
 
+thread_local! {
+    /// Where the matcher's previous match ended, which `\b{g}` measures from,
+    /// for the search under way on this thread.
+    static LAST_END: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Matching a regular expression does not express, done by a callout
+/// (`(?C<n>)`, the n-th of a pattern's).
+enum Callout {
+    /// `\X`: an extended grapheme cluster.
+    Grapheme,
+    /// `\b{g}`: a grapheme cluster boundary.
+    GraphemeBoundary,
+    /// A position at least this many UTF-16 code units into the text.
+    From(usize),
+    /// A back-reference to `group` under case-insensitive matching, in
+    /// Unicode case or ASCII.
+    Backref { group: usize, unicode_case: bool },
+}
+
 /// What a `\` introduces.
 enum Escape {
     /// A character: outside a class, one of a run of literal characters;
@@ -452,6 +498,8 @@ enum Escape {
     Char(u32),
     /// Any other construct, as `fancy_regex` text; inside a class, class items.
     Text(String),
+    /// A construct a callout matches.
+    Callout(Callout),
 }
 
 /// Rewrites a `java.util.regex` pattern as a `fancy_regex` one with the same
@@ -471,6 +519,11 @@ struct Translator {
     /// Where in `out` the last complete atom begins, for a possessive
     /// quantifier to wrap.
     atom_start: Option<usize>,
+    /// The callouts `out` names, in order.
+    callouts: Vec<Callout>,
+    /// The groups open, the pattern's own first: what their alternatives
+    /// hold so far, as Java's nodes.
+    frames: Vec<Frame>,
 }
 
 const LINE_TERMINATORS: &str = r"\n\r\x{85}\x{2028}\x{2029}";
@@ -479,13 +532,42 @@ const LINE_TERMINATORS: &str = r"\n\r\x{85}\x{2028}\x{2029}";
 const NOTHING: &str = r"[^\x00-\x{10FFFF}]";
 
 /// Outside `(?U)`, `\b` takes ASCII letters, digits and `_` for word
-/// characters, and a nonspacing mark that follows a letter or digit (of any
-/// script) through a run of marks. Whether the character before a position
-/// is one, and whether the one after it is.
-const WORD_BEFORE: &str = r"(?<=[0-9A-Za-z_]|[\p{L}\p{Nd}]\p{Mn}+)";
-const NO_WORD_BEFORE: &str = r"(?<![0-9A-Za-z_]|[\p{L}\p{Nd}]\p{Mn}+)";
-const WORD_AFTER: &str = r"(?:(?=[0-9A-Za-z_])|(?=\p{Mn})(?<=[\p{L}\p{Nd}]\p{Mn}*))";
-const NO_WORD_AFTER: &str = r"(?![0-9A-Za-z_])(?:(?!\p{Mn})|(?<![\p{L}\p{Nd}]\p{Mn}*))";
+/// characters, and a nonspacing mark that a letter or digit precedes through a
+/// run of nonspacing marks, all in the Basic Multilingual Plane (the mark
+/// itself, after a position, in any plane). The texts saying whether the
+/// character before a position is one, and whether the one after it is.
+struct WordSides {
+    before: String,
+    no_before: String,
+    after: String,
+    no_after: String,
+}
+
+fn word_sides() -> &'static WordSides {
+    static SIDES: OnceLock<WordSides> = OnceLock::new();
+    SIDES.get_or_init(|| {
+        let base = types(category::L | category::ND).bmp().items();
+        let mark = types(category::MN);
+        let (mark, bmp_mark) = (mark.items(), mark.bmp().items());
+        WordSides {
+            before: format!(r"(?<=[0-9A-Za-z_]|[{base}][{bmp_mark}]+)"),
+            no_before: format!(r"(?<![0-9A-Za-z_]|[{base}][{bmp_mark}]+)"),
+            after: format!(r"(?:(?=[0-9A-Za-z_])|(?=[{mark}])(?<=[{base}][{bmp_mark}]*))"),
+            no_after: format!(r"(?![0-9A-Za-z_])(?:(?![{mark}])|(?<![{base}][{bmp_mark}]*))"),
+        }
+    })
+}
+
+/// A word boundary (`\b`), or a place that is none (`\B`), where `word` is
+/// what a word character is.
+fn word_boundary(word: &Set, boundary: bool) -> String {
+    let w = word.items();
+    if boundary {
+        format!("(?:(?<=[{w}])(?![{w}])|(?<![{w}])(?=[{w}]))")
+    } else {
+        format!("(?:(?<=[{w}])(?=[{w}])|(?<![{w}])(?![{w}]))")
+    }
+}
 
 impl Translator {
     fn new(pattern: &str) -> Translator {
@@ -499,6 +581,15 @@ impl Translator {
             flags: Flags::default(),
             saved: Vec::new(),
             atom_start: None,
+            callouts: Vec::new(),
+            frames: vec![Frame { kind: FrameKind::Pattern, alternatives: vec![Vec::new()], out_start: 0, src_start: 0 }],
+        }
+    }
+
+    /// `node` added to the alternative being read.
+    fn push_node(&mut self, node: Node) {
+        if let Some(alternative) = self.frames.last_mut().and_then(|f| f.alternatives.last_mut()) {
+            alternative.push(node);
         }
     }
 
@@ -563,6 +654,23 @@ impl Translator {
                             let at = self.out.len();
                             self.out.push_str(&text);
                             self.atom_start = Some(at);
+                            self.push_node(match self.src[start + 1] {
+                                'b' | 'B' | 'A' | 'z' | 'G' | 'Z' => Node::Empty,
+                                'R' => Node::LineEnding,
+                                '1'..='9' | 'k' => Node::Backref,
+                                _ => Node::Char,
+                            });
+                        }
+                        Escape::Callout(callout) => {
+                            let at = self.out.len();
+                            self.out.push_str(&format!("(?C{})", self.callouts.len()));
+                            self.push_node(match callout {
+                                Callout::Grapheme => Node::Grapheme,
+                                Callout::Backref { .. } => Node::Backref,
+                                Callout::GraphemeBoundary | Callout::From(_) => Node::Empty,
+                            });
+                            self.callouts.push(callout);
+                            self.atom_start = Some(at);
                         }
                     }
                 }
@@ -571,16 +679,12 @@ impl Translator {
                     let class = self.class()?;
                     self.out.push_str(&class);
                     self.atom_start = Some(start);
+                    self.push_node(Node::Char);
                 }
                 '(' => self.open_group()?,
-                ')' => {
-                    let Some(f) = self.saved.pop() else { return self.err("an unmatched `)`") };
-                    self.flags = f;
-                    self.out.push(')');
-                    // The atom is the group: find its `(` by balance.
-                    self.atom_start = Some(self.group_start());
-                }
+                ')' => self.close_group()?,
                 '.' => {
+                    self.push_node(Node::Char);
                     let start = self.out.len();
                     self.out.push_str(&if self.flags.dotall {
                         "(?s:.)".to_string()
@@ -592,14 +696,17 @@ impl Translator {
                     self.atom_start = Some(start);
                 }
                 '^' => {
+                    self.atom_start = Some(self.out.len());
+                    self.push_node(Node::Empty);
                     self.out.push_str(match (self.flags.multiline, self.flags.unix_lines) {
                         (false, _) => r"\A",
                         (true, true) => r"(?:\A|(?<=\n)(?!\z))",
                         (true, false) => r"(?:\A|(?<=[\n\x{85}\x{2028}\x{2029}])(?!\z)|(?<=\r)(?!\n)(?!\z))",
                     });
-                    self.atom_start = None;
                 }
                 '$' => {
+                    let start = self.out.len();
+                    self.push_node(Node::Empty);
                     self.out.push_str(match (self.flags.multiline, self.flags.unix_lines) {
                         (false, true) => r"(?:\z|(?=\n\z))",
                         (false, false) => {
@@ -608,7 +715,7 @@ impl Translator {
                         (true, true) => r"(?:\z|(?=\n))",
                         (true, false) => r"(?:\z|(?<!\r)(?=\n)|(?=[\r\x{85}\x{2028}\x{2029}]))",
                     });
-                    self.atom_start = None;
+                    self.atom_start = Some(start);
                 }
                 '*' | '+' | '?' => self.quantifier(c.to_string())?,
                 '{' => {
@@ -639,6 +746,9 @@ impl Translator {
                 '|' => {
                     self.out.push('|');
                     self.atom_start = None;
+                    if let Some(frame) = self.frames.last_mut() {
+                        frame.alternatives.push(Vec::new());
+                    }
                 }
                 _ => {
                     self.pos -= 1;
@@ -677,7 +787,7 @@ impl Translator {
                     self.pos += 1;
                     match self.escape(false)? {
                         Escape::Char(c) => run.push((c, at)),
-                        Escape::Text(_) => {
+                        Escape::Text(_) | Escape::Callout(_) => {
                             self.pos = at;
                             break;
                         }
@@ -690,6 +800,9 @@ impl Translator {
             }
         }
         let in_sequence = run.len() > 1;
+        for _ in &run {
+            self.push_node(Node::Char);
+        }
         for (c, _) in run {
             let set = if in_sequence { self.sequence_set(c) } else { self.single_set(c) };
             let items = Self::items(set);
@@ -757,41 +870,19 @@ impl Translator {
         s
     }
 
-    /// The start in `out` of the group just closed.
-    fn group_start(&self) -> usize {
-        let bytes = self.out.as_bytes();
-        let mut depth = 0usize;
-        let mut i = bytes.len();
-        while i > 0 {
-            i -= 1;
-            let escaped = i > 0 && {
-                let mut n = 0;
-                let mut j = i;
-                while j > 0 && bytes[j - 1] == b'\\' {
-                    n += 1;
-                    j -= 1;
-                }
-                n % 2 == 1
-            };
-            if escaped {
-                continue;
-            }
-            match bytes[i] {
-                b')' => depth += 1,
-                b'(' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return i;
-                    }
-                }
-                _ => {}
-            }
-        }
-        0
-    }
-
     fn quantifier(&mut self, q: String) -> Result<(), String> {
         let Some(start) = self.atom_start else { return self.err("a quantifier with nothing to repeat") };
+        let Some(mut repeat) = Repeat::of(&q) else { return self.err("a repetition range out of order or too long") };
+        repeat.mode = match self.peek() {
+            Some('?') => Mode::Lazy,
+            Some('+') => Mode::Possessive,
+            _ => Mode::Greedy,
+        };
+        if let Some(alternative) = self.frames.last_mut().and_then(|f| f.alternatives.last_mut()) {
+            if let Some(node) = alternative.pop() {
+                alternative.push(Node::Repeat(Box::new(node), repeat));
+            }
+        }
         match self.peek() {
             Some('?') => {
                 self.pos += 1;
@@ -813,25 +904,47 @@ impl Translator {
 
     fn open_group(&mut self) -> Result<(), String> {
         self.saved.push(self.flags);
+        let out_start = self.out.len();
+        let kind = self.group_opener()?;
+        if let Some(kind) = kind {
+            self.frames.push(Frame { kind, alternatives: vec![Vec::new()], out_start, src_start: self.pos });
+        }
+        Ok(())
+    }
+
+    /// A group's opening, `(` already read: what kind of group it opens, or
+    /// none when it only sets flags.
+    fn group_opener(&mut self) -> Result<Option<FrameKind>, String> {
         if self.peek() != Some('?') {
             self.groups += 1;
             self.out.push('(');
-            return Ok(());
+            return Ok(Some(FrameKind::Group));
         }
         self.pos += 1;
         match self.next() {
             Some(':') => self.out.push_str("(?:"),
-            Some('=') => self.out.push_str("(?="),
-            Some('!') => self.out.push_str("(?!"),
-            Some('>') => self.out.push_str("(?>"),
+            Some('=') => {
+                self.out.push_str("(?=");
+                return Ok(Some(FrameKind::LookAhead));
+            }
+            Some('!') => {
+                self.out.push_str("(?!");
+                return Ok(Some(FrameKind::LookAhead));
+            }
+            Some('>') => {
+                self.out.push_str("(?>");
+                return Ok(Some(FrameKind::Atomic));
+            }
             Some('<') => match self.peek() {
                 Some('=') => {
                     self.pos += 1;
                     self.out.push_str("(?<=");
+                    return Ok(Some(FrameKind::LookBehind { negative: false }));
                 }
                 Some('!') => {
                     self.pos += 1;
                     self.out.push_str("(?<!");
+                    return Ok(Some(FrameKind::LookBehind { negative: true }));
                 }
                 _ => {
                     let name = self.take_while(|c| c.is_ascii_alphanumeric());
@@ -842,8 +955,8 @@ impl Translator {
                         return self.err(&format!("a second group named `{name}`"));
                     }
                     self.groups += 1;
-                    self.names.insert(name.clone(), self.groups);
-                    self.out.push_str(&format!("(?<{name}>"));
+                    self.names.insert(name, self.groups);
+                    self.out.push('(');
                 }
             },
             _ => {
@@ -871,15 +984,85 @@ impl Translator {
                             self.saved.pop();
                             self.flags = f;
                             self.atom_start = None;
-                            return Ok(());
+                            return Ok(None);
                         }
                         Some(':') => {
                             self.out.push_str("(?:");
-                            return Ok(());
+                            return Ok(Some(FrameKind::Group));
                         }
                         _ => return self.err("an unknown inline flag"),
                     }
                 }
+            }
+        }
+        Ok(Some(FrameKind::Group))
+    }
+
+    /// The end of a group, `)` already read.
+    fn close_group(&mut self) -> Result<(), String> {
+        let Some(f) = self.saved.pop() else { return self.err("an unmatched `)`") };
+        self.flags = f;
+        let Some(frame) = self.frames.pop().filter(|f| f.kind != FrameKind::Pattern) else {
+            return self.err("an unmatched `)`");
+        };
+        let node = match frame.kind {
+            FrameKind::Group | FrameKind::Pattern => Node::Group(frame.alternatives),
+            FrameKind::Atomic => Node::Atomic(frame.alternatives),
+            FrameKind::LookAhead => Node::Empty,
+            FrameKind::LookBehind { negative } => {
+                let supplementary = self.src[frame.src_start..].iter().any(|c| *c as u32 > 0xFFFF);
+                self.look_behind(frame.out_start, negative, supplementary, Node::Group(frame.alternatives))?;
+                Node::Empty
+            }
+        };
+        self.out.push(')');
+        self.atom_start = Some(frame.out_start);
+        self.push_node(node);
+        Ok(())
+    }
+
+    /// The look-behind whose `(?<=` or `(?<!` begins at `start` in `out`,
+    /// its body behind it, made to try the lengths Java works out `body` can
+    /// take: refused with no most Java can count, never matching (a negative
+    /// one always) when its least passes its most, and tried from its least
+    /// to its most otherwise. Java counts those lengths in UTF-16 code units,
+    /// or in code points (`supplementary`) when the pattern from the body on
+    /// holds a supplementary character; here they are code points. A most an
+    /// int cannot hold leaves the most out, and the look-behind tried only
+    /// from as far into the text as that most wrapped round says.
+    fn look_behind(&mut self, start: usize, negative: bool, supplementary: bool, body: Node) -> Result<(), String> {
+        let mut lengths = Lengths::default();
+        study(&[body], &mut lengths);
+        if !lengths.max_valid {
+            return self.err("a look-behind whose length has no bound");
+        }
+        let (least, most) = (lengths.min.max(0) as usize, lengths.max);
+        let sign = if negative { '!' } else { '=' };
+        let opener = if most >= 0 && lengths.min > most {
+            // No length to try: kept, so that its groups are, but unreached.
+            if negative { format!("(?:(?:(?!)(?<0,{sign}") } else { format!("(?:(?!)(?<0,{sign}") }
+        } else if most >= 0 {
+            format!("(?<{least},{most}{sign}")
+        } else {
+            let from = i64::from(most) + (1_i64 << 31);
+            if supplementary || from <= 0 {
+                format!("(?<{least},{sign}")
+            } else {
+                let gate = format!("(?C{})", self.callouts.len());
+                self.callouts.push(Callout::From(from as usize));
+                if negative {
+                    format!("(?:(?!{gate})|(?<{least},{sign}")
+                } else {
+                    format!("(?:{gate}(?<{least},{sign}")
+                }
+            }
+        };
+        let closed = opener.starts_with("(?:");
+        self.out.replace_range(start..start + 4, &opener);
+        if closed {
+            self.out.push(')');
+            if negative && opener.starts_with("(?:(?:(?!)") {
+                self.out.push_str(")?");
             }
         }
         Ok(())
@@ -899,25 +1082,30 @@ impl Translator {
                 format!("[{items}]")
             })
         };
+        let of = |chars: Set, negate: bool| {
+            let chars = if negate { chars.complement() } else { chars };
+            Escape::Text(if in_class { chars.items() } else { chars.class() })
+        };
         let text = |s: &str| Escape::Text(s.to_string());
         Ok(match c {
             'w' | 'W' if ascii => set("0-9A-Za-z_", c == 'W'),
             'd' | 'D' if ascii => set("0-9", c == 'D'),
             's' | 'S' if ascii => set(r"\t\n\x0B\x0C\r ", c == 'S'),
-            'w' | 'W' | 'd' | 'D' | 's' | 'S' => {
-                let class = format!(r"\{c}");
-                Escape::Text(if in_class { class } else { format!("[{class}]") })
-            }
+            'w' | 'W' => of(word(), c == 'W'),
+            'd' | 'D' => of(types(category::ND), c == 'D'),
+            's' | 'S' => of(white_space(), c == 'S'),
             'h' | 'H' => set(r" \t\xA0\x{1680}\x{180E}\x{2000}-\x{200A}\x{202F}\x{205F}\x{3000}", c == 'H'),
             'v' | 'V' => set(r"\n\x0B\x0C\r\x{85}\x{2028}\x{2029}", c == 'V'),
+            'b' if !in_class && self.grapheme_bound()? => Escape::Callout(Callout::GraphemeBoundary),
             'b' | 'B' if !in_class => Escape::Text(if ascii {
+                let w = word_sides();
                 if c == 'b' {
-                    format!("(?:{WORD_BEFORE}{NO_WORD_AFTER}|{NO_WORD_BEFORE}{WORD_AFTER})")
+                    format!("(?:{}{}|{}{})", w.before, w.no_after, w.no_before, w.after)
                 } else {
-                    format!("(?:{WORD_BEFORE}{WORD_AFTER}|{NO_WORD_BEFORE}{NO_WORD_AFTER})")
+                    format!("(?:{}{}|{}{})", w.before, w.after, w.no_before, w.no_after)
                 }
             } else {
-                format!(r"\{c}")
+                word_boundary(&word(), c == 'b')
             }),
             'A' | 'z' if !in_class => Escape::Text(format!(r"\{c}")),
             // Matching starts where the text does, so the end of the previous
@@ -929,6 +1117,7 @@ impl Translator {
                 r"(?:\z|(?=\r\n\z)|(?<!\r)(?=\n\z)|(?=[\r\x{85}\x{2028}\x{2029}]\z))"
             }),
             'R' if !in_class => text(r"(?:\r\n|[\n\x0B\x0C\r\x{85}\x{2028}\x{2029}])"),
+            'X' if !in_class => Escape::Callout(Callout::Grapheme),
             't' => Escape::Char(0x09),
             'n' => Escape::Char(0x0A),
             'r' => Escape::Char(0x0D),
@@ -938,6 +1127,7 @@ impl Translator {
             '0' => Escape::Char(self.octal()?),
             'x' => Escape::Char(self.hex()?),
             'u' => Escape::Char(self.utf16_escape()?),
+            'N' => Escape::Char(self.character_name()?),
             'c' => {
                 let Some(x) = self.next() else { return self.err("a `\\c` with no character") };
                 Escape::Char(x as u32 ^ 64)
@@ -953,19 +1143,20 @@ impl Translator {
                 } else {
                     self.next().map(String::from).unwrap_or_default()
                 };
-                let items = family(&name, self.flags.case_insensitive, self.flags.unicode_classes)
+                let chars = family(&name, self.flags.case_insensitive, self.flags.unicode_classes)
                     .map_or_else(|| self.err(&format!("the character property `{name}`, which names none")), Ok)?;
-                set(&items, c == 'P')
+                of(chars, c == 'P')
             }
             'k' if !in_class => {
                 if self.next() != Some('<') {
                     return self.err("a malformed `\\k<name>`");
                 }
                 let name = self.take_while(|c| c != '>');
-                if self.next() != Some('>') || !self.names.contains_key(&name) {
-                    return self.err(&format!("a reference to no group named `{name}`"));
+                let group = self.names.get(&name).copied();
+                match (self.next(), group) {
+                    (Some('>'), Some(group)) => self.backref(group),
+                    _ => return self.err(&format!("a reference to no group named `{name}`")),
                 }
-                Escape::Text(self.backref(&format!(r"\k<{name}>")))
             }
             '1'..='9' if !in_class => {
                 let mut n = c.to_digit(10).unwrap_or(0) as usize;
@@ -981,7 +1172,7 @@ impl Translator {
                     // A reference to a group not yet opened never matches.
                     text("(?!)")
                 } else {
-                    Escape::Text(self.backref(&format!(r"\{n}")))
+                    self.backref(n)
                 }
             }
             c if c.is_ascii_alphanumeric() => return self.err(&format!("the escape `\\{c}`")),
@@ -989,14 +1180,50 @@ impl Translator {
         })
     }
 
-    /// A back-reference: under case-insensitive matching, to the group's text
-    /// in any case.
-    fn backref(&self, reference: &str) -> String {
+    /// A back-reference to `group`: under case-insensitive matching, to the
+    /// group's text with each character in either case.
+    fn backref(&self, group: usize) -> Escape {
         if self.flags.case_insensitive {
-            format!("(?i:{reference})")
+            Escape::Callout(Callout::Backref { group, unicode_case: self.flags.unicode_case })
         } else {
-            format!("(?:{reference})")
+            Escape::Text(format!(r"(?:\{group})"))
         }
+    }
+
+    /// After `\b`: whether `{g}` follows, which makes it a grapheme cluster
+    /// boundary. In comments mode, space may come before the `{` and before
+    /// the `}`.
+    fn grapheme_bound(&mut self) -> Result<bool, String> {
+        self.skip_comments();
+        if self.peek() != Some('{') || self.src.get(self.pos + 1) != Some(&'g') {
+            return Ok(false);
+        }
+        self.pos += 2;
+        self.skip_comments();
+        if self.next() != Some('}') {
+            return self.err("a `\\b{g` that `}` does not close");
+        }
+        Ok(true)
+    }
+
+    /// The code point a `\N{name}` escape names, `\N` already read.
+    fn character_name(&mut self) -> Result<u32, String> {
+        self.skip_comments();
+        if self.next() != Some('{') {
+            return self.err("a `\\N` with no `{name}`");
+        }
+        let start = self.pos;
+        loop {
+            self.skip_comments();
+            if self.next() == Some('}') {
+                break;
+            }
+            if self.pos >= self.src.len() {
+                return self.err("an unclosed `\\N{…}`");
+            }
+        }
+        let name: String = self.src[start..self.pos - 1].iter().collect();
+        charnames::code_point_of(&name).map_or_else(|| self.err(&format!("the character name `{name}`, which names none")), Ok)
     }
 
     /// The code point an octal escape `\0n`, `\0nn` or `\0mnn` (`m` at most 3)
@@ -1091,6 +1318,7 @@ impl Translator {
                 '\\' => match self.escape(true)? {
                     Escape::Text(text) => items.push_str(&text),
                     Escape::Char(c) => items.push_str(&self.class_char(c)?),
+                    Escape::Callout(_) => return self.err("a class that holds more than characters"),
                 },
                 c => items.push_str(&self.class_char(c as u32)?),
             }
@@ -1109,7 +1337,9 @@ impl Translator {
             let hi = match self.next() {
                 Some('\\') => match self.escape(true)? {
                     Escape::Char(hi) => hi,
-                    Escape::Text(_) => return self.err("a character range that ends in a class"),
+                    Escape::Text(_) | Escape::Callout(_) => {
+                        return self.err("a character range that ends in a class")
+                    }
                 },
                 Some(c) => c as u32,
                 None => return self.err("an unclosed character class"),
@@ -1280,25 +1510,21 @@ fn escape_char(c: char) -> String {
 /// Case mapping one character to one, as `Character.toUpperCase` and
 /// `toLowerCase` map it.
 mod case {
+    use super::unicode::CASES;
     use std::sync::OnceLock;
+
+    fn mapping(c: u32) -> Option<&'static (u32, u32, u32)> {
+        CASES.binary_search_by_key(&c, |m| m.0).ok().map(|i| &CASES[i])
+    }
 
     /// The uppercase of `c`.
     pub(super) fn upper(c: u32) -> u32 {
-        match c {
-            // A capital with prosgegrammeni: these map to two characters in
-            // full, to one here.
-            0x1F80..=0x1F87 | 0x1F90..=0x1F97 | 0x1FA0..=0x1FA7 => c + 8,
-            0x1FB3 | 0x1FC3 | 0x1FF3 => c + 9,
-            _ => one(char::from_u32(c).map(char::to_uppercase)).unwrap_or(c),
-        }
+        mapping(c).map_or(c, |m| m.1)
     }
 
     /// The lowercase of `c`.
     pub(super) fn lower(c: u32) -> u32 {
-        match c {
-            0x130 => 0x69,
-            _ => one(char::from_u32(c).map(char::to_lowercase)).unwrap_or(c),
-        }
+        mapping(c).map_or(c, |m| m.2)
     }
 
     /// `c`'s folded case: the lowercase of its uppercase.
@@ -1306,22 +1532,15 @@ mod case {
         lower(upper(c))
     }
 
-    /// The one character `chars` holds; none if it holds several.
-    fn one(chars: Option<impl Iterator<Item = char>>) -> Option<u32> {
-        let mut chars = chars?;
-        let c = chars.next()?;
-        chars.next().is_none().then_some(c as u32)
-    }
-
     /// Every character whose uppercase or folded case is another character,
     /// with its uppercase and its folded case.
     pub(super) fn cased() -> &'static [(u32, u32, u32)] {
         static CASED: OnceLock<Vec<(u32, u32, u32)>> = OnceLock::new();
         CASED.get_or_init(|| {
-            // No character past the first two planes has a case.
-            (0..0x20000)
-                .filter_map(|c| {
-                    let (upper, folded) = (upper(c), fold(c));
+            CASES
+                .iter()
+                .filter_map(|&(c, upper, _)| {
+                    let folded = lower(upper);
                     (upper != c || folded != c).then_some((c, upper, folded))
                 })
                 .collect()
@@ -1336,13 +1555,436 @@ mod case {
     }
 }
 
+/// Where a case-insensitive back-reference to `captured` that starts at byte
+/// `at` of `text` ends: past a character for each of the group's, each the
+/// same or the same folded, to Unicode case (`unicode_case`) or with ASCII
+/// letters in lower case.
+fn backref_end(text: &str, at: usize, captured: &str, unicode_case: bool) -> Option<usize> {
+    let fold = |c: char| if unicode_case { case::fold(c as u32) } else { ascii_lower(c as u32) };
+    let mut rest = text.get(at..)?.chars();
+    let mut end = at;
+    for want in captured.chars() {
+        let got = rest.next()?;
+        if got != want && fold(got) != fold(want) {
+            return None;
+        }
+        end += got.len_utf8();
+    }
+    Some(end)
+}
+
+// ── Look-behind lengths ─────────────────────────────────────────────────────
+
+/// A group being read, as what its length is worked out from.
+struct Frame {
+    kind: FrameKind,
+    /// Its alternatives so far, each a sequence of nodes.
+    alternatives: Vec<Vec<Node>>,
+    /// Where in `out` the group begins.
+    out_start: usize,
+    /// Where in `src` its body begins.
+    src_start: usize,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum FrameKind {
+    /// The whole pattern.
+    Pattern,
+    /// A group, capturing or not.
+    Group,
+    /// An atomic group, `(?>…)`.
+    Atomic,
+    /// A look-ahead, positive or negative.
+    LookAhead,
+    LookBehind { negative: bool },
+}
+
+/// A construct as Java's matcher has it, so far as its length goes.
+#[derive(Clone)]
+enum Node {
+    /// One character: a literal, a class, `.`, a property.
+    Char,
+    /// `\R`: one character or two.
+    LineEnding,
+    /// `\X`: one character at least, and none counted at most.
+    Grapheme,
+    /// A back-reference, whose length nothing bounds.
+    Backref,
+    /// What takes no length: an anchor, a boundary, a look-around.
+    Empty,
+    /// A group's alternatives.
+    Group(Vec<Vec<Node>>),
+    /// An atomic group's alternatives.
+    Atomic(Vec<Vec<Node>>),
+    Repeat(Box<Node>, Repeat),
+}
+
+/// A quantifier: how many times, written how, and how it backtracks.
+#[derive(Clone, Copy)]
+struct Repeat {
+    min: i32,
+    max: i32,
+    form: Form,
+    mode: Mode,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Form {
+    /// `?`, and `{0,1}`.
+    Optional,
+    /// `*`, `+` and `{n,}`.
+    Open,
+    /// `{n}` and `{n,m}`.
+    Counted,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Greedy,
+    Lazy,
+    Possessive,
+}
+
+/// The most repetitions Java counts: what an open quantifier stands for.
+const MAX_REPS: i32 = i32::MAX;
+
+impl Repeat {
+    /// The quantifier `q` (`?`, `*`, `+` or `{…}`), greedy; none for a range
+    /// out of order or past an int.
+    fn of(q: &str) -> Option<Repeat> {
+        let (min, max, form) = match q {
+            "?" => (0, 1, Form::Optional),
+            "*" => (0, MAX_REPS, Form::Open),
+            "+" => (1, MAX_REPS, Form::Open),
+            _ => {
+                let range = q.strip_prefix('{')?.strip_suffix('}')?;
+                match range.split_once(',') {
+                    None => {
+                        let n = range.parse().ok()?;
+                        (n, n, Form::Counted)
+                    }
+                    Some((n, "")) => (n.parse().ok()?, MAX_REPS, Form::Open),
+                    Some((n, m)) => {
+                        let (n, m) = (n.parse().ok()?, m.parse().ok()?);
+                        (n, m, if (n, m) == (0, 1) { Form::Optional } else { Form::Counted })
+                    }
+                }
+            }
+        };
+        (min <= max).then_some(Repeat { min, max, form, mode: Mode::Greedy })
+    }
+}
+
+/// How long Java takes what it has studied to match, in its int arithmetic:
+/// the fewest characters, the most, whether the most is known, and whether
+/// matching it never backtracks.
+#[derive(Clone, Copy)]
+struct Lengths {
+    min: i32,
+    max: i32,
+    max_valid: bool,
+    deterministic: bool,
+}
+
+impl Default for Lengths {
+    fn default() -> Lengths {
+        Lengths { min: 0, max: 0, max_valid: true, deterministic: true }
+    }
+}
+
+/// `nodes`, a chain, studied after what `lengths` holds: a group in a chain
+/// is its nodes there, and alternatives take the rest of the chain apart.
+fn study(nodes: &[Node], lengths: &mut Lengths) {
+    for (i, node) in nodes.iter().enumerate() {
+        let alternatives = match node {
+            Node::Group(alternatives) if alternatives.len() == 1 => {
+                let chain: Vec<Node> = alternatives[0].iter().chain(&nodes[i + 1..]).cloned().collect();
+                return study(&chain, lengths);
+            }
+            Node::Group(alternatives) => alternatives.clone(),
+            // An optional group is the group or nothing.
+            Node::Repeat(inner, r) if r.form == Form::Optional && r.mode != Mode::Possessive => match &**inner {
+                Node::Group(alternatives) => vec![vec![Node::Group(alternatives.clone())], Vec::new()],
+                _ => {
+                    study_one(node, lengths);
+                    continue;
+                }
+            },
+            _ => {
+                study_one(node, lengths);
+                continue;
+            }
+        };
+        let (mut min, mut max, mut max_valid) = (lengths.min, lengths.max, lengths.max_valid);
+        let (mut fewest, mut most) = (i32::MAX, -1);
+        for alternative in &alternatives {
+            let mut each = Lengths::default();
+            study(alternative, &mut each);
+            fewest = fewest.min(each.min);
+            most = most.max(each.max);
+            max_valid &= each.max_valid;
+        }
+        min = min.wrapping_add(fewest);
+        max = max.wrapping_add(most);
+        *lengths = Lengths::default();
+        study(&nodes[i + 1..], lengths);
+        lengths.min = lengths.min.wrapping_add(min);
+        lengths.max = lengths.max.wrapping_add(max);
+        lengths.max_valid &= max_valid;
+        lengths.deterministic = false;
+        return;
+    }
+}
+
+/// One node that is no group in a chain, studied after `lengths`.
+fn study_one(node: &Node, lengths: &mut Lengths) {
+    match node {
+        Node::Char => {
+            lengths.min = lengths.min.wrapping_add(1);
+            lengths.max = lengths.max.wrapping_add(1);
+        }
+        Node::LineEnding => {
+            lengths.min = lengths.min.wrapping_add(1);
+            lengths.max = lengths.max.wrapping_add(2);
+        }
+        Node::Grapheme => {
+            lengths.min = lengths.min.wrapping_add(1);
+            lengths.deterministic = false;
+        }
+        Node::Backref => lengths.max_valid = false,
+        Node::Empty => {}
+        Node::Group(_) | Node::Atomic(_) => study(&[group_of(node)], lengths),
+        Node::Repeat(inner, r) => {
+            let group = matches!(**inner, Node::Group(_));
+            if r.form == Form::Optional {
+                let min = lengths.min;
+                study(&[group_of(inner)], lengths);
+                lengths.min = min;
+                lengths.deterministic = false;
+            } else if !group && r.form == Form::Open && r.mode == Mode::Greedy && matches!(**inner, Node::Char) {
+                lengths.min = lengths.min.wrapping_add(r.min);
+                if lengths.max_valid {
+                    lengths.max = lengths.max.wrapping_add(MAX_REPS);
+                }
+                lengths.deterministic = false;
+            } else if group && r.mode != Mode::Possessive && !{
+                let mut body = Lengths::default();
+                study(&[group_of(inner)], &mut body);
+                body.deterministic
+            } {
+                // A repeated group that may backtrack: no most is counted.
+                lengths.max_valid = false;
+                lengths.deterministic = false;
+            } else {
+                let (min, max, max_valid, deterministic) =
+                    (lengths.min, lengths.max, lengths.max_valid, lengths.deterministic);
+                *lengths = Lengths::default();
+                study(&[group_of(inner)], lengths);
+                let fewest = lengths.min.wrapping_mul(r.min).wrapping_add(min);
+                lengths.min = if fewest < min { 0xFFF_FFFF } else { fewest };
+                if max_valid && lengths.max_valid {
+                    let most = lengths.max.wrapping_mul(r.max).wrapping_add(max);
+                    lengths.max = most;
+                    lengths.max_valid = most >= max;
+                } else {
+                    lengths.max_valid = false;
+                }
+                lengths.deterministic = lengths.deterministic && r.min == r.max && deterministic;
+            }
+        }
+    }
+}
+
+/// `node` as a chain of its own: an atomic group's body as a group's.
+fn group_of(node: &Node) -> Node {
+    match node {
+        Node::Atomic(alternatives) => Node::Group(alternatives.clone()),
+        node => node.clone(),
+    }
+}
+
+// ── Characters ──────────────────────────────────────────────────────────────
+
+/// A set of code points: sorted runs, apart from each other.
+#[derive(Clone, Default)]
+struct Set(Vec<(u32, u32)>);
+
+impl Set {
+    /// The code points of `runs`, in any order and overlapping.
+    fn of(runs: impl IntoIterator<Item = (u32, u32)>) -> Set {
+        let mut runs: Vec<(u32, u32)> = runs.into_iter().collect();
+        runs.sort_unstable();
+        let mut out: Vec<(u32, u32)> = Vec::with_capacity(runs.len());
+        for (lo, hi) in runs {
+            match out.last_mut() {
+                Some(last) if lo <= last.1.saturating_add(1) => last.1 = last.1.max(hi),
+                _ => out.push((lo, hi)),
+            }
+        }
+        Set(out)
+    }
+
+    fn union(&self, other: &Set) -> Set {
+        Set::of(self.0.iter().chain(&other.0).copied())
+    }
+
+    /// Every code point not in this set.
+    fn complement(&self) -> Set {
+        let mut out = Vec::new();
+        let mut next = 0;
+        for &(lo, hi) in &self.0 {
+            if lo > next {
+                out.push((next, lo - 1));
+            }
+            next = hi + 1;
+        }
+        if next <= 0x10FFFF {
+            out.push((next, 0x10FFFF));
+        }
+        Set(out)
+    }
+
+    /// The code points of this set in the Basic Multilingual Plane.
+    fn bmp(&self) -> Set {
+        Set(self.0.iter().filter(|r| r.0 <= 0xFFFF).map(|&(lo, hi)| (lo, hi.min(0xFFFF))).collect())
+    }
+
+    /// This set as class items, without the surrogates, which no text holds;
+    /// a class that holds nothing when that leaves none.
+    fn items(&self) -> String {
+        let mut out = String::new();
+        for &(lo, hi) in &self.0 {
+            for (lo, hi) in [(lo, hi.min(0xD7FF)), (lo.max(0xE000), hi)] {
+                if lo < hi {
+                    out.push_str(&format!(r"\x{{{lo:X}}}-\x{{{hi:X}}}"));
+                } else if lo == hi {
+                    out.push_str(&format!(r"\x{{{lo:X}}}"));
+                }
+            }
+        }
+        if out.is_empty() {
+            NOTHING.to_string()
+        } else {
+            out
+        }
+    }
+
+    /// This set as a class.
+    fn class(&self) -> String {
+        let items = self.items();
+        if items == NOTHING {
+            items
+        } else {
+            format!("[{items}]")
+        }
+    }
+}
+
+/// `Character.getType`'s categories, a bit each.
+mod category {
+    pub(super) const CN: u32 = 1;
+    pub(super) const LU: u32 = 1 << 1;
+    pub(super) const LL: u32 = 1 << 2;
+    pub(super) const LT: u32 = 1 << 3;
+    pub(super) const LM: u32 = 1 << 4;
+    pub(super) const LO: u32 = 1 << 5;
+    pub(super) const MN: u32 = 1 << 6;
+    pub(super) const ME: u32 = 1 << 7;
+    pub(super) const MC: u32 = 1 << 8;
+    pub(super) const ND: u32 = 1 << 9;
+    pub(super) const NL: u32 = 1 << 10;
+    pub(super) const NO: u32 = 1 << 11;
+    pub(super) const ZS: u32 = 1 << 12;
+    pub(super) const ZL: u32 = 1 << 13;
+    pub(super) const ZP: u32 = 1 << 14;
+    pub(super) const CC: u32 = 1 << 15;
+    pub(super) const CF: u32 = 1 << 16;
+    pub(super) const CO: u32 = 1 << 18;
+    pub(super) const CS: u32 = 1 << 19;
+    pub(super) const PD: u32 = 1 << 20;
+    pub(super) const PS: u32 = 1 << 21;
+    pub(super) const PE: u32 = 1 << 22;
+    pub(super) const PC: u32 = 1 << 23;
+    pub(super) const PO: u32 = 1 << 24;
+    pub(super) const SM: u32 = 1 << 25;
+    pub(super) const SC: u32 = 1 << 26;
+    pub(super) const SK: u32 = 1 << 27;
+    pub(super) const SO: u32 = 1 << 28;
+    pub(super) const PI: u32 = 1 << 29;
+    pub(super) const PF: u32 = 1 << 30;
+    pub(super) const L: u32 = LU | LL | LT | LM | LO;
+    pub(super) const M: u32 = MN | ME | MC;
+    pub(super) const N: u32 = ND | NL | NO;
+    pub(super) const Z: u32 = ZS | ZL | ZP;
+    pub(super) const C: u32 = CC | CF | CO | CS | CN;
+    pub(super) const P: u32 = PD | PS | PE | PC | PO | PI | PF;
+    pub(super) const S: u32 = SM | SC | SK | SO;
+}
+
+/// The code points whose category is among `mask`.
+fn types(mask: u32) -> Set {
+    let unassigned = mask & category::CN != 0;
+    let mut runs = Vec::new();
+    let mut next = 0;
+    for &(lo, hi, t) in unicode::CATEGORIES {
+        if unassigned && lo > next {
+            runs.push((next, lo - 1));
+        }
+        if mask & (1 << t) != 0 {
+            runs.push((lo, hi));
+        }
+        next = hi + 1;
+    }
+    if unassigned && next <= 0x10FFFF {
+        runs.push((next, 0x10FFFF));
+    }
+    Set::of(runs)
+}
+
+/// Whether `Character.getType` calls `c` unassigned.
+fn is_unassigned(c: u32) -> bool {
+    let runs = unicode::CATEGORIES;
+    runs.get(runs.partition_point(|r| r.1 < c)).is_none_or(|r| r.0 > c)
+}
+
+/// The code points one of `Character`'s predicates holds for.
+fn holding(runs: &[(u32, u32)]) -> Set {
+    Set::of(runs.iter().copied())
+}
+
+/// `\p{IsWord}`, and `\w` under `(?U)`.
+fn word() -> Set {
+    use category::*;
+    holding(unicode::ALPHABETIC).union(&types(MN | ME | MC | ND | PC)).union(&Set::of([(0x200C, 0x200D)]))
+}
+
+/// `\p{IsWhite_Space}`, and `\s` under `(?U)`.
+fn white_space() -> Set {
+    types(category::Z).union(&Set::of([(0x09, 0x0D), (0x85, 0x85)]))
+}
+
+fn hex_digit() -> Set {
+    let digits = [(0x30, 0x39), (0x41, 0x46), (0x61, 0x66), (0xFF10, 0xFF19), (0xFF21, 0xFF26), (0xFF41, 0xFF46)];
+    types(category::ND).union(&Set::of(digits))
+}
+
+/// Every letter with a case, which is what the case properties name
+/// case-insensitively; otherwise `chars`.
+fn cased(case_insensitive: bool, chars: Set) -> Set {
+    if case_insensitive {
+        holding(unicode::LOWER_CASE).union(&holding(unicode::UPPER_CASE)).union(&types(category::LT))
+    } else {
+        chars
+    }
+}
+
 // ── Character properties ────────────────────────────────────────────────────
 
-/// What `\p{name}` names, as class items, under the flags in force: a Unicode
-/// script, block or general category, a POSIX class (ASCII, or Unicode under
-/// `(?U)` and with an `Is`), or a `java…` property of `Character`. None when
-/// the name names nothing.
-fn family(name: &str, case_insensitive: bool, unicode_classes: bool) -> Option<String> {
+/// What `\p{name}` names under the flags in force: a Unicode script, block or
+/// general category, a POSIX class (ASCII, or Unicode under `(?U)` and with an
+/// `Is`), or a `java…` property of `Character`. None when the name names
+/// nothing.
+fn family(name: &str, case_insensitive: bool, unicode_classes: bool) -> Option<Set> {
     if let Some((key, value)) = name.split_once('=') {
         return match key.to_lowercase().as_str() {
             "sc" | "script" => script(value),
@@ -1367,135 +2009,316 @@ fn family(name: &str, case_insensitive: bool, unicode_classes: bool) -> Option<S
     }
 }
 
-/// Every letter with a case, which is what the case properties name
-/// case-insensitively.
-const ANY_CASE: &str = r"\p{Lowercase}\p{Uppercase}\p{Lt}";
-const WHITE_SPACE: &str = r"\p{Z}\t\n\x0B\x0C\r\x{85}";
-const HEX_DIGIT: &str = r"\p{Nd}0-9A-Fa-f\x{FF10}-\x{FF19}\x{FF21}-\x{FF26}\x{FF41}-\x{FF46}";
-const IDENTIFIER_IGNORABLE: &str = r"\x00-\x08\x0E-\x1B\x7F-\x9F\p{Cf}";
-
-fn cased(case_insensitive: bool, items: &str) -> String {
-    (if case_insensitive { ANY_CASE } else { items }).to_string()
-}
-
 /// A Unicode property `\p{IsName}` names, `name` in upper case.
-fn unicode_property(name: &str, case_insensitive: bool) -> Option<String> {
+fn unicode_property(name: &str, case_insensitive: bool) -> Option<Set> {
+    use category::*;
+    use unicode::*;
     Some(match name {
-        "ALPHABETIC" => r"\p{Alphabetic}".into(),
-        "ASSIGNED" => r"\P{Cn}".into(),
-        "CONTROL" => r"\p{Cc}".into(),
-        "EMOJI" => r"\p{Emoji}".into(),
-        "EMOJI_PRESENTATION" => r"\p{Emoji_Presentation}".into(),
-        "EMOJI_MODIFIER" => r"\p{Emoji_Modifier}".into(),
-        "EMOJI_MODIFIER_BASE" => r"\p{Emoji_Modifier_Base}".into(),
-        "EMOJI_COMPONENT" => r"\p{Emoji_Component}".into(),
-        "EXTENDED_PICTOGRAPHIC" => r"\p{Extended_Pictographic}".into(),
-        "HEXDIGIT" | "HEX_DIGIT" => HEX_DIGIT.into(),
-        "IDEOGRAPHIC" => r"\p{Ideographic}".into(),
-        "JOINCONTROL" | "JOIN_CONTROL" => r"\x{200C}\x{200D}".into(),
-        "LETTER" => r"\p{L}".into(),
-        "LOWERCASE" => cased(case_insensitive, r"\p{Lowercase}"),
-        "NONCHARACTERCODEPOINT" | "NONCHARACTER_CODE_POINT" => r"\p{Noncharacter_Code_Point}".into(),
-        "TITLECASE" => cased(case_insensitive, r"\p{Lt}"),
-        "PUNCTUATION" => r"\p{P}".into(),
-        "UPPERCASE" => cased(case_insensitive, r"\p{Uppercase}"),
-        "WHITESPACE" | "WHITE_SPACE" => WHITE_SPACE.into(),
-        "WORD" => r"\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\x{200C}\x{200D}".into(),
+        "ALPHABETIC" => holding(ALPHABETIC),
+        "ASSIGNED" => types(CN).complement(),
+        "CONTROL" => types(CC),
+        "EMOJI" => holding(EMOJI),
+        "EMOJI_PRESENTATION" => holding(EMOJI_PRESENTATION),
+        "EMOJI_MODIFIER" => holding(EMOJI_MODIFIER),
+        "EMOJI_MODIFIER_BASE" => holding(EMOJI_MODIFIER_BASE),
+        "EMOJI_COMPONENT" => holding(EMOJI_COMPONENT),
+        "EXTENDED_PICTOGRAPHIC" => holding(EXTENDED_PICTOGRAPHIC),
+        "HEXDIGIT" | "HEX_DIGIT" => hex_digit(),
+        "IDEOGRAPHIC" => holding(IDEOGRAPHIC),
+        "JOINCONTROL" | "JOIN_CONTROL" => Set::of([(0x200C, 0x200D)]),
+        "LETTER" => types(L),
+        "LOWERCASE" => cased(case_insensitive, holding(LOWER_CASE)),
+        "NONCHARACTERCODEPOINT" | "NONCHARACTER_CODE_POINT" => {
+            Set::of((0..=0x10).map(|plane| (plane << 16 | 0xFFFE, plane << 16 | 0xFFFF)).chain([(0xFDD0, 0xFDEF)]))
+        }
+        "TITLECASE" => cased(case_insensitive, types(LT)),
+        "PUNCTUATION" => types(P),
+        "UPPERCASE" => cased(case_insensitive, holding(UPPER_CASE)),
+        "WHITESPACE" | "WHITE_SPACE" => white_space(),
+        "WORD" => word(),
         _ => return None,
     })
 }
 
 /// A POSIX class with Unicode members, `name` in upper case.
-fn posix(name: &str, case_insensitive: bool) -> Option<String> {
+fn posix(name: &str, case_insensitive: bool) -> Option<Set> {
+    use category::*;
+    use unicode::*;
     Some(match name {
-        "ALPHA" => r"\p{Alphabetic}".into(),
-        "LOWER" => cased(case_insensitive, r"\p{Lowercase}"),
-        "UPPER" => cased(case_insensitive, r"\p{Uppercase}"),
-        "SPACE" => WHITE_SPACE.into(),
-        "PUNCT" => r"\p{P}".into(),
-        "XDIGIT" => HEX_DIGIT.into(),
-        "ALNUM" => r"\p{Alphabetic}\p{Nd}".into(),
-        "CNTRL" => r"\p{Cc}".into(),
-        "DIGIT" => r"\p{Nd}".into(),
-        "BLANK" => r"\p{Zs}\t".into(),
-        "GRAPH" => complement(r"\p{Z}\p{Cc}\p{Cn}"),
-        "PRINT" => complement(r"\p{Zl}\p{Zp}\p{Cc}\p{Cn}"),
+        "ALPHA" => holding(ALPHABETIC),
+        "LOWER" => cased(case_insensitive, holding(LOWER_CASE)),
+        "UPPER" => cased(case_insensitive, holding(UPPER_CASE)),
+        "SPACE" => white_space(),
+        "PUNCT" => types(P),
+        "XDIGIT" => hex_digit(),
+        "ALNUM" => holding(ALPHABETIC).union(&types(ND)),
+        "CNTRL" => types(CC),
+        "DIGIT" => types(ND),
+        "BLANK" => types(ZS).union(&Set::of([(0x09, 0x09)])),
+        "GRAPH" => types(Z | CC | CS | CN).complement(),
+        "PRINT" => types(ZL | ZP | CC | CS | CN).complement(),
         _ => return None,
     })
 }
 
 /// A general category, an ASCII POSIX class or a `java…` property, by its
 /// exact name.
-fn property(name: &str, case_insensitive: bool) -> Option<String> {
+fn property(name: &str, case_insensitive: bool) -> Option<Set> {
+    use category::*;
+    use unicode::*;
+    let ascii = |runs: &[(u32, u32)]| Set::of(runs.iter().copied());
     Some(match name {
-        "Lu" | "Ll" | "Lt" if case_insensitive => r"\p{Lu}\p{Ll}\p{Lt}".into(),
-        "Cn" | "Lu" | "Ll" | "Lt" | "Lm" | "Lo" | "Mn" | "Me" | "Mc" | "Nd" | "Nl" | "No" | "Zs" | "Zl" | "Zp"
-        | "Cc" | "Cf" | "Co" | "Pd" | "Ps" | "Pe" | "Pc" | "Po" | "Sm" | "Sc" | "Sk" | "So" | "Pi" | "Pf" | "L"
-        | "M" | "N" | "Z" | "P" | "S" => format!(r"\p{{{name}}}"),
-        // No text holds a surrogate.
-        "Cs" => NOTHING.into(),
-        "C" => r"\p{Cc}\p{Cf}\p{Co}\p{Cn}".into(),
-        "LC" => r"\p{Lu}\p{Ll}\p{Lt}".into(),
-        "LD" => r"\p{L}\p{Nd}".into(),
-        "L1" => r"\x00-\xFF".into(),
-        "all" => r"\x00-\x{10FFFF}".into(),
-        "ASCII" => r"\x00-\x7F".into(),
-        "Alnum" => "0-9A-Za-z".into(),
-        "Alpha" => "A-Za-z".into(),
-        "Blank" => r"\x20\t".into(),
-        "Cntrl" => r"\x00-\x1F\x7F".into(),
-        "Digit" => "0-9".into(),
-        "Graph" => "!-~".into(),
-        "Lower" => (if case_insensitive { "A-Za-z" } else { "a-z" }).into(),
-        "Print" => r"\x20-~".into(),
-        "Punct" => r"!-/:-@\[-`\{-~".into(),
-        "Space" => r"\t\n\x0B\x0C\r\x20".into(),
-        "Upper" => (if case_insensitive { "A-Za-z" } else { "A-Z" }).into(),
-        "XDigit" => "0-9A-Fa-f".into(),
-        "javaLowerCase" => cased(case_insensitive, r"\p{Lowercase}"),
-        "javaUpperCase" => cased(case_insensitive, r"\p{Uppercase}"),
-        "javaAlphabetic" => r"\p{Alphabetic}".into(),
-        "javaIdeographic" => r"\p{Ideographic}".into(),
-        "javaTitleCase" => cased(case_insensitive, r"\p{Lt}"),
-        "javaDigit" => r"\p{Nd}".into(),
-        "javaDefined" => r"\P{Cn}".into(),
-        "javaLetter" => r"\p{L}".into(),
-        "javaLetterOrDigit" => r"\p{L}\p{Nd}".into(),
-        "javaJavaIdentifierStart" => r"\p{L}\p{Nl}\p{Sc}\p{Pc}".into(),
-        "javaJavaIdentifierPart" => format!(r"\p{{L}}\p{{Nl}}\p{{Sc}}\p{{Pc}}\p{{Nd}}\p{{Mc}}\p{{Mn}}{IDENTIFIER_IGNORABLE}"),
-        "javaUnicodeIdentifierStart" => r"\p{ID_Start}\x{2E2F}".into(),
-        "javaUnicodeIdentifierPart" => format!(r"\p{{ID_Continue}}\x{{2E2F}}{IDENTIFIER_IGNORABLE}"),
-        "javaIdentifierIgnorable" => IDENTIFIER_IGNORABLE.into(),
-        "javaSpaceChar" => r"\p{Z}".into(),
-        "javaWhitespace" => r"\t-\r\x1C-\x1F[\p{Z}--[\xA0\x{2007}\x{202F}]]".into(),
-        "javaISOControl" => r"\x00-\x1F\x7F-\x9F".into(),
-        "javaMirrored" => r"\p{Bidi_Mirrored}".into(),
+        "Lu" | "Ll" | "Lt" if case_insensitive => types(LU | LL | LT),
+        "Cn" => types(CN),
+        "Lu" => types(LU),
+        "Ll" => types(LL),
+        "Lt" => types(LT),
+        "Lm" => types(LM),
+        "Lo" => types(LO),
+        "Mn" => types(MN),
+        "Me" => types(ME),
+        "Mc" => types(MC),
+        "Nd" => types(ND),
+        "Nl" => types(NL),
+        "No" => types(NO),
+        "Zs" => types(ZS),
+        "Zl" => types(ZL),
+        "Zp" => types(ZP),
+        "Cc" => types(CC),
+        "Cf" => types(CF),
+        "Co" => types(CO),
+        "Cs" => types(CS),
+        "Pd" => types(PD),
+        "Ps" => types(PS),
+        "Pe" => types(PE),
+        "Pc" => types(PC),
+        "Po" => types(PO),
+        "Sm" => types(SM),
+        "Sc" => types(SC),
+        "Sk" => types(SK),
+        "So" => types(SO),
+        "Pi" => types(PI),
+        "Pf" => types(PF),
+        "L" => types(L),
+        "M" => types(M),
+        "N" => types(N),
+        "Z" => types(Z),
+        "C" => types(C),
+        "P" => types(P),
+        "S" => types(S),
+        "LC" => types(LU | LL | LT),
+        "LD" => types(L | ND),
+        "L1" => ascii(&[(0x00, 0xFF)]),
+        "all" => ascii(&[(0x00, 0x10FFFF)]),
+        "ASCII" => ascii(&[(0x00, 0x7F)]),
+        "Alnum" => ascii(&[(0x30, 0x39), (0x41, 0x5A), (0x61, 0x7A)]),
+        "Alpha" => ascii(&[(0x41, 0x5A), (0x61, 0x7A)]),
+        "Blank" => ascii(&[(0x09, 0x09), (0x20, 0x20)]),
+        "Cntrl" => ascii(&[(0x00, 0x1F), (0x7F, 0x7F)]),
+        "Digit" => ascii(&[(0x30, 0x39)]),
+        "Graph" => ascii(&[(0x21, 0x7E)]),
+        "Lower" if case_insensitive => ascii(&[(0x41, 0x5A), (0x61, 0x7A)]),
+        "Lower" => ascii(&[(0x61, 0x7A)]),
+        "Print" => ascii(&[(0x20, 0x7E)]),
+        "Punct" => ascii(&[(0x21, 0x2F), (0x3A, 0x40), (0x5B, 0x60), (0x7B, 0x7E)]),
+        "Space" => ascii(&[(0x09, 0x0D), (0x20, 0x20)]),
+        "Upper" if case_insensitive => ascii(&[(0x41, 0x5A), (0x61, 0x7A)]),
+        "Upper" => ascii(&[(0x41, 0x5A)]),
+        "XDigit" => ascii(&[(0x30, 0x39), (0x41, 0x46), (0x61, 0x66)]),
+        "javaLowerCase" => cased(case_insensitive, holding(LOWER_CASE)),
+        "javaUpperCase" => cased(case_insensitive, holding(UPPER_CASE)),
+        "javaAlphabetic" => holding(ALPHABETIC),
+        "javaIdeographic" => holding(IDEOGRAPHIC),
+        "javaTitleCase" => cased(case_insensitive, types(LT)),
+        "javaDigit" => types(ND),
+        "javaDefined" => types(CN).complement(),
+        "javaLetter" => types(L),
+        "javaLetterOrDigit" => types(L | ND),
+        "javaJavaIdentifierStart" => holding(JAVA_IDENTIFIER_START),
+        "javaJavaIdentifierPart" => holding(JAVA_IDENTIFIER_PART),
+        "javaUnicodeIdentifierStart" => holding(UNICODE_IDENTIFIER_START),
+        "javaUnicodeIdentifierPart" => holding(UNICODE_IDENTIFIER_PART),
+        "javaIdentifierIgnorable" => holding(IDENTIFIER_IGNORABLE),
+        "javaSpaceChar" => types(Z),
+        "javaWhitespace" => holding(WHITESPACE),
+        "javaISOControl" => ascii(&[(0x00, 0x1F), (0x7F, 0x9F)]),
+        "javaMirrored" => holding(MIRRORED),
         _ => return None,
     })
 }
 
 /// A Unicode script, by its name or one of its other names, in any case.
-fn script(name: &str) -> Option<String> {
+fn script(name: &str) -> Option<Set> {
     let upper = name.to_uppercase();
-    let (script, _) = names::SCRIPTS
+    let index = names::SCRIPTS
         .iter()
-        .find(|(_, others)| others.contains(&upper.as_str()))
-        .or_else(|| names::SCRIPTS.iter().find(|(script, _)| *script == upper))?;
-    Some(match *script {
-        // The script of every code point no script claims.
-        "UNKNOWN" => r"\p{Cn}\p{Co}".into(),
-        script => format!(r"\p{{sc={script}}}"),
-    })
+        .position(|(_, others)| others.contains(&upper.as_str()))
+        .or_else(|| names::SCRIPTS.iter().position(|(script, _)| *script == upper))?;
+    Some(Set::of(unicode::SCRIPTS_OF.iter().filter(|r| usize::from(r.2) == index).map(|r| (r.0, r.1))))
 }
 
 /// A Unicode block, by any of its names, in any case.
-fn block(name: &str) -> Option<String> {
+fn block(name: &str) -> Option<Set> {
     let upper = name.to_uppercase();
-    let (_, range) = names::BLOCKS.iter().find(|(names, _)| names.contains(&upper.as_str()))?;
-    Some(match range {
-        Some((lo, hi)) => range_items(*lo, *hi),
-        None => NOTHING.into(),
-    })
+    let (_, _, range) = names::BLOCKS.iter().find(|(_, names, _)| names.contains(&upper.as_str()))?;
+    Some(Set::of(*range))
+}
+
+/// Extended grapheme clusters, as `\X` and `\b{g}` find them.
+mod grapheme {
+    use super::unicode;
+    use std::sync::OnceLock;
+
+    // The types `unicode::GRAPHEME_TYPES` gives a character.
+    const OTHER: u8 = 0;
+    const CR: u8 = 1;
+    const LF: u8 = 2;
+    const CONTROL: u8 = 3;
+    const EXTEND: u8 = 4;
+    const ZWJ: u8 = 5;
+    const RI: u8 = 6;
+    const PREPEND: u8 = 7;
+    const SPACING_MARK: u8 = 8;
+    const L: u8 = 9;
+    const V: u8 = 10;
+    const T: u8 = 11;
+    const LV: u8 = 12;
+    const LVT: u8 = 13;
+    const EXTENDED_PICTOGRAPHIC: u8 = 14;
+    const TYPES: usize = 15;
+
+    fn type_of(c: char) -> u8 {
+        let (c, runs) = (c as u32, unicode::GRAPHEME_TYPES);
+        runs.get(runs.partition_point(|r| r.1 < c)).filter(|r| r.0 <= c).map_or(OTHER, |r| r.2)
+    }
+
+    /// Whether a cluster ends between a character of type `a` and one of type
+    /// `b` after it, by the two alone.
+    fn breaks(a: u8, b: u8) -> bool {
+        static RULES: OnceLock<[[bool; TYPES]; TYPES]> = OnceLock::new();
+        RULES.get_or_init(|| {
+            let mut rules = [[true; TYPES]; TYPES];
+            // Hangul syllable sequences.
+            for (a, b) in [(L, L), (L, V), (L, LV), (L, LVT), (LV, V), (LV, T), (V, V), (V, T), (LVT, T), (T, T)] {
+                rules[usize::from(a)][usize::from(b)] = false;
+            }
+            // Before an extending character, a ZWJ or a spacing mark; after a
+            // prepended character.
+            for row in rules.iter_mut() {
+                for b in [EXTEND, ZWJ, SPACING_MARK] {
+                    row[usize::from(b)] = false;
+                }
+            }
+            rules[usize::from(PREPEND)] = [false; TYPES];
+            // Around controls, but within CR LF.
+            for c in [CR, LF, CONTROL].map(usize::from) {
+                rules[c] = [true; TYPES];
+                for row in rules.iter_mut() {
+                    row[c] = true;
+                }
+            }
+            rules[usize::from(CR)][usize::from(LF)] = false;
+            rules
+        })[usize::from(a)][usize::from(b)]
+    }
+
+    /// Where the cluster that starts at byte `at` of `text` ends: none at the
+    /// end of the text. A cluster that starts with a pictograph takes another
+    /// after each ZWJ, and regional indicators pair off.
+    pub(super) fn cluster_end(text: &str, at: usize) -> Option<usize> {
+        let mut chars = text.get(at..)?.char_indices();
+        let (_, first) = chars.next()?;
+        let mut end = at + first.len_utf8();
+        let mut prev = type_of(first);
+        let pictographic = prev == EXTENDED_PICTOGRAPHIC;
+        let mut regional = usize::from(prev == RI);
+        for (i, c) in chars {
+            let next = type_of(c);
+            let joins = (pictographic && prev == ZWJ && next == EXTENDED_PICTOGRAPHIC)
+                || (regional % 2 == 1 && prev == RI && next == RI)
+                || !breaks(prev, next);
+            if !joins {
+                break;
+            }
+            regional += usize::from(next == RI);
+            prev = next;
+            end = at + i + c.len_utf8();
+        }
+        Some(end)
+    }
+
+    /// Whether `\b{g}` holds at byte `at` of `text`, the matcher's previous
+    /// match having ended at byte `last`: at the start and the end of the
+    /// text, and from where the cluster that starts at `last` ends.
+    pub(super) fn is_boundary(text: &str, at: usize, last: usize) -> Result<bool, String> {
+        if at == 0 || at >= text.len() {
+            return Ok(true);
+        }
+        match cluster_end(text, last) {
+            Some(end) => Ok(end <= at),
+            None => Err(format!("`\\b{{g}}` measures from the end of `{text}`")),
+        }
+    }
+}
+
+/// The character names `\N{…}` takes, read as `Character.codePointOf` reads
+/// them.
+mod charnames {
+    use super::names;
+    use std::collections::{HashMap, HashSet};
+    use std::io::Read;
+    use std::sync::OnceLock;
+
+    struct Table {
+        code_points: HashMap<String, u32>,
+        named: HashSet<u32>,
+    }
+
+    /// Every character's own name: java/charnames.z, deflated `HEX;NAME`
+    /// lines.
+    fn table() -> &'static Table {
+        static TABLE: OnceLock<Table> = OnceLock::new();
+        TABLE.get_or_init(|| {
+            let mut text = String::new();
+            flate2::read::ZlibDecoder::new(&include_bytes!("java/charnames.z")[..])
+                .read_to_string(&mut text)
+                .expect("the character names");
+            let mut table = Table { code_points: HashMap::new(), named: HashSet::new() };
+            for line in text.lines() {
+                let (hex, name) = line.split_once(';').expect("a `HEX;NAME` line");
+                let cp = u32::from_str_radix(hex, 16).expect("a code point in hex");
+                table.code_points.insert(name.to_string(), cp);
+                table.named.insert(cp);
+            }
+            table
+        })
+    }
+
+    /// The code point `name` names, in any case and with space around it: a
+    /// character by its own name, or one that has none by its block's name and
+    /// its code point in hex.
+    pub(super) fn code_point_of(name: &str) -> Option<u32> {
+        let name = name.trim_matches(|c| c <= ' ').to_uppercase();
+        let table = table();
+        if let Some(&cp) = table.code_points.get(&name) {
+            return Some(cp);
+        }
+        let (_, hex) = name.rsplit_once(' ')?;
+        let cp = u32::from_str_radix(hex, 16).ok().filter(|&cp| cp <= 0x10FFFF)?;
+        (!table.named.contains(&cp) && unnamed(cp)? == name).then_some(cp)
+    }
+
+    /// The name of a character that has none of its own: its block's name,
+    /// with `_` as space, and its code point in hex. None for an unassigned
+    /// code point.
+    fn unnamed(cp: u32) -> Option<String> {
+        if super::is_unassigned(cp) {
+            return None;
+        }
+        let (block, _, _) =
+            names::BLOCKS.iter().find(|(_, _, range)| range.is_some_and(|(lo, hi)| lo <= cp && cp <= hi))?;
+        Some(format!("{} {cp:X}", block.replace('_', " ")))
+    }
 }
 
 // ── Numbers ─────────────────────────────────────────────────────────────────
@@ -1708,7 +2531,7 @@ mod tests {
 
 #[cfg(test)]
 mod recorded {
-    use super::Regex;
+    use super::{Regex, Translator};
 
     /// A field of the cases file: `\uXXXX` stands for a UTF-16 code unit.
     fn unescape(s: &str) -> String {
@@ -1735,15 +2558,93 @@ mod recorded {
         text[..byte].encode_utf16().count()
     }
 
-    /// The recorded cases this reading differs on, by a text their pattern
-    /// holds, and why.
-    const DIFFERENT: &[(&str, &str)] = &[
-        (r"\X", r"a grapheme cluster `\X` is refused"),
-        (r"\N{", r"a character named `\N{…}` is refused"),
-        (r"(?U)\B", "no match starts inside a surrogate pair"),
-        (r"(?i)(é)\1", "a back-reference folds the case of other than ASCII letters without `u`"),
-        (r"(?iu)(k)\1", "a back-reference matches only text of its own length in UTF-8"),
+    /// What `pattern` matches on its own of every code point, when it reads as
+    /// a class: how many, and the FNV-1a hash of their runs written
+    /// `FIRST-LAST,` in hex.
+    fn class_digest(pattern: &str) -> String {
+        let mut t = Translator::new(pattern);
+        if t.translate().is_err() || Regex::new(pattern).is_err() {
+            return "E".to_string();
+        }
+        let hir = match regex_syntax::Parser::new().parse(&t.out) {
+            Ok(hir) => hir,
+            Err(e) => return format!("unread: {e}"),
+        };
+        use regex_syntax::hir::{Class, HirKind};
+        let ranges: Vec<(u32, u32)> = match hir.kind() {
+            HirKind::Class(Class::Unicode(class)) => {
+                class.ranges().iter().map(|r| (r.start() as u32, r.end() as u32)).collect()
+            }
+            HirKind::Class(Class::Bytes(class)) if class.ranges().is_empty() => Vec::new(),
+            HirKind::Literal(literal) => match std::str::from_utf8(&literal.0).map(|s| s.chars().collect::<Vec<_>>()) {
+                Ok(chars) if chars.len() == 1 => vec![(chars[0] as u32, chars[0] as u32)],
+                _ => return format!("not a class: {}", t.out),
+            },
+            _ => return format!("not a class: {}", t.out),
+        };
+        let (mut count, mut runs) = (0, String::new());
+        for (lo, hi) in ranges {
+            for (lo, hi) in [(lo, hi.min(0xD7FF)), (lo.max(0xE000), hi)] {
+                if lo <= hi {
+                    count += hi - lo + 1;
+                    runs.push_str(&format!("{lo:X}-{hi:X},"));
+                }
+            }
+        }
+        let hash = runs.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
+        format!("{count}\t{hash:016x}")
+    }
+
+    /// The recorded cases this reading differs on, by their kind and a text
+    /// their pattern holds, and why.
+    const DIFFERENT: &[(&str, &str, &str)] = &[
+        ("P", r"(?U)\B", "no match starts inside a surrogate pair"),
+        ("F", r"(?=\uD83D\uDE00)|.", "no match starts inside a surrogate pair"),
+        ("M", r"(?<=\p{So})", "a look-behind counts code points, where Java counts UTF-16 units and starts inside a pair"),
+        ("M", r"(?=\X)\X\b{g}", r"`\b{g}` measures from where the previous match ended, not where a look-ahead did"),
     ];
+
+    /// Each recorded pattern's translation leaves the regex crate nothing of
+    /// its own to look up: no Unicode property, Perl class or word boundary,
+    /// and no case-insensitive flag. What a character is, and its case, come
+    /// from Java's tables alone.
+    #[test]
+    fn translations_name_no_table_of_the_regex_crate() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/java-regex/cases.tsv");
+        let text = std::fs::read_to_string(path).expect("the recorded cases");
+        let mut patterns: Vec<String> =
+            text.lines().filter(|l| !l.starts_with('#')).filter_map(|l| l.split('\t').nth(1)).map(unescape).collect();
+        patterns.sort();
+        patterns.dedup();
+        let mut named = Vec::new();
+        for pattern in &patterns {
+            let mut t = Translator::new(pattern);
+            if t.translate().is_err() {
+                continue;
+            }
+            let out: Vec<char> = t.out.chars().collect();
+            let mut i = 0;
+            while i < out.len() {
+                let flagged = match out[i] {
+                    '\\' => {
+                        i += 1;
+                        out.get(i).is_some_and(|c| "pPwWdDsSbB".contains(*c))
+                    }
+                    '(' if out.get(i + 1) == Some(&'?') => {
+                        out[i + 2..].iter().take_while(|c| c.is_ascii_alphabetic() || **c == '-').any(|c| *c == 'i')
+                    }
+                    _ => false,
+                };
+                if flagged {
+                    named.push(format!("{pattern:?} -> {}", t.out));
+                    break;
+                }
+                i += 1;
+            }
+        }
+        assert!(patterns.len() > 3000, "only {} patterns", patterns.len());
+        assert!(named.is_empty(), "{} translations name the regex crate's tables:\n{}", named.len(), named.join("\n"));
+    }
 
     /// Every case scripts/gen_java_regex.sh recorded from `java.util.regex`
     /// into tests/fixtures/java-regex/cases.tsv, read as that script writes
@@ -1789,12 +2690,29 @@ mod recorded {
                     };
                     (got, f[2].to_string())
                 }
+                "C" => (class_digest(&pattern), f[2..].join("\t")),
+                "F" => {
+                    let input = unescape(f[2]);
+                    let got = match &regex {
+                        Err(_) => "E".to_string(),
+                        Ok(r) => match r.find_all(&input) {
+                            Err(_) => "X".to_string(),
+                            Ok(all) if all.is_empty() => "N".to_string(),
+                            Ok(all) => all
+                                .iter()
+                                .map(|m| format!("{},{}", utf16_at(&input, m.start()), utf16_at(&input, m.end())))
+                                .collect::<Vec<_>>()
+                                .join(";"),
+                        },
+                    };
+                    (got, f[3].to_string())
+                }
                 "M" => {
                     let input = unescape(f[2]);
                     let got = match &regex {
                         Err(_) => "E".to_string(),
                         Ok(r) => match r.find(&input) {
-                            Err(e) => format!("failed: {e}"),
+                            Err(_) => "X".to_string(),
                             Ok(None) => "N".to_string(),
                             Ok(Some(m)) => (0..=r.group_count())
                                 .map(|g| match m.spans[g] {
@@ -1817,15 +2735,17 @@ mod recorded {
                 }
                 kind => panic!("a case of kind `{kind}`"),
             };
-            match DIFFERENT.iter().position(|(text, _)| pattern.contains(text)) {
+            match DIFFERENT.iter().position(|(kind, text, _)| *kind == f[0] && pattern.contains(text)) {
                 Some(i) if got != want => different[i] += 1,
-                Some(i) => wrong.push(format!("{} {pattern:?} no longer differs ({})", f[0], DIFFERENT[i].1)),
+                Some(i) => wrong.push(format!("{} {pattern:?} no longer differs ({})", f[0], DIFFERENT[i].2)),
                 None if got != want => wrong.push(format!("{} {pattern:?}: recorded {want:?}, got {got:?}", f[0])),
                 None => {}
             }
         }
-        for (n, (text, why)) in different.iter().zip(DIFFERENT) {
-            assert!(*n > 0, "no recorded case holds `{text}` ({why})");
+        for (n, (_, text, why)) in different.iter().zip(DIFFERENT) {
+            if *n == 0 {
+                wrong.push(format!("no recorded case that holds `{text}` differs ({why})"));
+            }
         }
         assert!(checked > 4000, "only {checked} cases");
         assert!(wrong.is_empty(), "{} of {checked} cases differ:\n{}", wrong.len(), wrong.join("\n"));

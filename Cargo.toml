@@ -129,8 +129,9 @@ owo-colors = "4"
 #   * tiktoken-rs — the exact cl100k_base BPE tokenizer OLS uses to truncate embed
 #     strings to 500 tokens (pinned to OLS's 0.7).
 #   * sha1 — the content hash keying the incremental embedding cache.
-#   * flate2 — gunzip the published `text_tagger_db.bin.gz` (miniz_oxide backend =
-#     pure Rust, no C toolchain).
+#   * flate2 — gunzip the published `text_tagger_db.bin.gz`, and inflate the
+#     character names `\N{…}` takes (miniz_oxide backend = pure Rust, no C
+#     toolchain).
 tiktoken-rs = "0.7"
 sha1 = "0.10"
 flate2 = "1"
@@ -243,6 +244,11 @@ codegen-units = 1
 inherits = "release"
 debug = 1
 
+[dev-dependencies]
+# regex-syntax — the recorded `java.util.regex` cases read a translated character
+# class back into the code points it holds (src/dosdp/java.rs).
+regex-syntax = "0.8"
+
 # horned-owl and hermit-rs are consumed from their EBISPOT forks rather than
 # vendored in-tree, so they track upstream directly. This root patch unifies the
 # OWL object model: hermit-rs, whelk and owlmake all build against the one
@@ -277,3 +283,9 @@ spargebra = { path = "deps/spargebra" }
 # the Apple-SDK-free cargo-zigbuild release cross-build can't link. See the note
 # in deps/sed/Cargo.toml and .github/workflows/release.yml.
 sed = { path = "deps/sed" }
+# fancy-regex (the backtracking engine under owlmake's reading of
+# java.util.regex) — kept in-tree under deps/fancy-regex for callouts: `(?C<n>)`
+# hands matching to a function the pattern's builder gives, which is how
+# src/dosdp/java.rs matches a grapheme cluster and a case-insensitive
+# back-reference as Java does. See deps/fancy-regex/Cargo.toml.
+fancy-regex = { path = "deps/fancy-regex" }
