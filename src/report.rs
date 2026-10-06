@@ -316,7 +316,11 @@ pub struct ReportRow {
     /// Documentation URL for the rule, or `None` for a `file:` rule.
     pub rule_url: Option<String>,
     pub subject: String,
-    pub property: String,
+    /// The property of the statement the violation lists, or `None` when its row
+    /// bound no `?property`. Such a violation counts like any other and has no
+    /// statement to list: the TSV, CSV and HTML tables and the printed rows leave
+    /// it out, and YAML and JSON give its subject alone.
+    pub property: Option<String>,
     pub value: String,
 }
 
@@ -335,14 +339,20 @@ impl ReportResult {
         self.rows.iter().filter(|r| r.level == sev).count()
     }
 
+    /// The violations that list a statement, each as its table row: Level /
+    /// Rule Name / Subject / Property / Value.
+    pub fn table_rows(&self) -> impl Iterator<Item = [&str; 5]> {
+        self.rows.iter().filter_map(|r| {
+            let property = r.property.as_deref()?;
+            Some([r.level.label(), &r.rule, &r.subject, property, &r.value])
+        })
+    }
+
     /// The report as TSV: Level / Rule Name / Subject / Property / Value.
     pub fn to_tsv(&self) -> String {
         let mut out = crate::table::record(&["Level", "Rule Name", "Subject", "Property", "Value"], '\t');
-        for r in &self.rows {
-            out.push_str(&crate::table::record(
-                &[r.level.label(), &r.rule, &r.subject, &r.property, &r.value],
-                '\t',
-            ));
+        for row in self.table_rows() {
+            out.push_str(&crate::table::record(&row, '\t'));
         }
         out
     }
@@ -350,11 +360,8 @@ impl ReportResult {
     /// The same table as CSV, with RFC-4180 quoting.
     pub fn to_csv(&self) -> String {
         let mut out = crate::table::record(&["Level", "Rule Name", "Subject", "Property", "Value"], ',');
-        for r in &self.rows {
-            out.push_str(&crate::table::record(
-                &[r.level.label(), &r.rule, &r.subject, &r.property, &r.value],
-                ',',
-            ));
+        for row in self.table_rows() {
+            out.push_str(&crate::table::record(&row, ','));
         }
         out
     }
@@ -376,11 +383,13 @@ impl ReportResult {
                     out.push_str(&format!("  - {rule}:\n"));
                 }
                 out.push_str(&format!("    - subject: \"{}\"\n", r.subject));
-                // Property and value are emitted for every violation, including
-                // one whose value is a literal rather than an entity: a report of
-                // bare subjects is not a report.
-                out.push_str(&format!("      property: \"{}\"\n", r.property));
-                out.push_str(&format!("      values:\n        - \"{}\"\n", r.value));
+                // Property and value are emitted for every violation that lists a
+                // statement, including one whose value is a literal rather than an
+                // entity.
+                if let Some(property) = &r.property {
+                    out.push_str(&format!("      property: \"{property}\"\n"));
+                    out.push_str(&format!("      values:\n        - \"{}\"\n", r.value));
+                }
             }
         }
         out
@@ -397,11 +406,14 @@ impl ReportResult {
             }
             let mut by_rule: Vec<(String, Vec<serde_json::Value>)> = Vec::new();
             for r in rows {
-                let violation = serde_json::json!({
-                    "subject": r.subject,
-                    "property": r.property,
-                    "values": [r.value],
-                });
+                let violation = match &r.property {
+                    Some(property) => serde_json::json!({
+                        "subject": r.subject,
+                        "property": property,
+                        "values": [r.value],
+                    }),
+                    None => serde_json::json!({ "subject": r.subject }),
+                };
                 match by_rule.last_mut() {
                     Some((name, vs)) if *name == r.rule => vs.push(violation),
                     _ => by_rule.push((r.rule.clone(), vec![violation])),
@@ -503,26 +515,19 @@ pub fn run_report_with_profile(model: &Model, rules: &[ReportRule]) -> Result<Re
         let prop_idx = table.columns.iter().position(|c| c == "property");
         let value_idx = table.columns.iter().position(|c| c == "value");
 
-        let Some(entity_idx) = entity_idx else {
-            // A rule that never projects ?entity can report nothing at all.
-            if matches!(rule.source, RuleSource::File(_)) {
-                bail!("report: MISSING ENTITY BINDING query '{}' must include an '?entity'", rule.name);
+        // A rule's query is expected to project `?entity`, `?property` and
+        // `?value`, and one that does not is told so on the console, a line per
+        // variable, whether or not it matched anything. A projected variable left
+        // unbound in a row is not a defect: every "missing X" rule binds `?value`
+        // only inside `FILTER NOT EXISTS` or an `OPTIONAL … FILTER(!bound(?value))`,
+        // so its rows carry an empty Value.
+        for (var, idx) in [("entity", entity_idx), ("property", prop_idx), ("value", value_idx)] {
+            if idx.is_none() {
+                crate::build::console_line(&format!(
+                    "WARN: '{}' query is missing ?{var} variable",
+                    rule.name
+                ));
             }
-            // Every bundled query binds ?entity; keep the skip as defence so a
-            // mistake in one of them degrades instead of aborting a build.
-            continue;
-        };
-
-        // A rule's query is expected to project `?property` and `?value`, and one
-        // that does not is told so once, whether or not it matched anything. A
-        // projected variable left unbound in a row is not a defect: every
-        // "missing X" rule binds `?value` only inside `FILTER NOT EXISTS` or an
-        // `OPTIONAL … FILTER(!bound(?value))`, so its rows carry an empty Value.
-        if prop_idx.is_none() {
-            status!("WARN: '{}' query is missing ?property variable", rule.name);
-        }
-        if value_idx.is_none() {
-            status!("WARN: '{}' query is missing ?value variable", rule.name);
         }
 
         let mut rows = Vec::new();
@@ -535,36 +540,24 @@ pub fn run_report_with_profile(model: &Model, rules: &[ReportRule]) -> Result<Re
                 )
             };
 
-            let (entity, entity_tsv) = cell(entity_idx);
+            // A row with no `?entity` names nothing to report, and stops the
+            // report. A query that matches nothing has no such row, whatever it
+            // projects.
+            let (entity, entity_tsv) = entity_idx.map_or(("", None), cell);
             if unbound(entity, entity_tsv) {
-                // An unbound `?entity` in ANY row is an error, not only a query
-                // that never projects the column.
-                if matches!(rule.source, RuleSource::File(_)) {
-                    bail!(
-                        "report: MISSING ENTITY BINDING query '{}' must include an '?entity'",
-                        rule.name
-                    );
-                }
-                continue;
+                bail!("report: MISSING ENTITY BINDING query '{}' must include an '?entity'", rule.name);
             }
             let subject = term_display(entity, entity_tsv);
             if is_builtin(&subject) {
                 continue;
             }
 
-            let binding = |idx: Option<usize>| match idx {
-                Some(idx) => {
-                    let (v, v_tsv) = cell(idx);
-                    if unbound(v, v_tsv) {
-                        String::new()
-                    } else {
-                        term_display(v, v_tsv)
-                    }
-                }
-                None => String::new(),
+            let binding = |idx: Option<usize>| {
+                let (v, v_tsv) = cell(idx?);
+                (!unbound(v, v_tsv)).then(|| term_display(v, v_tsv))
             };
             let property = binding(prop_idx);
-            let value = binding(value_idx);
+            let value = binding(value_idx).unwrap_or_default();
 
             rows.push(ReportRow {
                 level: rule.severity,

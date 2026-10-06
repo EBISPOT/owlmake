@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context};
 use clap::Args as ClapArgs;
 
+use crate::build::console_line;
 use crate::report::{self, ReportRule, Severity};
 use crate::sparql::Queryable;
 
@@ -235,6 +236,8 @@ fn render_html_report(
         None => text.to_string(),
     };
     for (row, link) in result.rows.iter().zip(links) {
+        // A violation that lists no statement has no row in the table.
+        let Some(property) = &row.property else { continue };
         let tr_class = match row.level {
             Severity::Error => "table-danger",
             Severity::Warn => "table-warning",
@@ -244,7 +247,7 @@ fn render_html_report(
         sb.push_str(&format!("\t\t<td>{}</td>\n", row.level.label()));
         sb.push_str(&format!("\t\t<td>{}</td>\n", anchor(&row.rule, &row.rule_url)));
         sb.push_str(&format!("\t\t<td>{}</td>\n", anchor(&row.subject, &link[0])));
-        sb.push_str(&format!("\t\t<td>{}</td>\n", anchor(&row.property, &link[1])));
+        sb.push_str(&format!("\t\t<td>{}</td>\n", anchor(property, &link[1])));
         sb.push_str(&format!("\t\t<td>{}</td>\n", anchor(&row.value, &link[2])));
         sb.push_str("\t</tr>\n");
     }
@@ -272,7 +275,7 @@ fn label_map(model: &crate::model::Model) -> anyhow::Result<HashMap<String, Stri
 
 /// Print `n` violation rows, one per line, joined by the format's separator, under
 /// a `First N violations:` heading.
-fn print_n_violations(rows: &[Vec<String>], mut n: usize, sep: &str) {
+fn print_n_violations(rows: &[[&str; 5]], mut n: usize, sep: &str) {
     // `n` is a row count — the heading is printed in addition to the rows it
     // announces. Asking for more rows than exist is not an error: `n` is clamped
     // to the number of rows, so the heading never promises violations the report
@@ -280,9 +283,9 @@ fn print_n_violations(rows: &[Vec<String>], mut n: usize, sep: &str) {
     if rows.len() + 1 <= n {
         n = rows.len();
     }
-    println!("\nFirst {n} violations:");
+    console_line(&format!("\nFirst {n} violations:"));
     for row in rows.iter().take(n) {
-        println!("{}", row.join(sep));
+        console_line(&row.join(sep));
     }
 }
 
@@ -387,9 +390,9 @@ pub fn step(
         let link = |v: &str| {
             (v.starts_with("http://") || v.starts_with("https://")).then(|| v.to_string())
         };
-        links.push([link(&row.subject), link(&row.property), link(&row.value)]);
+        links.push([link(&row.subject), row.property.as_deref().and_then(link), link(&row.value)]);
         row.subject = short.subject(&row.subject);
-        row.property = short.cell(&row.property);
+        row.property = row.property.as_deref().map(|p| short.cell(p));
         row.value = short.cell(&row.value);
     }
 
@@ -405,43 +408,32 @@ pub fn step(
         std::fs::write(p, &rendered)?;
     }
 
-    // The summary block, on stdout, before anything is printed per-violation.
+    // The summary block, on the console, before anything is printed per-violation.
     let errors = result.count_at(Severity::Error);
     let warns = result.count_at(Severity::Warn);
     let infos = result.count_at(Severity::Info);
     if result.rows.is_empty() {
-        println!("No violations found.");
+        console_line("No violations found.");
     } else {
-        println!("Violations: {}", result.rows.len());
-        println!("-----------------");
-        println!("ERROR:      {errors}");
-        println!("WARN:       {warns}");
-        println!("INFO:       {infos}");
+        console_line(&format!("Violations: {}", result.rows.len()));
+        console_line("-----------------");
+        console_line(&format!("ERROR:      {errors}"));
+        console_line(&format!("WARN:       {warns}"));
+        console_line(&format!("INFO:       {infos}"));
     }
 
-    // With no output file the whole table is printed instead of written
-    // (`print == 0` becomes the row count). Only do that for a STANDALONE
-    // `om report`: mid-chain, stdout belongs to the model the chain serializes.
+    // With no output file the table is printed instead of written: its heading
+    // always, even over no rows, and every row unless `--print` names a count.
+    // Only a STANDALONE `om report` does that: mid-chain, stdout belongs to the
+    // model the chain serializes. With an output file, rows are printed only on
+    // request.
     let sep = if format == "csv" { "," } else { "\t" };
-    let mut print = args.print;
-    if args.output.is_none() && print == 0 && !chained {
-        print = result.rows.len();
-    }
-    if print > 0 {
-        let rows: Vec<Vec<String>> = result
-            .rows
-            .iter()
-            .map(|r| {
-                vec![
-                    r.level.label().to_string(),
-                    r.rule.clone(),
-                    r.subject.clone(),
-                    r.property.clone(),
-                    r.value.clone(),
-                ]
-            })
-            .collect();
-        print_n_violations(&rows, print, sep);
+    let rows: Vec<[&str; 5]> = result.table_rows().collect();
+    if args.output.is_none() && !chained {
+        let n = if args.print == 0 { rows.len() } else { args.print };
+        print_n_violations(&rows, n, sep);
+    } else if args.print > 0 {
+        print_n_violations(&rows, args.print, sep);
     }
 
     // Remove the on-disk TDB dataset unless --keep-tdb-mappings was given.
@@ -450,7 +442,17 @@ pub fn step(
     if let FailOn::At(threshold) = fail_on {
         let n = result.count_at_least(threshold);
         if n > 0 {
-            bail!("report: {n} violation(s) at or above {}", threshold.label());
+            // A failed report is logged on the console, after its rows, and that
+            // line is all the command says about it.
+            console_line(&format!(
+                "{} ERROR org.obolibrary.robot.ReportCommand - Report failed!",
+                crate::cmd::reason::log_stamp()
+            ));
+            return Err(crate::cmd::Reported(format!(
+                "report: {n} violation(s) at or above {}",
+                threshold.label()
+            ))
+            .into());
         }
     }
     Ok(Some(model))
@@ -485,8 +487,8 @@ mod tests {
     #[test]
     fn print_n_violations_matches_robots_off_by_one() {
         // Asking for exactly as many rows as there are prints them all…
-        let rows: Vec<Vec<String>> =
-            (0..3).map(|i| vec![format!("r{i}"), "x".into()]).collect();
+        let names: Vec<String> = (0..3).map(|i| format!("r{i}")).collect();
+        let rows: Vec<[&str; 5]> = names.iter().map(|n| [n.as_str(), "x", "", "", ""]).collect();
         print_n_violations(&rows, 3, "\t");
         // …and asking for more prints all of them too, never panicking.
         print_n_violations(&rows, 99, "\t");

@@ -282,7 +282,8 @@ fn is_help_token(tok: Option<&String>) -> bool {
 /// It mirrors a normal CLI run: the standalone sub-CLIs (`jq`, `sssom`, the
 /// bundled `sed`/`grep`/`comm`, `dosdp`) are intercepted first and return their
 /// own exit code; everything else flows through the command-chaining harness.
-/// Errors from the chain are printed to stderr (as the binary would)
+/// Errors from the chain are printed to stderr (as the binary would), except
+/// one the command has already reported on the console ([`crate::cmd::Reported`]),
 /// and mapped to exit code 1. Unlike a bare binary, nothing here calls
 /// `process::exit`, so an embedding host (Python) keeps control.
 pub fn run_argv(mut argv: Vec<String>) -> i32 {
@@ -435,8 +436,11 @@ pub fn run_argv(mut argv: Vec<String>) -> i32 {
     match run_chain(&argv) {
         Ok(()) => 0,
         Err(e) => {
-            // Match the binary's anyhow error rendering on stderr.
-            eprintln!("Error: {e:?}");
+            // Match the binary's anyhow error rendering on stderr. A failure the
+            // command has already reported on the console is not reported again.
+            if !e.chain().any(|c| c.is::<crate::cmd::Reported>()) {
+                eprintln!("Error: {e:?}");
+            }
             1
         }
     }

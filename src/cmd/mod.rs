@@ -308,6 +308,20 @@ pub fn reset_invocation_options() {
     crate::build::set_emulation(None);
 }
 
+/// A failure a command has already reported on the console in its own words.
+/// The run exits 1 and prints nothing more for it; anything that reports errors
+/// itself, such as a build step, still reads the message.
+#[derive(Debug)]
+pub struct Reported(pub String);
+
+impl std::fmt::Display for Reported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Reported {}
+
 /// Resolve an output format from an explicit `--format` name, else the output
 /// path's extension.
 pub fn resolve_format(format: Option<&str>, output: &Path) -> Result<Format> {

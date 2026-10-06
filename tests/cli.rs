@@ -3543,11 +3543,12 @@ fn owltools_list_cycles_counts_and_fails_on_a_cycle() {
     assert_eq!(out.status.code(), Some(0));
 }
 
-/// `report` warns about a rule whose query does not PROJECT `?property` or
-/// `?value`, once per rule, whether or not it matched anything. A projected
-/// variable left unbound is not a defect: the bundled "missing X" rules bind
-/// `?value` only inside `FILTER NOT EXISTS` or an `OPTIONAL … !bound`, and their
-/// rows are reported with an empty Value and no warning.
+/// `report` warns on the console about a rule whose query does not PROJECT
+/// `?entity`, `?property` or `?value`, a line per variable, whether or not it
+/// matched anything, ahead of the summary. A projected variable left unbound is
+/// not a defect: the bundled "missing X" rules bind `?value` only inside
+/// `FILTER NOT EXISTS` or an `OPTIONAL … !bound`, and their rows are reported
+/// with an empty Value and no warning.
 #[test]
 fn report_warns_only_for_variables_a_query_does_not_project() {
     let dir = tmp("report-vars");
@@ -3573,8 +3574,8 @@ fn report_warns_only_for_variables_a_query_does_not_project() {
     // The default profile: four of its rules match rows with an unbound `?value`.
     let tsv = dir.join("default.tsv");
     let out = bin().args(["report", "-i"]).arg(&ont).arg("-o").arg(&tsv).output().unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!stderr.contains("query is missing"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("query is missing"), "{stdout}");
     let rows = std::fs::read_to_string(&tsv).unwrap();
     assert!(rows.contains("WARN\tmissing_definition\tobo:EX_0000001\tIAO:0000115\t\n"), "{rows}");
 
@@ -3593,12 +3594,164 @@ fn report_warns_only_for_variables_a_query_does_not_project() {
         .arg(dir.join("custom.tsv"))
         .output()
         .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(stderr.matches("'no_value' query is missing ?value variable").count(), 1, "{stderr}");
-    assert!(!stderr.contains("'no_value' query is missing ?property"), "{stderr}");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
     // …and a rule that matched nothing is told all the same.
-    assert!(stderr.contains("'never' query is missing ?property variable"), "{stderr}");
-    assert!(stderr.contains("'never' query is missing ?value variable"), "{stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "WARN: 'no_value' query is missing ?value variable\n\
+         WARN: 'never' query is missing ?property variable\n\
+         WARN: 'never' query is missing ?value variable\n\
+         Violations: 4\n\
+         -----------------\n\
+         ERROR:      0\n\
+         WARN:       4\n\
+         INFO:       0\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Whether `line` is a console log line: `YYYY-MM-DD HH:MM:SS,mmm ` and then `rest`.
+fn is_log_line(line: &str, rest: &str) -> bool {
+    let Some((stamp, tail)) = line.split_at_checked(24) else { return false };
+    let shape = stamp.bytes().zip("0000-00-00 00:00:00,000 ".bytes()).all(|(b, s)| match s {
+        b'0' => b.is_ascii_digit(),
+        _ => b == s,
+    });
+    shape && tail == rest
+}
+
+/// A report that fails logs it on the console, after the rows it prints, and
+/// says nothing on stderr; the run exits 1. The report file is written all the
+/// same.
+#[test]
+fn report_logs_its_failure_on_the_console() {
+    let dir = tmp("report-fail");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ont = dir.join("test.obo");
+    // No description, license or title: three ERROR violations under the default
+    // profile.
+    std::fs::write(&ont, "format-version: 1.4\nontology: ex\n\n[Term]\nid: EX:0000001\nname: root thing\n")
+        .unwrap();
+    let failed = "ERROR org.obolibrary.robot.ReportCommand - Report failed!";
+
+    let out = bin().args(["report", "-i"]).arg(&ont).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(lines.contains(&"ERROR:      3"), "{stdout}");
+    assert!(lines[lines.len() - 2].starts_with("INFO\tmissing_superclass\t"), "{stdout}");
+    assert!(is_log_line(lines[lines.len() - 1], failed), "{stdout}");
+
+    let tsv = dir.join("report.tsv");
+    let out = bin().args(["report", "-i"]).arg(&ont).arg("-o").arg(&tsv).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(is_log_line(stdout.lines().last().unwrap(), failed), "{stdout}");
+    assert!(std::fs::read_to_string(&tsv).unwrap().contains("ERROR\tmissing_ontology_title\t"));
+
+    // Below the threshold nothing is logged and the run succeeds.
+    let out = bin().args(["report", "-i"]).arg(&ont).args(["--fail-on", "none"]).output().unwrap();
+    assert!(out.status.success());
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("Report failed!"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A row that binds no `?property` is a violation with no statement: it counts,
+/// and has no row in the table, printed or written. YAML and JSON give its
+/// subject alone.
+#[test]
+fn report_counts_a_violation_without_a_property_and_lists_no_statement() {
+    let dir = tmp("report-noprop");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ont = dir.join("test.obo");
+    std::fs::write(&ont, "format-version: 1.4\nontology: ex\n\n[Term]\nid: EX:0000001\nname: root thing\n")
+        .unwrap();
+    let query = dir.join("noprop.rq");
+    std::fs::write(
+        &query,
+        "PREFIX owl: <http://www.w3.org/2002/07/owl#>\n\
+         SELECT ?entity ?value WHERE { ?entity a owl:Class . BIND(\"x\" AS ?value) }\n",
+    )
+    .unwrap();
+    let profile = dir.join("profile.txt");
+    std::fs::write(&profile, format!("WARN\tfile:{}\n", query.display())).unwrap();
+    let report = |out: Option<&str>| {
+        let mut cmd = bin();
+        cmd.args(["report", "-i"]).arg(&ont).arg("--profile").arg(&profile);
+        if let Some(name) = out {
+            cmd.arg("-o").arg(dir.join(name));
+        }
+        let run = cmd.output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        String::from_utf8_lossy(&run.stdout).into_owned()
+    };
+
+    assert_eq!(
+        report(None),
+        "WARN: 'noprop' query is missing ?property variable\n\
+         Violations: 1\n\
+         -----------------\n\
+         ERROR:      0\n\
+         WARN:       1\n\
+         INFO:       0\n\
+         \n\
+         First 0 violations:\n"
+    );
+    report(Some("r.tsv"));
+    assert_eq!(std::fs::read_to_string(dir.join("r.tsv")).unwrap(), "Level\tRule Name\tSubject\tProperty\tValue\n");
+    report(Some("r.yaml"));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("r.yaml")).unwrap(),
+        "- level: 'WARN'\n  violations:\n  - noprop:\n    - subject: \"obo:EX_0000001\"\n"
+    );
+    report(Some("r.json"));
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("r.json")).unwrap()).unwrap();
+    assert_eq!(json[0]["violations"][0]["noprop"], serde_json::json!([{ "subject": "obo:EX_0000001" }]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A query that does not project `?entity` is warned about like any other
+/// missing variable. It stops the report only when one of its rows comes back,
+/// as such a row names nothing to report.
+#[test]
+fn report_fails_on_a_row_without_an_entity() {
+    let dir = tmp("report-noentity");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ont = dir.join("test.obo");
+    std::fs::write(&ont, "format-version: 1.4\nontology: ex\n\n[Term]\nid: EX:0000001\nname: root thing\n")
+        .unwrap();
+    let report = |name: &str, pattern: &str| {
+        let query = dir.join(format!("{name}.rq"));
+        std::fs::write(
+            &query,
+            format!("PREFIX owl: <http://www.w3.org/2002/07/owl#>\nSELECT ?thing WHERE {{ ?thing a {pattern} }}\n"),
+        )
+        .unwrap();
+        let profile = dir.join(format!("{name}.txt"));
+        std::fs::write(&profile, format!("WARN\tfile:{}\n", query.display())).unwrap();
+        bin().args(["report", "-i"]).arg(&ont).arg("--profile").arg(&profile).output().unwrap()
+    };
+
+    let out = report("nothing", "owl:Nothing");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "WARN: 'nothing' query is missing ?entity variable\n\
+         WARN: 'nothing' query is missing ?property variable\n\
+         WARN: 'nothing' query is missing ?value variable\n\
+         No violations found.\n\
+         \n\
+         First 0 violations:\n"
+    );
+
+    let out = report("classes", "owl:Class");
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("MISSING ENTITY BINDING query 'classes' must include an '?entity'"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
