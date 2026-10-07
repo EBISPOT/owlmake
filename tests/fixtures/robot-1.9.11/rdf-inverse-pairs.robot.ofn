@@ -1,0 +1,37 @@
+Prefix(:=<http://example.org/inv#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/inv>
+
+Declaration(ObjectProperty(:a_parent))
+Declaration(ObjectProperty(:b_before))
+Declaration(ObjectProperty(:has_part))
+Declaration(ObjectProperty(:part_of))
+Declaration(ObjectProperty(:y_after))
+Declaration(ObjectProperty(:z_child))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :a_parent (:a_parent)
+
+InverseObjectProperties(:a_parent :z_child)
+
+# Object Property: :b_before (:b_before)
+
+InverseObjectProperties(:b_before :y_after)
+InverseObjectProperties(Annotation(rdfs:comment "stated by y_after") :b_before :y_after)
+
+# Object Property: :has_part (:has_part)
+
+InverseObjectProperties(:has_part :part_of)
+
+
+
+)

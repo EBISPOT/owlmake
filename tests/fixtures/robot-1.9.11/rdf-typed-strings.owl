@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/typed-strings#"
+     xml:base="http://example.org/typed-strings"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/typed-strings"/>
+    <owl:AnnotationProperty rdf:about="http://example.org/typed-strings#p"/>
+    <owl:DatatypeProperty rdf:about="http://example.org/typed-strings#dp"/>
+    <owl:Class rdf:about="http://example.org/typed-strings#C"/>
+
+    <!-- Typed and untyped literals sort apart. -->
+    <owl:Class rdf:about="http://example.org/typed-strings#A">
+        <p>3030</p>
+        <p rdf:datatype="http://www.w3.org/2001/XMLSchema#anyURI">2020</p>
+        <p rdf:datatype="http://www.w3.org/2001/XMLSchema#string">1010</p>
+        <rdfs:comment xml:lang="en">mmm</rdfs:comment>
+        <rdfs:comment>zzz</rdfs:comment>
+        <rdfs:comment rdf:datatype="http://www.w3.org/2001/XMLSchema#string">aaa</rdfs:comment>
+        <rdfs:label xml:lang="en">definition</rdfs:label>
+        <rdfs:label rdf:datatype="http://www.w3.org/2001/XMLSchema#string">definition</rdfs:label>
+    </owl:Class>
+
+    <!-- The same text typed and untyped is one literal: the first stated. -->
+    <owl:Class rdf:about="http://example.org/typed-strings#B">
+        <rdfs:label rdf:datatype="http://www.w3.org/2001/XMLSchema#string">y</rdfs:label>
+        <rdfs:label>y</rdfs:label>
+        <rdfs:label xml:lang="en">y</rdfs:label>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/typed-strings#D">
+        <rdfs:label>z</rdfs:label>
+        <rdfs:label rdf:datatype="http://www.w3.org/2001/XMLSchema#string">z</rdfs:label>
+        <rdfs:label xml:lang="en">z</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/typed-strings#D"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget xml:lang="en">z</owl:annotatedTarget>
+        <rdfs:comment rdf:datatype="http://www.w3.org/2001/XMLSchema#string">c</rdfs:comment>
+        <rdfs:comment>c</rdfs:comment>
+        <rdfs:comment xml:lang="en">c</rdfs:comment>
+    </owl:Axiom>
+    <owl:NamedIndividual rdf:about="http://example.org/typed-strings#i">
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#string">v</dp>
+        <dp>v</dp>
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#anyURI">u</dp>
+    </owl:NamedIndividual>
+
+    <!-- A reification typing the statement's literal the other way names it. -->
+    <owl:Class rdf:about="http://example.org/typed-strings#E">
+        <rdfs:label>x</rdfs:label>
+        <rdfs:label xml:lang="en">x</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/typed-strings#E"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#string">x</owl:annotatedTarget>
+        <rdfs:comment>c1</rdfs:comment>
+    </owl:Axiom>
+    <owl:Class rdf:about="http://example.org/typed-strings#F">
+        <rdfs:label rdf:datatype="http://www.w3.org/2001/XMLSchema#string">w</rdfs:label>
+        <rdfs:label xml:lang="en">w</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/typed-strings#F"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>w</owl:annotatedTarget>
+        <rdfs:comment>c2</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description rdf:nodeID="a">
+        <rdf:type rdf:resource="http://example.org/typed-strings#C"/>
+        <dp>t</dp>
+        <dp xml:lang="en">t</dp>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="a"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/typed-strings#dp"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#string">t</owl:annotatedTarget>
+        <rdfs:comment>c3</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>

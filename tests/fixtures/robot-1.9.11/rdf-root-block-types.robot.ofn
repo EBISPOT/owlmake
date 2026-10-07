@@ -1,0 +1,78 @@
+Prefix(:=<http://example.org/root-blocks#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/root-blocks>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:F))
+Declaration(ObjectProperty(:s))
+Declaration(ObjectProperty(:t))
+Declaration(ObjectProperty(:u))
+Declaration(DataProperty(:p))
+Declaration(DataProperty(:q))
+Declaration(DataProperty(:r))
+Declaration(NamedIndividual(:a))
+Declaration(NamedIndividual(:b))
+Declaration(NamedIndividual(:c))
+Declaration(NamedIndividual(:d))
+Declaration(NamedIndividual(:x))
+Declaration(NamedIndividual(:y))
+Declaration(NamedIndividual(:z))
+############################
+#   Object Properties
+############################
+
+# Object Property: :s (:s)
+
+EquivalentObjectProperties(:s :t :u)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :p (:p)
+
+EquivalentDataProperties(:p :q :r)
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+EquivalentClasses(:A :B :C)
+
+# Class: :D (:D)
+
+EquivalentClasses(:D :E :F)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :a (:a)
+
+SameIndividual(:a :b)
+
+# Individual: :c (:c)
+
+SameIndividual(:c :d)
+
+# Individual: :x (:x)
+
+SameIndividual(:x :y :z)
+
+
+)

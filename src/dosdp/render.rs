@@ -26,6 +26,8 @@ use horned_owl::model::{
     ClassExpression as CE, Component, DisjointClasses, EquivalentClasses, Literal, RcStr, SubClassOf,
 };
 
+use crate::java_number;
+
 use super::table::Row;
 use super::{
     expression, java, least, ordered_keys, scala_map_key_order, scala_set_order, AnnotationDef, AxiomType, Clause,
@@ -740,7 +742,7 @@ impl<'a> Renderer<'a> {
         for gm in self.group_finder.find_all(sub).map_err(|e| anyhow!(e))? {
             out.push_str(&sub[last..gm.start()]);
             let digits = gm.group(1).unwrap_or("");
-            let n = java::parse_int(digits)
+            let n = java_number::parse_int(digits)
                 .and_then(|n| usize::try_from(n).ok())
                 .ok_or_else(|| anyhow!("`{sub}`: `\\{digits}` is no group number"))?;
             if n > re.group_count() {

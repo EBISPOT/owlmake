@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/xml-literal#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/xml-literal>
+Declaration(Class(:A))
+Declaration(DataProperty(:dp))
+Declaration(NamedIndividual(:i))
+AnnotationAssertion(rdfs:comment :A "plain text"^^rdf:XMLLiteral)
+AnnotationAssertion(Annotation(rdfs:label "annotated") rdfs:seeAlso :A "<owl:Thing xmlns:owl=\"http://www.w3.org/2002/07/owl#\"/>"^^rdf:XMLLiteral)
+DataPropertyAssertion(:dp :i "<p xmlns=\"http://example.org/p\"><p>nested</p></p>"^^rdf:XMLLiteral)
+)

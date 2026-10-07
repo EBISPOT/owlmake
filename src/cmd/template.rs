@@ -987,10 +987,10 @@ fn apply_template(
                         let dt = dt.trim().trim_start_matches('<').trim_end_matches('>');
                         let datatype_iri = resolver(dt)
                             .ok_or_else(|| format!("could not resolve datatype '{dt}'"))?;
-                        Literal::Datatype {
+                        crate::model::literal_as_made(Literal::Datatype {
                             literal: literal.trim().to_string(),
                             datatype_iri: b.iri(datatype_iri),
-                        }
+                        })
                     }
                     None => Literal::Simple { literal: value.trim().to_string() },
                 };
@@ -1194,10 +1194,10 @@ fn build_annotation(
             declare_annotation_property(b, model, &prop);
             Ok(Annotation { ann: Default::default(),
                 ap: b.annotation_property(prop.as_str()),
-                av: AnnotationValue::Literal(Literal::Datatype {
+                av: AnnotationValue::Literal(crate::model::literal_as_made(Literal::Datatype {
                     literal: value.trim().to_string(),
                     datatype_iri: b.iri(dt_iri.as_str()),
-                }),
+                })),
             })
         }
         "AL" => {
@@ -1209,10 +1209,10 @@ fn build_annotation(
             declare_annotation_property(b, model, &prop);
             Ok(Annotation { ann: Default::default(),
                 ap: b.annotation_property(prop.as_str()),
-                av: AnnotationValue::Literal(Literal::Language {
+                av: AnnotationValue::Literal(crate::model::literal_as_made(Literal::Language {
                     literal: value.trim().to_string(),
                     lang: lang.trim().to_string(),
-                }),
+                })),
             })
         }
         "AI" => {

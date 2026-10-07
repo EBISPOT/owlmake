@@ -1,0 +1,269 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/general-axioms-reaching-individuals-nested#"
+     xml:base="http://example.org/general-axioms-reaching-individuals-nested"
+     xmlns:g="http://example.org/g#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:swrl="http://www.w3.org/2003/11/swrl#"
+     xmlns:swrlb="http://www.w3.org/2003/11/swrlb#">
+    <owl:Ontology rdf:about="http://example.org/general-axioms-reaching-individuals-nested"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#ap0 -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/g#ap0"/>
+    
+
+
+    <!-- http://example.org/g#ap1 -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/g#ap1"/>
+    
+
+
+    <!-- http://example.org/g#ap2 -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/g#ap2"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#op0 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#op0"/>
+    
+
+
+    <!-- http://example.org/g#op1 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#op1"/>
+    
+
+
+    <!-- http://example.org/g#op2 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#op2"/>
+    
+
+
+    <!-- http://example.org/g#op3 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#op3"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#dp0 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/g#dp0"/>
+    
+
+
+    <!-- http://example.org/g#dp1 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/g#dp1"/>
+    
+
+
+    <!-- http://example.org/g#dp2 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/g#dp2"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#C0 -->
+
+    <owl:Class rdf:about="http://example.org/g#C0"/>
+    
+
+
+    <!-- http://example.org/g#C1 -->
+
+    <owl:Class rdf:about="http://example.org/g#C1"/>
+    
+
+
+    <!-- http://example.org/g#C2 -->
+
+    <owl:Class rdf:about="http://example.org/g#C2"/>
+    
+
+
+    <!-- http://example.org/g#C3 -->
+
+    <owl:Class rdf:about="http://example.org/g#C3"/>
+    
+
+
+    <!-- http://example.org/g#C4 -->
+
+    <owl:Class rdf:about="http://example.org/g#C4"/>
+    
+
+
+    <!-- http://example.org/g#C5 -->
+
+    <owl:Class rdf:about="http://example.org/g#C5"/>
+    
+
+
+    <!-- http://example.org/g#C6 -->
+
+    <owl:Class rdf:about="http://example.org/g#C6"/>
+    
+
+
+    <!-- http://example.org/g#C7 -->
+
+    <owl:Class rdf:about="http://example.org/g#C7"/>
+    
+
+
+    <!-- http://example.org/g#C8 -->
+
+    <owl:Class rdf:about="http://example.org/g#C8"/>
+    
+
+
+    <!-- http://example.org/g#C9 -->
+
+    <owl:Class rdf:about="http://example.org/g#C9"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#i0 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/g#i0"/>
+    
+
+
+    <!-- http://example.org/g#i1 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/g#i1"/>
+    
+
+
+    <!-- http://example.org/g#i2 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/g#i2"/>
+    
+
+
+    <!-- http://example.org/g#i3 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/g#i3"/>
+    
+
+
+    <!-- http://example.org/g#i4 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/g#i4"/>
+    
+
+
+    <!-- http://example.org/g#i5 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/g#i5"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NegativePropertyAssertion"/>
+        <owl:sourceIndividual rdf:nodeID="genid2"/>
+        <owl:assertionProperty rdf:resource="http://example.org/g#op3"/>
+        <owl:targetIndividual>
+            <rdf:Description/>
+        </owl:targetIndividual>
+        <rdfs:seeAlso rdf:nodeID="genid5"/>
+    </rdf:Description>
+    <rdf:Description rdf:nodeID="genid2"/>
+    <rdf:Description rdf:nodeID="genid5"/>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid6"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/g#ap2"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">6</owl:annotatedTarget>
+        <rdfs:seeAlso>v20</rdfs:seeAlso>
+    </owl:Annotation>
+    <owl:Axiom rdf:nodeID="genid6">
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#op3"/>
+                <owl:hasValue rdf:nodeID="genid2"/>
+                <rdfs:subClassOf rdf:resource="http://example.org/g#C4"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/g#C4"/>
+        <g:ap2 rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">6</g:ap2>
+    </owl:Axiom>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

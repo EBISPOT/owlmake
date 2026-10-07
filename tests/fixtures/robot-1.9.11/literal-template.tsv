@@ -1,0 +1,4 @@
+ID	Label	Bool	Dbl	Lang	Int
+ID	LABEL	AT rdfs:comment^^xsd:boolean	AT rdfs:comment^^xsd:double	AL rdfs:label@EN	AT rdfs:comment^^xsd:integer
+ex:A	a	1	2e3	Foo	+5
+ex:C	c	0	-0.0	Bar	007

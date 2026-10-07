@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/inv#"
+     xml:base="http://example.org/inv"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/inv"/>
+    <!-- stated in both directions -->
+    <owl:ObjectProperty rdf:about="#part_of">
+        <owl:inverseOf rdf:resource="#has_part"/>
+    </owl:ObjectProperty>
+    <owl:ObjectProperty rdf:about="#has_part">
+        <owl:inverseOf rdf:resource="#part_of"/>
+    </owl:ObjectProperty>
+    <!-- stated once, the subject sorting after the object -->
+    <owl:ObjectProperty rdf:about="#z_child">
+        <owl:inverseOf rdf:resource="#a_parent"/>
+    </owl:ObjectProperty>
+    <owl:ObjectProperty rdf:about="#a_parent"/>
+    <!-- one direction annotated, the other plain -->
+    <owl:ObjectProperty rdf:about="#y_after">
+        <owl:inverseOf rdf:resource="#b_before"/>
+    </owl:ObjectProperty>
+    <owl:ObjectProperty rdf:about="#b_before">
+        <owl:inverseOf rdf:resource="#y_after"/>
+    </owl:ObjectProperty>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="#y_after"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#inverseOf"/>
+        <owl:annotatedTarget rdf:resource="#b_before"/>
+        <rdfs:comment>stated by y_after</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>

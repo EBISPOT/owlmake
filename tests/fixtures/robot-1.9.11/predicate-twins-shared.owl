@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/predicate-twins-shared.owl#"
+     xml:base="http://example.org/predicate-twins-shared.owl"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/predicate-twins-shared.owl"/>
+    <owl:ObjectProperty rdf:about="http://example.org/predicate-twins-shared.owl#q"/>
+    <owl:Class rdf:about="http://example.org/predicate-twins-shared.owl#B"/>
+    <owl:Class rdf:about="http://example.org/predicate-twins-shared.owl#A1">
+        <owl:equivalentClass rdf:nodeID="n1"/>
+        <rdfs:subClassOf rdf:nodeID="n1"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="n1">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins-shared.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins-shared.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins-shared.owl#A1"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="n1"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+    <owl:Class rdf:about="http://example.org/predicate-twins-shared.owl#A2">
+        <owl:equivalentClass rdf:nodeID="n2"/>
+        <rdfs:subClassOf rdf:nodeID="n2"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="n2">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins-shared.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins-shared.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins-shared.owl#A2"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="n2"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Class rdf:about="http://example.org/predicate-twins-shared.owl#A3">
+        <owl:equivalentClass>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins-shared.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins-shared.owl#B"/>
+            </owl:Restriction>
+        </owl:equivalentClass>
+        <rdfs:subClassOf rdf:nodeID="n3"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="n3">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins-shared.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins-shared.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins-shared.owl#A3"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="n3"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>

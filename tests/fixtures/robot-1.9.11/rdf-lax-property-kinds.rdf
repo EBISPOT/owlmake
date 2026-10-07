@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Ontology rdf:about="http://example.org/lax"/>
+    <owl:AnnotationProperty rdf:about="http://example.org/lax#r"/>
+    <owl:Class rdf:about="http://example.org/lax#A"/>
+    <owl:Class rdf:about="http://example.org/lax#B">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/lax#r"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/lax#A"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    <rdf:Description rdf:about="http://example.org/lax#p">
+        <owl:equivalentProperty rdf:resource="http://example.org/lax#q"/>
+    </rdf:Description>
+</rdf:RDF>

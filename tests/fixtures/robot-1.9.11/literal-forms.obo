@@ -1,0 +1,12 @@
+format-version: 1.2
+ontology: lits
+
+[Term]
+id: LITS:0000001
+name: one
+property_value: LITS:dp "1" xsd:boolean
+property_value: LITS:dp "1" xsd:float
+property_value: LITS:dp "2e3" xsd:double
+property_value: LITS:dp "+5" xsd:integer
+property_value: LITS:dp "007" xsd:integer
+property_value: LITS:dp "s1" xsd:string

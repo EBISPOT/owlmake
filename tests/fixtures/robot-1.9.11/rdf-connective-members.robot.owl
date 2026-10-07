@@ -1,0 +1,262 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/connective-members#"
+     xml:base="http://example.org/connective-members"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/connective-members"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/connective-members#d1 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/connective-members#d1">
+        <rdfs:range>
+            <rdfs:Datatype>
+                <owl:unionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </rdfs:Datatype>
+        </rdfs:range>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/connective-members#d2 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/connective-members#d2">
+        <rdfs:range>
+            <rdfs:Datatype>
+                <owl:intersectionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </rdfs:Datatype>
+        </rdfs:range>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/connective-members#d3 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/connective-members#d3">
+        <rdfs:range>
+            <rdfs:Datatype>
+                <owl:oneOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </rdfs:Datatype>
+        </rdfs:range>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/connective-members#d4 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/connective-members#d4">
+        <rdfs:range>
+            <rdfs:Datatype>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#integer"/>
+                </owl:unionOf>
+            </rdfs:Datatype>
+        </rdfs:range>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/connective-members#d5 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/connective-members#d5">
+        <rdfs:range>
+            <rdfs:Datatype>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#integer"/>
+                    <rdf:Description rdf:about="http://www.w3.org/2001/XMLSchema#string"/>
+                </owl:intersectionOf>
+            </rdfs:Datatype>
+        </rdfs:range>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/connective-members#B -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#B"/>
+    
+
+
+    <!-- http://example.org/connective-members#C -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#C"/>
+    
+
+
+    <!-- http://example.org/connective-members#EmptyI -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#EmptyI">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#EmptyO -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#EmptyO">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:oneOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#EmptyU -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#EmptyU">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:unionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#OneI -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#OneI">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/connective-members#B"/>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#OneO -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#OneO">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:oneOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/connective-members#i"/>
+                </owl:oneOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#OneU -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#OneU">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/connective-members#B"/>
+                </owl:unionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#SubEmptyI -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#SubEmptyI">
+        <rdfs:subClassOf>
+            <owl:Class>
+                <owl:intersectionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </owl:Class>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#SubEmptyU -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#SubEmptyU">
+        <rdfs:subClassOf>
+            <owl:Class>
+                <owl:unionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </owl:Class>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#SubOneU -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#SubOneU">
+        <rdfs:subClassOf>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/connective-members#C"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/connective-members#TwoU -->
+
+    <owl:Class rdf:about="http://example.org/connective-members#TwoU">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/connective-members#B"/>
+                    <rdf:Description rdf:about="http://example.org/connective-members#C"/>
+                </owl:unionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/connective-members#i -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/connective-members#i"/>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

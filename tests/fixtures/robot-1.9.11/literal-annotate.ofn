@@ -1,0 +1,4 @@
+Prefix(:=<http://example.org/a#>)
+Ontology(<http://example.org/a>
+Declaration(Class(:A))
+)

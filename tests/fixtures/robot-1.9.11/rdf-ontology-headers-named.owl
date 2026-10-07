@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Ontology rdf:about="http://example.org/ontology-headers/first">
+        <owl:imports rdf:resource="http://example.org/ontology-headers/one.owl"/>
+        <rdfs:comment>a header with no IRI</rdfs:comment>
+        <rdfs:label xml:lang="en">first</rdfs:label>
+    </owl:Ontology>
+    <owl:Ontology rdf:about="http://example.org/ontology-headers/second">
+        <owl:imports rdf:resource="http://example.org/ontology-headers/two.owl"/>
+        <owl:versionIRI rdf:resource="http://example.org/ontology-headers/second/v1"/>
+        <rdfs:comment>a header with an IRI</rdfs:comment>
+    </owl:Ontology>
+    <owl:Class rdf:about="http://example.org/ontology-headers#A">
+        <rdfs:label>a</rdfs:label>
+    </owl:Class>
+</rdf:RDF>

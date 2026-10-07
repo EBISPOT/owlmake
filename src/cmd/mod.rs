@@ -226,6 +226,33 @@ pub fn take_or_load(piped: Option<Model>, input: Option<&Path>, common: &CommonA
     Ok(model)
 }
 
+/// Read the entities of the imports closure of `model`, a document loaded
+/// without its imports, unless they are known already: a document that
+/// imports is written among the ontologies it imports (see
+/// [`crate::model::ImportsClosure`]). The closure is resolved from a scratch
+/// document carrying only the root's `Import(...)`s, so the root's own
+/// signature never counts as the closure's. Best-effort: an unresolvable
+/// closure leaves the entities unknown.
+pub(crate) fn read_imports_closure(model: &mut Model, input: Option<&Path>, common: &CommonArgs) {
+    use horned_owl::model::MutableOntology;
+
+    if model.imports_closure.is_some() {
+        return;
+    }
+    let mut imports_only = Model::new();
+    for ac in model.ont.iter() {
+        if matches!(ac.component, horned_owl::model::Component::Import(_)) {
+            imports_only.ont.insert(ac.clone());
+        }
+    }
+    if imports_only.ont.iter().next().is_none() {
+        return;
+    }
+    if common.apply_catalog(&mut imports_only, input).is_ok() {
+        model.imports_closure = imports_only.imports_closure;
+    }
+}
+
 /// Like [`take_or_load`] but WITHOUT resolving/merging the `owl:imports` closure.
 ///
 /// For commands that operate only on a document's own axioms and must keep its
@@ -233,39 +260,6 @@ pub fn take_or_load(piped: Option<Model>, input: Option<&Path>, common: &CommonA
 /// `kgcl:mint … convert`, where no import document is read at all and only the
 /// root is serialised, so the edit file keeps its import declarations instead of
 /// being flattened into its whole closure.
-/// The signature of the import closure ALONE — the entities an imported
-/// ontology declares on the root's behalf, keyed as
-/// [`crate::build::closure_declared_entities`] keys them. Resolved from a scratch
-/// document carrying only the root's `Import(...)`s, so the root's own signature
-/// never leaks in: an entity the document references but nothing imports must
-/// still get its stub. Best-effort — an unresolvable closure yields an empty set,
-/// and every undeclared entity is then stubbed.
-pub(crate) fn closure_declared_signature(
-    root: &Model,
-    input: Option<&Path>,
-    common: &CommonArgs,
-) -> std::collections::HashSet<String> {
-    use horned_owl::model::MutableOntology;
-
-    let mut imports_only = Model::new();
-    for ac in root.ont.iter() {
-        if matches!(ac.component, horned_owl::model::Component::Import(_)) {
-            imports_only.ont.insert(ac.clone());
-        }
-    }
-    if !imports_only
-        .ont
-        .iter()
-        .any(|ac| matches!(ac.component, horned_owl::model::Component::Import(_)))
-    {
-        return std::collections::HashSet::new();
-    }
-    match common.apply_catalog(&mut imports_only, input) {
-        Ok(()) => crate::build::closure_declared_entities(&imports_only),
-        Err(_) => std::collections::HashSet::new(),
-    }
-}
-
 pub fn take_or_load_no_imports(
     piped: Option<Model>,
     input: Option<&Path>,
@@ -531,18 +525,17 @@ pub(crate) fn resolve_import_closure(
             .filter(|c| !model.ont.i().contains(c))
             .cloned()
             .collect();
-        // What the closure declares on the root's behalf: an entity anywhere in an
-        // imported ontology's signature is that ontology's to declare, so the root
-        // materialises no stub for it. The save drops the borrowed axioms again,
-        // which is exactly when this record is the only thing left that knows.
-        let declared = crate::build::closure_declared_entities(&imported);
+        // The closure's entities decide what the root, written among its
+        // imports, states of an entity it only names. The save drops the
+        // borrowed axioms again, which is exactly when this record is the only
+        // thing left that knows.
+        model.imports_closure.get_or_insert_with(Default::default).add(&imported);
         // A closure member was opened with the document, so a functional
         // write's banners draw on its labels too.
         if !model.banner_docs.is_empty() {
             model.banner_docs.push(crate::cmd::banner_doc_of(&imported, false));
         }
         crate::cmd::merge::merge_into(model, &imported, &opts);
-        model.closure_declared.extend(declared);
         for c in borrowed {
             if model.ont.i().contains(&c) {
                 model.imported_components.insert(c);

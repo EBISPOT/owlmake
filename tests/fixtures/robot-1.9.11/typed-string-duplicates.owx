@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://example.org/typed-string-duplicates" ontologyIRI="http://example.org/typed-string-duplicates">
+    <Prefix name="" IRI="http://example.org/typed-string-duplicates#"/>
+    <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+    <Declaration><Class IRI="#A"/></Declaration>
+    <Declaration><Class IRI="#B"/></Declaration>
+    <Declaration><DataProperty IRI="#dp"/></Declaration>
+    <Declaration><NamedIndividual IRI="#i"/></Declaration>
+    <AnnotationAssertion>
+        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+        <IRI>#A</IRI>
+        <Literal>x</Literal>
+    </AnnotationAssertion>
+    <AnnotationAssertion>
+        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+        <IRI>#A</IRI>
+        <Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#string">x</Literal>
+    </AnnotationAssertion>
+    <AnnotationAssertion>
+        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+        <IRI>#B</IRI>
+        <Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#string">y</Literal>
+    </AnnotationAssertion>
+    <AnnotationAssertion>
+        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+        <IRI>#B</IRI>
+        <Literal>y</Literal>
+    </AnnotationAssertion>
+    <AnnotationAssertion>
+        <AnnotationProperty abbreviatedIRI="rdfs:label"/>
+        <IRI>#B</IRI>
+        <Literal xml:lang="en">y</Literal>
+    </AnnotationAssertion>
+    <DataPropertyAssertion><DataProperty IRI="#dp"/><NamedIndividual IRI="#i"/><Literal>v</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="#dp"/><NamedIndividual IRI="#i"/><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#string">v</Literal></DataPropertyAssertion>
+</Ontology>

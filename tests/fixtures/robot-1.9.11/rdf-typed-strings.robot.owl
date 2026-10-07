@@ -1,0 +1,169 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/typed-strings#"
+     xml:base="http://example.org/typed-strings"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:typed-strings="http://example.org/typed-strings#">
+    <owl:Ontology rdf:about="http://example.org/typed-strings"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/typed-strings#p -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/typed-strings#p"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/typed-strings#dp -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/typed-strings#dp"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/typed-strings#A -->
+
+    <owl:Class rdf:about="http://example.org/typed-strings#A">
+        <p>3030</p>
+        <p rdf:datatype="http://www.w3.org/2001/XMLSchema#anyURI">2020</p>
+        <p>1010</p>
+        <rdfs:comment xml:lang="en">mmm</rdfs:comment>
+        <rdfs:comment>zzz</rdfs:comment>
+        <rdfs:comment>aaa</rdfs:comment>
+        <rdfs:label xml:lang="en">definition</rdfs:label>
+        <rdfs:label>definition</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/typed-strings#B -->
+
+    <owl:Class rdf:about="http://example.org/typed-strings#B">
+        <rdfs:label xml:lang="en">y</rdfs:label>
+        <rdfs:label>y</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/typed-strings#C -->
+
+    <owl:Class rdf:about="http://example.org/typed-strings#C"/>
+    
+
+
+    <!-- http://example.org/typed-strings#D -->
+
+    <owl:Class rdf:about="http://example.org/typed-strings#D">
+        <rdfs:label>z</rdfs:label>
+        <rdfs:label xml:lang="en">z</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/typed-strings#D"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget xml:lang="en">z</owl:annotatedTarget>
+        <rdfs:comment xml:lang="en">c</rdfs:comment>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/typed-strings#E -->
+
+    <owl:Class rdf:about="http://example.org/typed-strings#E">
+        <rdfs:label xml:lang="en">x</rdfs:label>
+        <rdfs:label>x</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/typed-strings#E"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>x</owl:annotatedTarget>
+        <rdfs:comment>c1</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/typed-strings#F -->
+
+    <owl:Class rdf:about="http://example.org/typed-strings#F">
+        <rdfs:label>w</rdfs:label>
+        <rdfs:label xml:lang="en">w</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/typed-strings#F"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>w</owl:annotatedTarget>
+        <rdfs:comment>c2</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/typed-strings#i -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/typed-strings#i">
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#anyURI">u</dp>
+        <dp>v</dp>
+    </owl:NamedIndividual>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <rdf:type rdf:resource="http://example.org/typed-strings#C"/>
+                <dp xml:lang="en">t</dp>
+                <dp>t</dp>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://example.org/typed-strings#dp"/>
+        <owl:annotatedTarget>t</owl:annotatedTarget>
+        <rdfs:comment>c3</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/s#>)
+Ontology(<http://example.org/s>
+SameIndividual(_:b _:a)
+SameIndividual(_:x1 _:x2)
+SameIndividual(:n2 :n1)
+DifferentIndividuals(_:d _:c)
+SameIndividual(:m _:e)
+)

@@ -4,8 +4,9 @@
 //! IRI — the OWL namespace for an anonymous ontology — holding, in order: one
 //! `Prefix` element per declared prefix (shortest name first, then
 //! alphabetically), the imports, the ontology annotations, the ontology's own
-//! declarations, a declaration for each entity it mentions without declaring
-//! (see [`crate::io::entities::undeclared`]), and every other axiom; each group
+//! declarations, a declaration for each entity it or its imports mention and
+//! nothing declares (see [`crate::io::entities::missing_declarations`]), and
+//! every other axiom; each group
 //! in the natural order of OWL objects ([`crate::io::natural_order`]).
 //!
 //! An IRI is written one of three ways. Inside the base it is relative to it
@@ -821,7 +822,7 @@ pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -
     for d in decls {
         r.axiom(d)?;
     }
-    for (kind, iri) in entities::undeclared(model) {
+    for (kind, iri) in entities::missing_declarations(model) {
         r.xml.start("Declaration")?;
         r.entity(entity_element(kind), &iri)?;
         r.xml.end()?;

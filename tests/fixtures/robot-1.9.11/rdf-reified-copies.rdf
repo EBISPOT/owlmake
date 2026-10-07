@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:owl="http://www.w3.org/2002/07/owl#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/c"/>
+    <owl:ObjectProperty rdf:about="http://example.org/p"/>
+    <owl:Class rdf:about="http://example.org/B"/>
+    <owl:Class rdf:about="http://example.org/C"/>
+    <owl:Class rdf:about="http://example.org/A">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/B"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/p"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/C"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/B"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/B"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/p"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/C"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:annotatedTarget>
+        <rdfs:comment>copied target</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/B"/>
+            </owl:Restriction>
+        </owl:annotatedTarget>
+        <rdfs:comment>copied restriction</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>

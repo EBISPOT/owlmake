@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!DOCTYPE rdf:RDF [
+    <!ENTITY ex "http://example.org/ex#" >
+    <!ENTITY obo "http://purl.obolibrary.org/obo/" >
+    <!ENTITY food "http://example.org/food#" >
+]>
+<rdf:RDF xmlns="&food;"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:food="&food;"
+     xmlns:foo="http://example.org/foo#">
+    <owl:Ontology rdf:about="http://purl.obolibrary.org/obo/test.owl"/>
+    <owl:Class rdf:about="&obo;TEST_0000001">
+        <rdfs:label>one</rdfs:label>
+        <rdfs:seeAlso rdf:resource="&ex;thing"/>
+    </owl:Class>
+    <owl:Class rdf:about="&obo;TEST_0000002" xmlns:bar="http://example.org/bar#">
+        <rdfs:subClassOf rdf:resource="&obo;TEST_0000001"/>
+        <rdfs:seeAlso rdf:resource="http://example.org/bar#thing"/>
+    </owl:Class>
+    <Fish rdf:about="&obo;TEST_0000003">
+        <rdfs:label>three</rdfs:label>
+    </Fish>
+</rdf:RDF>

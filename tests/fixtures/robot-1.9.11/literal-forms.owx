@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://example.org/lits" ontologyIRI="http://example.org/lits">
+    <Declaration><DataProperty IRI="http://example.org/lits#dp"/></Declaration>
+    <Declaration><NamedIndividual IRI="http://example.org/lits#i"/></Declaration>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#boolean">1</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#float">1</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#double">2e3</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#integer">+5</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal datatypeIRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral">p1 text@EN-gb</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal datatypeIRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral">p2 text</Literal></DataPropertyAssertion>
+    <DataPropertyAssertion><DataProperty IRI="http://example.org/lits#dp"/><NamedIndividual IRI="http://example.org/lits#i"/><Literal xml:lang="EN-GB">l1 text</Literal></DataPropertyAssertion>
+    <AnnotationAssertion><AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#comment"/><IRI>http://example.org/lits#i</IRI><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#boolean">0</Literal></AnnotationAssertion>
+    <AnnotationAssertion><AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#comment"/><IRI>http://example.org/lits#i</IRI><Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#integer" xml:lang="fr">5</Literal></AnnotationAssertion>
+</Ontology>

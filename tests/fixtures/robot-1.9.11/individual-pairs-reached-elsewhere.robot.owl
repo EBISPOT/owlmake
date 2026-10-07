@@ -1,0 +1,267 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/pairs#"
+     xml:base="http://example.org/pairs"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:pairs="http://example.org/pairs#">
+    <owl:Ontology rdf:about="http://example.org/pairs"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/pairs#ap0 -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/pairs#ap0">
+        <rdfs:comment rdf:nodeID="genid1"/>
+    </owl:AnnotationProperty>
+    <rdf:Description rdf:nodeID="genid1"/>
+    
+
+
+    <!-- http://example.org/pairs#i1 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#i1">
+        <owl:sameAs rdf:resource="http://example.org/pairs#i3"/>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/pairs#i3 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#i3">
+        <owl:sameAs rdf:nodeID="genid1"/>
+    </rdf:Description>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/pairs#op0 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/pairs#op0">
+        <rdfs:range rdf:nodeID="genid2"/>
+    </owl:ObjectProperty>
+    <owl:Restriction rdf:nodeID="genid2">
+        <owl:onProperty rdf:resource="http://example.org/pairs#op0"/>
+        <owl:hasValue rdf:nodeID="genid3"/>
+    </owl:Restriction>
+    <rdf:Description rdf:nodeID="genid3">
+        <op1 rdf:nodeID="genid5"/>
+    </rdf:Description>
+    <rdf:Description rdf:nodeID="genid5"/>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/pairs#i5"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#differentFrom"/>
+        <owl:annotatedTarget rdf:nodeID="genid3"/>
+        <rdfs:comment>annotated difference</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/pairs#op0"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#range"/>
+        <owl:annotatedTarget rdf:nodeID="genid2"/>
+        <rdfs:comment>annotated range</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/pairs#i4 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#i4">
+        <owl:sameAs rdf:nodeID="genid3"/>
+        <owl:differentFrom rdf:nodeID="genid3"/>
+        <owl:differentFrom rdf:nodeID="genid5"/>
+        <op1 rdf:nodeID="genid3"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/pairs#i5"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#differentFrom"/>
+        <owl:annotatedTarget rdf:nodeID="genid3"/>
+        <rdfs:comment>annotated difference</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/pairs#op0"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#range"/>
+        <owl:annotatedTarget rdf:nodeID="genid2"/>
+        <rdfs:comment>annotated range</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/pairs#op1 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/pairs#op1"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/pairs#A -->
+
+    <owl:Class rdf:about="http://example.org/pairs#A">
+        <owl:equivalentClass rdf:resource="http://example.org/pairs#B1"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/pairs#op1"/>
+                <owl:hasValue rdf:nodeID="genid8"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    <rdf:Description rdf:nodeID="genid8"/>
+    
+
+
+    <!-- http://example.org/pairs#B1 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#B1">
+        <owl:equivalentClass rdf:resource="http://example.org/pairs#B2"/>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/pairs#B2 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#B2"/>
+    
+
+
+    <!-- http://example.org/pairs#A0 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#A0">
+        <owl:sameAs rdf:nodeID="genid8"/>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/pairs#B1 -->
+
+    <owl:Class rdf:about="http://example.org/pairs#B1"/>
+    
+
+
+    <!-- http://example.org/pairs#B2 -->
+
+    <owl:Class rdf:about="http://example.org/pairs#B2"/>
+    
+
+
+    <!-- http://example.org/pairs#C -->
+
+    <owl:Class rdf:about="http://example.org/pairs#C">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/pairs#op1"/>
+                <owl:hasValue rdf:nodeID="genid10"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    <rdf:Description rdf:nodeID="genid10"/>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+        <owl:distinctMembers rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/pairs#i2"/>
+            <rdf:Description rdf:nodeID="genid10"/>
+            <rdf:Description>
+                <rdf:type rdf:resource="http://example.org/pairs#C"/>
+            </rdf:Description>
+        </owl:distinctMembers>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/pairs#i2 -->
+
+    <rdf:Description rdf:about="http://example.org/pairs#i2"/>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+        <owl:distinctMembers rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/pairs#i2"/>
+            <rdf:Description rdf:nodeID="genid10"/>
+            <rdf:Description>
+                <rdf:type rdf:resource="http://example.org/pairs#C"/>
+            </rdf:Description>
+        </owl:distinctMembers>
+    </rdf:Description>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/pairs#A0 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/pairs#A0"/>
+    
+
+
+    <!-- http://example.org/pairs#i1 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/pairs#i1"/>
+    
+
+
+    <!-- http://example.org/pairs#i2 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/pairs#i2"/>
+    
+
+
+    <!-- http://example.org/pairs#i3 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/pairs#i3"/>
+    
+
+
+    <!-- http://example.org/pairs#i4 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/pairs#i4"/>
+    
+
+
+    <!-- http://example.org/pairs#i5 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/pairs#i5"/>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

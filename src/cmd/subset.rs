@@ -314,8 +314,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         // Nor does it inherit the source's import-closure evidence: that is what
         // decides which signature entities get a bare declaration stub, and the
         // subset's signature is its own.
-        model.closure_declared.clear();
-        model.closure_ann_ns.clear();
+        model.imports_closure = None;
     }
 
     // The slice is a new ontology built out of whatever the closure offered, so

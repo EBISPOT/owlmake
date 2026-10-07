@@ -1,0 +1,4 @@
+Prefix(:=<http://example.org/ontology-headers#>)
+Ontology(<http://example.org/ontology-headers/one.owl>
+Declaration(Class(:One))
+)

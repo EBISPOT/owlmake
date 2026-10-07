@@ -1,0 +1,39 @@
+Prefix(:=<http://example.org/lits#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/lits>
+
+Declaration(DataProperty(:dp))
+Declaration(NamedIndividual(:i))
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+AnnotationAssertion(rdfs:comment :i "c1 note"@fr)
+AnnotationAssertion(rdfs:comment :i "false"^^xsd:boolean)
+DataPropertyAssertion(:dp :i "l1 text"@en-gb)
+DataPropertyAssertion(:dp :i "p1 text"@EN-gb)
+DataPropertyAssertion(:dp :i "true"^^xsd:boolean)
+DataPropertyAssertion(:dp :i "1.50"^^xsd:decimal)
+DataPropertyAssertion(:dp :i "3e2"^^xsd:decimal)
+DataPropertyAssertion(:dp :i "2000.0"^^xsd:double)
+DataPropertyAssertion(:dp :i "1.0"^^xsd:float)
+DataPropertyAssertion(:dp :i "2.5"^^xsd:float)
+DataPropertyAssertion(:dp :i "0"^^xsd:integer)
+DataPropertyAssertion(:dp :i "007"^^xsd:integer)
+DataPropertyAssertion(:dp :i "42"^^xsd:integer)
+DataPropertyAssertion(:dp :i "5"^^xsd:integer)
+DataPropertyAssertion(:dp :i "7"^^xsd:integer)
+
+
+)

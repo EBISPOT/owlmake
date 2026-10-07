@@ -8,7 +8,7 @@ use std::io::{BufRead, Write};
 
 use anyhow::{anyhow, Result};
 use oxigraph::io::{RdfFormat, RdfParser, RdfSerializer};
-use oxigraph::model::{BlankNode, NamedNode, NamedOrBlankNode, Term, Triple};
+use oxigraph::model::{BlankNode, NamedOrBlankNode, Term, Triple};
 
 use crate::io::Format;
 use crate::model::Model;
@@ -88,7 +88,12 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
         let next = names.len() + 1;
         names.entry(b.clone()).or_insert_with(|| BlankNode::new_unchecked(format!("b{next}"))).clone()
     };
-    for quad in RdfParser::from_format(fmt).for_slice(&buf) {
+    // A relative IRI resolves against the document's own IRI.
+    let mut parser = RdfParser::from_format(fmt);
+    if let Some(base) = crate::io::document_iri() {
+        parser = parser.with_base_iri(base.as_str()).map_err(|e| anyhow!("document IRI {base}: {e}"))?;
+    }
+    for quad in parser.for_slice(&buf) {
         let mut triple = Triple::from(quad.map_err(|e| anyhow!("parsing Turtle: {e}"))?);
         if let NamedOrBlankNode::BlankNode(b) = &triple.subject {
             triple.subject = NamedOrBlankNode::BlankNode(name(b));
@@ -103,8 +108,7 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
         let mut seen: HashSet<&Triple> = HashSet::with_capacity(made.len());
         made.iter().map(|t| seen.insert(t)).collect()
     };
-    let mut statements: Vec<Triple> = made.into_iter().zip(first).filter_map(|(t, first)| first.then_some(t)).collect();
-    statements.extend(missing_class_expression_types(&statements));
+    let statements: Vec<Triple> = made.into_iter().zip(first).filter_map(|(t, first)| first.then_some(t)).collect();
     // Re-serialised in that order, as the document wrote each literal, so the
     // parse meets the document's blank nodes in the order the document does.
     let mut rdf = Vec::new();
@@ -115,7 +119,7 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
     ser.finish().map_err(|e| anyhow!("re-serializing as RDF/XML: {e}"))?;
     drop(statements);
     let base = crate::io::anon_counter();
-    let mut model = crate::io::load_from(std::io::Cursor::new(rdf), Format::RdfXml)?;
+    let mut model = super::load_from_raw(std::io::Cursor::new(rdf), Format::RdfXml)?;
     // A Turtle document's blank nodes take no ids of their own: its anonymous
     // individuals are numbered from where the count stood, in the order the
     // parse met them, and the count goes on after them.
@@ -176,52 +180,6 @@ pub fn load_as<R: BufRead>(mut reader: R, fmt: RdfFormat) -> Result<Model> {
     // An untyped literal in Turtle or N-Triples is an `xsd:string`.
     model.plain_literals_typed = true;
     Ok(model)
-}
-
-/// The `rdf:type` statements that type each anonymous class expression the
-/// document left untyped, in the order the document first describes it.
-///
-/// `rdfs:subClassOf [ owl:onProperty …; owl:someValuesFrom … ]` with no
-/// `rdf:type owl:Restriction` is legal RDF, but horned-owl's parser needs the type
-/// stated and drops the axiom without it — so the type is inferred here from the
-/// characteristic predicates. MONDO's `mirror/ncbigene.owl`, which owlmake's own
-/// `arq` CONSTRUCT builds over the downloaded N-Triples mirror ([`crate::arq`]),
-/// writes every taxon restriction that way, and the 756
-/// `SubClassOf(<ncbigene/…> ObjectSomeValuesFrom(RO_0002162 NCBITaxon_…))` axioms
-/// it carries would otherwise not reach `imports/merged_import.owl`.
-fn missing_class_expression_types(statements: &[Triple]) -> Vec<Triple> {
-    const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-    const OWL: &str = "http://www.w3.org/2002/07/owl#";
-    const RDFS_DATATYPE: &str = "http://www.w3.org/2000/01/rdf-schema#Datatype";
-    // Predicate → the `rdf:type` its subject must carry. `owl:onProperty` marks a
-    // restriction; the set operators mark an anonymous class.
-    let implied = |predicate: &str| match predicate.strip_prefix(OWL)? {
-        "onProperty" => Some("Restriction"),
-        "unionOf" | "intersectionOf" | "complementOf" | "oneOf" => Some("Class"),
-        _ => None,
-    };
-    // A node typed in the OWL vocabulary, or as a data range, says what it is.
-    let typed: HashSet<&NamedOrBlankNode> = statements
-        .iter()
-        .filter(|t| {
-            t.predicate.as_str() == RDF_TYPE
-                && matches!(&t.object, Term::NamedNode(n) if n.as_str().starts_with(OWL) || n.as_str() == RDFS_DATATYPE)
-        })
-        .map(|t| &t.subject)
-        .collect();
-    let mut added: Vec<Triple> = Vec::new();
-    let mut seen: HashSet<(&NamedOrBlankNode, &str)> = HashSet::new();
-    for t in statements {
-        let Some(ty) = implied(t.predicate.as_str()) else { continue };
-        if !typed.contains(&t.subject) && seen.insert((&t.subject, ty)) {
-            added.push(Triple::new(
-                t.subject.clone(),
-                NamedNode::new_unchecked(RDF_TYPE),
-                NamedNode::new_unchecked(format!("{OWL}{ty}")),
-            ));
-        }
-    }
-    added
 }
 
 /// The `@prefix p: <ns> .` (and SPARQL-style `PREFIX p: <ns>`) declarations of a

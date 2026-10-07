@@ -1,0 +1,32 @@
+@prefix : <http://example.org/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<http://example.org/untyped-data-ranges.owl> a owl:Ontology .
+:C a owl:Class .
+:DT a rdfs:Datatype .
+:d a owl:DatatypeProperty .
+:e a owl:DatatypeProperty .
+:p a owl:ObjectProperty .
+:q a owl:ObjectProperty .
+:i a owl:NamedIndividual .
+:A1 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom [ owl:oneOf ( "x" "y" ) ] ] .
+:A2 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:allValuesFrom [ owl:unionOf ( xsd:string xsd:integer ) ] ] .
+:A5 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:hasValue :i ] .
+:A6 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:hasValue "lit" ] .
+:A7 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom :C ] .
+:A8 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom :U ] .
+:A9 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom :DT ] .
+:A10 a owl:Class ; rdfs:subClassOf [ owl:onProperty :p ; owl:someValuesFrom :C ] .
+:A11 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom [ a rdfs:Datatype ; owl:oneOf ( "x" ) ] ] .
+:A12 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:allValuesFrom [ a owl:Class ; owl:oneOf ( :i "x" ) ] ] .
+:A13 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom [ owl:intersectionOf ( xsd:integer xsd:int ) ] ] .
+:A15 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom rdfs:Literal ] .
+:A17 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom [ owl:complementOf xsd:string ] ] .
+:A18 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom [ owl:datatypeComplementOf xsd:boolean ] ] .
+:A19 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:someValuesFrom [ owl:onProperty :p ; owl:someValuesFrom :C ] ] .
+:A21 a owl:Class ; rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom [ owl:onDatatype xsd:decimal ; owl:withRestrictions ( [ xsd:minInclusive 1 ] ) ] ] .
+:A24 a owl:Class ; rdfs:subClassOf [ owl:onProperty :p ; owl:someValuesFrom [ a owl:Class ; owl:oneOf rdf:nil ] ] .
+:e rdfs:range [ owl:oneOf ( "a" "b" ) ] .
+:q rdfs:range [ owl:unionOf ( :C :A1 ) ] .

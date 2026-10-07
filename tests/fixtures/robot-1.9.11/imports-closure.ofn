@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/imports-closure#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/imports-closure>
+Import(<http://example.org/imports-closure/mid>)
+Declaration(Class(:R))
+Declaration(AnnotationProperty(:note))
+AnnotationAssertion(:note :R "2020-01-01"^^xsd:date)
+SubClassOf(:R :M)
+)

@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#">
+    <owl:Ontology rdf:about="http://example.com/e"/>
+    <owl:ObjectProperty rdf:about="http://example.com/e#p"/>
+    <owl:ObjectProperty rdf:about="http://example.com/e#q"/>
+    <owl:ObjectProperty rdf:about="http://example.com/e#r"/>
+    <owl:ObjectProperty rdf:about="http://example.com/e#s"/>
+    <owl:Class rdf:about="http://example.com/e#A"/>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.com/e#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+                <owl:equivalentClass>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.com/e#q"/>
+                        <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+                    </owl:Restriction>
+                </owl:equivalentClass>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.com/e#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+            </owl:Restriction>
+        </owl:annotatedTarget>
+        <rdfs:comment>an equivalent pair</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.com/e#r"/>
+                <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+                <owl:disjointWith>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.com/e#q"/>
+                        <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+                    </owl:Restriction>
+                </owl:disjointWith>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointWith"/>
+        <owl:annotatedTarget>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.com/e#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+            </owl:Restriction>
+        </owl:annotatedTarget>
+        <rdfs:comment>a disjoint pair</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.com/e#s"/>
+                <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+                <rdfs:subClassOf>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.com/e#q"/>
+                        <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+                    </owl:Restriction>
+                </rdfs:subClassOf>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.com/e#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.com/e#A"/>
+            </owl:Restriction>
+        </owl:annotatedTarget>
+        <rdfs:comment>a general subclass</rdfs:comment>
+    </owl:Axiom>
+</rdf:RDF>

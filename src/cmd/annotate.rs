@@ -85,6 +85,8 @@ pub fn step(
 ) -> anyhow::Result<Option<crate::model::Model>> {
     let mut model = crate::cmd::take_or_load_no_imports(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
+    // The annotated document is written among the ontologies it imports.
+    crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
     // `--interpolate`: replace `%{CURIE-or-IRI}` placeholders in annotation
     // values with that entity's rdfs:label (falling back to the IRI).
     let interp = args.interpolate.unwrap_or(false);
@@ -314,10 +316,10 @@ pub fn annotate_with(
         model.ont.insert(Component::OntologyAnnotation(
             horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
                 ap,
-                av: AnnotationValue::Literal(Literal::Language {
+                av: AnnotationValue::Literal(crate::model::literal_as_made(Literal::Language {
                     literal: value.clone(),
                     lang: lang.clone(),
-                }),
+                })),
             }),
         ));
         declare_ap_if_custom(&mut model, &full);
@@ -333,10 +335,10 @@ pub fn annotate_with(
         model.ont.insert(Component::OntologyAnnotation(
             horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
                 ap,
-                av: AnnotationValue::Literal(Literal::Datatype {
+                av: AnnotationValue::Literal(crate::model::literal_as_made(Literal::Datatype {
                     literal: value.clone(),
                     datatype_iri: model.build.iri(expand(&model, ty).as_str()),
-                }),
+                })),
             }),
         ));
         declare_ap_if_custom(&mut model, &full);

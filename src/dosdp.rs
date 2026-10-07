@@ -25,7 +25,7 @@ use serde::Deserialize;
 
 mod docs;
 mod expression;
-mod java;
+pub(crate) mod java;
 mod render;
 mod table;
 use crate::model::{default_prefixes, Model};

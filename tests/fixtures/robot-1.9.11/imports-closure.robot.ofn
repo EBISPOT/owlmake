@@ -1,0 +1,31 @@
+Prefix(:=<http://example.org/imports-closure#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/imports-closure>
+Import(<http://example.org/imports-closure/mid>)
+
+Declaration(Class(:L))
+Declaration(Class(:L2))
+Declaration(Class(:M2))
+Declaration(Class(:R))
+Declaration(AnnotationProperty(:note))
+Declaration(AnnotationProperty(<http://example.org/leaf#ap>))
+Declaration(Datatype(xsd:date))
+
+
+############################
+#   Classes
+############################
+
+# Class: :R (:R)
+
+AnnotationAssertion(:note :R "2020-01-01"^^xsd:date)
+SubClassOf(:R :M)
+
+
+)

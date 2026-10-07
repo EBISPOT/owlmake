@@ -1,0 +1,450 @@
+@prefix : <http://example.org/axiom-twins#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/axiom-twins> .
+
+<http://example.org/axiom-twins> rdf:type owl:Ontology .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/axiom-twins#ap
+:ap rdf:type owl:AnnotationProperty ;
+    rdfs:range :B ;
+    rdfs:domain :A .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :ap ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget :B ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :ap ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget :A ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :ap ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget :A ;
+   rdfs:comment "b"
+ ] .
+
+
+#################################################################
+#    Datatypes
+#################################################################
+
+###  http://example.org/axiom-twins#dt
+:dt rdf:type rdfs:Datatype ;
+    owl:equivalentClass _:genid4 .
+
+_:genid4 rdf:type rdfs:Datatype ;
+          owl:oneOf [ rdf:type rdf:List ;
+                      rdf:first "u" ;
+                      rdf:rest [ rdf:type rdf:List ;
+                                 rdf:first "v" ;
+                                 rdf:rest rdf:nil
+                               ]
+                    ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :dt ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid4 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :dt ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid4 ;
+   rdfs:comment "b"
+ ] .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/axiom-twins#p
+:p rdf:type owl:ObjectProperty ;
+   rdfs:domain :A ,
+               _:genid10 ;
+   rdfs:range _:genid13 .
+
+_:genid10 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :A .
+
+_:genid13 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :A .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget _:genid10 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget _:genid10 ;
+   rdfs:comment "b"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid13 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget :A ;
+   rdfs:comment "a"
+ ] .
+
+
+###  http://example.org/axiom-twins#q
+:q rdf:type owl:ObjectProperty .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :q ;
+                         rdfs:domain _:genid16
+                       ] ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget _:genid16 ;
+   rdfs:comment "a"
+ ] .
+
+_:genid16 rdf:type owl:Restriction ;
+           owl:onProperty :p ;
+           owl:someValuesFrom :B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :q ;
+                         rdfs:domain _:genid16
+                       ] ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget _:genid16 ;
+   rdfs:comment "b"
+ ] .
+
+[ owl:inverseOf :q ;
+   rdfs:range _:genid21
+ ] .
+
+_:genid21 rdf:type owl:Restriction ;
+           owl:onProperty :p ;
+           owl:someValuesFrom :A .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :q ;
+                         rdfs:range _:genid21
+                       ] ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid21 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :q ;
+                         rdfs:range _:genid21
+                       ] ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid21 ;
+   rdfs:comment "b"
+ ] .
+
+
+###  http://example.org/axiom-twins#r
+:r rdf:type owl:ObjectProperty ;
+   rdfs:subPropertyOf _:genid26 .
+
+_:genid26 owl:inverseOf :q .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :r ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget _:genid26 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :r ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget _:genid26 ;
+   rdfs:comment "b"
+ ] .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/axiom-twins#d
+:d rdf:type owl:DatatypeProperty ;
+   rdfs:domain :A ,
+               _:genid30 ;
+   rdfs:range xsd:string ,
+              _:genid33 .
+
+_:genid30 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :B .
+
+_:genid33 rdf:type rdfs:Datatype ;
+           owl:oneOf [ rdf:type rdf:List ;
+                       rdf:first "x" ;
+                       rdf:rest [ rdf:type rdf:List ;
+                                  rdf:first "y" ;
+                                  rdf:rest rdf:nil
+                                ]
+                     ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget :A ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty rdfs:domain ;
+   owl:annotatedTarget _:genid30 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget xsd:string ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid33 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty rdfs:range ;
+   owl:annotatedTarget _:genid33 ;
+   rdfs:comment "b"
+ ] .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/axiom-twins#A
+:A rdf:type owl:Class ;
+   owl:equivalentClass _:genid38 .
+
+_:genid38 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid38 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid38 ;
+   rdfs:comment "b"
+ ] .
+
+
+###  http://example.org/axiom-twins#B
+:B rdf:type owl:Class ;
+   rdfs:subClassOf _:genid41 ;
+   owl:disjointWith _:genid44 .
+
+_:genid41 rdf:type owl:Restriction ;
+           owl:onProperty :r ;
+           owl:someValuesFrom :A .
+
+_:genid44 rdf:type owl:Restriction ;
+           owl:onProperty :p ;
+           owl:someValuesFrom :A .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty rdfs:subClassOf ;
+   owl:annotatedTarget _:genid41 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty rdfs:subClassOf ;
+   owl:annotatedTarget _:genid41 ;
+   rdfs:comment "b"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:disjointWith ;
+   owl:annotatedTarget _:genid44 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:disjointWith ;
+   owl:annotatedTarget _:genid44 ;
+   rdfs:comment "b"
+ ] .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/axiom-twins#i
+:i rdf:type owl:NamedIndividual ,
+            :A ,
+            _:genid48 ;
+   owl:sameAs :j ;
+   owl:differentFrom :j .
+
+_:genid48 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget :A ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid48 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid48 ;
+   rdfs:comment "b"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :j ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty owl:differentFrom ;
+   owl:annotatedTarget :j ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty owl:differentFrom ;
+   owl:annotatedTarget :j ;
+   rdfs:comment "b"
+ ] .
+
+
+###  http://example.org/axiom-twins#j
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource :i ;
+  owl:annotatedProperty rdf:type ;
+  owl:annotatedTarget :A ;
+  rdfs:comment "a"
+] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid48 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid48 ;
+   rdfs:comment "b"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :j ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty owl:differentFrom ;
+   owl:annotatedTarget :j ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :i ;
+   owl:annotatedProperty owl:differentFrom ;
+   owl:annotatedTarget :j ;
+   rdfs:comment "b"
+ ] .
+
+
+###  http://example.org/axiom-twins#j
+:j rdf:type owl:NamedIndividual ;
+   :p _:genid54 .
+
+_:genid54 rdf:type _:genid55 .
+
+_:genid55 rdf:type owl:Restriction ;
+           owl:onProperty :r ;
+           owl:someValuesFrom :B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid54 ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid55 ;
+   rdfs:comment "a"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid54 ;
+   owl:annotatedProperty rdf:type ;
+   owl:annotatedTarget _:genid55 ;
+   rdfs:comment "b"
+ ] .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

@@ -1,0 +1,11 @@
+@prefix : <http://example.org/lits#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<http://example.org/lits> a owl:Ontology .
+:dp a owl:DatatypeProperty .
+:i a owl:NamedIndividual ;
+   :dp "1"^^xsd:boolean, "1"^^xsd:float, "2e3"^^xsd:double, "+5"^^xsd:integer, "007"^^xsd:integer,
+       "p1 text@EN-gb"^^rdf:PlainLiteral, "l1 text"@EN-GB, 1.5e0, 42 ;
+   rdfs:comment "0"^^xsd:boolean, "c1 note@fr"^^rdf:PlainLiteral .

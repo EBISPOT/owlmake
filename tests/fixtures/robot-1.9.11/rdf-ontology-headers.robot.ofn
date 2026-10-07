@@ -1,0 +1,26 @@
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(Import(<http://example.org/ontology-headers/one.owl>)
+Import(<http://example.org/ontology-headers/two.owl>)
+Annotation(rdfs:comment "a header with an IRI")
+Annotation(rdfs:comment "a header with no IRI")
+Annotation(rdfs:label "first"@en)
+
+Declaration(Class(<http://example.org/ontology-headers#A>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/ontology-headers#A> (a)
+
+AnnotationAssertion(rdfs:label <http://example.org/ontology-headers#A> "a")
+
+
+)

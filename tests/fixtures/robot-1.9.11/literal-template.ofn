@@ -1,0 +1,7 @@
+Prefix(ex:=<http://example.org/t#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/t>
+Declaration(DataProperty(ex:dp))
+AnnotationAssertion(rdfs:label ex:dp "dp")
+Declaration(Class(ex:B))
+)

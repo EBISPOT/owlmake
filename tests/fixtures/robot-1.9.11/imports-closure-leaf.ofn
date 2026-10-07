@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/imports-closure#>)
+Prefix(leaf:=<http://example.org/leaf#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/imports-closure/leaf>
+SubClassOf(:L :L2)
+AnnotationAssertion(leaf:ap :L "x")
+AnnotationAssertion(leaf:ap :L2 "2021-01-01"^^xsd:date)
+)

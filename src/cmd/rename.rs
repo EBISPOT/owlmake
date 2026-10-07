@@ -195,7 +195,7 @@ pub fn rename_model(model: crate::model::Model, map: &HashMap<String, String>) -
     // to survive it. A rename in the middle of a chain that dropped it would hand
     // the next step the re-read document's own metadata, so the chain's output
     // would be serialised against the wrong prefix map.
-    let mut out = io::load_from(std::io::Cursor::new(text.into_bytes()), Format::RdfXml)?;
+    let mut out = io::reload(std::io::Cursor::new(text.into_bytes()), Format::RdfXml)?;
     out.carry_meta_from(&model);
     // The blank-node evidence is keyed by IRIs — owners, and the property/filler
     // parts of shared-node keys — so it renames WITH the ontology. Left under
@@ -306,7 +306,7 @@ pub fn rename_by_prefix(
             text = text.replace(&format!("\"{old}"), &format!("\"{new}"));
         }
     }
-    let mut out = io::load_from(std::io::Cursor::new(text.into_bytes()), Format::RdfXml)?;
+    let mut out = io::reload(std::io::Cursor::new(text.into_bytes()), Format::RdfXml)?;
     out.carry_meta_from(&model);
     Ok(out)
 }

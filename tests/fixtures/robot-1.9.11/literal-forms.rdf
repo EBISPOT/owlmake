@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/lits#"
+     xml:base="http://example.org/lits"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/lits"/>
+    <owl:DatatypeProperty rdf:about="http://example.org/lits#dp"/>
+    <owl:NamedIndividual rdf:about="http://example.org/lits#i">
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">1</dp>
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#float">1</dp>
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#double">2e3</dp>
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">+5</dp>
+        <dp rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">007</dp>
+        <dp rdf:datatype="http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral">p1 text@EN-gb</dp>
+        <dp rdf:datatype="http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral">p2 text</dp>
+        <dp xml:lang="EN-GB">l1 text</dp>
+        <rdfs:comment rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">0</rdfs:comment>
+        <rdfs:comment rdf:datatype="http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral">c1 note@fr</rdfs:comment>
+    </owl:NamedIndividual>
+</rdf:RDF>

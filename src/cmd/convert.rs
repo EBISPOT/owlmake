@@ -53,25 +53,17 @@ pub fn step(
     args.common.apply(&mut model)?;
 
     // A conversion keeps the document's `owl:imports` as declarations rather than
-    // folding the imported axioms in — but what the closure DECLARES still decides
-    // the output, because a class the closure declares needs no stub of its own
-    // here. `taxslim-disjoint-over-in-taxon.owl` imports `taxslim.owl` and states
-    // nothing but disjointness over its taxa; every one of them is written
-    // untyped, and materialising 106,000 `owl:Class` stubs for them put 2.2 MB
-    // into `mirror/ncbitaxondisjoints.owl` that the document does not carry.
+    // folding the imported axioms in — but what the imported ontologies hold still
+    // decides the output, because a class one of them has in its signature needs
+    // no stub of its own here. `taxslim-disjoint-over-in-taxon.owl` imports
+    // `taxslim.owl` and states nothing but disjointness over its taxa; every one
+    // of them is written untyped, and materialising 106,000 `owl:Class` stubs for
+    // them put 2.2 MB into `mirror/ncbitaxondisjoints.owl` that the document does
+    // not carry.
     //
     // Best-effort and only when this command owns the load: piped into a pipeline
     // the closure is whatever the earlier steps established.
-    if model.closure_declared.is_empty() {
-        let declared = crate::cmd::closure_declared_signature(
-            &model,
-            args.input.as_deref(),
-            &args.common,
-        );
-        if !declared.is_empty() {
-            model.closure_declared = declared;
-        }
-    }
+    crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
 
     // `--check` (default true): run OBO document-structure checks when the
     // output is OBO, reporting issues to stderr. `--check false` skips them. The

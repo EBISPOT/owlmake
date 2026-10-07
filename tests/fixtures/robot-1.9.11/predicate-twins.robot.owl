@@ -1,0 +1,233 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/predicate-twins.owl#"
+     xml:base="http://example.org/predicate-twins.owl"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/predicate-twins.owl"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#q -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/predicate-twins.owl#q"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#A1 -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#A1">
+        <owl:equivalentClass rdf:nodeID="genid1"/>
+        <rdfs:subClassOf rdf:nodeID="genid3"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid1">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Restriction rdf:nodeID="genid3">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A1"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A1"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid3"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A1"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid3"/>
+        <rdfs:comment>b</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#A2 -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#A2">
+        <owl:equivalentClass>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+            </owl:Restriction>
+        </owl:equivalentClass>
+        <rdfs:subClassOf rdf:nodeID="genid7"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid7">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A2"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid7"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#A3 -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#A3">
+        <owl:equivalentClass rdf:nodeID="genid9"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid9">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A3"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid9"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#A4 -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#A4">
+        <owl:equivalentClass>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+            </owl:Restriction>
+        </owl:equivalentClass>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <owl:disjointWith rdf:nodeID="genid14"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid14">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A4"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointWith"/>
+        <owl:annotatedTarget rdf:nodeID="genid14"/>
+        <rdfs:comment>d</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#A5 -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#A5">
+        <owl:equivalentClass rdf:nodeID="genid16"/>
+        <rdfs:subClassOf rdf:nodeID="genid19"/>
+        <owl:disjointWith>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+            </owl:Restriction>
+        </owl:disjointWith>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid16">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Restriction rdf:nodeID="genid19">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A5"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid16"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A5"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid16"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A5"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid19"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#A6 -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#A6">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <owl:disjointWith rdf:nodeID="genid23"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid23">
+        <owl:onProperty rdf:resource="http://example.org/predicate-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/predicate-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A6"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointWith"/>
+        <owl:annotatedTarget rdf:nodeID="genid23"/>
+        <rdfs:comment>d</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/predicate-twins.owl#A6"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointWith"/>
+        <owl:annotatedTarget rdf:nodeID="genid23"/>
+        <rdfs:comment>f</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/predicate-twins.owl#B -->
+
+    <owl:Class rdf:about="http://example.org/predicate-twins.owl#B"/>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

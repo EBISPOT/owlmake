@@ -112,6 +112,19 @@ impl Kind {
         }
     }
 
+    /// The kind as horned-owl names it.
+    pub fn named(self) -> horned_owl::model::NamedOWLEntityKind {
+        use horned_owl::model::NamedOWLEntityKind as N;
+        match self {
+            Kind::Class => N::Class,
+            Kind::ObjectProperty => N::ObjectProperty,
+            Kind::DataProperty => N::DataProperty,
+            Kind::NamedIndividual => N::NamedIndividual,
+            Kind::AnnotationProperty => N::AnnotationProperty,
+            Kind::Datatype => N::Datatype,
+        }
+    }
+
     /// The seed of an entity's content hash: `seed * 31 + hash(IRI)`.
     fn hash_seed(self) -> i32 {
         match self {
@@ -307,30 +320,71 @@ pub fn illegal_punnings(signature: &BTreeSet<(Kind, String)>) -> HashSet<String>
         .collect()
 }
 
-/// The `closure_declared` and `materialised_declarations` key of an entity (see
-/// `Model::closure_declared`).
-fn closure_key(kind: Kind, iri: &str) -> String {
-    let k = match kind {
+/// The `kind\0IRI` key of an entity in `Model::imports_closure` and
+/// `Model::materialised_declarations`.
+pub(crate) fn closure_key(kind: Kind, iri: &str) -> String {
+    format!("{}\0{iri}", key_name(kind))
+}
+
+/// The kind a [`closure_key`] names.
+fn key_name(kind: Kind) -> &'static str {
+    match kind {
         Kind::Class => "class",
         Kind::ObjectProperty => "op",
         Kind::DataProperty => "dp",
         Kind::NamedIndividual => "ni",
         Kind::AnnotationProperty => "ap",
         Kind::Datatype => "dt",
-    };
-    format!("{k}\0{iri}")
+    }
 }
 
-/// The entities a written document declares although the ontology does not:
-/// every entity of the signature that is not declared here or in the import
-/// closure, is not built in, and is not illegally punned.
+/// The entity a [`closure_key`] names.
+fn key_entity(key: &str) -> Option<(Kind, String)> {
+    let (name, iri) = key.split_once('\0')?;
+    let kind = [
+        Kind::Class,
+        Kind::ObjectProperty,
+        Kind::DataProperty,
+        Kind::NamedIndividual,
+        Kind::AnnotationProperty,
+        Kind::Datatype,
+    ]
+    .into_iter()
+    .find(|k| key_name(*k) == name)?;
+    Some((kind, iri.to_string()))
+}
+
+/// Whether a document written from `model` in RDF/XML or Turtle has to state
+/// the type of `iri` as a `kind` itself: the entity is not built in, the
+/// ontology does not declare it (`declared`, from [`declared`]), and no
+/// ontology it imports has it in its signature.
+pub fn missing_type(model: &Model, declared: &HashSet<(Kind, String)>, kind: Kind, iri: &str) -> bool {
+    !is_builtin(kind, iri)
+        && !declared.contains(&(kind, iri.to_string()))
+        && !model.imports_have(&closure_key(kind, iri))
+}
+
+/// The entities a document written from `model` in functional syntax or
+/// OWL/XML declares although the ontology does not: every entity of the
+/// ontology's signature and its imports closure's that is not built in, not
+/// illegally punned across the two, and declared by neither. An ontology that
+/// imports declares none while its closure is unread.
 ///
-/// They come in the order a hash set built from the whole signature holds them:
-/// by bucket, the table sized for the signature (at least 16 slots, a power of
+/// They come in the order a hash set built from that signature holds them: by
+/// bucket, the table sized for the signature (at least 16 slots, a power of
 /// two holding it at 3/4 load), ties in natural order.
-pub fn undeclared(model: &Model) -> Vec<(Kind, String)> {
-    let sig = signature(model);
-    let declared = declared(model);
+pub fn missing_declarations(model: &Model) -> Vec<(Kind, String)> {
+    use horned_owl::model::Component;
+    let mut sig = signature(model);
+    let mut declared = declared(model);
+    let imports = model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)));
+    if imports {
+        let Some(closure) = &model.imports_closure else {
+            return Vec::new();
+        };
+        sig.extend(closure.signature.iter().filter_map(|k| key_entity(k)));
+        declared.extend(closure.declared.iter().filter_map(|k| key_entity(k)));
+    }
     let illegal = illegal_punnings(&sig);
     let mut cap = 16usize;
     let want = ((sig.len() as f64) / 0.75) as usize + 1;
@@ -344,10 +398,7 @@ pub fn undeclared(model: &Model) -> Vec<(Kind, String)> {
     let mut out: Vec<(Kind, String)> = sig
         .into_iter()
         .filter(|(k, iri)| {
-            !declared.contains(&(*k, iri.clone()))
-                && !is_builtin(*k, iri)
-                && !illegal.contains(iri)
-                && !model.closure_declared.contains(&closure_key(*k, iri))
+            !is_builtin(*k, iri) && !declared.contains(&(*k, iri.clone())) && !illegal.contains(iri)
         })
         .collect();
     out.sort_by(|(ka, a), (kb, b)| {

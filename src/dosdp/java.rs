@@ -1,7 +1,8 @@
 //! The text dialects a DOSDP pattern is written in: its printf text is a
 //! `java.util.Formatter` format, its substitutions are `java.util.regex`
 //! patterns whose replacements follow `Matcher.appendReplacement`, and the
-//! literals of its logical axioms take Java's number syntax and printing.
+//! literals of its logical axioms take Java's number syntax and printing
+//! ([`crate::java_number`]).
 //!
 //! Strings are measured in UTF-16 code units wherever the dialect measures
 //! them (a `%.3s` precision, a `%5s` width).
@@ -2321,133 +2322,19 @@ mod charnames {
     }
 }
 
-// ── Numbers ─────────────────────────────────────────────────────────────────
-
-/// `s` as an `int`, as `Integer.parseInt` reads one: an optional sign and
-/// decimal digits, in range.
-pub(crate) fn parse_int(s: &str) -> Option<i32> {
-    let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+/// The value of `c` as a decimal digit, as `Character.digit(c, 10)` reads it:
+/// a decimal digit of any script, in the Basic Multilingual Plane.
+pub(crate) fn decimal_digit(c: char) -> Option<u32> {
+    let cp = c as u32;
+    if cp > 0xFFFF {
         return None;
     }
-    let body = s.strip_prefix('+').unwrap_or(s);
-    body.parse::<i32>().ok()
-}
-
-/// Whether `s` is a floating-point number as `Double.parseDouble` reads one,
-/// and its text with any `f`/`d` suffix removed, for Rust to read.
-fn java_float_text(s: &str) -> Option<String> {
-    let t = s.trim_matches(|c: char| c <= ' ');
-    let (sign, body) = match t.strip_prefix(['+', '-']) {
-        Some(b) => (&t[..1], b),
-        None => ("", t),
-    };
-    if body == "NaN" || body == "Infinity" {
-        return Some(format!("{sign}{}", if body == "NaN" { "NaN" } else { "inf" }));
+    let i = unicode::CATEGORIES.partition_point(|&(_, hi, _)| hi < cp);
+    match unicode::CATEGORIES.get(i) {
+        // Decimal digits come in runs of ten, from zero.
+        Some(&(lo, _, t)) if lo <= cp && 1 << t == category::ND => Some((cp - lo) % 10),
+        _ => None,
     }
-    let body = body.strip_suffix(['f', 'F', 'd', 'D']).unwrap_or(body);
-    let lower = body.to_ascii_lowercase();
-    if let Some(hex) = lower.strip_prefix("0x") {
-        return hex_float(hex).map(|v| format!("{sign}{v:e}"));
-    }
-    let (mantissa, exponent) = match lower.split_once('e') {
-        Some((m, e)) => (m, Some(e)),
-        None => (lower.as_str(), None),
-    };
-    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    if int.is_empty() && frac.is_empty()
-        || !int.bytes().all(|b| b.is_ascii_digit())
-        || !frac.bytes().all(|b| b.is_ascii_digit())
-    {
-        return None;
-    }
-    if let Some(e) = exponent {
-        let digits = e.strip_prefix(['+', '-']).unwrap_or(e);
-        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-            return None;
-        }
-    }
-    Some(format!("{sign}{}{}", if int.is_empty() { "0" } else { int }, &mantissa[int.len()..])
-        + &exponent.map(|e| format!("e{e}")).unwrap_or_default())
-}
-
-/// A hexadecimal floating-point body (after `0x`): hex digits with an optional
-/// point, then a binary exponent `p±N`.
-fn hex_float(s: &str) -> Option<f64> {
-    let (m, e) = s.split_once('p')?;
-    let e: i32 = e.parse().ok()?;
-    let (int, frac) = m.split_once('.').unwrap_or((m, ""));
-    if int.is_empty() && frac.is_empty() {
-        return None;
-    }
-    let mut v = 0f64;
-    for c in int.chars() {
-        v = v * 16.0 + c.to_digit(16)? as f64;
-    }
-    let mut scale = 1.0 / 16.0;
-    for c in frac.chars() {
-        v += c.to_digit(16)? as f64 * scale;
-        scale /= 16.0;
-    }
-    Some(v * 2f64.powi(e))
-}
-
-/// Whether `Double.parseDouble` reads `s`.
-pub(crate) fn is_double(s: &str) -> bool {
-    java_float_text(s).is_some_and(|t| t.parse::<f64>().is_ok())
-}
-
-/// `s` read as `Float.parseFloat` reads it.
-pub(crate) fn parse_float(s: &str) -> Option<f32> {
-    java_float_text(s)?.parse::<f32>().ok()
-}
-
-/// `s` read as `Double.parseDouble` reads it.
-pub(crate) fn parse_double(s: &str) -> Option<f64> {
-    java_float_text(s)?.parse::<f64>().ok()
-}
-
-/// `v` printed as `Float.toString` prints it.
-pub(crate) fn float_to_string(v: f32) -> String {
-    java_decimal(v.is_nan(), v.is_infinite(), v.is_sign_negative(), v == 0.0, &format!("{:e}", v.abs()))
-}
-
-/// `v` printed as `Double.toString` prints it.
-pub(crate) fn double_to_string(v: f64) -> String {
-    java_decimal(v.is_nan(), v.is_infinite(), v.is_sign_negative(), v == 0.0, &format!("{:e}", v.abs()))
-}
-
-/// The shortest digits of a finite number (`sci` as Rust's `{:e}` prints its
-/// magnitude) in Java's layout: plain from 10⁻³ up to 10⁷, else `d.dddE±n`,
-/// with at least one digit after the point.
-fn java_decimal(nan: bool, infinite: bool, negative: bool, zero: bool, sci: &str) -> String {
-    if nan {
-        return "NaN".to_string();
-    }
-    let sign = if negative { "-" } else { "" };
-    if infinite {
-        return format!("{sign}Infinity");
-    }
-    if zero {
-        return format!("{sign}0.0");
-    }
-    let (m, e) = sci.split_once('e').unwrap_or((sci, "0"));
-    let exp: i32 = e.parse().unwrap_or(0);
-    let digits: String = m.chars().filter(|c| c.is_ascii_digit()).collect();
-    let body = if (-3..7).contains(&exp) {
-        if exp >= 0 {
-            let int_len = exp as usize + 1;
-            let int: String = digits.chars().chain(std::iter::repeat('0')).take(int_len).collect();
-            let frac = if digits.len() > int_len { &digits[int_len..] } else { "0" };
-            format!("{int}.{frac}")
-        } else {
-            format!("0.{}{digits}", "0".repeat((-exp - 1) as usize))
-        }
-    } else {
-        let frac = if digits.len() > 1 { &digits[1..] } else { "0" };
-        format!("{}.{frac}E{exp}", &digits[..1])
-    };
-    format!("{sign}{body}")
 }
 
 /// Whether `c` is whitespace as `Character.isWhitespace` judges it.
@@ -2511,21 +2398,6 @@ mod tests {
         assert!(r.expand(&m, "cost $").is_err());
         assert!(r.expand(&m, "$2").is_err());
         assert!(r.expand(&m, "${x}").is_err());
-    }
-
-    #[test]
-    fn numbers_print_as_java_prints_them() {
-        assert_eq!(parse_int("+5"), Some(5));
-        assert_eq!(parse_int("007"), Some(7));
-        assert_eq!(parse_int("3000000000"), None);
-        assert!(is_double("1e5") && is_double("1.5d") && is_double(".5") && !is_double("inf"));
-        assert_eq!(float_to_string(1.5), "1.5");
-        assert_eq!(float_to_string(1.0), "1.0");
-        assert_eq!(float_to_string(1e10), "1.0E10");
-        assert_eq!(float_to_string(0.0001), "1.0E-4");
-        assert_eq!(float_to_string(0.001), "0.001");
-        assert_eq!(double_to_string(1234567.0), "1234567.0");
-        assert_eq!(double_to_string(12345678.0), "1.2345678E7");
     }
 }
 

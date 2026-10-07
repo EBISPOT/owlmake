@@ -1,0 +1,702 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/chain-twins.owl#"
+     xml:base="http://example.org/chain-twins.owl"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/chain-twins.owl"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/chain-twins.owl#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/chain-twins.owl#p">
+        <owl:equivalentProperty rdf:resource="http://example.org/chain-twins.owl#q"/>
+    </owl:ObjectProperty>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description rdf:nodeID="genid6">
+        <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:equivalentProperty rdf:nodeID="genid8"/>
+    </rdf:Description>
+    <rdf:Description rdf:nodeID="genid8">
+        <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#q"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#p"/>
+                <owl:equivalentProperty rdf:nodeID="genid8"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid8"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description rdf:nodeID="genid1">
+        <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#r"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="genid6"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid8"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#q -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#q">
+        <owl:equivalentProperty rdf:nodeID="genid1"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#p"/>
+                <owl:equivalentProperty rdf:nodeID="genid8"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid8"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="genid6"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid8"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#s -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#s">
+        <owl:equivalentProperty rdf:nodeID="genid6"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#p"/>
+                <owl:equivalentProperty rdf:nodeID="genid8"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid8"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid1"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="genid6"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:nodeID="genid8"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#q -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/chain-twins.owl#q"/>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#r -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/chain-twins.owl#r"/>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#s -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/chain-twins.owl#s">
+        <rdfs:subPropertyOf rdf:nodeID="genid13"/>
+    </owl:ObjectProperty>
+    <rdf:Description rdf:nodeID="genid13">
+        <owl:inverseOf rdf:resource="http://example.org/chain-twins.owl#r"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#s"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subPropertyOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid13"/>
+        <rdfs:comment>x</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/chain-twins.owl#d -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/chain-twins.owl#d">
+        <owl:equivalentProperty rdf:resource="http://example.org/chain-twins.owl#e"/>
+    </owl:DatatypeProperty>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#d"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#f"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#d"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#f"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#e -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#e">
+        <owl:equivalentProperty rdf:resource="http://example.org/chain-twins.owl#f"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#d"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#f"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#d"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#f"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#f -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#f"/>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#d"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#f"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#d"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#e"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentProperty"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#f"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#e -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/chain-twins.owl#e"/>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#f -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/chain-twins.owl#f"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/chain-twins.owl#A -->
+
+    <owl:Class rdf:about="http://example.org/chain-twins.owl#A">
+        <owl:equivalentClass rdf:resource="http://example.org/chain-twins.owl#B"/>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid19"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid19">
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#B"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid19"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#B -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#B">
+        <owl:equivalentClass rdf:nodeID="genid19"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid19"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid19"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#A2 -->
+
+    <owl:Class rdf:about="http://example.org/chain-twins.owl#A2">
+        <owl:equivalentClass rdf:nodeID="genid24"/>
+    </owl:Class>
+    <owl:Restriction rdf:nodeID="genid24">
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#C"/>
+        <owl:equivalentClass rdf:nodeID="genid25"/>
+    </owl:Restriction>
+    <owl:Restriction rdf:nodeID="genid25">
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#D"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#A2"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid24"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#C"/>
+                <owl:equivalentClass rdf:nodeID="genid25"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid25"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#A2"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid24"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#C"/>
+                <owl:equivalentClass rdf:nodeID="genid25"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid25"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#B -->
+
+    <owl:Class rdf:about="http://example.org/chain-twins.owl#B"/>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#C -->
+
+    <owl:Class rdf:about="http://example.org/chain-twins.owl#C"/>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#D -->
+
+    <owl:Class rdf:about="http://example.org/chain-twins.owl#D"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/chain-twins.owl#a -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/chain-twins.owl#a">
+        <owl:sameAs rdf:resource="http://example.org/chain-twins.owl#b"/>
+    </owl:NamedIndividual>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#c"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#c"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#b -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#b">
+        <owl:sameAs rdf:resource="http://example.org/chain-twins.owl#c"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#c"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#c"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#c -->
+
+    <rdf:Description rdf:about="http://example.org/chain-twins.owl#c"/>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#c"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#a"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/chain-twins.owl#b"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#sameAs"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/chain-twins.owl#c"/>
+        <rdfs:comment>e</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#b -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/chain-twins.owl#b"/>
+    
+
+
+    <!-- http://example.org/chain-twins.owl#c -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/chain-twins.owl#c"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Restriction>
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#B"/>
+        <owl:equivalentClass>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#C"/>
+                <owl:equivalentClass>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#D"/>
+                    </owl:Restriction>
+                </owl:equivalentClass>
+            </owl:Restriction>
+        </owl:equivalentClass>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#B"/>
+                <owl:equivalentClass rdf:nodeID="genid40"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid40"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid40">
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#C"/>
+        <owl:equivalentClass rdf:nodeID="genid42"/>
+    </owl:Restriction>
+    <owl:Restriction rdf:nodeID="genid42">
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#D"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="genid40"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid42"/>
+        <rdfs:comment>c</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#C"/>
+                <rdfs:subClassOf rdf:nodeID="genid45"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid45"/>
+        <rdfs:comment>g</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid45">
+        <owl:onProperty rdf:resource="http://example.org/chain-twins.owl#p"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/chain-twins.owl#D"/>
+    </owl:Restriction>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

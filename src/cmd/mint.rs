@@ -83,11 +83,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     // that neither the imports nor the edit file declares still gets its stub.
     // Only when this command owns the load: piped into a build pipeline there is
     // no `-i` to resolve a closure from, and the executor has already supplied it.
-    let declared =
-        crate::cmd::closure_declared_signature(&model, args.input.as_deref(), &args.common);
-    if !declared.is_empty() {
-        model.closure_declared = declared;
-    }
+    crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
     // The in-memory ontology is an unordered set, so recover the source file's
     // `Import(...)` order from its text and preserve it on output — reserialising
     // the edit file must not reshuffle its imports.

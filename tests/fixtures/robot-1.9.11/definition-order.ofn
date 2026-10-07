@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/definition-order.owl#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/definition-order.owl>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(ObjectProperty(:q))
+EquivalentClasses(Annotation(rdfs:comment "c") :A ObjectSomeValuesFrom(:q :B) ObjectSomeValuesFrom(:q :C))
+SubClassOf(Annotation(rdfs:comment "s") :A ObjectSomeValuesFrom(:q :C))
+)

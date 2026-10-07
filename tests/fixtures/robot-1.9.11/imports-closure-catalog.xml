@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+  <uri name="http://example.org/imports-closure/mid" uri="imports-closure-mid.ofn"/>
+  <uri name="http://example.org/imports-closure/leaf" uri="imports-closure-leaf.ofn"/>
+</catalog>

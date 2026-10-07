@@ -1,0 +1,36 @@
+## Prefix names standing alone
+Prefix: : <http://example.org/prefix-names#>
+Prefix: idsfor: <http://purl.obolibrary.org/obo/IAO_0000598>
+Prefix: allocatedto: <http://purl.obolibrary.org/obo/IAO_0000597>
+Prefix: idrange: <http://purl.obolibrary.org/obo/ro/idrange/>
+Prefix: part: <http://purl.obolibrary.org/obo/BFO_0000050>
+Prefix: organ: <http://purl.obolibrary.org/obo/UBERON_0000062>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+Ontology: <http://example.org/prefix-names>
+
+Annotations:
+    idsfor: "PN"
+
+AnnotationProperty: idsfor:
+
+AnnotationProperty: allocatedto:
+
+ObjectProperty: part:
+
+Class: organ:
+    Annotations: rdfs:label "organ"
+    SubClassOf: part: some organ:
+
+Datatype: idrange:1
+    Annotations:
+        allocatedto: "ONTOLOGY-CREATOR"
+    EquivalentTo:
+        xsd:integer[>= 0 , <= 999999]
+
+Individual: :heart
+    Types: organ:
+    Facts: part: :body
+
+Individual: :body

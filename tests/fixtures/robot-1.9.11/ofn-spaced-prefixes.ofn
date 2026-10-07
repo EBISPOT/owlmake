@@ -1,0 +1,9 @@
+Prefix(: = <http://example.org/spaced/>)
+  Prefix(ex: = <http://example.org/ex#>)
+  Prefix( rdfs: = <http://www.w3.org/2000/01/rdf-schema#> )
+  Ontology(
+   Declaration(Class(:A))
+   Declaration(Class(ex:B))
+   SubClassOf(:A ex:B)
+   AnnotationAssertion(rdfs:label :A "a")
+)

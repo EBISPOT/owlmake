@@ -1,0 +1,183 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/g#"
+     xml:base="http://example.org/g"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/g"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#p"/>
+    
+
+
+    <!-- http://example.org/g#q -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#q"/>
+    
+
+
+    <!-- http://example.org/g#r -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/g#r"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/g#A -->
+
+    <owl:Class rdf:about="http://example.org/g#A"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#p"/>
+                <owl:someValuesFrom>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/g#q"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+                    </owl:Restriction>
+                </owl:someValuesFrom>
+                <owl:equivalentClass rdf:nodeID="genid3"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#equivalentClass"/>
+        <owl:annotatedTarget rdf:nodeID="genid3"/>
+        <rdfs:comment>anonymous pair</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid3">
+        <owl:onProperty rdf:resource="http://example.org/g#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+                <rdfs:subClassOf rdf:nodeID="genid6"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>gci</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid6">
+        <owl:onProperty rdf:resource="http://example.org/g#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+                <rdfs:subClassOf rdf:nodeID="genid9"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid9"/>
+        <rdfs:comment>gci with another comment</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid9">
+        <owl:onProperty rdf:resource="http://example.org/g#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+                <rdfs:subClassOf rdf:nodeID="genid12"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid12"/>
+        <rdfs:comment>universal</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid12">
+        <owl:onProperty rdf:resource="http://example.org/g#q"/>
+        <owl:allValuesFrom rdf:resource="http://example.org/g#A"/>
+    </owl:Restriction>
+    <owl:Restriction>
+        <owl:onProperty rdf:resource="http://example.org/g#r"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+                <owl:disjointWith rdf:nodeID="genid17"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointWith"/>
+        <owl:annotatedTarget rdf:nodeID="genid17"/>
+        <rdfs:comment>disjoint pair</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid17">
+        <owl:onProperty rdf:resource="http://example.org/g#r"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+    </owl:Restriction>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/g#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+                <owl:disjointWith rdf:nodeID="genid20"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#disjointWith"/>
+        <owl:annotatedTarget rdf:nodeID="genid20"/>
+        <rdfs:comment>disjoint pair again</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid20">
+        <owl:onProperty rdf:resource="http://example.org/g#r"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/g#A"/>
+    </owl:Restriction>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

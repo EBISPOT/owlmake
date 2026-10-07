@@ -1,0 +1,7 @@
+Prefix(:=<http://example.org/import-full-iri#>)
+Prefix(ic:=<http://example.org/imports-closure/>)
+Ontology(<http://example.org/import-full-iri>
+Import(<http://example.org/imports-closure/mid>)
+Declaration(Class(:R))
+SubClassOf(:R ic:x)
+)

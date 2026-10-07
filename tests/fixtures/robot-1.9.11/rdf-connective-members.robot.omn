@@ -1,0 +1,117 @@
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/connective-members>
+
+
+
+Ontology: <http://example.org/connective-members>
+
+
+Datatype: xsd:integer
+
+    
+Datatype: xsd:string
+
+    
+DataProperty: <http://example.org/connective-members#d1>
+
+    Range: 
+        ()
+    
+    
+DataProperty: <http://example.org/connective-members#d2>
+
+    Range: 
+        ()
+    
+    
+DataProperty: <http://example.org/connective-members#d3>
+
+    Range: 
+        {}
+    
+    
+DataProperty: <http://example.org/connective-members#d4>
+
+    Range: 
+        (xsd:integer)
+    
+    
+DataProperty: <http://example.org/connective-members#d5>
+
+    Range: 
+        (xsd:integer and xsd:string)
+    
+    
+Class: <http://example.org/connective-members#B>
+
+    
+Class: <http://example.org/connective-members#C>
+
+    
+Class: <http://example.org/connective-members#EmptyI>
+
+    EquivalentTo: 
+        
+    
+    
+Class: <http://example.org/connective-members#EmptyO>
+
+    EquivalentTo: 
+        {}
+    
+    
+Class: <http://example.org/connective-members#EmptyU>
+
+    EquivalentTo: 
+        
+    
+    
+Class: <http://example.org/connective-members#OneI>
+
+    EquivalentTo: 
+        <http://example.org/connective-members#B>
+    
+    
+Class: <http://example.org/connective-members#OneO>
+
+    EquivalentTo: 
+        {<http://example.org/connective-members#i>}
+    
+    
+Class: <http://example.org/connective-members#OneU>
+
+    EquivalentTo: 
+        <http://example.org/connective-members#B>
+    
+    
+Class: <http://example.org/connective-members#SubEmptyI>
+
+    SubClassOf: 
+        
+    
+    
+Class: <http://example.org/connective-members#SubEmptyU>
+
+    SubClassOf: 
+        
+    
+    
+Class: <http://example.org/connective-members#SubOneU>
+
+    SubClassOf: 
+        <http://example.org/connective-members#C>
+    
+    
+Class: <http://example.org/connective-members#TwoU>
+
+    EquivalentTo: 
+        <http://example.org/connective-members#B> or <http://example.org/connective-members#C>
+    
+    
+Individual: <http://example.org/connective-members#i>
+
+    

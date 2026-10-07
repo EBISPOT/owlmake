@@ -57,6 +57,7 @@ pub mod html_escape;
 /// `om validate-id-ranges`.
 pub mod idpolicy;
 pub mod io;
+pub mod java_number;
 pub mod model;
 pub mod odk;
 // OWLAPI-compatible content hashes and set iteration order. Pure std +

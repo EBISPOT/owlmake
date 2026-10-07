@@ -5239,16 +5239,17 @@ fn run_artefact(
 
     // Resolve the import closure BEFORE materialising declarations: a property the
     // closure already declares must NOT get a fresh Declaration here, and the
-    // writer needs the same set to decide whether a referenced entity gets a stub.
+    // writer needs the closure's entities to decide what a document that imports
+    // states of an entity it only names.
     let write_owlrdf = a.target.ends_with(".owl");
-    if write_owlrdf && model_has_imports(&model) {
+    let write_fmt = recipe_format(a).or_else(|| crate::io::Format::from_path(out).ok());
+    if model_has_imports(&model) && writes_among_imports(write_fmt) {
         if !closure_loaded {
             closure = load_closure(repo, &model, catalog)?;
             closure_loaded = true;
         }
         if let Some(cl) = &closure {
-            model.closure_ann_ns = annotation_property_namespaces(cl);
-            model.closure_declared = closure_declared_entities(cl);
+            model.imports_closure = Some(crate::model::ImportsClosure::of(cl));
             // A functional document names each entity's section after its label,
             // and an entity the root only REFERENCES is labelled by the ontology
             // that declares it. `oba-edit.obo` gives `OBA:0000003` no `name:` at
@@ -5299,7 +5300,7 @@ fn run_artefact(
     // `xmlns:doap` (from `merged_import.owl`) and `xmlns:protege` (from
     // `omo_import.owl`) without a single triple using either — and, since each step
     // re-reads the previous file's prefix map, why every downstream artefact
-    // carries them too. Both that and `closure_declared` are recorded above, before
+    // carries them too. The closure's entities are recorded above, before
     // declarations are materialised.
     let explicit_fmt = recipe_format(a);
     // A shell step already produced the artefact by redirection — that file IS the
@@ -5942,7 +5943,7 @@ fn declare_used_annotation_properties(model: &mut crate::model::Model) {
         // `omo_import.owl` needs no declaration in `filtered.owl`; adding one puts
         // a bare `<owl:AnnotationProperty rdf:about="…"/>` stub in every
         // intermediate.
-        if model.closure_declared.contains(&format!("ap\u{0}{ap}")) {
+        if model.imports_have(&format!("ap\u{0}{ap}")) {
             continue;
         }
         model.ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
@@ -5951,47 +5952,20 @@ fn declare_used_annotation_properties(model: &mut crate::model::Model) {
     }
 }
 
+/// Whether a document written in `fmt` (`None`: RDF/XML, the default) states
+/// what it does of an entity according to the ontologies it imports: RDF/XML
+/// and Turtle in the types they state, functional syntax and OWL/XML in the
+/// declarations they add.
+fn writes_among_imports(fmt: Option<crate::io::Format>) -> bool {
+    use crate::io::Format;
+    matches!(fmt, None | Some(Format::RdfXml | Format::Turtle | Format::Functional | Format::OwlXml))
+}
+
 fn model_has_imports(model: &crate::model::Model) -> bool {
     use horned_owl::model::Component;
     model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)))
 }
 
-/// Load the model's import closure (resolved via the catalog) into one model,
-/// to be used as a read-only reasoning context. None when no imports are declared.
-/// The distinct namespaces of every annotation property in `model`'s signature.
-///
-/// Of the imported entity kinds, ONLY annotation properties contribute an
-/// `xmlns` declaration to an RDF/XML output — an
-/// imported ObjectProperty, DataProperty, Datatype, Class or NamedIndividual in
-/// its own namespace contributes nothing. That asymmetry comes from RDF/XML
-/// itself: an annotation property becomes an XML *element name* and so needs a
-/// prefix, while every other entity appears only inside an `rdf:about` /
-/// `rdf:resource` attribute as a full IRI.
-pub(crate) fn annotation_property_namespaces(model: &crate::model::Model) -> Vec<String> {
-    let mut ns: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for ac in model.ont.iter() {
-        for iri in crate::sig::annotation_properties(&ac.component) {
-            // The same split the writer abbreviates element names with — see
-            // `owlrdf::ncname_split`.
-            ns.insert(crate::io::owlrdf::ncname_split(&iri).0.to_string());
-        }
-    }
-    ns.into_iter().collect()
-}
-
-/// Every entity in `model`'s SIGNATURE, keyed `kind\0IRI` — the set the RDF/XML
-/// writer consults before materialising a bare declaration stub for a
-/// referenced-but-undeclared entity (see `Model::closure_declared`).
-///
-/// The signature, not the declarations: an entity that appears anywhere in a
-/// transitively imported ontology's signature is left for that ontology to
-/// declare, whether or not it declares it. MONDO relies on the difference:
-/// `omo_import.owl` declares `IAO_0000231` and friends, but `RO_0002175`,
-/// `RO_0004001`, `RO_0004004` and `foaf:homepage` are only USED in the closure —
-/// and none of them may get a stub. Keying off declarations alone puts those stubs
-/// in `filtered.owl`/`reasoned.owl`, and from there into `tmp/simple_seed.txt`
-/// (whose query asks for `?cls a owl:AnnotationProperty`), which keeps axioms
-/// `filter` must drop from `mondo-simple.owl`.
 /// `entity IRI → rdfs:label` across a resolved import closure, for the banner
 /// comment a functional document heads each entity's section with.
 ///
@@ -6023,26 +5997,6 @@ fn closure_labels(
     labels
 }
 
-pub(crate) fn closure_declared_entities(
-    model: &crate::model::Model,
-) -> std::collections::HashSet<String> {
-    let e = crate::cmd::select::signature_entities(model);
-    let mut out = std::collections::HashSet::new();
-    for (kind, set) in [
-        ("class", &e.classes),
-        ("op", &e.object_properties),
-        ("dp", &e.data_properties),
-        ("ap", &e.annotation_properties),
-        ("ni", &e.individuals),
-        ("dt", &e.datatypes),
-    ] {
-        for iri in set {
-            out.insert(format!("{kind}\u{0}{iri}"));
-        }
-    }
-    out
-}
-
 /// Withdraw the declarations owlmake's OBO reader SYNTHESISED for entities the
 /// import closure already has (see `Model::materialised_declarations`).
 ///
@@ -6056,7 +6010,7 @@ pub(crate) fn closure_declared_entities(
 /// `?cls a owl:AnnotationProperty`) and keeps axioms `filter` must drop.
 fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
     use horned_owl::model::{Component, MutableOntology};
-    if model.materialised_declarations.is_empty() || model.closure_declared.is_empty() {
+    if model.materialised_declarations.is_empty() || model.imports_closure.is_none() {
         return;
     }
     // Which classes are in question is settled at read time: a class named as the
@@ -6098,7 +6052,7 @@ fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
             };
             !builtin(iri)
                 && model.materialised_declarations.contains(&key)
-                && model.closure_declared.contains(&key)
+                && model.imports_have(&key)
         })
         .cloned()
         .collect();
@@ -6107,6 +6061,8 @@ fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
     }
 }
 
+/// Load the model's import closure (resolved via the catalog) into one model,
+/// to be used as a read-only reasoning context. None when no imports are declared.
 pub(crate) fn load_closure(
     repo: &Repo,
     model: &crate::model::Model,
@@ -6515,11 +6471,10 @@ fn write_step_output(
     // `convert -I …/taxslim-disjoint-over-in-taxon.owl -o tmp/mirror-<id>.owl`
     // states nothing but disjointness over taxa that `taxslim.owl` declares, and
     // every one of them belongs to the import rather than to this document.
-    if matches!(fmt, Some(crate::io::Format::RdfXml) | None) && model_has_imports(model) {
+    if writes_among_imports(fmt) && model_has_imports(model) {
         let catalog = load_catalog_planned(repo);
         if let Some(cl) = load_closure(repo, model, &catalog)? {
-            model.closure_ann_ns = annotation_property_namespaces(&cl);
-            model.closure_declared = closure_declared_entities(&cl);
+            model.imports_closure = Some(crate::model::ImportsClosure::of(&cl));
         }
         withdraw_materialised_declarations(model);
     }
@@ -6920,9 +6875,9 @@ fn apply_op(
             // standalone command does the same from its own `-i`, which a threaded
             // model does not have.
             if let Some(cl) = closure {
-                model.closure_declared = closure_declared_entities(cl);
+                model.imports_closure = Some(crate::model::ImportsClosure::of(cl));
             } else if let Some(cl) = load_closure(repo, &model, catalog)? {
-                model.closure_declared = closure_declared_entities(&cl);
+                model.imports_closure = Some(crate::model::ImportsClosure::of(&cl));
             }
             // The plan NAMES the ID-ranges file; execution never globs the ontology
             // directory for `*-idranges.owl` when the op leaves it unset, which

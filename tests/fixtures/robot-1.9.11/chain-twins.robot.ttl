@@ -1,0 +1,642 @@
+@prefix : <http://example.org/chain-twins.owl#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/chain-twins.owl> .
+
+<http://example.org/chain-twins.owl> rdf:type owl:Ontology .
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/chain-twins.owl#p
+:p rdf:type owl:ObjectProperty ;
+   owl:equivalentProperty :q .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid6 ;
+   rdfs:comment "e"
+ ] .
+
+_:genid6 owl:inverseOf :p ;
+          owl:equivalentProperty _:genid8 .
+
+_:genid8 owl:inverseOf :q .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :p ;
+                         owl:equivalentProperty _:genid8
+                       ] ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid8 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "c"
+ ] .
+
+_:genid1 owl:inverseOf :r .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid6 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid6 ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid8 ;
+   rdfs:comment "c"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#q
+:q owl:equivalentProperty _:genid1 .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid6 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :p ;
+                         owl:equivalentProperty _:genid8
+                       ] ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid8 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid6 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid6 ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid8 ;
+   rdfs:comment "c"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#s
+:s owl:equivalentProperty _:genid6 .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid6 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ owl:inverseOf :p ;
+                         owl:equivalentProperty _:genid8
+                       ] ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid8 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :p ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :q ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :q ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid1 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid6 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid6 ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget _:genid8 ;
+   rdfs:comment "c"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#q
+:q rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/chain-twins.owl#r
+:r rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/chain-twins.owl#s
+:s rdf:type owl:ObjectProperty ;
+   rdfs:subPropertyOf _:genid13 .
+
+_:genid13 owl:inverseOf :r .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :s ;
+   owl:annotatedProperty rdfs:subPropertyOf ;
+   owl:annotatedTarget _:genid13 ;
+   rdfs:comment "x"
+ ] .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/chain-twins.owl#d
+:d rdf:type owl:DatatypeProperty ;
+   owl:equivalentProperty :e .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :e ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :e ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :f ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :e ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :e ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :f ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#e
+:e owl:equivalentProperty :f .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :e ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :e ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :f ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :e ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :e ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :f ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#f
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource :d ;
+  owl:annotatedProperty owl:equivalentProperty ;
+  owl:annotatedTarget :e ;
+  rdfs:comment "c"
+] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :e ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :f ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :d ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :e ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :e ;
+   owl:annotatedProperty owl:equivalentProperty ;
+   owl:annotatedTarget :f ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#e
+:e rdf:type owl:DatatypeProperty .
+
+
+###  http://example.org/chain-twins.owl#f
+:f rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/chain-twins.owl#A
+:A rdf:type owl:Class ;
+   owl:equivalentClass :B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget :B ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid19 ;
+   rdfs:comment "c"
+ ] .
+
+_:genid19 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :B .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget :B ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid19 ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#B
+:B owl:equivalentClass _:genid19 .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget :B ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid19 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget :B ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :B ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid19 ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#A2
+:A2 rdf:type owl:Class ;
+    owl:equivalentClass _:genid24 .
+
+_:genid24 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :C ;
+           owl:equivalentClass _:genid25 .
+
+_:genid25 rdf:type owl:Restriction ;
+           owl:onProperty :q ;
+           owl:someValuesFrom :D .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A2 ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid24 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ rdf:type owl:Restriction ;
+                         owl:onProperty :q ;
+                         owl:someValuesFrom :C ;
+                         owl:equivalentClass _:genid25
+                       ] ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid25 ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :A2 ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid24 ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource [ rdf:type owl:Restriction ;
+                         owl:onProperty :q ;
+                         owl:someValuesFrom :C ;
+                         owl:equivalentClass _:genid25
+                       ] ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid25 ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#B
+:B rdf:type owl:Class .
+
+
+###  http://example.org/chain-twins.owl#C
+:C rdf:type owl:Class .
+
+
+###  http://example.org/chain-twins.owl#D
+:D rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/chain-twins.owl#a
+:a rdf:type owl:NamedIndividual ;
+   owl:sameAs :b .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :a ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :b ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :b ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :c ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :a ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :b ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :b ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :c ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#b
+:b owl:sameAs :c .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :a ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :b ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :b ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :c ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :a ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :b ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :b ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :c ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#c
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource :a ;
+  owl:annotatedProperty owl:sameAs ;
+  owl:annotatedTarget :b ;
+  rdfs:comment "c"
+] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :b ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :c ;
+   rdfs:comment "c"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :a ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :b ;
+   rdfs:comment "e"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource :b ;
+   owl:annotatedProperty owl:sameAs ;
+   owl:annotatedTarget :c ;
+   rdfs:comment "e"
+ ] .
+
+
+###  http://example.org/chain-twins.owl#b
+:b rdf:type owl:NamedIndividual .
+
+
+###  http://example.org/chain-twins.owl#c
+:c rdf:type owl:NamedIndividual .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Restriction ;
+  owl:onProperty :p ;
+  owl:someValuesFrom :B ;
+  owl:equivalentClass [ rdf:type owl:Restriction ;
+                        owl:onProperty :p ;
+                        owl:someValuesFrom :C ;
+                        owl:equivalentClass [ rdf:type owl:Restriction ;
+                                              owl:onProperty :p ;
+                                              owl:someValuesFrom :D
+                                            ]
+                      ]
+] .
+
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ rdf:type owl:Restriction ;
+                        owl:onProperty :p ;
+                        owl:someValuesFrom :B ;
+                        owl:equivalentClass _:genid40
+                      ] ;
+  owl:annotatedProperty owl:equivalentClass ;
+  owl:annotatedTarget _:genid40 ;
+  rdfs:comment "c"
+] .
+
+_:genid40 rdf:type owl:Restriction ;
+           owl:onProperty :p ;
+           owl:someValuesFrom :C ;
+           owl:equivalentClass _:genid42 .
+
+_:genid42 rdf:type owl:Restriction ;
+           owl:onProperty :p ;
+           owl:someValuesFrom :D .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource _:genid40 ;
+   owl:annotatedProperty owl:equivalentClass ;
+   owl:annotatedTarget _:genid42 ;
+   rdfs:comment "c"
+ ] .
+
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ rdf:type owl:Restriction ;
+                        owl:onProperty :p ;
+                        owl:someValuesFrom :C ;
+                        rdfs:subClassOf _:genid45
+                      ] ;
+  owl:annotatedProperty rdfs:subClassOf ;
+  owl:annotatedTarget _:genid45 ;
+  rdfs:comment "g"
+] .
+
+_:genid45 rdf:type owl:Restriction ;
+           owl:onProperty :p ;
+           owl:someValuesFrom :D .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

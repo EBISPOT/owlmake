@@ -1,0 +1,98 @@
+Prefix(:=<http://example.org/nest#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(nest:=<http://example.org/nest#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(swrl:=<http://www.w3.org/2003/11/swrl#>)
+Prefix(swrlb:=<http://www.w3.org/2003/11/swrlb#>)
+
+
+Ontology(<http://example.org/nest>
+Annotation(nest:see _:genid2147483648)
+Annotation(Annotation(nest:see _:genid2147483652) rdfs:comment "header")
+
+Declaration(Class(nest:A))
+Declaration(Class(nest:B))
+Declaration(Class(nest:C))
+Declaration(Class(nest:D))
+Declaration(ObjectProperty(nest:p))
+Declaration(ObjectProperty(nest:q))
+Declaration(ObjectProperty(nest:r))
+Declaration(DataProperty(nest:d))
+Declaration(NamedIndividual(nest:i))
+Declaration(NamedIndividual(nest:j))
+Declaration(NamedIndividual(nest:k))
+Declaration(NamedIndividual(nest:m))
+Declaration(AnnotationProperty(nest:see))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: nest:p (nest:p)
+
+SubObjectPropertyOf(Annotation(Annotation(Annotation(nest:see _:genid2147483696) rdfs:comment "nn") rdfs:comment "subproperty") nest:p nest:q)
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: nest:A (a)
+
+AnnotationAssertion(Annotation(Annotation(Annotation(nest:see _:genid2147483695) rdfs:comment "nn") rdfs:comment "label") rdfs:label nest:A "a")
+SubClassOf(Annotation(Annotation(rdfs:comment "subclass value") nest:see _:genid2147483657) nest:A nest:B)
+
+# Class: nest:B (nest:B)
+
+EquivalentClasses(Annotation(nest:see _:genid2147483693) nest:B nest:C)
+
+# Class: nest:C (nest:C)
+
+EquivalentClasses(Annotation(Annotation(rdfs:comment "equivalent value") nest:see _:genid2147483693) nest:C nest:D)
+
+# Class: nest:D (nest:D)
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: nest:i (nest:i)
+
+
+# Individual: nest:j (nest:j)
+
+ObjectPropertyAssertion(Annotation(Annotation(nest:see _:genid2147483666) rdfs:comment "assertion") nest:p nest:j nest:i)
+NegativeObjectPropertyAssertion(Annotation(Annotation(nest:see _:genid2147483669) rdfs:comment "negative") nest:p nest:j nest:k)
+DataPropertyAssertion(Annotation(Annotation(rdfs:comment "data value") nest:see _:genid2147483689) nest:d nest:j "1")
+
+# Individual: nest:k (nest:k)
+
+ObjectPropertyAssertion(nest:q nest:k _:genid2147483657)
+
+# Individual: nest:m (nest:m)
+
+ClassAssertion(Annotation(Annotation(rdfs:comment "type value") nest:see _:genid2147483692) nest:A nest:m)
+ObjectPropertyAssertion(nest:r nest:m _:genid2147483692)
+
+
+SubClassOf(Annotation(Annotation(rdfs:comment "gci value") nest:see _:genid2147483674) ObjectSomeValuesFrom(nest:p nest:A) nest:B)
+DisjointClasses(Annotation(Annotation(nest:see _:genid2147483694) rdfs:comment "disjoint") nest:A nest:C nest:D)
+ClassAssertion(nest:B _:genid2147483648)
+ClassAssertion(nest:A _:genid2147483652)
+ClassAssertion(nest:C _:genid2147483657)
+ClassAssertion(nest:A _:genid2147483666)
+ClassAssertion(nest:A _:genid2147483669)
+ClassAssertion(nest:D _:genid2147483674)
+DifferentIndividuals(Annotation(Annotation(rdfs:comment "different value") nest:see _:genid2147483697) nest:i nest:j nest:k)
+ObjectPropertyAssertion(nest:q _:genid2147483689 nest:k)
+DataPropertyAssertion(nest:d _:genid2147483689 "2")
+DLSafeRule(Body(ClassAtom(nest:A Variable(<urn:swrl:var#x>)))Head(ClassAtom(nest:B Variable(<urn:swrl:var#x>))))
+AnnotationAssertion(nest:see _:genid2147483691 _:genid2147483690)
+)

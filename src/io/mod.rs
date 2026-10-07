@@ -97,6 +97,7 @@ pub mod owlfunc;
 pub mod owlapi_ttl;
 pub mod owlrdf;
 pub mod owx;
+pub(crate) mod rdfxml;
 pub mod turtle;
 pub mod jena_ttl;
 
@@ -361,7 +362,10 @@ pub fn load_iri(iri: &str, format: Option<&str>) -> Result<Model> {
         .or_else(|| sniff(&bytes))
         .with_context(|| format!("cannot determine ontology format of {iri}"))?,
     };
-    load_from(std::io::Cursor::new(bytes), fmt).with_context(|| format!("parsing {iri}"))
+    IN_IRI.with(|c| *c.borrow_mut() = Some(iri.to_string()));
+    let r = load_from(std::io::Cursor::new(bytes), fmt).with_context(|| format!("parsing {iri}"));
+    IN_IRI.with(|c| *c.borrow_mut() = None);
+    r
 }
 
 /// Fetch a URL's bytes over HTTP(S), following redirects.
@@ -571,13 +575,6 @@ fn leading_iri_term(trimmed: &str) -> bool {
     }
 }
 
-/// The `idspace:` set an OWL document declares: every `xmlns:`-declared prefix
-/// whose namespace is not a built-in one (the OBO base, RDF, RDFS, XSD, OWL, XML),
-/// in declaration order, one prefix per distinct namespace. Scanned from the raw
-/// bytes because RDF/XML keeps no formal prefix map that horned-owl surfaces.
-///
-/// A declared prefix earns an idspace even when no id is ever shortened with it —
-/// UBERON writes its `foaf`/`doap` IRIs out in full yet still declares both.
 /// Whether a namespace can stand behind an OBO `idspace:`. The OWL, RDF, RDFS,
 /// XSD and XML namespaces cannot; nor can the OBO PURL space, whose ids the
 /// OBO id rules already shorten, or any namespace that encloses it.
@@ -611,133 +608,35 @@ pub(crate) fn declared_idspaces(model: &Model) -> Vec<(String, String)> {
     out
 }
 
-fn scan_owl_idspaces(bytes: &[u8]) -> Vec<(String, String)> {
-    let text = String::from_utf8_lossy(bytes);
+/// The format prefixes an RDF/XML document declares: the entities of its
+/// internal subset and the namespace declarations of all its elements, in
+/// document order, a later binding of a name replacing an earlier one where
+/// the name was first bound. The default namespace binds no prefix, and the
+/// RDF namespace is always `rdf`, whatever the document calls it.
+fn rdfxml_prefixes(declared: &[(String, String)]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
-    let mut seen_ns: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // The `idspace:` set and CURIE shortening are driven by the document's declared
-    // `xmlns:PREFIX` bindings — NOT by which namespaces merely occur in the body. A
-    // namespace used only via a default `xmlns="…"` on an element (as cl-full.owl
-    // declares dc/terms/skos/foaf) is not a prefix, so it gets no idspace and
-    // shortens nothing; ids under it fall to the mechanical local-name rule instead.
-    // So scan only the `xmlns:PREFIX="NS"` declarations below; do not pre-seed
-    // well-known namespaces.
-    let is_builtin = |ns: &str| !idspace_namespace(ns);
-    // Parse `xmlns:PREFIX="NS"` declarations by hand (RDF/XML, no dependency on a
-    // full XML parse). The default `xmlns=` (no prefix) never becomes an idspace.
-    for decl in text.split("xmlns:").skip(1) {
-        let Some(eq) = decl.find('=') else { continue };
-        let prefix = decl[..eq].trim();
-        if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+    for (prefix, ns) in declared {
+        if prefix.is_empty() {
             continue;
         }
-        let rest = decl[eq + 1..].trim_start();
-        let quote = match rest.bytes().next() {
-            Some(b @ (b'"' | b'\'')) => b as char,
-            _ => continue,
-        };
-        let Some(end) = rest[1..].find(quote) else { continue };
-        // As in `scan_all_prefixes`: the raw attribute text still spells its
-        // entity references out, and a namespace is what they stand for.
-        let ns = unescape_xml(&rest[1..1 + end]);
-        if is_builtin(&ns) || seen_ns.contains(&ns) {
-            continue;
+        let prefix = if ns == "http://www.w3.org/1999/02/22-rdf-syntax-ns#" { "rdf" } else { prefix.as_str() };
+        match out.iter_mut().find(|(p, _)| p == prefix) {
+            Some(bound) => bound.1 = ns.clone(),
+            None => out.push((prefix.to_string(), ns.clone())),
         }
-        seen_ns.insert(ns.clone());
-        out.push((prefix.to_string(), ns));
     }
     out
 }
 
-/// Resolve the XML predefined entity references and character references in an
-/// attribute value. An entity the document declares itself is left as written:
-/// nothing here reads a DTD.
-fn unescape_xml(s: &str) -> String {
-    if !s.contains('&') {
-        return s.to_string();
-    }
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(i) = rest.find('&') {
-        out.push_str(&rest[..i]);
-        let tail = &rest[i..];
-        let Some(semi) = tail.find(';') else {
-            out.push_str(tail);
-            return out;
-        };
-        let name = &tail[1..semi];
-        let resolved = match name {
-            "amp" => Some("&".to_string()),
-            "lt" => Some("<".to_string()),
-            "gt" => Some(">".to_string()),
-            "quot" => Some("\"".to_string()),
-            "apos" => Some("'".to_string()),
-            _ => name.strip_prefix('#').and_then(|n| {
-                let code = match n.strip_prefix(['x', 'X']) {
-                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
-                    None => n.parse::<u32>().ok(),
-                }?;
-                char::from_u32(code).map(|c| c.to_string())
-            }),
-        };
-        match resolved {
-            Some(text) => out.push_str(&text),
-            None => out.push_str(&tail[..=semi]),
-        }
-        rest = &tail[semi + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Scan every `xmlns:PREFIX="NS"` declaration in an RDF/XML document, in order,
-/// keeping built-in prefixes (unlike [`scan_owl_idspaces`]) — the full prefix map
-/// the RDF/XML writer re-declares on `rdf:RDF`.
-fn scan_all_prefixes(bytes: &[u8]) -> Vec<(String, String)> {
-    let text = String::from_utf8_lossy(bytes);
-    // Only the `rdf:RDF` opening tag carries the document prefixes; stop at its
-    // close `>` so body attributes named `xmlns:…` (there are none in practice)
-    // can't leak in.
-    let root_tag = format!("<{}RDF", rdf_prefix(&text));
-    let head = match text.find(root_tag.as_str()) {
-        Some(i) => {
-            let rest = &text[i..];
-            let end = rest.find('>').map(|e| i + e + 1).unwrap_or(text.len());
-            &text[i..end]
-        }
-        None => &text[..text.len().min(8192)],
-    };
-    let mut out: Vec<(String, String)> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for decl in head.split("xmlns:").skip(1) {
-        let Some(eq) = decl.find('=') else { continue };
-        let prefix = decl[..eq].trim();
-        if prefix.is_empty()
-            || !prefix.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        {
-            continue;
-        }
-        let rest = decl[eq + 1..].trim_start();
-        let quote = match rest.bytes().next() {
-            Some(b @ (b'"' | b'\'')) => b as char,
-            _ => continue,
-        };
-        let Some(end) = rest[1..].find(quote) else { continue };
-        let ns = &rest[1..1 + end];
-        // The scan reads the attribute's raw text, so its entity references are
-        // still spelled out; a namespace is the value they stand for. FoodOn
-        // declares `xmlns:itis="…?search_topic=TSN&amp;search_value="`, and the
-        // prefix it binds ends in a bare `&`.
-        let ns = unescape_xml(ns);
-        // The RDF namespace is always written back as `rdf`, whatever the source
-        // called it, so a document declaring `xmlns:r=` must not put `xmlns:r=` in
-        // the artefact.
-        let prefix = if ns == "http://www.w3.org/1999/02/22-rdf-syntax-ns#" { "rdf" } else { prefix };
-        if seen.insert(prefix.to_string()) {
-            out.push((prefix.to_string(), ns));
-        }
-    }
-    out
+/// The `idspace:` set an RDF/XML document declares: its format prefixes
+/// ([`rdfxml_prefixes`]) whose namespace an idspace may name, one prefix per
+/// namespace, the first.
+///
+/// A declared prefix earns an idspace even when no id is ever shortened with it —
+/// UBERON writes its `foaf`/`doap` IRIs out in full yet still declares both.
+fn rdfxml_idspaces(prefixes: &[(String, String)]) -> Vec<(String, String)> {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    prefixes.iter().filter(|(_, ns)| idspace_namespace(ns) && seen.insert(ns.as_str())).cloned().collect()
 }
 
 /// Owning class IRIs whose body references the SAME `rdf:nodeID` more than once —
@@ -1043,41 +942,6 @@ fn unescape_attr(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// The prefix a document binds the RDF namespace to, with its colon — normally
-/// `rdf:`, but nothing in XML requires that, so a document is read under whatever
-/// prefix it declares.
-///
-/// Everything the two scanners look for is a prefixed name, so hard-coding the
-/// literal string `rdf:…` breaks on a document binding the namespace to something
-/// else: the root element goes unrecognised, node and property elements are read
-/// one level out of phase, and every `<rdfs:subClassOf r:resource=…/>` looks like
-/// an anonymous node — the same 5.5x over-count the alternation comment describes
-/// — while the anonymous-individual blocks are missed entirely and the Individuals
-/// section comes out empty.
-///
-/// A default binding (`xmlns="…rdf-syntax-ns#"`) names ELEMENTS only; an
-/// unprefixed attribute is in no namespace, so such a document cannot write
-/// `rdf:about` at all and the attribute needles stay `rdf:`.
-pub(crate) fn rdf_prefix(text: &str) -> String {
-    const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-    let head = &text[..text.len().min(65536)];
-    for m in ["\"", "'"] {
-        let needle = format!("={m}{RDF_NS}{m}");
-        let mut from = 0usize;
-        while let Some(rel) = head[from..].find(&needle) {
-            let at = from + rel;
-            let decl = head[..at].rsplit(char::is_whitespace).next().unwrap_or("");
-            if let Some(p) = decl.strip_prefix("xmlns:") {
-                if !p.is_empty() {
-                    return format!("{p}:");
-                }
-            }
-            from = at + needle.len();
-        }
-    }
-    "rdf:".to_string()
-}
-
 thread_local! {
     /// The blank-node counter. Anonymous individuals are numbered upwards from
     /// 2^31, so `_:genid2147483648` is the first one a parse mints. One counter
@@ -1220,26 +1084,6 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
     (std::borrow::Cow::Owned(out), labels)
 }
 
-/// How many blank nodes an RDF/XML document has: the distinct nodes its
-/// triples name.
-fn document_blank_nodes(buf: &[u8], lax: bool) -> Result<usize> {
-    use oxigraph::io::{RdfFormat, RdfParser};
-    use oxigraph::model::{NamedOrBlankNode, Term};
-    let parser = RdfParser::from_format(RdfFormat::RdfXml);
-    let parser = if lax { parser.lenient() } else { parser };
-    let mut nodes: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for quad in parser.for_slice(buf) {
-        let quad = quad.map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
-        if let NamedOrBlankNode::BlankNode(n) = &quad.subject {
-            nodes.insert(n.as_str().to_string());
-        }
-        if let Term::BlankNode(n) = &quad.object {
-            nodes.insert(n.as_str().to_string());
-        }
-    }
-    Ok(nodes.len())
-}
-
 /// The anonymous individuals of `ont`, by the number their `genid` id carries,
 /// or `None` when one carries another kind of id.
 pub(crate) fn numbered_individuals(ont: &Onto) -> Option<Vec<(u64, String)>> {
@@ -1348,8 +1192,57 @@ fn version_iri_statement(ont: &mut Onto) {
 /// Load an ontology of the given format from any buffered reader.
 pub fn load_from<R: BufRead>(reader: R, fmt: Format) -> Result<Model> {
     let mut model = guard_parse(fmt, move || load_from_raw(reader, fmt))?;
+    literals_as_made(&mut model.ont);
     canonicalize_rules(&mut model);
     Ok(model)
+}
+
+/// Read back a document written from a model, whose literals are made already
+/// and stay as they are.
+pub(crate) fn reload<R: BufRead>(reader: R, fmt: Format) -> Result<Model> {
+    let mut model = guard_parse(fmt, move || load_from_raw(reader, fmt))?;
+    canonicalize_rules(&mut model);
+    Ok(model)
+}
+
+/// Each literal a document states, as it is made
+/// ([`crate::model::literal_as_made`]). An axiom that differs from another only
+/// in a literal made the same becomes that axiom.
+fn literals_as_made(ont: &mut Onto) {
+    use crate::model::remade_literal;
+    use horned_owl::model::{Literal, MutableOntology, RcStr};
+    use horned_owl::visitor::immutable::{Visit, Walk};
+    use horned_owl::visitor::mutable::{VisitMut, WalkMut};
+
+    struct Unmade(bool);
+    impl Visit<RcStr> for Unmade {
+        fn visit_literal(&mut self, l: &Literal<RcStr>) {
+            self.0 = self.0 || remade_literal(l).is_some();
+        }
+    }
+    let unmade: Vec<_> = ont
+        .iter()
+        .filter(|ac| {
+            let mut walk = Walk::new(Unmade(false));
+            walk.annotated_component(ac);
+            walk.into_visit().0
+        })
+        .cloned()
+        .collect();
+    struct Make;
+    impl VisitMut<RcStr> for Make {
+        fn visit_literal(&mut self, l: &mut Literal<RcStr>) {
+            if let Some(made) = remade_literal(l) {
+                *l = made;
+            }
+        }
+    }
+    let mut make = WalkMut::new(Make);
+    for mut ac in unmade {
+        ont.remove(&ac);
+        make.annotated_component(&mut ac);
+        ont.insert(ac);
+    }
 }
 
 /// Run a parser closure, turning a panic into a clean error. The vendored
@@ -1428,13 +1321,8 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
     cfg.lax = lax;
     match fmt {
         Format::RdfXml => {
-            // RDF/XML carries no formal prefix map, so buffer the bytes and scan the
-            // `xmlns:` declarations for the document's own prefix map — the set an
-            // OBO write emits as `idspace:` lines.
             let mut buf = Vec::new();
             reader.read_to_end(&mut buf)?;
-            let idspaces = scan_owl_idspaces(&buf);
-            let rdf_prefixes = scan_all_prefixes(&buf);
             // Read unconditionally, for the same reason the SHARING scan below is:
             // these describe the SOURCE, and every RDF/XML file owlmake writes goes
             // through the writer that consumes them. Anything that made the scans
@@ -1447,41 +1335,25 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // only ran when that writer was already on would reach it with no record
             // of which expressions were one node.
             let owl_shared_owners = scan_owl_shared_owners(&buf);
-            // The parse numbers this document's blank nodes from the run's own
-            // counter, so an anonymous individual carries the id it would be
+            // The reader numbers this document's blank nodes from the run's own
+            // counter, so an anonymous individual carries the name it is
             // written with — `_:genid2147483648` onwards — and two documents
             // merged in one step keep their nodes apart. The counter comes back
-            // out where the parse left it.
+            // out where the reading left it.
+            let trace = std::env::var_os("OM_RDFXML_TRACE").is_some();
+            let read = rdfxml::read(&buf, anon_counter(), trace, document_iri())?;
+            let rdf_prefixes = rdfxml_prefixes(&read.prefixes);
+            let idspaces = rdfxml_idspaces(&rdf_prefixes);
             let b = horned_owl::model::Build::new_rc();
-            let base = anon_counter();
-            b.set_bnode_base(base as i64);
-            // The RDF reader takes its `Build` inside the configuration, and this
-            // parse must share `b` so the counter can be read back afterwards.
             let mut rdf_cfg = ParserConfiguration::new(&b);
             rdf_cfg.lax = lax;
-            let (rdfo, incomplete): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
-                horned_owl::io::rdf::reader::read(&mut buf.as_slice(), rdf_cfg.into())
+            let (rdfo, _): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
+                horned_owl::io::rdf::reader::read_statements(read.statements, rdf_cfg, &read.order)
                     .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
             // Move components out of the parser's Rc set rather than deep-cloning
             // every one (the naive From<ConcreteRDFOntology>).
             let mut ont: Onto = rdfo.into_set_ontology_fast();
-            let mut after = b.bnode_base().map(|n| n as u64);
-            // The parse takes an id for every blank node it tries as an
-            // individual, and the nodes a rule is made of, or triples it cannot
-            // read, are tried and rejected first. Where either is present the
-            // individuals are numbered again, after the document's own nodes.
-            let has_rule = ont.iter().any(|ac| matches!(ac.component, horned_owl::model::Component::Rule(_)));
-            if has_rule || !incomplete.is_complete() {
-                if let Some(ids) = numbered_individuals(&ont).filter(|ids| !ids.is_empty()) {
-                    let first = base + document_blank_nodes(&buf, lax)? as u64;
-                    if ids[0].0 >= first {
-                        after = Some(renumber_individuals(&mut ont, ids, first));
-                    }
-                }
-            }
-            if let Some(n) = after {
-                set_anon_counter(n);
-            }
+            set_anon_counter(read.next);
             version_iri_statement(&mut ont);
             let mut model = Model::from_parts(ont, crate::model::default_prefixes());
             model.idspaces = idspaces;
@@ -1675,9 +1547,11 @@ pub fn save(model: &mut Model, path: &Path) -> Result<()> {
 ///
 /// The same holds of the members of the other set-valued axioms —
 /// equivalent and disjoint object and data properties, same and different
-/// individuals — and of a key's properties: an RDF document stating
-/// `p owl:equivalentProperty q` and `q owl:equivalentProperty p` reads as two
-/// axioms, which would otherwise be written twice in every syntax.
+/// individuals, the two properties an inverse-properties axiom relates — and
+/// of a key's properties: an RDF document stating `p owl:equivalentProperty q`
+/// and `q owl:equivalentProperty p`, or `p owl:inverseOf q` and
+/// `q owl:inverseOf p`, reads as two axioms, which would otherwise be written
+/// twice in every syntax.
 ///
 /// The canonical order is the order OWL's object model keeps a set in. The
 /// functional writer emits operands in it; the other writers sort operands as
@@ -1731,6 +1605,10 @@ pub(crate) fn canonical_component(
         }
         Component::DisjointDataProperties(ax) => {
             Component::DisjointDataProperties(m::DisjointDataProperties(sorted_by(&ax.0, cmp_dp)))
+        }
+        Component::InverseObjectProperties(ax) => {
+            let (first, second) = if cmp_ope(&ax.1, &ax.0).is_lt() { (&ax.1, &ax.0) } else { (&ax.0, &ax.1) };
+            Component::InverseObjectProperties(m::InverseObjectProperties(first.clone(), second.clone()))
         }
         Component::SameIndividual(ax) => Component::SameIndividual(m::SameIndividual(sorted_by(&ax.0, cmp_individual))),
         Component::DifferentIndividuals(ax) => {
@@ -2047,8 +1925,7 @@ fn write_to_with<W: Write>(
         Format::RdfXml if rdfxml == RdfXmlWriter::Owlapi => {
             // An axiom the layout cannot state sends the whole document through
             // the general writer, so it is never written without one.
-            let unstated =
-                with_inverse_assertions_stated(model, |m| crate::io::owlrdf::try_save(m, &mut writer))?;
+            let unstated = crate::io::owlrdf::try_save(model, &mut writer)?;
             if unstated.is_empty() {
                 return Ok(());
             }
@@ -2178,17 +2055,24 @@ fn write_to_with<W: Write>(
                 mk.sharedowner = model.owl_shared_owners.clone().into_iter().collect();
                 PENDING_MARKERS.with(|c| *c.borrow_mut() = Some(mk));
             }
+            // The entities the document declares although the ontology does
+            // not, the same ones an OWL/XML document declares.
+            let declare: Vec<(horned_owl::model::NamedOWLEntityKind, String)> = entities::missing_declarations(model)
+                .into_iter()
+                .map(|(kind, iri)| (kind.named(), iri))
+                .collect();
             let cm = take_cm(model);
             // Which class this document's untyped literals take, which decides where
             // they sort against `xsd:anyURI` — see `Model::plain_literals_typed`.
             // Set per WRITE, from the model, the same way `owlrdf` does it.
             horned_owl::io::ofn::writer::set_plain_literals_typed(model.plain_literals_typed);
-            let r = horned_owl::io::ofn::writer::write_with_labels(
+            let r = horned_owl::io::ofn::writer::write_full(
                 &mut writer,
                 &cm,
                 Some(&prefixes),
                 labels_opt,
                 order_opt,
+                Some(&declare),
             )
             .map_err(|e| anyhow::anyhow!("Functional Syntax write error: {e}"));
             restore_cm(model, cm);
@@ -2202,92 +2086,38 @@ fn write_to_with<W: Write>(
         }
         Format::Turtle => {
             let prefixes = written_prefixes(model);
-            with_inverse_assertions_stated(model, |m| owlapi_ttl::save(m, &prefixes, &mut writer))?
+            owlapi_ttl::save(model, &prefixes, &mut writer)?
         }
         Format::NTriples => turtle::save_ntriples(model, &mut writer)?,
     }
     Ok(())
 }
 
-/// Run `write` with every annotated assertion on an inverse property that names
-/// an anonymous individual stated by the named property instead, as the RDF
-/// statement it makes: `ObjectPropertyAssertion(ObjectInverseOf(p) x y)` as
-/// `ObjectPropertyAssertion(p y x)`, its annotations reifying that statement.
-/// The model is as it was once `write` returns.
-fn with_inverse_assertions_stated<T>(model: &mut Model, write: impl FnOnce(&mut Model) -> T) -> T {
-    use horned_owl::model::{
-        AnnotatedComponent, Component, Individual, MutableOntology, ObjectPropertyAssertion,
-        ObjectPropertyExpression as OPE,
-    };
-    let anonymous = |i: &Individual<horned_owl::model::RcStr>| matches!(i, Individual::Anonymous(_));
-    let stated: Vec<(AnnotatedComponent<_>, AnnotatedComponent<_>)> = model
-        .ont
-        .iter()
-        .filter_map(|ac| match &ac.component {
-            Component::ObjectPropertyAssertion(a) if !ac.ann.is_empty() => match &a.ope {
-                OPE::InverseObjectProperty(p) if anonymous(&a.from) || anonymous(&a.to) => Some((
-                    ac.clone(),
-                    AnnotatedComponent {
-                        component: Component::ObjectPropertyAssertion(ObjectPropertyAssertion {
-                            ope: OPE::ObjectProperty(p.clone()),
-                            from: a.to.clone(),
-                            to: a.from.clone(),
-                        }),
-                        ann: ac.ann.clone(),
-                    },
-                )),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect();
-    if stated.is_empty() {
-        return write(model);
-    }
-    // A named-property twin the model already holds stays: only what this adds
-    // is taken out again.
-    let added: Vec<bool> = stated.iter().map(|(_, new)| !model.ont.iter().any(|ac| ac == new)).collect();
-    for (old, new) in &stated {
-        model.ont.remove(old);
-        model.ont.insert(new.clone());
-    }
-    let out = write(model);
-    for ((old, new), added) in stated.iter().zip(added) {
-        if added {
-            model.ont.remove(new);
-        }
-        model.ont.insert(old.clone());
-    }
-    out
-}
-
 /// The `Prefix(p:=<ns>)` declarations a Functional document makes for itself, in
-/// declaration order. The empty prefix (`Prefix(:=<…>)`) is the document's default
-/// namespace rather than an xmlns binding re-declared by name, so it is skipped
-/// here.
+/// declaration order, the default (`Prefix(:=<…>)`) among them: a file whose only
+/// declaration is the default is still a file that declares prefixes. White space
+/// may stand between the parts of a declaration, as anywhere in the syntax.
 fn document_ofn_prefixes(text: &str) -> Vec<(String, String)> {
+    static DECLARATION: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let declaration = DECLARATION.get_or_init(|| {
+        regex::Regex::new(r"Prefix\s*\(\s*([^\s:=()<>]*):\s*=\s*<([^>]*)>\s*\)").expect("prefix declaration")
+    });
     let mut out = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        let Some(rest) = line.strip_prefix("Prefix(") else {
-            // Prefix declarations form the document's head; the first axiom ends them.
-            if line.starts_with("Ontology(") {
-                break;
-            }
-            continue;
-        };
-        let Some(rest) = rest.strip_suffix(')') else { continue };
-        let Some((name, iri)) = rest.split_once(":=") else { continue };
-        let iri = iri.trim().trim_start_matches('<').trim_end_matches('>');
-        if iri.is_empty() {
+        // Prefix declarations form the document's head; the first axiom ends them.
+        if line.starts_with("Ontology") {
+            break;
+        }
+        if line.starts_with('#') {
             continue;
         }
-        // The DEFAULT binding counts. Dropping it made "this document declared no
-        // prefixes" indistinguishable from "it declared only a default", and the
-        // OFN writer takes a different branch for the two: a file whose only
-        // `Prefix(…)` line is `:` fell through to the full CURIE map and kept the
-        // `:` that `saveOntology` overwrites. `rdfxml_format_prefixes` skips it.
-        out.push((name.to_string(), iri.to_string()));
+        for decl in declaration.captures_iter(line) {
+            let (name, iri) = (&decl[1], &decl[2]);
+            if !iri.is_empty() {
+                out.push((name.to_string(), iri.to_string()));
+            }
+        }
     }
     out
 }
@@ -2306,12 +2136,8 @@ fn document_ofn_prefixes(text: &str) -> Vec<(String, String)> {
 ///
 /// String literals are skipped: `"a <b> c"` is text, not an IRI.
 fn resolve_relative_iris(text: &str) -> std::borrow::Cow<'_, str> {
-    let Some(base) = text
-        .split("Prefix(:=<")
-        .nth(1)
-        .and_then(|rest| rest.split('>').next())
-        .filter(|b| !b.is_empty())
-    else {
+    let declared = document_ofn_prefixes(text);
+    let Some(base) = declared.iter().find(|(name, _)| name.is_empty()).map(|(_, iri)| iri.as_str()) else {
         return text.into();
     };
     let (bytes, mut out, mut last, mut in_string, mut escaped) =
@@ -2378,10 +2204,11 @@ fn standard_prefix_prelude(text: &str) -> String {
 
 /// Build the fixed prefix map owlmake gives a module it has just built from
 /// scratch — a DOSDP pattern file, the merged `patterns/definitions.owl`, an
-/// extracted import module: the default `:` prefix bound to the ontology IRI plus
-/// `#`, then `owl`, `rdf`, `xml`, `xsd`, `rdfs`. Nothing else — OBO CURIEs like
-/// `obo:` are deliberately absent so entity IRIs render as full `<IRI>`, which is
-/// the shape released pattern and module files carry. A functional document that
+/// extracted import module: the default `:` prefix bound to the ontology IRI
+/// ([`with_terminating_hash`]), then `owl`, `rdf`, `xml`, `xsd`, `rdfs`.
+/// Nothing else — OBO CURIEs like `obo:` are deliberately absent so entity IRIs
+/// render as full `<IRI>`, which is the shape released pattern and module files
+/// carry. A functional document that
 /// came off disk is not this case: it declares its own prefixes, which
 /// `document_ofn_prefixes` reads back and the write path passes through unchanged.
 /// The horned-owl writer emits these in this canonical order and uses them (only
@@ -2398,7 +2225,8 @@ pub fn robot_ofn_prefixes(model: &Model) -> PrefixMapping {
 
     // Default `:`: keep the ontology's own default prefix if it declared one (a
     // load/convert round-trip preserves it); otherwise synthesize it from the
-    // ontology IRI + '#', which is what a freshly built pattern module gets.
+    // ontology IRI ([`with_terminating_hash`]), which is what a freshly built
+    // pattern module gets.
     let mut self_ns: Option<String> = model
         .prefixes
         .mappings()
@@ -2408,7 +2236,7 @@ pub fn robot_ofn_prefixes(model: &Model) -> PrefixMapping {
         for ac in model.ont.iter() {
             if let horned_owl::model::Component::OntologyID(id) = &ac.component {
                 if let Some(iri) = &id.iri {
-                    self_ns = Some(format!("{}#", iri.as_ref()));
+                    self_ns = Some(with_terminating_hash(iri.as_ref()));
                 }
                 break;
             }
@@ -2476,6 +2304,56 @@ fn in_path() -> Option<std::path::PathBuf> {
     IN_PATH.with(|c| c.borrow().clone())
 }
 
+thread_local! {
+    /// The IRI of the document currently being read when it was fetched by IRI
+    /// rather than read from a file. Set by [`load_iri`].
+    static IN_IRI: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The IRI of the document being read, which its relative IRIs resolve
+/// against when it states no base of its own: the IRI it was fetched by, or
+/// its file's IRI.
+pub(crate) fn document_iri() -> Option<String> {
+    IN_IRI.with(|c| c.borrow().clone()).or_else(|| in_path().and_then(|p| file_iri(&p)))
+}
+
+/// The IRI of the file at `path`: `file:` and the path made absolute against
+/// the working directory as written, `.` and `..` included, with repeated and
+/// trailing separators dropped and every character a URI path cannot hold
+/// percent-escaped.
+fn file_iri(path: &Path) -> Option<String> {
+    let text = path.to_str()?;
+    let joined = if text.starts_with('/') {
+        text.to_string()
+    } else {
+        format!("{}/{text}", std::env::current_dir().ok()?.to_str()?)
+    };
+    let mut absolute = String::with_capacity(joined.len());
+    for c in joined.chars() {
+        if !(c == '/' && absolute.ends_with('/')) {
+            absolute.push(c);
+        }
+    }
+    if absolute.len() > 1 && absolute.ends_with('/') {
+        absolute.pop();
+    }
+    let mut iri = String::from("file:");
+    for c in absolute.chars() {
+        let legal = c.is_ascii_alphanumeric()
+            || "-_.!~*'();:@&=+$,/".contains(c)
+            || (!c.is_ascii() && !c.is_control() && !c.is_whitespace());
+        if legal {
+            iri.push(c);
+        } else {
+            let mut utf8 = [0u8; 4];
+            for b in c.encode_utf8(&mut utf8).bytes() {
+                iri.push_str(&format!("%{b:02X}"));
+            }
+        }
+    }
+    Some(iri)
+}
+
 /// The name of the file being written, for diagnostics.
 pub(crate) fn out_name() -> String {
     OUT_NAME.with(|c| c.borrow().clone())
@@ -2487,7 +2365,18 @@ fn prefixes_default_ns(model: &Model, document: &PrefixMapping) -> Option<String
     if document.mappings().any(|(p, _)| p.is_empty()) {
         return None;
     }
-    crate::cmd::merge::ontology_iri(model).map(|iri| format!("{iri}#"))
+    crate::cmd::merge::ontology_iri(model).map(|iri| with_terminating_hash(&iri))
+}
+
+/// The namespace an ontology IRI gives the default prefix: the IRI itself when
+/// it ends in `/` or `#` or holds a `#` anywhere, and the IRI with `#` appended
+/// otherwise.
+pub(crate) fn with_terminating_hash(iri: &str) -> String {
+    if iri.ends_with('/') || iri.contains('#') {
+        iri.to_string()
+    } else {
+        format!("{iri}#")
+    }
 }
 
 /// The `Prefix(…)` block of a functional-syntax document, in the order such a
@@ -2608,13 +2497,14 @@ fn written_prefixes(model: &Model) -> Vec<(String, String)> {
 /// The prefix map for an ontology whose document format carries no prefixes — i.e.
 /// one built by `query --update`, which hands the result a fresh ontology (see
 /// `Model::format_prefixes_cleared`). All that survives is the default `:` bound to
-/// the ontology IRI with a `#`, plus the seed set below in its own insertion order.
+/// the ontology IRI ([`with_terminating_hash`]), plus the seed set below in its
+/// own insertion order.
 /// MONDO's `imports/merged_import.owl` ends in three `--update`s and comes out with
 /// exactly these six lines and every other IRI written in full.
 fn default_ofn_prefixes(model: &Model) -> PrefixMapping {
     let mut out = PrefixMapping::default();
     if let Some(iri) = crate::cmd::merge::ontology_iri(model) {
-        let _ = out.add_prefix("", &format!("{iri}#"));
+        let _ = out.add_prefix("", &with_terminating_hash(&iri));
     }
     for (p, ns) in [
         ("owl", "http://www.w3.org/2002/07/owl#"),
@@ -2730,28 +2620,3 @@ fn is_valid_curie_local(local: &str) -> bool {
         && !local.starts_with('.')
 }
 
-#[cfg(test)]
-mod inverse_assertion_tests {
-    use super::*;
-
-    /// Writing RDF states an annotated assertion on an inverse property by the
-    /// named property, and the model the write was given is unchanged after it,
-    /// so whatever reads the model next still has the inverse.
-    #[test]
-    fn writing_rdf_leaves_the_inverse_assertion_in_the_model() {
-        let text = "Prefix(:=<http://example.org/>)\n\
-                    Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
-                    Ontology(<http://example.org/o>\n\
-                    ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") ObjectInverseOf(:p) _:a :b)\n\
-                    ObjectPropertyAssertion(Annotation(rdfs:comment \"c\") :p :b _:a)\n\
-                    ObjectPropertyAssertion(Annotation(rdfs:comment \"d\") ObjectInverseOf(:p) :s _:x)\n)\n";
-        let mut model = load_from(std::io::Cursor::new(text), Format::Functional).unwrap();
-        let before: std::collections::HashSet<_> = model.ont.iter().cloned().collect();
-        for fmt in [Format::RdfXml, Format::Turtle] {
-            let mut out = Vec::new();
-            write_to_with(&mut model, &mut out, fmt, RdfXmlWriter::Owlapi).unwrap();
-            let after: std::collections::HashSet<_> = model.ont.iter().cloned().collect();
-            assert_eq!(before, after, "{fmt:?}");
-        }
-    }
-}

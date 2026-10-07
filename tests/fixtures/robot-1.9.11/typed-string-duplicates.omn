@@ -1,0 +1,14 @@
+Prefix: : <http://example.org/typed-string-duplicates#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Ontology: <http://example.org/typed-string-duplicates>
+AnnotationProperty: rdfs:label
+AnnotationProperty: rdfs:comment
+DataProperty: :dp
+Class: :A
+    Annotations: rdfs:label "x", rdfs:label "x"^^xsd:string
+    SubClassOf: :dp value "w", :dp value "w"^^xsd:string
+Class: :B
+    Annotations: rdfs:label "y"^^xsd:string, rdfs:label "y", rdfs:label "y"@en
+Individual: :i
+    Facts: :dp "v", :dp "v"^^xsd:string

@@ -1,0 +1,269 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/root-blocks#"
+     xml:base="http://example.org/root-blocks"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/root-blocks"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/root-blocks#s -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/root-blocks#s">
+        <owl:equivalentProperty rdf:resource="http://example.org/root-blocks#t"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/root-blocks#t -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/root-blocks#t">
+        <owl:equivalentProperty rdf:resource="http://example.org/root-blocks#u"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/root-blocks#u -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/root-blocks#u"/>
+    
+
+
+    <!-- http://example.org/root-blocks#t -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/root-blocks#t"/>
+    
+
+
+    <!-- http://example.org/root-blocks#u -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/root-blocks#u"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/root-blocks#p -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/root-blocks#p">
+        <owl:equivalentProperty rdf:resource="http://example.org/root-blocks#q"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/root-blocks#q -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/root-blocks#q">
+        <owl:equivalentProperty rdf:resource="http://example.org/root-blocks#r"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/root-blocks#r -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/root-blocks#r"/>
+    
+
+
+    <!-- http://example.org/root-blocks#q -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/root-blocks#q"/>
+    
+
+
+    <!-- http://example.org/root-blocks#r -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/root-blocks#r"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/root-blocks#A -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#A">
+        <owl:equivalentClass rdf:resource="http://example.org/root-blocks#B"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/root-blocks#B -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#B">
+        <owl:equivalentClass rdf:resource="http://example.org/root-blocks#C"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/root-blocks#C -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#C"/>
+    
+
+
+    <!-- http://example.org/root-blocks#B -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#B"/>
+    
+
+
+    <!-- http://example.org/root-blocks#C -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#C"/>
+    
+
+
+    <!-- http://example.org/root-blocks#D -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#D">
+        <owl:equivalentClass rdf:resource="http://example.org/root-blocks#E"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/root-blocks#E -->
+
+    <rdf:Description rdf:about="http://example.org/root-blocks#E">
+        <owl:equivalentClass rdf:resource="http://example.org/root-blocks#F"/>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/root-blocks#F -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#F"/>
+    
+
+
+    <!-- http://example.org/root-blocks#E -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#E"/>
+    
+
+
+    <!-- http://example.org/root-blocks#F -->
+
+    <owl:Class rdf:about="http://example.org/root-blocks#F"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/root-blocks#a -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#a">
+        <owl:sameAs rdf:resource="http://example.org/root-blocks#b"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://example.org/root-blocks#b -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#b"/>
+    
+
+
+    <!-- http://example.org/root-blocks#b -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#b"/>
+    
+
+
+    <!-- http://example.org/root-blocks#c -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#c">
+        <owl:sameAs rdf:resource="http://example.org/root-blocks#d"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://example.org/root-blocks#d -->
+
+    <rdf:Description rdf:about="http://example.org/root-blocks#d"/>
+    
+
+
+    <!-- http://example.org/root-blocks#d -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#d"/>
+    
+
+
+    <!-- http://example.org/root-blocks#x -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#x">
+        <owl:sameAs rdf:resource="http://example.org/root-blocks#y"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://example.org/root-blocks#y -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#y">
+        <owl:sameAs rdf:resource="http://example.org/root-blocks#z"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://example.org/root-blocks#z -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#z"/>
+    
+
+
+    <!-- http://example.org/root-blocks#y -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#y"/>
+    
+
+
+    <!-- http://example.org/root-blocks#z -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/root-blocks#z"/>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

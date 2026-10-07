@@ -1,0 +1,126 @@
+Prefix(:=<http://example.org/untyped-data-ranges.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/untyped-data-ranges.owl>
+
+Declaration(Class(<http://example.org/A1>))
+Declaration(Class(<http://example.org/A10>))
+Declaration(Class(<http://example.org/A11>))
+Declaration(Class(<http://example.org/A12>))
+Declaration(Class(<http://example.org/A13>))
+Declaration(Class(<http://example.org/A15>))
+Declaration(Class(<http://example.org/A17>))
+Declaration(Class(<http://example.org/A18>))
+Declaration(Class(<http://example.org/A19>))
+Declaration(Class(<http://example.org/A2>))
+Declaration(Class(<http://example.org/A21>))
+Declaration(Class(<http://example.org/A24>))
+Declaration(Class(<http://example.org/A5>))
+Declaration(Class(<http://example.org/A6>))
+Declaration(Class(<http://example.org/A7>))
+Declaration(Class(<http://example.org/A8>))
+Declaration(Class(<http://example.org/A9>))
+Declaration(Class(<http://example.org/C>))
+Declaration(Class(<http://example.org/U>))
+Declaration(Class(xsd:int))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(ObjectProperty(<http://example.org/q>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(DataProperty(<http://example.org/e>))
+Declaration(NamedIndividual(<http://example.org/i>))
+Declaration(Datatype(<http://example.org/DT>))
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/e> (<http://example.org/e>)
+
+ObjectPropertyRange(<http://example.org/e> ObjectOneOf())
+
+# Object Property: <http://example.org/q> (<http://example.org/q>)
+
+ObjectPropertyRange(<http://example.org/q> ObjectUnionOf(<http://example.org/A1> <http://example.org/C>))
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A1> (<http://example.org/A1>)
+
+SubClassOf(<http://example.org/A1> ObjectSomeValuesFrom(<http://example.org/d> ObjectOneOf()))
+
+# Class: <http://example.org/A10> (<http://example.org/A10>)
+
+SubClassOf(<http://example.org/A10> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/C>))
+
+# Class: <http://example.org/A11> (<http://example.org/A11>)
+
+SubClassOf(<http://example.org/A11> DataSomeValuesFrom(<http://example.org/d> DataOneOf("x")))
+
+# Class: <http://example.org/A12> (<http://example.org/A12>)
+
+SubClassOf(<http://example.org/A12> ObjectAllValuesFrom(<http://example.org/p> ObjectOneOf(<http://example.org/i>)))
+
+# Class: <http://example.org/A13> (<http://example.org/A13>)
+
+SubClassOf(<http://example.org/A13> ObjectSomeValuesFrom(<http://example.org/d> ObjectIntersectionOf(xsd:int xsd:integer)))
+
+# Class: <http://example.org/A15> (<http://example.org/A15>)
+
+SubClassOf(<http://example.org/A15> DataSomeValuesFrom(<http://example.org/d> rdfs:Literal))
+
+# Class: <http://example.org/A17> (<http://example.org/A17>)
+
+SubClassOf(<http://example.org/A17> ObjectSomeValuesFrom(<http://example.org/d> ObjectComplementOf(xsd:string)))
+
+# Class: <http://example.org/A18> (<http://example.org/A18>)
+
+SubClassOf(<http://example.org/A18> DataSomeValuesFrom(<http://example.org/d> DataComplementOf(xsd:boolean)))
+
+# Class: <http://example.org/A19> (<http://example.org/A19>)
+
+SubClassOf(<http://example.org/A19> ObjectSomeValuesFrom(<http://example.org/p> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/C>)))
+
+# Class: <http://example.org/A2> (<http://example.org/A2>)
+
+SubClassOf(<http://example.org/A2> ObjectAllValuesFrom(<http://example.org/d> ObjectUnionOf(xsd:integer xsd:string)))
+
+# Class: <http://example.org/A21> (<http://example.org/A21>)
+
+SubClassOf(<http://example.org/A21> DataSomeValuesFrom(<http://example.org/d> DatatypeRestriction(xsd:decimal xsd:minInclusive "1"^^xsd:integer)))
+
+# Class: <http://example.org/A24> (<http://example.org/A24>)
+
+SubClassOf(<http://example.org/A24> ObjectSomeValuesFrom(<http://example.org/p> ObjectOneOf()))
+
+# Class: <http://example.org/A5> (<http://example.org/A5>)
+
+SubClassOf(<http://example.org/A5> ObjectHasValue(<http://example.org/d> <http://example.org/i>))
+
+# Class: <http://example.org/A6> (<http://example.org/A6>)
+
+SubClassOf(<http://example.org/A6> DataHasValue(<http://example.org/p> "lit"))
+
+# Class: <http://example.org/A7> (<http://example.org/A7>)
+
+SubClassOf(<http://example.org/A7> ObjectSomeValuesFrom(<http://example.org/d> <http://example.org/C>))
+
+# Class: <http://example.org/A8> (<http://example.org/A8>)
+
+SubClassOf(<http://example.org/A8> ObjectSomeValuesFrom(<http://example.org/d> <http://example.org/U>))
+
+# Class: <http://example.org/A9> (<http://example.org/A9>)
+
+SubClassOf(<http://example.org/A9> DataSomeValuesFrom(<http://example.org/d> <http://example.org/DT>))
+
+
+
+)

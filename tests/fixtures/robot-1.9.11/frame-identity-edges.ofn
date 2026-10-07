@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/identity#>)
+Ontology(<http://example.org/identity>
+Declaration(Class(:A))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:k))
+SameIndividual(:j :k)
+DifferentIndividuals(:j :i)
+SameIndividual(:i _:x)
+DifferentIndividuals(:i _:y)
+ClassAssertion(:A _:y)
+)

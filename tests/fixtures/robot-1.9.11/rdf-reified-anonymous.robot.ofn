@@ -1,0 +1,32 @@
+Prefix(:=<http://example.org/reified-anonymous#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/reified-anonymous>
+
+Declaration(Class(:C))
+Declaration(ObjectProperty(:p))
+Declaration(NamedIndividual(:i))
+
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+SameIndividual(Annotation(rdfs:comment "same") :i _:genid2147483654)
+ObjectPropertyAssertion(Annotation(rdfs:comment "related") :p :i _:genid2147483657)
+
+
+ClassAssertion(Annotation(rdfs:comment "typed with a label") :C _:genid2147483653)
+ClassAssertion(Annotation(rdfs:comment "typed alone") :C _:genid2147483656)
+DifferentIndividuals(Annotation(rdfs:comment "different") :i _:genid2147483655)
+AnnotationAssertion(rdfs:label _:genid2147483653 "labelled")
+)

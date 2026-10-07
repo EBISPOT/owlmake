@@ -1,0 +1,145 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/one-member-difference.owl#"
+     xml:base="http://example.org/one-member-difference.owl"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:one-member-difference="http://example.org/one-member-difference.owl#">
+    <owl:Ontology rdf:about="http://example.org/one-member-difference.owl"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/one-member-difference.owl#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/one-member-difference.owl#p"/>
+    
+
+
+    <!-- http://example.org/one-member-difference.owl#q -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/one-member-difference.owl#q"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/one-member-difference.owl#C -->
+
+    <owl:Class rdf:about="http://example.org/one-member-difference.owl#C"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/one-member-difference.owl#i -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/one-member-difference.owl#i">
+        <p rdf:nodeID="genid1"/>
+        <q rdf:nodeID="genid6"/>
+    </owl:NamedIndividual>
+    <rdf:Description rdf:nodeID="genid1"/>
+    <rdf:Description rdf:nodeID="genid6"/>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+        <owl:distinctMembers rdf:parseType="Collection">
+            <rdf:Description rdf:nodeID="genid1"/>
+        </owl:distinctMembers>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+        <owl:distinctMembers rdf:parseType="Collection">
+            <rdf:Description rdf:nodeID="genid1"/>
+        </owl:distinctMembers>
+        <rdfs:comment>d</rdfs:comment>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/one-member-difference.owl#i"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/one-member-difference.owl#q"/>
+        <owl:annotatedTarget rdf:nodeID="genid6"/>
+        <rdfs:comment>a</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/one-member-difference.owl#j -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/one-member-difference.owl#j">
+        <q rdf:nodeID="genid6"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/one-member-difference.owl#p"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/one-member-difference.owl#C"/>
+                <rdfs:subClassOf rdf:nodeID="genid9"/>
+            </owl:Restriction>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:nodeID="genid9"/>
+        <rdfs:comment>g</rdfs:comment>
+    </owl:Axiom>
+    <owl:Restriction rdf:nodeID="genid9">
+        <owl:onProperty rdf:resource="http://example.org/one-member-difference.owl#q"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/one-member-difference.owl#C"/>
+    </owl:Restriction>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+        <owl:distinctMembers rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/one-member-difference.owl#j"/>
+        </owl:distinctMembers>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+        <owl:distinctMembers rdf:parseType="Collection">
+            <rdf:Description/>
+        </owl:distinctMembers>
+        <rdfs:comment>e</rdfs:comment>
+    </rdf:Description>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

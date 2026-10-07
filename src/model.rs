@@ -46,6 +46,54 @@ pub struct ImportSource {
     pub direct: bool,
 }
 
+/// The entities of an ontology's imports closure: every ontology it imports,
+/// directly or not, leaving out the ontology itself. A document is written
+/// among them:
+///
+/// - RDF/XML and Turtle state the type of an entity the document names and
+///   nothing declares, unless an imported ontology has the entity in its
+///   signature and so declares it on the document's behalf;
+/// - functional syntax and OWL/XML declare every entity of the document's
+///   signature and the closure's that neither declares;
+/// - RDF/XML binds a namespace prefix for every annotation property of the
+///   closure's signature, as for the document's own, since a property is
+///   written as an element name.
+///
+/// Entities are keyed `kind\0IRI` (`class`, `op`, `dp`, `ap`, `ni`, `dt`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportsClosure {
+    /// Every entity in the signature of an imported ontology, the datatype of
+    /// each of its literals included.
+    pub signature: std::collections::HashSet<String>,
+    /// The entities an imported ontology declares.
+    pub declared: std::collections::HashSet<String>,
+}
+
+impl ImportsClosure {
+    /// The closure whose ontologies are merged in `imported`.
+    pub fn of(imported: &Model) -> Self {
+        let mut closure = ImportsClosure::default();
+        closure.add(imported);
+        closure
+    }
+
+    /// Add the entities of an imported ontology.
+    pub fn add(&mut self, imported: &Model) {
+        use crate::io::entities::{closure_key, declared, signature};
+        self.signature.extend(signature(imported).into_iter().map(|(kind, iri)| closure_key(kind, &iri)));
+        self.declared.extend(declared(imported).into_iter().map(|(kind, iri)| closure_key(kind, &iri)));
+    }
+
+    /// The namespaces of the closure's annotation properties, split as an
+    /// RDF/XML element name is.
+    pub fn annotation_property_namespaces(&self) -> impl Iterator<Item = String> + '_ {
+        self.signature
+            .iter()
+            .filter_map(|key| key.strip_prefix("ap\0"))
+            .map(|iri| crate::io::owlrdf::ncname_split(iri).0.to_string())
+    }
+}
+
 /// One recorded node of an axiom (`Model::shared_occurrences`): an anonymous
 /// expression in it that is one object with every other recorded occurrence
 /// of the same node.
@@ -231,31 +279,10 @@ pub struct Model {
     /// carried them. Where two labels land in the same slot of the subject's
     /// assertion set, the one read first is the one the `! …` comments name.
     pub owl_label_order: std::collections::HashMap<String, Vec<String>>,
-    /// Namespaces of the annotation properties in this ontology's IMPORT CLOSURE.
-    ///
-    /// The `xmlns` block is seeded from the entities that need a namespace across
-    /// the WHOLE closure, not just the root document: an ontology that merely
-    /// *imports* one declaring
-    /// `AnnotationProperty(<http://usefulinc.com/ns/doap#bug-database>)` still gets
-    /// `xmlns:doap`, while an imported ObjectProperty/Class/Individual/Datatype in
-    /// its own namespace gets nothing (only annotation properties are rendered as
-    /// XML element names). MONDO's `filtered.owl`/`reasoned.owl` keep their imports
-    /// uncollapsed, so `doap` (merged_import.owl) and `protege` (omo_import.owl)
-    /// reach the xmlns block — and from there every downstream artefact's prefix
-    /// map — without a single triple in the file using them.
-    pub closure_ann_ns: Vec<String>,
-    /// Entities DECLARED in this ontology's import closure, as `kind\0IRI`
-    /// (`class`, `op`, `dp`, `ap`, `ni`, `dt`).
-    ///
-    /// The RDF/XML writer drives its per-kind sections from the SIGNATURE, so
-    /// an entity that is only referenced still gets a bare
-    /// `<owl:ObjectProperty rdf:about="…"/>` stub — but ONLY if nothing in the
-    /// imports closure declares it. An ontology referencing an undeclared
-    /// `BFO_0000050` renders the stub; add an import that
-    /// declares it (uncollapsed) and the stub disappears. That single rule explains
-    /// why MONDO's `filtered.owl`/`reasoned.owl` have no stubs while
-    /// `mondo-base.owl` — built by `remove --select imports` — has exactly two.
-    pub closure_declared: std::collections::HashSet<String>,
+    /// The entities of the ontologies this one imports, directly or not, which
+    /// decide how this one is written (see [`ImportsClosure`]); `None` until
+    /// they have been read.
+    pub imports_closure: Option<ImportsClosure>,
     /// Anonymous-individual node labels in the order the SOURCE DOCUMENT first
     /// mentions them. An anonymous individual is re-minted the first time it is
     /// asked for and the set renders sorted by the minted id, so for a
@@ -393,8 +420,7 @@ impl Model {
             added_prefixes: Vec::new(),
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
-            closure_ann_ns: Vec::new(),
-            closure_declared: std::collections::HashSet::new(),
+            imports_closure: None,
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
@@ -431,8 +457,7 @@ impl Model {
             added_prefixes: Vec::new(),
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
-            closure_ann_ns: Vec::new(),
-            closure_declared: std::collections::HashSet::new(),
+            imports_closure: None,
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
@@ -472,8 +497,7 @@ impl Model {
         self.explicit_prefixes = other.explicit_prefixes.clone();
         self.owl_genid_refs = other.owl_genid_refs.clone();
         self.owl_label_order = other.owl_label_order.clone();
-        self.closure_ann_ns = other.closure_ann_ns.clone();
-        self.closure_declared = other.closure_declared.clone();
+        self.imports_closure = other.imports_closure.clone();
         self.anon_doc_order = other.anon_doc_order.clone();
         self.plain_literals_typed = other.plain_literals_typed;
         self.owlapi_456 = other.owlapi_456;
@@ -499,13 +523,17 @@ impl Model {
         self.inlined_imports.clear();
         self.imported_components.clear();
         self.import_sources.clear();
-        // The closure's declarations and annotation-property namespaces
-        // described a document that still imported; once the closure's axioms
-        // are the document's own, an entity the closure declared is declared
-        // HERE, and suppressing its stub or its annotations hides content the
-        // document now carries.
-        self.closure_declared.clear();
-        self.closure_ann_ns.clear();
+        // The closure's entities described a document that still imported;
+        // once the closure's axioms are the document's own, an entity the
+        // closure declared is declared HERE, and suppressing its stub or its
+        // annotations hides content the document now carries.
+        self.imports_closure = None;
+    }
+
+    /// Whether an ontology this one imports has the entity keyed `key`
+    /// (`kind\0IRI`, see [`ImportsClosure`]) in its signature.
+    pub fn imports_have(&self, key: &str) -> bool {
+        self.imports_closure.as_ref().is_some_and(|c| c.signature.contains(key))
     }
 
     /// Number of components (axioms + metadata) in the ontology.
@@ -548,8 +576,7 @@ impl Clone for Model {
         m.explicit_prefixes = self.explicit_prefixes.clone();
         m.owl_genid_refs = self.owl_genid_refs.clone();
         m.owl_label_order = self.owl_label_order.clone();
-        m.closure_ann_ns = self.closure_ann_ns.clone();
-        m.closure_declared = self.closure_declared.clone();
+        m.imports_closure = self.imports_closure.clone();
         m.anon_doc_order = self.anon_doc_order.clone();
         m.plain_literals_typed = self.plain_literals_typed;
         m.owlapi_456 = self.owlapi_456;
@@ -638,4 +665,119 @@ pub fn asserts_deprecated(av: &horned_owl::model::AnnotationValue<Str>) -> bool 
             if literal == "true"
                 && datatype_iri.as_ref() == "http://www.w3.org/2001/XMLSchema#boolean"
     )
+}
+
+/// A literal as an ontology holds it once made: `l` itself, or what
+/// [`remade_literal`] makes of it.
+pub fn literal_as_made(l: horned_owl::model::Literal<Str>) -> horned_owl::model::Literal<Str> {
+    remade_literal(&l).unwrap_or(l)
+}
+
+/// What making `l` turns it into, where that is another literal.
+///
+/// A language tag is trimmed and lower-cased, and a literal whose tag is then
+/// empty is plain. `rdf:PlainLiteral` text names its language after its last
+/// `@`, kept as written, and is plain where nothing follows the `@` or there is
+/// none. An `xsd:boolean` is `true` for `1` or `true`, trimmed, and `false`
+/// for anything else. An `xsd:float` or `xsd:double` is its value as Java
+/// prints it, a float that trims to `-0.0` being `-0.0`. An `xsd:integer` is
+/// its value printed, unless it is blank or starts with `0` once trimmed. Text
+/// a number type cannot read keeps its form, as does every other literal.
+pub fn remade_literal(l: &horned_owl::model::Literal<Str>) -> Option<horned_owl::model::Literal<Str>> {
+    use crate::java_number as java;
+    use horned_owl::model::Literal;
+    const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+    const RDF_PLAIN_LITERAL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
+    match l {
+        Literal::Simple { .. } => None,
+        Literal::Language { literal, lang } => {
+            let made = java::trim(lang).to_lowercase();
+            if made == *lang {
+                None
+            } else if made.is_empty() {
+                Some(Literal::Simple { literal: literal.clone() })
+            } else {
+                Some(Literal::Language { literal: literal.clone(), lang: made })
+            }
+        }
+        Literal::Datatype { literal, datatype_iri } => {
+            let datatype: &str = datatype_iri.as_ref();
+            if datatype == RDF_PLAIN_LITERAL {
+                return Some(match literal.rfind('@') {
+                    Some(at) if at + 1 < literal.len() => {
+                        Literal::Language { literal: literal[..at].to_string(), lang: literal[at + 1..].to_string() }
+                    }
+                    Some(at) => Literal::Simple { literal: literal[..at].to_string() },
+                    None => Literal::Simple { literal: literal.clone() },
+                });
+            }
+            let made = match datatype.strip_prefix(XSD)? {
+                "boolean" => Some((if matches!(java::trim(literal), "1" | "true") { "true" } else { "false" }).to_string()),
+                "float" if java::trim(literal) == "-0.0" => Some("-0.0".to_string()),
+                "float" => java::parse_float(literal).map(java::float_to_string),
+                "double" => java::parse_double(literal).map(java::double_to_string),
+                "integer" => {
+                    let t = java::trim(literal);
+                    if t.is_empty() || t.starts_with('0') {
+                        None
+                    } else {
+                        java::parse_int(literal).map(|i| i.to_string())
+                    }
+                }
+                _ => None,
+            }?;
+            (made != *literal).then(|| Literal::Datatype { literal: made, datatype_iri: datatype_iri.clone() })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horned_owl::model::Literal;
+
+    /// Every case `scripts/gen_owlapi_literals.sh` recorded in
+    /// tests/fixtures/owlapi-literals/cases.tsv: a lexical form, the datatype or
+    /// language tag it is made with, and the lexical form, language and
+    /// datatype of the literal made.
+    #[test]
+    fn literals_are_made_as_recorded() {
+        const PLAIN: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/owlapi-literals/cases.tsv");
+        let text = std::fs::read_to_string(path).unwrap();
+        // The fixture writes a character as `\u` and four hex digits of UTF-16.
+        let unescape = |s: &str| -> String {
+            let mut units = Vec::new();
+            let mut rest = s;
+            while let Some(i) = rest.find("\\u") {
+                units.extend(rest[..i].encode_utf16());
+                units.push(u16::from_str_radix(&rest[i + 2..i + 6], 16).unwrap());
+                rest = &rest[i + 6..];
+            }
+            units.extend(rest.encode_utf16());
+            String::from_utf16(&units).unwrap()
+        };
+        let b = Build::new_rc();
+        let mut cases = 0;
+        let mut wrong = Vec::new();
+        for line in text.lines().filter(|l| !l.starts_with('#')) {
+            let f: Vec<&str> = line.split('\t').collect();
+            let (lex, with, want) = (unescape(f[0]), unescape(f[1]), (unescape(f[2]), unescape(f[3]), f[4].to_string()));
+            let made = literal_as_made(match with.strip_prefix('@') {
+                Some(lang) => Literal::Language { literal: lex.clone(), lang: lang.to_string() },
+                None => Literal::Datatype { literal: lex.clone(), datatype_iri: b.iri(with.clone()) },
+            });
+            let got = match made {
+                Literal::Simple { literal } => (literal, String::new(), PLAIN.to_string()),
+                Literal::Language { literal, lang } => (literal, lang, PLAIN.to_string()),
+                Literal::Datatype { literal, datatype_iri } => (literal, String::new(), datatype_iri.to_string()),
+            };
+            cases += 1;
+            if got != want {
+                wrong.push(format!("{lex:?} {with}: made {got:?}, recorded {want:?}"));
+            }
+        }
+        assert!(cases > 2000, "{cases} cases");
+        assert!(wrong.is_empty(), "{} of {cases} differ:\n{}", wrong.len(), wrong.join("\n"));
+    }
 }

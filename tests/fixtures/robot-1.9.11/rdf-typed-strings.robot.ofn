@@ -1,0 +1,72 @@
+Prefix(:=<http://example.org/typed-strings#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/typed-strings>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:F))
+Declaration(DataProperty(:dp))
+Declaration(NamedIndividual(:i))
+Declaration(AnnotationProperty(:p))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (definition)
+
+AnnotationAssertion(:p :A "3030")
+AnnotationAssertion(:p :A "2020"^^xsd:anyURI)
+AnnotationAssertion(:p :A "1010")
+AnnotationAssertion(rdfs:comment :A "mmm"@en)
+AnnotationAssertion(rdfs:comment :A "zzz")
+AnnotationAssertion(rdfs:comment :A "aaa")
+AnnotationAssertion(rdfs:label :A "definition"@en)
+AnnotationAssertion(rdfs:label :A "definition")
+
+# Class: :B (y)
+
+AnnotationAssertion(rdfs:label :B "y"@en)
+AnnotationAssertion(rdfs:label :B "y")
+
+# Class: :D (z)
+
+AnnotationAssertion(rdfs:label :D "z")
+AnnotationAssertion(Annotation(rdfs:comment "c"@en) Annotation(rdfs:comment "c") rdfs:label :D "z"@en)
+
+# Class: :E (x)
+
+AnnotationAssertion(rdfs:label :E "x"@en)
+AnnotationAssertion(Annotation(rdfs:comment "c1") rdfs:label :E "x")
+
+# Class: :F (w)
+
+AnnotationAssertion(Annotation(rdfs:comment "c2") rdfs:label :F "w")
+AnnotationAssertion(rdfs:label :F "w"@en)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+DataPropertyAssertion(:dp :i "u"^^xsd:anyURI)
+DataPropertyAssertion(:dp :i "v")
+
+
+ClassAssertion(:C _:genid2147483651)
+DataPropertyAssertion(:dp _:genid2147483651 "t"@en)
+DataPropertyAssertion(Annotation(rdfs:comment "c3") :dp _:genid2147483651 "t")
+)

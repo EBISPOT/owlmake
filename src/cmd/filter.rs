@@ -549,7 +549,7 @@ fn filter_core(
         // On MONDO's mondo-simple chain every step up to and including `remove
         // --select object-properties relax` still declares `xmlns:doap` and
         // `xmlns:protege` (inherited from `reasoned.owl`, where the import closure
-        // contributed them — see `Model::closure_ann_ns`), and the output of
+        // contributed them — see `Model::imports_closure`), and the output of
         // `filter` declares neither, while keeping every other prefix, all of which
         // some retained entity uses. Carrying them through would add exactly those
         // two `xmlns:`/`idspace:` lines to `mondo-simple.owl` and
@@ -558,8 +558,7 @@ fn filter_core(
         out.format_prefixes_cleared = true;
         out.owl_genid_refs = model.owl_genid_refs;
         out.owl_label_order = model.owl_label_order;
-        out.closure_ann_ns = model.closure_ann_ns;
-        out.closure_declared = model.closure_declared;
+        out.imports_closure = model.imports_closure;
         out.shared_anon = model.shared_anon;
         // The `spanGaps` groups computed above: without them the rebuilt model
         // loses the fact that a set of re-links is one object, and the numbering

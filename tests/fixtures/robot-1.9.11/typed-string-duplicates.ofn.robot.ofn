@@ -1,0 +1,42 @@
+Prefix(:=<http://example.org/typed-string-duplicates#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/typed-string-duplicates>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(DataProperty(:dp))
+Declaration(NamedIndividual(:i))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (x)
+
+AnnotationAssertion(rdfs:label :A "x")
+SubClassOf(:A DataHasValue(:dp "w"))
+
+# Class: :B (y)
+
+AnnotationAssertion(rdfs:label :B "y"@en)
+AnnotationAssertion(rdfs:label :B "y")
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+DataPropertyAssertion(:dp :i "v")
+
+
+)

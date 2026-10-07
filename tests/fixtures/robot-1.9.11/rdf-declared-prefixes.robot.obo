@@ -1,0 +1,17 @@
+format-version: 1.2
+idspace: bar http://example.org/bar# 
+idspace: ex http://example.org/ex# 
+idspace: foo http://example.org/foo# 
+idspace: food http://example.org/food# 
+ontology: test
+
+[Term]
+id: TEST:0000001
+name: one
+property_value: seeAlso ex:thing
+
+[Term]
+id: TEST:0000002
+is_a: TEST:0000001 ! one
+property_value: seeAlso bar:thing
+

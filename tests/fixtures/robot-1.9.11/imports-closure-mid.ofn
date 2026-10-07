@@ -1,0 +1,6 @@
+Prefix(:=<http://example.org/imports-closure#>)
+Ontology(<http://example.org/imports-closure/mid>
+Import(<http://example.org/imports-closure/leaf>)
+Declaration(Class(:M))
+SubClassOf(:M :M2)
+)

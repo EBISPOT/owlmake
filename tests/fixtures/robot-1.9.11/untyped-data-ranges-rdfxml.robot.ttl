@@ -1,0 +1,251 @@
+@prefix : <http://example.org/untyped-data-ranges.owl#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/untyped-data-ranges.owl> .
+
+<http://example.org/untyped-data-ranges.owl> rdf:type owl:Ontology .
+
+#################################################################
+#    Datatypes
+#################################################################
+
+###  http://example.org/DT
+<http://example.org/DT> rdf:type rdfs:Datatype .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/e
+<http://example.org/e> rdf:type owl:ObjectProperty ;
+                       rdfs:range [ rdf:type owl:Class ;
+                                    owl:oneOf rdf:nil
+                                  ] .
+
+
+###  http://example.org/p
+<http://example.org/p> rdf:type owl:ObjectProperty .
+
+
+###  http://example.org/q
+<http://example.org/q> rdf:type owl:ObjectProperty ;
+                       rdfs:range [ rdf:type owl:Class ;
+                                    owl:unionOf ( <http://example.org/A1>
+                                                  <http://example.org/C>
+                                                )
+                                  ] .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/d
+<http://example.org/d> rdf:type owl:DatatypeProperty .
+
+
+###  http://example.org/e
+<http://example.org/e> rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/A1
+<http://example.org/A1> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/d> ;
+                                          owl:someValuesFrom [ rdf:type owl:Class ;
+                                                               owl:oneOf rdf:nil
+                                                             ]
+                                        ] .
+
+
+###  http://example.org/A10
+<http://example.org/A10> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/p> ;
+                                           owl:someValuesFrom <http://example.org/C>
+                                         ] .
+
+
+###  http://example.org/A11
+<http://example.org/A11> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/d> ;
+                                           owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                                                owl:oneOf [ rdf:type rdf:List ;
+                                                                            rdf:first "x" ;
+                                                                            rdf:rest rdf:nil
+                                                                          ]
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A12
+<http://example.org/A12> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/p> ;
+                                           owl:allValuesFrom [ rdf:type owl:Class ;
+                                                               owl:oneOf ( <http://example.org/i>
+                                                                         )
+                                                             ]
+                                         ] .
+
+
+###  http://example.org/A13
+<http://example.org/A13> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/d> ;
+                                           owl:someValuesFrom [ owl:intersectionOf ( xsd:int
+                                                                                     xsd:integer
+                                                                                   ) ;
+                                                                rdf:type owl:Class
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A15
+<http://example.org/A15> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/d> ;
+                                           owl:someValuesFrom rdfs:Literal
+                                         ] .
+
+
+###  http://example.org/A17
+<http://example.org/A17> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/d> ;
+                                           owl:someValuesFrom [ rdf:type owl:Class ;
+                                                                owl:complementOf xsd:string
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A18
+<http://example.org/A18> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/d> ;
+                                           owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                                                owl:datatypeComplementOf xsd:boolean
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A19
+<http://example.org/A19> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/p> ;
+                                           owl:someValuesFrom [ rdf:type owl:Restriction ;
+                                                                owl:onProperty <http://example.org/p> ;
+                                                                owl:someValuesFrom <http://example.org/C>
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A2
+<http://example.org/A2> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/d> ;
+                                          owl:allValuesFrom [ rdf:type owl:Class ;
+                                                              owl:unionOf ( xsd:integer
+                                                                            xsd:string
+                                                                          )
+                                                            ]
+                                        ] .
+
+
+###  http://example.org/A21
+<http://example.org/A21> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/d> ;
+                                           owl:someValuesFrom [ rdf:type rdfs:Datatype ;
+                                                                owl:onDatatype xsd:decimal ;
+                                                                owl:withRestrictions ( [ xsd:minInclusive 1
+                                                                                       ]
+                                                                                     )
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A24
+<http://example.org/A24> rdf:type owl:Class ;
+                         rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                           owl:onProperty <http://example.org/p> ;
+                                           owl:someValuesFrom [ rdf:type owl:Class ;
+                                                                owl:oneOf rdf:nil
+                                                              ]
+                                         ] .
+
+
+###  http://example.org/A5
+<http://example.org/A5> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/d> ;
+                                          owl:hasValue <http://example.org/i>
+                                        ] .
+
+
+###  http://example.org/A6
+<http://example.org/A6> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/p> ;
+                                          owl:hasValue "lit"
+                                        ] .
+
+
+###  http://example.org/A7
+<http://example.org/A7> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/d> ;
+                                          owl:someValuesFrom <http://example.org/C>
+                                        ] .
+
+
+###  http://example.org/A8
+<http://example.org/A8> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/d> ;
+                                          owl:someValuesFrom <http://example.org/U>
+                                        ] .
+
+
+###  http://example.org/A9
+<http://example.org/A9> rdf:type owl:Class ;
+                        rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                          owl:onProperty <http://example.org/d> ;
+                                          owl:someValuesFrom <http://example.org/DT>
+                                        ] .
+
+
+###  http://example.org/C
+<http://example.org/C> rdf:type owl:Class .
+
+
+###  http://example.org/U
+<http://example.org/U> rdf:type owl:Class .
+
+
+###  http://www.w3.org/2001/XMLSchema#int
+xsd:int rdf:type owl:Class .
+
+
+###  http://www.w3.org/2001/XMLSchema#string
+xsd:string rdf:type owl:Class .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/i
+<http://example.org/i> rdf:type owl:NamedIndividual .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

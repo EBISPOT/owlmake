@@ -1,0 +1,9 @@
+Prefix: : <http://example.org/lits#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Ontology: <http://example.org/lits>
+DataProperty: :dp
+Individual: :i
+    Annotations: rdfs:comment "0"^^xsd:boolean, rdfs:comment "c1 note@fr"^^rdf:PlainLiteral
+    Facts: :dp "1"^^xsd:boolean, :dp "1"^^xsd:float, :dp "2e3"^^xsd:double, :dp "+5"^^xsd:integer, :dp "007"^^xsd:integer, :dp "p1 text@EN-gb"^^rdf:PlainLiteral, :dp "l1 text"@EN-GB, :dp 42, :dp 1.50, :dp 2.5f, :dp 3e2, :dp -0, :dp +7, :dp 007

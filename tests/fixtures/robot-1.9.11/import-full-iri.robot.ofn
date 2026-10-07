@@ -1,0 +1,29 @@
+Prefix(:=<http://example.org/import-full-iri#>)
+Prefix(ic:=<http://example.org/imports-closure/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/import-full-iri>
+Import(<http://example.org/imports-closure/mid>)
+
+Declaration(Class(:R))
+Declaration(Class(<http://example.org/imports-closure#L>))
+Declaration(Class(<http://example.org/imports-closure#L2>))
+Declaration(Class(<http://example.org/imports-closure#M2>))
+Declaration(Class(ic:x))
+Declaration(AnnotationProperty(<http://example.org/leaf#ap>))
+Declaration(Datatype(xsd:date))
+############################
+#   Classes
+############################
+
+# Class: :R (:R)
+
+SubClassOf(:R ic:x)
+
+
+)

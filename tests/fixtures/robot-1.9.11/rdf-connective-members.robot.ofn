@@ -1,0 +1,101 @@
+Prefix(:=<http://example.org/connective-members#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/connective-members>
+
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:EmptyI))
+Declaration(Class(:EmptyO))
+Declaration(Class(:EmptyU))
+Declaration(Class(:OneI))
+Declaration(Class(:OneO))
+Declaration(Class(:OneU))
+Declaration(Class(:SubEmptyI))
+Declaration(Class(:SubEmptyU))
+Declaration(Class(:SubOneU))
+Declaration(Class(:TwoU))
+Declaration(DataProperty(:d1))
+Declaration(DataProperty(:d2))
+Declaration(DataProperty(:d3))
+Declaration(DataProperty(:d4))
+Declaration(DataProperty(:d5))
+Declaration(NamedIndividual(:i))
+############################
+#   Data Properties
+############################
+
+# Data Property: :d1 (:d1)
+
+DataPropertyRange(:d1 DataUnionOf())
+
+# Data Property: :d2 (:d2)
+
+DataPropertyRange(:d2 DataIntersectionOf())
+
+# Data Property: :d3 (:d3)
+
+DataPropertyRange(:d3 DataOneOf())
+
+# Data Property: :d4 (:d4)
+
+DataPropertyRange(:d4 xsd:integer)
+
+# Data Property: :d5 (:d5)
+
+DataPropertyRange(:d5 DataIntersectionOf(xsd:integer xsd:string))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :EmptyI (:EmptyI)
+
+EquivalentClasses(:EmptyI ObjectIntersectionOf())
+
+# Class: :EmptyO (:EmptyO)
+
+EquivalentClasses(:EmptyO ObjectOneOf())
+
+# Class: :EmptyU (:EmptyU)
+
+EquivalentClasses(:EmptyU ObjectUnionOf())
+
+# Class: :OneI (:OneI)
+
+EquivalentClasses(:OneI :B)
+
+# Class: :OneO (:OneO)
+
+EquivalentClasses(:OneO ObjectOneOf(:i))
+
+# Class: :OneU (:OneU)
+
+EquivalentClasses(:OneU :B)
+
+# Class: :SubEmptyI (:SubEmptyI)
+
+SubClassOf(:SubEmptyI ObjectIntersectionOf())
+
+# Class: :SubEmptyU (:SubEmptyU)
+
+SubClassOf(:SubEmptyU ObjectUnionOf())
+
+# Class: :SubOneU (:SubOneU)
+
+SubClassOf(:SubOneU :C)
+
+# Class: :TwoU (:TwoU)
+
+EquivalentClasses(:TwoU ObjectUnionOf(:B :C))
+
+
+
+)

@@ -14,6 +14,8 @@ use horned_owl::model::{
 };
 use horned_owl::vocab::Facet;
 
+use crate::java_number;
+
 use super::java;
 
 /// What a name in a pattern's logical text stands for, by the kind of entity
@@ -396,7 +398,7 @@ impl<'a> Parser<'a> {
 
     fn cardinality(&mut self) -> Res<u32> {
         let t = self.consume();
-        match java::parse_int(&t) {
+        match java_number::parse_int(&t) {
             Some(n) if n >= 0 => Ok(n as u32),
             Some(_) => self.fail("a negative cardinality"),
             None => self.fail(&format!("`{t}` is no cardinality")),
@@ -669,28 +671,24 @@ impl<'a> Parser<'a> {
                 return Ok(typed_literal(self.b, &lex, &iri));
             }
             if self.peek().starts_with('@') {
-                let lang = self.consume()[1..].trim().to_lowercase();
-                return Ok(if lang.is_empty() {
-                    Literal::Simple { literal: lex }
-                } else {
-                    Literal::Language { literal: lex, lang }
-                });
+                let lang = self.consume()[1..].to_string();
+                return Ok(crate::model::literal_as_made(Literal::Language { literal: lex, lang }));
             }
             return Ok(Literal::Simple { literal: lex });
         }
         if let Some(iri) = datatype {
             return Ok(typed_literal(self.b, &t, iri));
         }
-        if let Some(i) = java::parse_int(&t) {
+        if let Some(i) = java_number::parse_int(&t) {
             return Ok(datatype_literal(self.b, &i.to_string(), &format!("{XSD}integer")));
         }
         if t.ends_with(['f', 'F']) {
-            if let Some(f) = java::parse_float(&t.replace("INF", "Infinity").replace("inf", "Infinity")) {
-                let lex = java::float_to_string(f).replace("Infinity", "INF");
+            if let Some(f) = java_number::parse_float(&t.replace("INF", "Infinity").replace("inf", "Infinity")) {
+                let lex = java_number::float_to_string(f).replace("Infinity", "INF");
                 return Ok(typed_literal(self.b, &lex, &format!("{XSD}float")));
             }
         }
-        if java::is_double(&t) {
+        if java_number::is_double(&t) {
             return Ok(datatype_literal(self.b, &t, &format!("{XSD}decimal")));
         }
         if kw(&t, "true") || kw(&t, "false") {
@@ -903,31 +901,10 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// The literal `lex` typed `datatype`, its lexical form as the type reads it:
-/// a boolean is `true` for `1` or `true` and `false` otherwise, a float or
-/// double prints its value, an integer prints its value unless it starts with
-/// `0`, and any other type keeps the text as written.
+/// The literal `lex` typed `datatype`, as it is made
+/// ([`crate::model::literal_as_made`]).
 fn typed_literal(b: &Build<RcStr>, lex: &str, datatype: &str) -> Literal<RcStr> {
-    let local = datatype.strip_prefix(XSD);
-    if datatype == format!("{RDF}PlainLiteral") {
-        return match lex.rfind('@') {
-            Some(sep) => Literal::Language { literal: lex[..sep].to_string(), lang: lex[sep + 1..].to_string() },
-            None => Literal::Simple { literal: lex.to_string() },
-        };
-    }
-    let lexical = match local {
-        Some("boolean") => {
-            let t = lex.trim();
-            (if t == "1" || t == "true" { "true" } else { "false" }).to_string()
-        }
-        Some("float") if lex.trim() != "-0.0" => java::parse_float(lex).map_or(lex.to_string(), java::float_to_string),
-        Some("double") => java::parse_double(lex).map_or(lex.to_string(), java::double_to_string),
-        Some("integer") if !lex.trim().is_empty() && !lex.trim().starts_with('0') => {
-            java::parse_int(lex).map_or(lex.to_string(), |i| i.to_string())
-        }
-        _ => lex.to_string(),
-    };
-    datatype_literal(b, &lexical, datatype)
+    crate::model::literal_as_made(datatype_literal(b, lex, datatype))
 }
 
 fn datatype_literal(b: &Build<RcStr>, lex: &str, datatype: &str) -> Literal<RcStr> {

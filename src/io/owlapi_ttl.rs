@@ -296,6 +296,11 @@ fn property(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<(Str
     if empty {
         return Ok((pred, literal(String::new())));
     }
+    // An XML literal is the markup the element holds, as it stands.
+    if a.parse_type.as_deref() == Some("Literal") {
+        let text = r.read_text(e.name())?.into_owned();
+        return Ok((pred, Obj::Literal { text, lang: None, datatype: Some(format!("{RDF}XMLLiteral")) }));
+    }
     if a.parse_type.as_deref() == Some("Collection") {
         let mut items = Vec::new();
         loop {
@@ -406,7 +411,7 @@ impl PrefixManager {
             .map(|(p, ns)| (format!("{p}:"), ns.to_string()))
             .collect();
         if let Some(iri) = ontology_iri {
-            bindings.push((":".to_string(), with_terminating_hash(iri)));
+            bindings.push((":".to_string(), crate::io::with_terminating_hash(iri)));
         }
         bindings.extend(prefixes.iter().filter(|(p, _)| !p.is_empty()).map(|(p, ns)| (format!("{p}:"), ns.clone())));
         let mut names: Vec<(String, String)> = Vec::new();
@@ -460,13 +465,6 @@ fn length_then_text(a: &str, b: &str) -> Ordering {
         .then_with(|| crate::io::natural_order::str_cmp(a, b))
 }
 
-fn with_terminating_hash(iri: &str) -> String {
-    if iri.ends_with('/') || iri.ends_with('#') || iri.contains('#') {
-        iri.to_string()
-    } else {
-        format!("{iri}#")
-    }
-}
 
 fn no_separators(s: &str) -> bool {
     !s.chars().any(|c| "~.-!$&()*+,;=/?#@%_".contains(c))
