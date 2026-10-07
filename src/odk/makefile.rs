@@ -206,10 +206,12 @@ impl MakeModel {
     /// [`VERSION_REF`], so the version reaches the plan as a reference to one
     /// field rather than as a date frozen into every string built from it.
     ///
-    /// A configuration whose version is neither pinned nor derived from `TODAY`
-    /// — one that calls `date` itself — still resolves to a fixed string here.
+    /// A configuration whose version calls `date` itself resolves to a reference
+    /// to the clock ([`clock_ref`]); one that runs any other command, to what
+    /// the command prints.
     ///
     /// [`VERSION_REF`]: crate::plan::VERSION_REF
+    /// [`clock_ref`]: crate::plan::clock_ref
     pub fn bind_release_version(&mut self) {
         // Probe first: bind `TODAY` to a string nothing else can produce and
         // expand `$(VERSION)`. The probe comes back exactly when the version is
@@ -1492,17 +1494,17 @@ fn run_shell(
     base_dir: Option<&Path>,
     version_file: &std::cell::RefCell<Option<String>>,
 ) -> String {
-    // A command that reads the calendar date is a run input, not a value to
-    // freeze: it resolves to [`VERSION_CLOCK`], which the run binds to the day
-    // it builds on — the shell's answer, which a `TODAY=` assignment does not
-    // reach. uPheno's `../patterns/pattern-merged.owl` stamps
-    // `annotate -V $(ONTBASE)/releases/`date +%Y-%m-%d`/…`, and running the
-    // command here wrote the planning day's date into the plan, so every later
-    // build published that same version IRI.
+    // A command that reads the clock is a run input, not a value to freeze: it
+    // resolves to a reference to the clock ([`clock_ref`]), which the run binds
+    // to the time it builds at, printed in the command's format — the shell's
+    // answer, which a `TODAY=` assignment does not reach. uPheno's
+    // `../patterns/pattern-merged.owl` stamps
+    // `annotate -V $(ONTBASE)/releases/`date +%Y-%m-%d`/…`, and the
+    // `oboInOwl:date` stamp is `date +'%d:%m:%Y %H:%M'`.
     //
-    // [`VERSION_CLOCK`]: crate::plan::VERSION_CLOCK
-    if is_today_command(cmd) {
-        return crate::plan::VERSION_CLOCK.to_string();
+    // [`clock_ref`]: crate::plan::clock_ref
+    if let Some(format) = date_format(cmd) {
+        return crate::plan::clock_ref(&format);
     }
     // A command that reads the release version out of a file is a run input for
     // the same reason: the file is repo content a curator edits for each release,
@@ -1537,12 +1539,6 @@ fn run_shell(
         .unwrap_or_default()
 }
 
-/// Whether `cmd` is `date` printing the day as `YYYY-MM-DD`, in any of the
-/// quotings a Makefile writes it in.
-///
-/// Only the bare day: a command that also prints the time — ODK's
-/// `date +'%d:%m:%Y %H:%M'` — is not a release version, and a plan that
-/// referred to it would resolve to a different string on every run.
 /// The file `cmd` reads the release version out of, if reading that file is all
 /// it does — `cat version.txt`, and the `tr`/`echo` dressings that mean the same.
 ///
@@ -1558,13 +1554,46 @@ fn version_file_command(cmd: &str) -> Option<&str> {
     words.next().is_none().then_some(path.trim_matches(['\'', '"']))
 }
 
-fn is_today_command(cmd: &str) -> bool {
-    let mut words = cmd.split_whitespace();
-    if words.next() != Some("date") {
-        return false;
+/// The format `cmd` prints the time in, if printing it is all `cmd` does:
+/// `date +FORMAT`, in any of the quotings a Makefile writes it in.
+///
+/// A format holding a brace is not taken, because a reference to the clock ends
+/// at the first one.
+fn date_format(cmd: &str) -> Option<String> {
+    let arg = cmd.trim().strip_prefix("date")?;
+    if !arg.starts_with(char::is_whitespace) {
+        return None;
     }
-    let Some(fmt) = words.next() else { return false };
-    words.next().is_none() && fmt.trim_matches(['\'', '"']) == "+%Y-%m-%d"
+    let word = shell_word(arg.trim())?;
+    let format = word.strip_prefix('+')?;
+    (!format.contains(['{', '}'])).then(|| format.to_string())
+}
+
+/// `text` as the one shell word it is, its quotes removed — `+'%d %H'`,
+/// `"+%d %H"`, `+%d` — when it is one word and nothing in it expands.
+fn shell_word(text: &str) -> Option<String> {
+    let mut word = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => loop {
+                match chars.next()? {
+                    '\'' => break,
+                    c => word.push(c),
+                }
+            },
+            '"' => loop {
+                match chars.next()? {
+                    '"' => break,
+                    '$' | '`' | '\\' => return None,
+                    c => word.push(c),
+                }
+            },
+            c if c.is_whitespace() || "$`\\;&|<>()*?[]#~".contains(c) => return None,
+            c => word.push(c),
+        }
+    }
+    Some(word)
 }
 
 #[cfg(test)]
@@ -1822,6 +1851,30 @@ mod tests {
         assert_eq!(super::super::planner::idranges_beside_edit_file(&dir), None);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A command that prints the time is a reference to the clock, in the format
+    /// it prints: the day as `{clock}`, any other format as `{clock:FORMAT}`,
+    /// however the format is quoted. A command that does anything more is not.
+    #[test]
+    fn a_date_command_refers_to_the_clock() {
+        let mut m = MakeModel::default();
+        m.ingest(concat!(
+            "TODAY ?= $(shell date +%Y-%m-%d)\n",
+            "OBODATE ?= $(shell date +'%d:%m:%Y %H:%M')\n",
+        ))
+        .unwrap();
+        assert_eq!(m.expand("releases/$(TODAY)/x.owl"), "releases/{clock}/x.owl");
+        assert_eq!(m.expand("\"$(OBODATE)\""), "\"{clock:%d:%m:%Y %H:%M}\"");
+
+        assert_eq!(date_format("date '+%d:%m:%Y %H:%M'").as_deref(), Some("%d:%m:%Y %H:%M"));
+        assert_eq!(date_format("date \"+%H\"%M").as_deref(), Some("%H%M"));
+        assert_eq!(date_format("date -u +%Y"), None);
+        assert_eq!(date_format("date +%Y | tr -d 0"), None);
+        assert_eq!(date_format("date \"+%Y $X\""), None);
+        assert_eq!(date_format("dates +%Y"), None);
+        assert_eq!(date_format("date"), None);
+        assert_eq!(date_format("date +{%Y}"), None);
     }
 
     /// Only a BARE read is a version reference. `cat a b` concatenates two files

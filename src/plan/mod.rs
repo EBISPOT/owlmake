@@ -226,7 +226,75 @@ pub const VERSION_TODAY: &str = "{today}";
 /// variable, and cannot change what `date` prints, so a run that stamps one
 /// release version still writes the real day here. uPheno's pattern ontology
 /// names both, one in each of two version IRIs.
+///
+/// A recipe that asks for the time in any other format refers to it as
+/// `{clock:FORMAT}`, FORMAT being what it gives `date` after the `+`: the
+/// `oboInOwl:date` stamp is `{clock:%d:%m:%Y %H:%M}`. See [`clock_ref`].
 pub const VERSION_CLOCK: &str = "{clock}";
+
+/// The reference to the time the build runs, printed in `format` as `date`
+/// prints it: [`VERSION_CLOCK`] for the day, `{clock:FORMAT}` for any other.
+pub fn clock_ref(format: &str) -> String {
+    if format == DAY_FORMAT {
+        VERSION_CLOCK.to_string()
+    } else {
+        format!("{CLOCK_REF_OPEN}{format}}}")
+    }
+}
+
+/// How a `{clock:FORMAT}` reference opens.
+const CLOCK_REF_OPEN: &str = "{clock:";
+
+/// The format of a day: `2026-10-07`.
+const DAY_FORMAT: &str = "%Y-%m-%d";
+
+/// The time a run builds at: the time `CLOCK=` names, a day (`2026-10-07`,
+/// at midnight) or a day and a time (`2026-10-07T03:41`), in the local time
+/// zone; the time the run starts when it names none.
+pub fn run_clock(named: Option<&str>) -> anyhow::Result<jiff::Zoned> {
+    let Some(text) = named else { return Ok(jiff::Zoned::now()) };
+    // A `DateTime` reads a day alone as that day at midnight.
+    let civil: jiff::civil::DateTime = text.trim().parse().map_err(|_| {
+        anyhow::anyhow!(
+            "CLOCK={text} is neither a day (YYYY-MM-DD) nor a day and a time \
+             (YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS)"
+        )
+    })?;
+    civil
+        .to_zoned(jiff::tz::TimeZone::system())
+        .map_err(|e| anyhow::anyhow!("CLOCK={text} is not a time in the local time zone: {e}"))
+}
+
+/// `text` with every reference to the clock replaced by `at`, printed in the
+/// reference's format. A format `at` cannot be printed in is an error that
+/// names it.
+pub fn bind_clock(text: &str, at: &jiff::Zoned) -> anyhow::Result<String> {
+    let print = |format: &str| {
+        jiff::fmt::strtime::format(format, at).map_err(|e| {
+            anyhow::anyhow!("the time this run builds at cannot be printed as `date +{format}`: {e}")
+        })
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find("{clock") {
+        out.push_str(&rest[..open]);
+        let after = &rest[open..];
+        if let Some(tail) = after.strip_prefix(VERSION_CLOCK) {
+            out.push_str(&print(DAY_FORMAT)?);
+            rest = tail;
+        } else if let Some((format, tail)) =
+            after.strip_prefix(CLOCK_REF_OPEN).and_then(|f| f.split_once('}'))
+        {
+            out.push_str(&print(format)?);
+            rest = tail;
+        } else {
+            out.push_str("{clock");
+            rest = &after["{clock".len()..];
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
+}
 
 /// Whether a switch's value reads as ON. The spellings a build configuration and
 /// a command line use between them, in one place, so a `BRI=1` means what a
@@ -246,16 +314,9 @@ pub fn release_version(plan_default: &str, requested: Option<&str>) -> String {
     }
 }
 
-/// Today's date, `YYYY-MM-DD`.
+/// Today's date in the local time zone, `YYYY-MM-DD`.
 pub fn today() -> String {
-    // Avoid a date dependency: shell out to `date`.
-    std::process::Command::new("date")
-        .arg("+%Y-%m-%d")
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".into())
+    jiff::Zoned::now().strftime(DAY_FORMAT).to_string()
 }
 
 /// `Default` is the empty plan: the base a build of the repository's own is
@@ -833,5 +894,33 @@ impl fmt::Display for Plan {
             }
         }
         write!(f, "╚══════════════════════════════════════════════════════════════════")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A reference to the clock prints the time the run builds at in its own
+    /// format; text that only looks like one is left as it is.
+    #[test]
+    fn a_clock_reference_prints_the_run_time_in_its_format() {
+        let at = run_clock(Some("2001-02-03T04:05")).unwrap();
+        assert_eq!(clock_ref("%Y-%m-%d"), VERSION_CLOCK);
+        assert_eq!(bind_clock("releases/{clock}/x.owl", &at).unwrap(), "releases/2001-02-03/x.owl");
+        assert_eq!(bind_clock(&clock_ref("%d:%m:%Y %H:%M"), &at).unwrap(), "03:02:2001 04:05");
+        assert_eq!(
+            bind_clock("{clock:%H}h{clock}{clockwork}{clock:%M", &at).unwrap(),
+            "04h2001-02-03{clockwork}{clock:%M"
+        );
+        // A day alone is that day at midnight.
+        let day = run_clock(Some("2001-02-03")).unwrap();
+        assert_eq!(bind_clock("{clock:%F %T}", &day).unwrap(), "2001-02-03 00:00:00");
+        // What is not a time is refused by name, and so is a format no time can
+        // be printed in.
+        let err = run_clock(Some("yesterday")).unwrap_err().to_string();
+        assert!(err.contains("CLOCK=yesterday"), "{err}");
+        let err = bind_clock("{clock:%J}", &at).unwrap_err().to_string();
+        assert!(err.contains("date +%J"), "{err}");
     }
 }

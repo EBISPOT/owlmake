@@ -376,6 +376,31 @@ fn a_release_that_fails_is_not_published() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// The time a release is stamped with is a run input, as its version is: the
+/// plan refers to the clock in the stamp's format, the run prints the time it
+/// builds at there, and `CLOCK=` names that time.
+#[test]
+fn a_release_is_stamped_with_the_time_the_run_builds_at() {
+    bundled_tools_as_om();
+    let root = tiny_repo("clock", "- target: greeting\n  steps:\n  - op: print\n    message: hello\n");
+    let file = root.join("owlmake.yaml");
+    let text = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, text.replace("edit_format: ofn\n", "edit_format: ofn\nrelease_date: true\n")).unwrap();
+
+    let plan = serde_json::to_string(&resolved(&OdkRepo::load(&root).expect("loading"))).unwrap();
+    assert!(
+        plan.contains("{clock:%d:%m:%Y %H:%M}"),
+        "the plan refers to the clock rather than holding the time it was made at:\n{plan}"
+    );
+    let (out, said) = om_in(&root, &["make", "tiny.owl", "CLOCK=2001-02-03T04:05"]);
+    assert!(out.status.success(), "{said}");
+    let full = std::fs::read_to_string(root.join("src/ontology/tiny.owl")).unwrap();
+    assert!(full.contains(">03:02:2001 04:05</"), "the release is stamped with the run's time:\n{full}");
+    let (out, said) = om_in(&root, &["make", "-B", "tiny.owl", "CLOCK=yesterday"]);
+    assert!(!out.status.success() && said.contains("CLOCK=yesterday"), "a clock that is no time is refused:\n{said}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A working repository laid out again WITHOUT its build files: every entry of
 /// its `src/` linked into a scratch tree, except the Makefile, the repository's
 /// own rules and its configuration. Real repositories are too large to copy and

@@ -6048,6 +6048,63 @@ fn annotate_and_template_make_literals_as_robot_makes_them() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// `annotate --interpolate` replaces `%{ontology_iri}` and `%{version_iri}` in
+/// each value with the IRIs the ontology has as the command reads it, before its
+/// own `--ontology-iri` and `--version-iri`, and leaves any other `%{…}`, and a
+/// placeholder whose IRI the ontology lacks, as written. As ROBOT 1.9.11 runs it
+/// over `interpolate` and `interpolate-unversioned`.
+#[test]
+fn annotate_interpolates_the_ontology_iris_as_robot_does() {
+    let out = tmp("interpolate.ofn");
+    let run = bin()
+        .args(["annotate", "-i"])
+        .arg(robot_fixture("interpolate.ofn"))
+        .args(["--interpolate", "true"])
+        .args(["--annotation", "rdfs:comment", "v %{ontology_iri} %{version_iri} %{rdfs:label}"])
+        .args(["--link-annotation", "rdfs:seeAlso", "%{version_iri}"])
+        .args(["--language-annotation", "rdfs:comment", "%{ontology_iri}", "en"])
+        .args(["--typed-annotation", "rdfs:comment", "%{version_iri}", "xsd:anyURI"])
+        .args(["--ontology-iri", "http://example.org/new.owl"])
+        .args(["--version-iri", "http://example.org/new/v2.owl"])
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("interpolate.robot.ofn"));
+
+    let run = bin()
+        .args(["annotate", "-i"])
+        .arg(robot_fixture("interpolate-unversioned.ofn"))
+        .args(["--interpolate", "true"])
+        .args(["--annotation", "rdfs:comment", "v %{ontology_iri} %{version_iri}"])
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("interpolate-unversioned.robot.ofn"));
+    let _ = std::fs::remove_file(&out);
+}
+
+/// A template's `LABEL` and `A` cells make their text an `xsd:string` literal,
+/// which sorts after a language-tagged literal of the same property whatever the
+/// two say. As ROBOT 1.9.11 builds `text-literals.tsv`.
+#[test]
+fn a_template_makes_a_cells_text_an_xsd_string() {
+    let out = tmp("text-literals.ofn");
+    let run = bin()
+        .args(["template", "--template"])
+        .arg(robot_fixture("text-literals.tsv"))
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("text-literals.robot.ofn"));
+    let _ = std::fs::remove_file(&out);
+}
+
 /// In Manchester syntax a prefix name standing alone, `idsfor:`, names the
 /// prefix's own IRI — as an ID-ranges file names its annotation properties —
 /// wherever an entity may stand. As ROBOT 1.9.11 reads

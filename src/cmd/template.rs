@@ -1254,11 +1254,14 @@ fn is_builtin_vocabulary(iri: &str) -> bool {
     BUILTIN_NS.iter().any(|ns| iri.starts_with(ns))
 }
 
+/// A `LABEL` or `A` cell's annotation: its text typed `xsd:string`, as a data
+/// factory makes a literal from text alone.
 fn lit_ann(b: &Build<RcStr>, prop: &str, value: &str) -> Annotation<RcStr> {
     Annotation { ann: Default::default(),
         ap: b.annotation_property(prop),
-        av: AnnotationValue::Literal(Literal::Simple {
+        av: AnnotationValue::Literal(Literal::Datatype {
             literal: value.to_string(),
+            datatype_iri: b.iri("http://www.w3.org/2001/XMLSchema#string"),
         }),
     }
 }

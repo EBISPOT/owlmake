@@ -1,0 +1,7 @@
+Prefix(:=<http://example.org/interpolate#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<http://example.org/interpolate.owl> <http://example.org/interpolate/v1.owl>
+Declaration(Class(:A))
+AnnotationAssertion(rdfs:label :A "a")
+)

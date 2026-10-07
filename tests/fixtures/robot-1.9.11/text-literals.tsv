@@ -1,0 +1,3 @@
+ID	Label	Label (en)	Comment	Comment (en)
+ID	LABEL	AL rdfs:label@en	A rdfs:comment	AL rdfs:comment@en
+http://example.org/text#X	a	b	c	d

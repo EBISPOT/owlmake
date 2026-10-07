@@ -1,0 +1,28 @@
+Prefix(:=<http://example.org/new.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/new.owl>
+<http://example.org/new/v2.owl>
+Annotation(rdfs:comment "http://example.org/interpolate.owl"@en)
+Annotation(rdfs:comment "http://example.org/interpolate/v1.owl"^^xsd:anyURI)
+Annotation(rdfs:comment "v http://example.org/interpolate.owl http://example.org/interpolate/v1.owl %{rdfs:label}")
+Annotation(rdfs:seeAlso <http://example.org/interpolate/v1.owl>)
+
+Declaration(Class(<http://example.org/interpolate#A>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/interpolate#A> (a)
+
+AnnotationAssertion(rdfs:label <http://example.org/interpolate#A> "a")
+
+
+)

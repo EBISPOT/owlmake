@@ -64,9 +64,8 @@ pub struct Args {
     /// Remove all existing ontology annotations first.
     #[arg(short = 'R', long)]
     pub remove_annotations: bool,
-    /// If true, interpolate `%{...}` placeholders within annotation
-    /// values. Accepted for compatibility; placeholder interpolation is
-    /// not performed. `<bool>`.
+    /// If true, replace `%{ontology_iri}` and `%{version_iri}` in each annotation
+    /// value with the ontology's IRI and version IRI. `<bool>`.
     #[arg(short = 'e', long, num_args = 1, default_missing_value = "true")]
     pub interpolate: Option<bool>,
 
@@ -87,32 +86,37 @@ pub fn step(
     args.common.apply(&mut model)?;
     // The annotated document is written among the ontologies it imports.
     crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
-    // `--interpolate`: replace `%{CURIE-or-IRI}` placeholders in annotation
-    // values with that entity's rdfs:label (falling back to the IRI).
-    let interp = args.interpolate.unwrap_or(false);
-    let (annotation, axiom_annotation, language_annotation, typed_annotation) = {
-        let labels = if interp { label_map(&model) } else { std::collections::HashMap::new() };
-        let interpolate_all = |vs: &[String]| -> Vec<String> {
-            if interp {
-                vs.iter().map(|s| interpolate_str(s, &model, &labels)).collect()
-            } else {
-                vs.to_vec()
-            }
-        };
-        (
-            interpolate_all(&args.annotation),
-            interpolate_all(&args.axiom_annotation),
-            interpolate_all(&args.language_annotation),
-            interpolate_all(&args.typed_annotation),
-        )
+    // `--interpolate`: each value names the ontology's IRI as `%{ontology_iri}`
+    // and its version IRI as `%{version_iri}` — the IRIs it has as this command
+    // reads it, before `--ontology-iri`/`--version-iri` change them.
+    let interpolate = |values: &[String], width: usize| -> Vec<String> {
+        if !args.interpolate.unwrap_or(false) {
+            return values.to_vec();
+        }
+        let (ontology, version) = ontology_iris(&model);
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| match i % width {
+                1 => interpolated(v, ontology.as_deref(), version.as_deref()),
+                _ => v.clone(),
+            })
+            .collect()
     };
+    let (annotation, link_annotation, axiom_annotation, language_annotation, typed_annotation) = (
+        interpolate(&args.annotation, 2),
+        interpolate(&args.link_annotation, 2),
+        interpolate(&args.axiom_annotation, 2),
+        interpolate(&args.language_annotation, 3),
+        interpolate(&args.typed_annotation, 3),
+    );
     let mut model = annotate_with(
         model,
         &AnnotateOptions {
             ontology_iri: args.ontology_iri.clone(),
             version_iri: args.version_iri.clone(),
             annotation,
-            link_annotation: args.link_annotation.clone(),
+            link_annotation,
             axiom_annotation,
             language_annotation,
             typed_annotation,
@@ -126,57 +130,42 @@ pub fn step(
     Ok(Some(model))
 }
 
-const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-
-/// Map entity IRI → its rdfs:label literal, for `--interpolate`.
-fn label_map(model: &crate::model::Model) -> std::collections::HashMap<String, String> {
-    let mut map = std::collections::HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                if let (AnnotationSubject::IRI(iri), AnnotationValue::Literal(lit)) =
-                    (&aa.subject, &aa.ann.av)
-                {
-                    map.insert(iri.as_ref().to_string(), lit.literal().clone());
-                }
-            }
-        }
+/// The literal `--annotation` and `--axiom-annotation` make of a value: typed
+/// `xsd:string`, as a data factory makes one from text alone.
+fn string_literal(model: &crate::model::Model, value: &str) -> Literal<crate::model::Str> {
+    Literal::Datatype {
+        literal: value.to_string(),
+        datatype_iri: model.build.iri("http://www.w3.org/2001/XMLSchema#string"),
     }
-    map
 }
 
-/// Replace each `%{token}` in `s` with the rdfs:label of the entity named by
-/// `token` (a CURIE or IRI), falling back to the expanded IRI when unlabelled.
-fn interpolate_str(
-    s: &str,
-    model: &crate::model::Model,
-    labels: &std::collections::HashMap<String, String>,
-) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(start) = rest.find("%{") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        match after.find('}') {
-            Some(end) => {
-                let token = &after[..end];
-                let iri = crate::cmd::select::expand(model, token.trim());
-                match labels.get(&iri) {
-                    Some(label) => out.push_str(label),
-                    None => out.push_str(&iri),
-                }
-                rest = &after[end + 1..];
-            }
-            // Unterminated `%{` — emit verbatim and stop.
-            None => {
-                out.push_str("%{");
-                rest = after;
-                break;
-            }
-        }
+/// The ontology's IRI and version IRI, where it has them.
+fn ontology_iris(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+    model
+        .ont
+        .iter()
+        .find_map(|ac| match &ac.component {
+            Component::OntologyID(id) => Some((
+                id.iri.as_ref().map(|i| i.as_ref().to_string()),
+                id.viri.as_ref().map(|i| i.as_ref().to_string()),
+            )),
+            _ => None,
+        })
+        .unwrap_or((None, None))
+}
+
+/// `value` with `%{ontology_iri}` and `%{version_iri}` replaced by the IRIs
+/// given; a placeholder whose IRI the ontology lacks, and any other `%{…}`, stays
+/// as written.
+fn interpolated(value: &str, ontology: Option<&str>, version: Option<&str>) -> String {
+    let mut value = value.to_string();
+    if let Some(iri) = ontology {
+        value = value.replace("%{ontology_iri}", iri);
     }
-    out.push_str(rest);
-    out
+    if let Some(iri) = version {
+        value = value.replace("%{version_iri}", iri);
+    }
+    value
 }
 
 /// Full set of `annotate` options. Defaults are empty / false so callers can set
@@ -286,9 +275,7 @@ pub fn annotate_with(
         model.ont.insert(Component::OntologyAnnotation(
             horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
                 ap,
-                av: AnnotationValue::Literal(Literal::Simple {
-                    literal: value.clone(),
-                }),
+                av: AnnotationValue::Literal(string_literal(&model, value)),
             }),
         ));
         declare_ap_if_custom(&mut model, &full);
@@ -364,9 +351,7 @@ pub fn annotate_with(
         let full = expand(&model, prop);
         let ann = Annotation { ann: Default::default(),
             ap: model.build.annotation_property(full.as_str()),
-            av: AnnotationValue::Literal(Literal::Simple {
-                literal: value.clone(),
-            }),
+            av: AnnotationValue::Literal(string_literal(&model, value)),
         };
         declare_ap_if_custom(&mut model, &full);
         let rebuilt: Vec<AnnotatedComponent<_>> = model

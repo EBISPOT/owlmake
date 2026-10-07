@@ -1660,28 +1660,30 @@ pub fn bind_version(
     let spec = OwlmakeSpec::from_plan(plan);
     let mut value = serde_json::to_value(&spec)
         .context("internal: a plan did not serialize while binding its release version")?;
-    substitute(&mut value, crate::plan::VERSION_REF, version);
     // A recipe that reads the calendar date directly refers to it as
     // [`crate::plan::VERSION_TODAY`], which is the day the build runs whatever
     // version the run stamps — uPheno's pattern ontology names both, one in its
     // version IRI and the other in the artefacts around it.
     //
     // It is a RUN INPUT, so it comes from the run when the run named one and from
-    // the clock only when it did not. Reading the clock unconditionally ignored
-    // `TODAY=` for every string built from `{today}` while honouring it for every
-    // string built from `{version}`: MONDO's mondo.owl took the wall-clock date in
-    // its versionIRI, one line of a 254 MB file, on a build that passed
-    // TODAY=2026-08-19 across midnight.
+    // the clock only when it did not: a build that passes `TODAY=` across
+    // midnight stamps that day in every string, those built from `{today}` as
+    // much as those built from `{version}`.
     let today = today.map(str::to_string).unwrap_or_else(crate::plan::today);
-    substitute(&mut value, crate::plan::VERSION_TODAY, &today);
     // …and the clock is the clock, unless the run names it: a recipe that
-    // shells out to `date` gets the day the build runs whatever version it
-    // stamps, and `CLOCK=` reproduces such a build on any later day.
-    let clock = clock.map(str::to_string).unwrap_or_else(crate::plan::today);
-    substitute(&mut value, crate::plan::VERSION_CLOCK, &clock);
+    // shells out to `date` gets the time the build runs, in the format it asks
+    // for, whatever version it stamps, and `CLOCK=` reproduces such a build on
+    // any later day.
+    let at = crate::plan::run_clock(clock)?;
+    // The version itself may be stated in terms of either (`v{today}`, or what
+    // a `date` command prints), and it is put in place resolved.
+    let version = crate::plan::bind_clock(&version.replace(crate::plan::VERSION_TODAY, &today), &at)?;
+    substitute(&mut value, crate::plan::VERSION_REF, &version);
+    substitute(&mut value, crate::plan::VERSION_TODAY, &today);
+    bind_clocks(&mut value, &at)?;
     let mut bound: OwlmakeSpec = serde_json::from_value(value)
         .context("internal: a plan did not read back while binding its release version")?;
-    bound.version = version.to_string();
+    bound.version = version;
     Ok(bound.into_plan(dir))
 }
 
@@ -1725,6 +1727,22 @@ pub fn bind_switches(mut plan: Plan, switches: &[(String, String)]) -> Plan {
         }
     }
     plan
+}
+
+/// Replace every reference to the clock in every string of a value tree with the
+/// time `at`, printed in the reference's format.
+fn bind_clocks(value: &mut serde_json::Value, at: &jiff::Zoned) -> Result<()> {
+    match value {
+        serde_json::Value::String(s) => {
+            if s.contains("{clock") {
+                *s = crate::plan::bind_clock(s, at)?;
+            }
+        }
+        serde_json::Value::Array(a) => a.iter_mut().try_for_each(|v| bind_clocks(v, at))?,
+        serde_json::Value::Object(o) => o.iter_mut().try_for_each(|(_, v)| bind_clocks(v, at))?,
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Replace every occurrence of `from` with `to` in every string of a value tree.
@@ -3182,6 +3200,22 @@ pub fn save(spec: &OwlmakeSpec, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A version stated in terms of the day or the clock is resolved before it
+    /// is put in place, so the plan's own version and every string built from it
+    /// carry the same one.
+    #[test]
+    fn a_version_stated_by_the_day_or_the_clock_is_bound_resolved() {
+        let mut plan = Plan::default();
+        plan.ontology_iri = "http://example.org/x/{version}".to_string();
+        for (stated, resolved) in [("{clock:%Y%m%d}", "20010203"), ("v{today}", "v2001-02-04")] {
+            plan.version = stated.to_string();
+            let bound =
+                bind_version(&plan, stated, Some("2001-02-04"), Some("2001-02-03T04:05"), Path::new(".")).unwrap();
+            assert_eq!(bound.version, resolved);
+            assert_eq!(bound.ontology_iri, format!("http://example.org/x/{resolved}"));
+        }
+    }
 
     /// `may_fail` is a field of the step, beside its `op` — not a wrapper around
     /// it — and it survives a round trip through the plan file.
