@@ -41,28 +41,6 @@ const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 /// place among the others — is whatever the clock said; this is one reading.
 const NAMING_CLASS: &str = "Entailment1790963877324";
 
-/// Whether an axiom is logical: everything but declarations and annotation
-/// axioms.
-pub(crate) fn is_logical(c: &Component<RcStr>) -> bool {
-    !matches!(
-        c,
-        Component::DeclareClass(_)
-            | Component::DeclareObjectProperty(_)
-            | Component::DeclareDataProperty(_)
-            | Component::DeclareAnnotationProperty(_)
-            | Component::DeclareNamedIndividual(_)
-            | Component::DeclareDatatype(_)
-            | Component::AnnotationAssertion(_)
-            | Component::SubAnnotationPropertyOf(_)
-            | Component::AnnotationPropertyDomain(_)
-            | Component::AnnotationPropertyRange(_)
-            | Component::OntologyAnnotation(_)
-            | Component::OntologyID(_)
-            | Component::DocIRI(_)
-            | Component::Import(_)
-    )
-}
-
 /// The module's axioms, indexed the way the expansion looks them up.
 struct Index {
     /// Each axiom's entities, without repeats.
@@ -219,7 +197,7 @@ pub(crate) fn justification(
     sup: &str,
     entails: &dyn Fn(&[&Ax]) -> bool,
 ) -> Option<Vec<Ax>> {
-    let working: Vec<&Ax> = axioms.iter().filter(|ac| is_logical(&ac.component)).collect();
+    let working: Vec<&Ax> = axioms.iter().filter(|ac| crate::cmd::select::is_logical(&ac.component)).collect();
     let b = Build::new();
     let entailment = Component::SubClassOf(SubClassOf {
         sub: CE::Class(b.class(sub)),

@@ -1,0 +1,62 @@
+{
+  "graphs" : [ {
+    "id" : "http://example.org/u.owl",
+    "meta" : {
+      "basicPropertyValues" : [ {
+        "pred" : "http://purl.org/dc/terms/creator",
+        "val" : "me"
+      } ]
+    },
+    "nodes" : [ {
+      "id" : "http://example.org/A",
+      "type" : "CLASS",
+      "meta" : {
+        "basicPropertyValues" : [ {
+          "pred" : "http://example.org/note",
+          "val" : "n"
+        } ]
+      }
+    }, {
+      "id" : "http://example.org/B",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/partOf",
+      "type" : "PROPERTY",
+      "propertyType" : "OBJECT"
+    }, {
+      "id" : "http://example.org/dp",
+      "type" : "PROPERTY",
+      "propertyType" : "DATA"
+    }, {
+      "id" : "http://example.org/i",
+      "type" : "INDIVIDUAL"
+    }, {
+      "id" : "http://example.org/note",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://purl.org/dc/terms/creator",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.w3.org/ns/prov#wasDerivedFrom",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    } ],
+    "edges" : [ {
+      "sub" : "http://example.org/A",
+      "pred" : "http://example.org/partOf",
+      "obj" : "http://example.org/B"
+    }, {
+      "sub" : "http://example.org/B",
+      "pred" : "is_a",
+      "obj" : "http://example.org/A",
+      "meta" : {
+        "basicPropertyValues" : [ {
+          "pred" : "http://www.w3.org/ns/prov#wasDerivedFrom",
+          "val" : "http://example.org/src"
+        } ]
+      }
+    } ]
+  } ]
+}

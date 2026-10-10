@@ -25,12 +25,12 @@ pub struct Args {
     pub format: Option<String>,
     /// Remove annotation assertions whose subject IRI is never declared or used in
     /// a logical axiom (dangling references).
-    #[arg(short = 'r', long)]
-    pub invalid_references: bool,
+    #[arg(short = 'r', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
+    pub invalid_references: Option<bool>,
 
     /// If true, merge the annotation sets of axioms that are otherwise
     /// identical. `<bool>`.
-    #[arg(short = 'm', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'm', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub merge_axiom_annotations: Option<bool>,
 
     /// An annotation property whose assertions should be migrated/retained.
@@ -102,7 +102,7 @@ pub fn step(
     let mut model = repair_with(
         model,
         &RepairOptions {
-            invalid_references: args.invalid_references,
+            invalid_references: args.invalid_references.unwrap_or(false),
             merge_axiom_annotations: args.merge_axiom_annotations.unwrap_or(false),
         },
     );

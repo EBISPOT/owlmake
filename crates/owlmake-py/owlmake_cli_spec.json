@@ -1,6 +1,6 @@
 {
   "program": "owlmake",
-  "version": "0.1.0",
+  "version": "0.4.13",
   "about": "Self-contained OWL/OBO ontology build and QC toolkit",
   "commands": [
     {
@@ -123,7 +123,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -134,7 +134,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -174,12 +174,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -194,7 +212,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -515,7 +533,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -526,7 +544,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -566,12 +584,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -586,7 +622,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -857,7 +893,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -868,7 +904,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -908,12 +944,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -928,7 +982,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -1176,7 +1230,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -1187,7 +1241,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -1227,12 +1281,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -1247,7 +1319,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -1512,7 +1584,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -1523,7 +1595,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -1563,12 +1635,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -1583,7 +1673,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -1874,7 +1964,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -1885,7 +1975,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -1925,12 +2015,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -1945,7 +2053,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -2155,7 +2263,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -2166,7 +2274,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -2206,12 +2314,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -2226,7 +2352,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -2495,7 +2621,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -2506,7 +2632,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -2546,12 +2672,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -2566,7 +2710,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -2808,7 +2952,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Annotate asserted inferred axioms with `is_inferred true` (`<bool>`)"
+          "help": "Annotate asserted inferred axioms with `is_inferred true` (`true` or `yes` in any case)"
         },
         {
           "id": "axiom_generators",
@@ -2829,7 +2973,26 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Inference types to assert: `SubClass`, `EquivalentClass`, `ClassAssertion`, \u2026 Repeatable / comma-separated. Default: `SubClass`"
+          "help": "Inference types to assert: `SubClass`, `EquivalentClass`, `ClassAssertion`, `PropertyAssertion`. Repeatable / comma-separated. Default: `SubClass`"
+        },
+        {
+          "id": "properties",
+          "longs": [
+            "properties"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PROPERTIES"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "The object properties whose inferred assertions the `PropertyAssertion` generator asserts, as IRIs or CURIEs. Repeatable / comma-separated. Default: every named object property in the signature"
         },
         {
           "id": "include_indirect",
@@ -2850,7 +3013,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Assert all (indirect) subsumptions, not just the direct ones (`<bool>`)"
+          "help": "Assert all (indirect) subsumptions, not just the direct ones (`true` or `yes` in any case)"
         },
         {
           "id": "equivalent_classes_allowed",
@@ -2894,7 +3057,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Output a NEW ontology containing only the inferred axioms (`<bool>`)"
+          "help": "Output a NEW ontology containing only the inferred axioms (`true` or `yes` in any case)"
         },
         {
           "id": "create_new_ontology_with_annotations",
@@ -2915,7 +3078,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Like --create-new-ontology, also copying entity annotations (`<bool>`)"
+          "help": "Like --create-new-ontology, also copying entity annotations (`true` or `yes` in any case)"
         },
         {
           "id": "preserve_annotated_axioms",
@@ -2936,7 +3099,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Preserve annotated axioms when removing redundant ones (`<bool>`)"
+          "help": "Preserve annotated axioms when removing redundant ones (`true` or `yes` in any case)"
         },
         {
           "id": "remove_redundant_subclass_axioms",
@@ -2957,7 +3120,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "After asserting, remove redundant SubClassOf axioms (run reduce) (`<bool>`)"
+          "help": "After asserting, remove redundant SubClassOf axioms (run reduce) (`true` or `yes` in any case)"
         },
         {
           "id": "exclude_tautologies",
@@ -2999,7 +3162,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Do not assert subsumptions whose superclass is owl:Thing (`<bool>`)"
+          "help": "Do not assert subsumptions whose superclass is owl:Thing (`true` or `yes` in any case)"
         },
         {
           "id": "exclude_duplicate_axioms",
@@ -3020,7 +3183,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Do not assert an axiom already present in the ontology (`<bool>`, default false, so an inferred edge can still be annotated)"
+          "help": "Do not assert an axiom already present in the ontology (`true` or `yes` in any case; default false, so an inferred edge can still be annotated)"
         },
         {
           "id": "exclude_external_entities",
@@ -3041,7 +3204,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Do not assert axioms whose subject is an external (undeclared) entity (`<bool>`)"
+          "help": "Do not assert axioms whose subject is an external (undeclared) entity (`true` or `yes` in any case)"
         },
         {
           "id": "dump_unsatisfiable",
@@ -3094,7 +3257,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -3105,7 +3268,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -3145,12 +3308,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -3165,7 +3346,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -3404,13 +3585,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Preserve redundant axioms that carry annotations (`<bool>`)"
+          "help": "Preserve redundant axioms that carry annotations (`true` or `yes` in any case; default false)"
         },
         {
           "id": "include_subproperties",
@@ -3428,13 +3606,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Take subproperties into account over existential restrictions (`<bool>`, default false). A bare `reduce`, as OBA's build runs it, therefore does NOT eliminate existentials entailed only via sub-property or property-chain reasoning. Pass `--include-subproperties true` for the more aggressive reduction"
+          "help": "Take subproperties into account over existential restrictions (`true` or `yes` in any case; default false). A bare `reduce`, as OBA's build runs it, therefore does NOT eliminate existentials entailed only via sub-property or property-chain reasoning. Pass `--include-subproperties true` for the more aggressive reduction"
         },
         {
           "id": "named_classes_only",
@@ -3452,13 +3627,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Only reduce named `A \u2291 B` subclass axioms (`<bool>`)"
+          "help": "Only reduce named `A \u2291 B` subclass axioms (`true` or `yes` in any case; default false)"
         },
         {
           "id": "exact",
@@ -3490,7 +3662,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -3501,7 +3673,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -3541,12 +3713,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -3561,7 +3751,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -3859,7 +4049,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -3870,7 +4060,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -3910,12 +4100,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -3930,7 +4138,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -4193,7 +4401,7 @@
             "elk"
           ],
           "hidden": false,
-          "help": "Reasoner to use. Materializing existential restrictions is an EL operation; `elk`/`structural`/`emr`/`owlmake` all use the built-in EL reasoner"
+          "help": "Reasoner the ontology is checked with before anything is materialized: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake`. The restrictions themselves are what the built-in EL reasoner infers, with union-elimination under `owlmake`"
         },
         {
           "id": "annotate_inferred_axioms",
@@ -4211,13 +4419,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Annotate asserted inferred axioms with `is_inferred true`"
+          "help": "Any value. Changes nothing: what materialize asserts is never annotated"
         },
         {
           "id": "create_new_ontology",
@@ -4235,13 +4440,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Output a new ontology containing only the materialized axioms. `<bool>`"
+          "help": "`true` or `yes` in any case: put the materialized axioms in an ontology of their own, which is not written: what is written is the input as it was"
         },
         {
           "id": "remove_redundant_subclass_axioms",
@@ -4259,13 +4461,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "After materializing, remove redundant SubClassOf axioms by running reduce. `<bool>`"
+          "help": "Any value. Changes nothing: materialize removes no axiom"
         },
         {
           "id": "input_iri",
@@ -4275,7 +4474,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -4286,7 +4485,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -4326,12 +4525,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -4346,7 +4563,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -4563,7 +4780,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "IRI namespace(s) whose properties get declarations (repeatable). Defaults to OBO / EFO / Biolink"
+          "help": "IRI namespace(s) whose properties get declarations (repeatable). Each one is ADDED to the built-in OBO / EFO / Biolink namespaces rather than replacing them, so naming one namespace does not stop the others being declared"
         },
         {
           "id": "subset_decls",
@@ -4639,7 +4856,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -4650,7 +4867,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -4690,12 +4907,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -4710,7 +4945,564 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
+        },
+        {
+          "id": "add_prefixes",
+          "longs": [
+            "add-prefixes"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Add prefixes from a JSON-LD context file (repeatable)"
+        },
+        {
+          "id": "noprefixes",
+          "longs": [
+            "noprefixes"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "NOPREFIXES"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Drop the standard built-in prefixes, keeping only those given explicitly"
+        },
+        {
+          "id": "xml_entities",
+          "longs": [
+            "xml-entities"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "XML_ENTITIES"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Emit `&prefix;` XML entities in RDF/XML output"
+        },
+        {
+          "id": "catalog",
+          "longs": [
+            "catalog"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "XML catalog used to resolve imports"
+        },
+        {
+          "id": "strict",
+          "longs": [
+            "strict"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "STRICT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Use strict parsing when loading"
+        },
+        {
+          "id": "verbose",
+          "longs": [
+            "verbose",
+            "very-verbose",
+            "very-very-verbose"
+          ],
+          "shorts": [
+            "v"
+          ],
+          "action": "count",
+          "value_names": [
+            "VERBOSE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable"
+        }
+      ]
+    },
+    {
+      "name": "check-align",
+      "aliases": [],
+      "about": "Check that the ontology's classes sit under an upper ontology (`odk:check-align`)",
+      "passthrough": false,
+      "args": [
+        {
+          "id": "input",
+          "longs": [
+            "input"
+          ],
+          "shorts": [
+            "i"
+          ],
+          "action": "set",
+          "value_names": [
+            "INPUT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": null
+        },
+        {
+          "id": "output",
+          "longs": [
+            "output"
+          ],
+          "shorts": [
+            "o"
+          ],
+          "action": "set",
+          "value_names": [
+            "OUTPUT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": null
+        },
+        {
+          "id": "format",
+          "longs": [
+            "format"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FORMAT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": null
+        },
+        {
+          "id": "upper_ontology",
+          "longs": [
+            "upper-ontology"
+          ],
+          "shorts": [
+            "u"
+          ],
+          "action": "set",
+          "value_names": [
+            "UPPER_ONTOLOGY"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Load the upper ontology from a file"
+        },
+        {
+          "id": "upper_ontology_iri",
+          "longs": [
+            "upper-ontology-iri"
+          ],
+          "shorts": [
+            "U"
+          ],
+          "action": "set",
+          "value_names": [
+            "UPPER_ONTOLOGY_IRI"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Load the upper ontology from an IRI"
+        },
+        {
+          "id": "use_cob",
+          "longs": [
+            "use-cob"
+          ],
+          "shorts": [
+            "C"
+          ],
+          "action": "set",
+          "value_names": [
+            "USE_COB"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Use COB as the upper ontology (`<bool>`)"
+        },
+        {
+          "id": "use_self",
+          "longs": [
+            "use-self"
+          ],
+          "shorts": [
+            "S"
+          ],
+          "action": "set",
+          "value_names": [
+            "USE_SELF"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Check against the roots the ontology declares for itself (`<bool>`)"
+        },
+        {
+          "id": "term",
+          "longs": [
+            "term"
+          ],
+          "shorts": [
+            "t"
+          ],
+          "action": "append",
+          "value_names": [
+            "TERM"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "A class to check alignment against (repeatable)"
+        },
+        {
+          "id": "term_file",
+          "longs": [
+            "term-file"
+          ],
+          "shorts": [
+            "T"
+          ],
+          "action": "append",
+          "value_names": [
+            "TERM_FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "A file listing classes to check alignment against"
+        },
+        {
+          "id": "base_iri",
+          "longs": [
+            "base-iri"
+          ],
+          "shorts": [
+            "b"
+          ],
+          "action": "append",
+          "value_names": [
+            "BASE_IRI"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Only check classes in this namespace (repeatable)"
+        },
+        {
+          "id": "ignore_dangling",
+          "longs": [
+            "ignore-dangling"
+          ],
+          "shorts": [
+            "d"
+          ],
+          "action": "set",
+          "value_names": [
+            "IGNORE_DANGLING"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Skip a class nothing is said about (`<bool>`)"
+        },
+        {
+          "id": "detail",
+          "longs": [
+            "detail"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "DETAIL"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [
+            "root"
+          ],
+          "hidden": false,
+          "help": "Which unaligned classes to report: `root`, `base-root` or `all`"
+        },
+        {
+          "id": "report_output",
+          "longs": [
+            "report-output"
+          ],
+          "shorts": [
+            "O"
+          ],
+          "action": "set",
+          "value_names": [
+            "REPORT_OUTPUT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Write the unaligned classes to this file"
+        },
+        {
+          "id": "reasoner",
+          "longs": [
+            "reasoner"
+          ],
+          "shorts": [
+            "r"
+          ],
+          "action": "set",
+          "value_names": [
+            "REASONER"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "The reasoner to classify with"
+        },
+        {
+          "id": "fail",
+          "longs": [
+            "fail"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FAIL"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Whether an unaligned class fails the command (`<bool>`, default true)"
+        },
+        {
+          "id": "input_iri",
+          "longs": [
+            "input-iri"
+          ],
+          "shorts": [
+            "I"
+          ],
+          "action": "append",
+          "value_names": [
+            "IRI"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
+        },
+        {
+          "id": "input_format",
+          "longs": [
+            "input-format"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FORMAT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Override the input parser format"
+        },
+        {
+          "id": "prefixes",
+          "longs": [
+            "prefixes"
+          ],
+          "shorts": [
+            "P"
+          ],
+          "action": "set",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
+        },
+        {
+          "id": "add_prefix",
+          "longs": [
+            "add-prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -5174,7 +5966,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -5185,7 +5977,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -5225,12 +6017,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -5245,7 +6055,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -5626,7 +6436,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -5637,7 +6447,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -5677,12 +6487,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -5697,7 +6525,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -6035,13 +6863,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Append rdfs:label after entity IRIs in the report"
+          "help": "Append rdfs:label after entity IRIs in the report (`true` or `yes` in any case)"
         },
         {
           "id": "input_iri",
@@ -6051,7 +6876,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -6062,7 +6887,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -6102,12 +6927,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -6122,7 +6965,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -6418,16 +7261,17 @@
           "action": "append",
           "value_names": [
             "PROP",
-            "VALUE"
+            "VALUE",
+            "PROP"
           ],
-          "min_values": 2,
-          "max_values": 2,
+          "min_values": 3,
+          "max_values": 3,
           "variadic": false,
           "required": false,
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Annotate every axiom in the ontology with `PROP VALUE` (literal value). May be repeated"
+          "help": "Annotate the axioms with `PROP VALUE` (literal value). Each occurrence takes three values, and the values of every occurrence are read in `PROP VALUE` pairs. Each pair replaces the annotations of every `SubClassOf`; an ontology with an axiom of any other type is refused"
         },
         {
           "id": "language_annotation",
@@ -6494,7 +7338,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load ontology annotations from a Turtle/OWL file and merge them. May be repeated"
+          "help": "Merge the axioms and ontology annotations of an ontology file, but not its imports. May be repeated"
         },
         {
           "id": "annotate_defined_by",
@@ -6518,7 +7362,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Add an `rdfs:isDefinedBy` annotation to each entity, pointing at the ontology IRI (`<bool>`, default false)"
+          "help": "Assert `rdfs:isDefinedBy` the ontology IRI of every entity of the signature outside the OWL, RDF, RDFS and XSD vocabularies that has no `rdfs:isDefinedBy` (`<bool>`, default false)"
         },
         {
           "id": "annotate_derived_from",
@@ -6542,7 +7386,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Add a `prov:wasDerivedFrom` ontology annotation pointing at the version IRI (`<bool>`, default false)"
+          "help": "Annotate every axiom with no `prov:wasDerivedFrom` with one naming the version IRI, or the ontology IRI where there is no version IRI (`<bool>`, default false)"
         },
         {
           "id": "remove_annotations",
@@ -6590,7 +7434,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, interpolate `%{...}` placeholders within annotation values. Accepted for compatibility; placeholder interpolation is not performed. `<bool>`"
+          "help": "If true, replace `%{ontology_iri}` and `%{version_iri}` in each annotation value with the ontology's IRI and version IRI. `<bool>`"
         },
         {
           "id": "input_iri",
@@ -6600,7 +7444,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -6611,7 +7455,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -6651,12 +7495,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -6671,7 +7533,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -6932,7 +7794,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Selectors (space- or repeat-separated): `annotations`, `ontology`, `anonymous`, `self`, \u2026"
+          "help": "Selector groups, applied in turn: each value's space-separated selectors (`self`, `classes`, `parents`, `anonymous`, `complement`, `PROP=VALUE`, `<IRI-pattern>`, \u2026) select the union of what each maps the set to. `annotations`, `imports` and `ontology` ask for the kept entities' annotation assertions, the imports and the ontology annotations"
         },
         {
           "id": "axioms",
@@ -6953,7 +7815,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Axiom categories to filter for (accepted for compatibility; advisory)"
+          "help": "Axiom types to keep: `all` (the default), `logical`, `annotation`, `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`, `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by name, or `internal`/`external` to the `--base-iri` namespaces"
         },
         {
           "id": "preserve_structure",
@@ -7001,7 +7863,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, keep axioms containing only selected objects (`<bool>`)"
+          "help": "If true (the default), keep the axioms all of whose objects are selected; if false, those with any selected object (`<bool>`)"
         },
         {
           "id": "exclude_term",
@@ -7022,7 +7884,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Terms to force-exclude (never kept on their own account). Repeatable"
+          "help": "Terms to take out of the selection. Repeatable"
         },
         {
           "id": "exclude_terms",
@@ -7043,7 +7905,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Files of terms to force-exclude. Repeatable"
+          "help": "Files of terms to take out of the selection. Repeatable"
         },
         {
           "id": "include_term",
@@ -7064,7 +7926,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Terms to force-include in the seed. Repeatable"
+          "help": "Terms to add to the selection. Repeatable"
         },
         {
           "id": "include_terms",
@@ -7085,7 +7947,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Files of terms to force-include in the seed. Repeatable"
+          "help": "Files of terms to add to the selection. Repeatable"
         },
         {
           "id": "drop_axiom_annotations",
@@ -7095,7 +7957,7 @@
           "shorts": [
             "d"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "ARG"
           ],
@@ -7106,7 +7968,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Drop axiom annotations involving a particular annotation property, or `all`/`true` to strip every annotation from kept axioms"
+          "help": "Drop the annotations of the kept axioms: `PROP` drops a property's, `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value the regex finds (`'` taken out of either); `all` drops every one. Repeatable"
         },
         {
           "id": "signature",
@@ -7130,7 +7992,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Signature mode: when true keep an axiom if ANY of its entities is in the seed; when false (the OBO sub-ontology filter) keep only when *all* of its entities are in the seed (`<bool>`)"
+          "help": "If true, judge an axiom by the IRIs it names rather than by its objects, which include its anonymous class expressions and individuals (`<bool>`)"
         },
         {
           "id": "allow_punning",
@@ -7152,7 +8014,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, allow selecting punned entities (`<bool>`)"
+          "help": "If true, a term naming entities of several kinds selects all of them; otherwise it selects none (`<bool>`)"
         },
         {
           "id": "base_iri",
@@ -7171,7 +8033,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Base IRI(s). Accepted for compatibility"
+          "help": "Base IRI(s): the namespaces `--axioms internal` and `--axioms external` judge an axiom's subjects by. Repeatable"
         },
         {
           "id": "ontology_iri",
@@ -7192,7 +8054,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Set the output ontology IRI"
+          "help": "The IRI of the output ontology, taken as written; the input's when absent"
         },
         {
           "id": "input_iri",
@@ -7202,7 +8064,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -7213,7 +8075,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -7253,12 +8115,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -7273,7 +8153,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -7534,7 +8414,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Selectors: `imports`, `complement`, `object-properties` (repeatable)"
+          "help": "Selector groups, applied in turn: each value's space-separated selectors (`self`, `classes`, `parents`, `anonymous`, `complement`, `PROP=VALUE`, `<IRI-pattern>`, \u2026) select the union of what each maps the set to. `imports` removes the imports and `ontology` the ontology annotations; with `anonymous`, no anonymous superclass is re-linked"
         },
         {
           "id": "axioms",
@@ -7555,7 +8435,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Axiom categories to remove: `external`, `equivalent`, `disjoint`"
+          "help": "Axiom types to remove: `all` (the default), `logical`, `annotation`, `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`, `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by name, or `internal`/`external` to the `--base-iri` namespaces"
         },
         {
           "id": "preserve_structure",
@@ -7603,7 +8483,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, remove axioms containing any selected object (`<bool>`)"
+          "help": "If true (the default), remove the axioms any of whose objects is selected; if false, those all of whose objects are (`<bool>`)"
         },
         {
           "id": "exclude_term",
@@ -7624,7 +8504,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Terms to force-exclude from removal (never removed). Repeatable"
+          "help": "Terms to take out of the selection. Repeatable"
         },
         {
           "id": "exclude_terms",
@@ -7645,7 +8525,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Files of terms to force-exclude from removal. Repeatable"
+          "help": "Files of terms to take out of the selection. Repeatable"
         },
         {
           "id": "include_term",
@@ -7666,7 +8546,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Terms to force-include in removal. Repeatable"
+          "help": "Terms to add to the selection. Repeatable"
         },
         {
           "id": "include_terms",
@@ -7687,7 +8567,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Files of terms to force-include in removal. Repeatable"
+          "help": "Files of terms to add to the selection. Repeatable"
         },
         {
           "id": "drop_axiom_annotations",
@@ -7697,7 +8577,7 @@
           "shorts": [
             "d"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "ARG"
           ],
@@ -7708,7 +8588,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Drop axiom annotations involving a particular annotation property, or `all`/`true` to strip every annotation from kept axioms"
+          "help": "Drop the annotations of the ontology's own axioms: `PROP` drops a property's, `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value the regex finds (`'` taken out of either); `all` drops every one. Repeatable"
         },
         {
           "id": "signature",
@@ -7732,7 +8612,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, keep axioms with any selected entity in their signature when deciding what to remove (`<bool>`)"
+          "help": "If true, judge an axiom by the IRIs it names rather than by its objects, which include its anonymous class expressions and individuals (`<bool>`)"
         },
         {
           "id": "allow_punning",
@@ -7754,7 +8634,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, allow selecting punned entities (widens IRI matching) (`<bool>`)"
+          "help": "If true, a term naming entities of several kinds selects all of them; otherwise it selects none (`<bool>`)"
         },
         {
           "id": "base_iri",
@@ -7773,7 +8653,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Base IRI(s) defining \"internal\" terms for `--axioms external`. Repeatable"
+          "help": "Base IRI(s): the namespaces `--axioms internal` and `--axioms external` judge an axiom's subjects by. Repeatable"
         },
         {
           "id": "input_iri",
@@ -7783,7 +8663,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -7794,7 +8674,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -7834,12 +8714,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -7854,7 +8752,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -8283,13 +9181,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`<bool>`, default false)"
+          "help": "Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`true` or `yes` in any case; default false)"
         },
         {
           "id": "individuals",
@@ -8397,13 +9292,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Warn (instead of error) when no input terms are given (`<bool>`, default false)"
+          "help": "Extract even when the ontology names none of the terms (`true` or `yes` in any case; default false)"
         },
         {
           "id": "output_iri",
@@ -8434,7 +9326,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -8445,7 +9337,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -8485,12 +9377,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -8505,7 +9415,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -8791,7 +9701,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -8802,7 +9712,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -8842,12 +9752,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -8862,7 +9790,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -9151,9 +10079,7 @@
           "longs": [
             "root-phenotype-file"
           ],
-          "shorts": [
-            "P"
-          ],
+          "shorts": [],
           "action": "append",
           "value_names": [
             "ROOT_PHENOTYPE_FILE"
@@ -9175,7 +10101,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -9186,7 +10112,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -9226,12 +10152,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -9246,7 +10190,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -9961,7 +10905,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -9972,7 +10916,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -10012,12 +10956,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -10032,7 +10994,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -10431,7 +11393,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -10442,7 +11404,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -10482,12 +11444,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -10502,7 +11482,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -10796,7 +11776,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -10807,7 +11787,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -10847,12 +11827,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -10867,7 +11865,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -11075,7 +12073,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -11086,7 +12084,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -11126,12 +12124,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -11146,7 +12162,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -11458,6 +12474,13 @@
           "help": "Same, spelled as an option, so the command reads like every other owlmake command when a recipe is replayed through the CLI"
         }
       ]
+    },
+    {
+      "name": "semsql",
+      "aliases": [],
+      "about": "Build an ontology's SQL database (`semsql make <name>.db`): its triples, its reasoned relation graph, and the views over both",
+      "passthrough": false,
+      "args": []
     },
     {
       "name": "sha256sum",
@@ -12011,7 +13034,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -12022,7 +13045,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -12062,12 +13085,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -12082,7 +13123,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -12317,10 +13358,13 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [],
+          "possible_values": [
+            "true",
+            "false"
+          ],
           "defaults": [],
           "hidden": false,
-          "help": "Logging level at which a non-empty result causes failure. `none`/`false` reports violations without failing the command"
+          "help": "If false, report violations without failing the command (`<bool>`, default true)"
         },
         {
           "id": "input_iri",
@@ -12330,7 +13374,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -12341,7 +13385,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -12381,12 +13425,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -12401,7 +13463,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -12661,13 +13723,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Report labels instead of CURIEs for entities"
+          "help": "Report labels instead of CURIEs for entities (`true` or `yes` in any case)"
         },
         {
           "id": "print",
@@ -12791,13 +13850,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Keep the TDB directory. No-op (no TDB)"
+          "help": "Keep the TDB directory (`true` or `yes` in any case). No-op (no TDB)"
         },
         {
           "id": "standalone",
@@ -12813,13 +13869,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Wrap HTML output in a complete document (default true). Only affects `--format html`"
+          "help": "Wrap HTML output in a complete document (`true` or `yes` in any case; default true). Only affects `--format html`"
         },
         {
           "id": "input_iri",
@@ -12829,7 +13882,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -12840,7 +13893,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -12880,12 +13933,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -12900,7 +13971,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -13135,13 +14206,10 @@
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "If true, log template errors and continue instead of aborting. `<bool>`"
+          "help": "Log template errors and continue instead of aborting (`true` or `yes` in any case)"
         },
         {
           "id": "errors",
@@ -13355,7 +14423,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -13366,7 +14434,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -13406,12 +14474,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -13426,7 +14512,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -13744,7 +14830,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -13755,7 +14841,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -13795,12 +14881,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -13815,7 +14919,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -13949,7 +15053,7 @@
     {
       "name": "export",
       "aliases": [],
-      "about": "Export ontology entities to a spreadsheet (TSV/CSV)",
+      "about": "Export ontology entities as a table: TSV, CSV, HTML, JSON or an Excel workbook",
       "passthrough": false,
       "args": [
         {
@@ -13974,16 +15078,16 @@
           "help": null
         },
         {
-          "id": "output",
+          "id": "export",
           "longs": [
-            "output"
+            "export"
           ],
           "shorts": [
-            "o"
+            "e"
           ],
           "action": "set",
           "value_names": [
-            "OUTPUT"
+            "FILE"
           ],
           "min_values": 1,
           "max_values": 1,
@@ -13992,30 +15096,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": null
-        },
-        {
-          "id": "format",
-          "longs": [
-            "format"
-          ],
-          "shorts": [
-            "f"
-          ],
-          "action": "set",
-          "value_names": [
-            "FORMAT"
-          ],
-          "min_values": 1,
-          "max_values": 1,
-          "variadic": false,
-          "required": false,
-          "possible_values": [],
-          "defaults": [
-            "tsv"
-          ],
-          "hidden": false,
-          "help": "Output format: tsv (default) or csv"
+          "help": "The file to write the table to. Required"
         },
         {
           "id": "header",
@@ -14036,7 +15117,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Ordered, `|`-separated list of column names for the header. Supported: `ID`, `LABEL`, `Definition`, `SubClass Of` (anonymous expressions rendered in Manchester syntax), `Equivalent`, `Disjoint`, and any annotation property by CURIE or label. Default: ID, LABEL, Definition, SubClass Of"
+          "help": "The columns, in order, separated by `|`: e.g. `ID|LABEL|SubClass Of`. Required"
         },
         {
           "id": "sort",
@@ -14048,7 +15129,7 @@
           ],
           "action": "set",
           "value_names": [
-            "COL"
+            "COLS"
           ],
           "min_values": 1,
           "max_values": 1,
@@ -14057,7 +15138,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Column name to sort rows on. Default: first column"
+          "help": "The columns to sort the rows on, separated by `|`, each written as in `--header`; `^` before a column sorts it in reverse. The last one listed orders the rows, and each before it orders the rows the later ones leave tied. Default: the first column"
         },
         {
           "id": "include",
@@ -14069,7 +15150,7 @@
           ],
           "action": "set",
           "value_names": [
-            "TYPES"
+            "KINDS"
           ],
           "min_values": 1,
           "max_values": 1,
@@ -14078,38 +15159,19 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Entity types to include: comma/space-separated `classes`, `properties`, `individuals`. Default: classes"
+          "help": "The kinds of entity to export, separated by spaces, or else by commas, or else by tabs: `classes`, `properties`, `individuals`. Default: `classes individuals`"
         },
         {
-          "id": "exclude",
+          "id": "format",
           "longs": [
-            "exclude"
-          ],
-          "shorts": [],
-          "action": "set",
-          "value_names": [
-            "TYPES"
-          ],
-          "min_values": 1,
-          "max_values": 1,
-          "variadic": false,
-          "required": false,
-          "possible_values": [],
-          "defaults": [],
-          "hidden": false,
-          "help": "Entity types to exclude (owlmake extension): same vocabulary as `--include`. Applied after `--include`"
-        },
-        {
-          "id": "entity_format",
-          "longs": [
-            "entity-format"
+            "format"
           ],
           "shorts": [
-            "E"
+            "f"
           ],
           "action": "set",
           "value_names": [
-            "ARG"
+            "FORMAT"
           ],
           "min_values": 1,
           "max_values": 1,
@@ -14118,49 +15180,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "How to render entities in cells: one of `ID`/`CURIE` (compressed IRI, default), `IRI`, `LABEL`/`NAME`"
-        },
-        {
-          "id": "entity_select",
-          "longs": [
-            "entity-select"
-          ],
-          "shorts": [
-            "l"
-          ],
-          "action": "set",
-          "value_names": [
-            "ARG"
-          ],
-          "min_values": 1,
-          "max_values": 1,
-          "variadic": false,
-          "required": false,
-          "possible_values": [],
-          "defaults": [],
-          "hidden": false,
-          "help": "Which entities to render: `NAMED` (default), `ANONYMOUS`, or `ANY`/`ALL`. Accepted for compatibility; owlmake only renders named entities"
-        },
-        {
-          "id": "export",
-          "longs": [
-            "export"
-          ],
-          "shorts": [
-            "e"
-          ],
-          "action": "set",
-          "value_names": [
-            "FILE"
-          ],
-          "min_values": 1,
-          "max_values": 1,
-          "variadic": false,
-          "required": false,
-          "possible_values": [],
-          "defaults": [],
-          "hidden": false,
-          "help": "Alternative output path; alias of `--output`"
+          "help": "Output format: `tsv`, `csv`, `html`, `html-list`, `json` or `xlsx`. Default: the export file's extension when it is one of these, else `tsv`"
         },
         {
           "id": "split",
@@ -14172,7 +15192,7 @@
           ],
           "action": "set",
           "value_names": [
-            "ARG"
+            "SEP"
           ],
           "min_values": 1,
           "max_values": 1,
@@ -14181,7 +15201,49 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Character to split multi-valued cells on (default `|`)"
+          "help": "The separator between the values of one cell. Default: `|`"
+        },
+        {
+          "id": "entity_format",
+          "longs": [
+            "entity-format"
+          ],
+          "shorts": [
+            "E"
+          ],
+          "action": "set",
+          "value_names": [
+            "FORMAT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "How a column with no tag renders entities: `NAME` (label, quoted inside expressions, else CURIE), `LABEL`, `ID` (CURIE) or `IRI`. Default: `NAME`"
+        },
+        {
+          "id": "entity_select",
+          "longs": [
+            "entity-select"
+          ],
+          "shorts": [
+            "l"
+          ],
+          "action": "set",
+          "value_names": [
+            "SELECT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Which values a column with no tag holds: `ANY`, `NAMED` or `ANON`/`ANONYMOUS`. Default: `ANY`"
         },
         {
           "id": "standalone",
@@ -14191,19 +15253,16 @@
           "shorts": [],
           "action": "set",
           "value_names": [
-            "STANDALONE"
+            "BOOL"
           ],
           "min_values": 1,
           "max_values": 1,
           "variadic": false,
           "required": false,
-          "possible_values": [
-            "true",
-            "false"
-          ],
+          "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "If true and the output format is HTML, generate a standalone HTML file. Accepted for compatibility; HTML output is not produced"
+          "help": "For HTML: `true` or `yes` writes a whole page with its stylesheet link; anything else writes the table alone. Default: `true`"
         },
         {
           "id": "input_iri",
@@ -14213,7 +15272,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -14224,7 +15283,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -14264,12 +15323,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -14284,7 +15361,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -14422,27 +15499,6 @@
       "passthrough": false,
       "args": [
         {
-          "id": "input",
-          "longs": [
-            "input"
-          ],
-          "shorts": [
-            "i"
-          ],
-          "action": "set",
-          "value_names": [
-            "INPUT"
-          ],
-          "min_values": 1,
-          "max_values": 1,
-          "variadic": false,
-          "required": false,
-          "possible_values": [],
-          "defaults": [],
-          "hidden": false,
-          "help": null
-        },
-        {
           "id": "output",
           "longs": [
             "output"
@@ -14471,7 +15527,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -14482,7 +15538,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -14522,12 +15578,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -14542,7 +15616,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -14834,7 +15908,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -14845,7 +15919,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -14885,12 +15959,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -14905,7 +15997,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -15237,7 +16329,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -15248,7 +16340,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -15288,12 +16380,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -15308,7 +16418,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -15511,6 +16621,50 @@
           "help": "`-k`/`--keep-going`: when a target fails, carry on with the targets that do not depend on it, then exit non-zero. A release with one unbuildable artefact still produces the rest"
         },
         {
+          "id": "jobs",
+          "longs": [
+            "jobs"
+          ],
+          "shorts": [
+            "j"
+          ],
+          "action": "set",
+          "value_names": [
+            "N"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [
+            "1"
+          ],
+          "hidden": false,
+          "help": "`-j`/`--jobs`: build up to this many targets at once. A target starts once everything it needs is built, and targets that need nothing of each other run side by side; with one job, targets are built one after another in plan order"
+        },
+        {
+          "id": "assume_new",
+          "longs": [
+            "assume-new"
+          ],
+          "shorts": [
+            "W"
+          ],
+          "action": "append",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "`-W`/`--assume-new`: pretend the named file was just modified. Targets that depend on it run their recipes; the file itself is neither rebuilt nor touched. This is how `recreate-components` forces the component recipes over their stamps"
+        },
+        {
           "id": "repo",
           "longs": [
             "directory",
@@ -15656,8 +16810,8 @@
             "false"
           ],
           "defaults": [],
-          "hidden": true,
-          "help": "Deprecated/no-op: the plan is ALWAYS regenerated from the repository's own build config, which is the single source of truth, so a supplied plan could only conflict with it. Accepted and ignored"
+          "hidden": false,
+          "help": "Rewrite the committed plan from the repository's build configuration"
         },
         {
           "id": "imports",
@@ -15674,9 +16828,7 @@
           "variadic": false,
           "required": false,
           "possible_values": [],
-          "defaults": [
-            "cached"
-          ],
+          "defaults": [],
           "hidden": false,
           "help": "How to obtain import modules: `cached` (reuse committed mirror/import files; default) or `fresh` (rebuild them)"
         },
@@ -15751,7 +16903,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -15762,7 +16914,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -15802,12 +16954,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -15822,7 +16992,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -15959,7 +17129,7 @@
         "prepare_release",
         "all"
       ],
-      "about": "Build every release artefact (`prepare_release`)",
+      "about": "Build what the release needs \u2014 its checks, reports and artefacts, and whatever the repository adds to it \u2014 then publish it (`prepare_release`)",
       "passthrough": false,
       "args": [
         {
@@ -16029,6 +17199,23 @@
           "help": "How to obtain import modules: `cached` (default) or `fresh`"
         },
         {
+          "id": "assignments",
+          "longs": [],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "VAR=VALUE"
+          ],
+          "min_values": 1,
+          "max_values": 18446744073709551615,
+          "variadic": true,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "`VAR=value` assignments, as `om make` takes them (`IMP=true`, `PAT=false`)"
+        },
+        {
           "id": "patterns",
           "longs": [
             "patterns"
@@ -16057,7 +17244,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -16068,7 +17255,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -16108,12 +17295,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -16128,7 +17333,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -16314,6 +17519,23 @@
           "help": "Skip imports flagged `is_large_import` (`refresh-imports-excluding-large`)"
         },
         {
+          "id": "assignments",
+          "longs": [],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "VAR=VALUE"
+          ],
+          "min_values": 1,
+          "max_values": 18446744073709551615,
+          "variadic": true,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "`VAR=value` assignments, as `om make` takes them (`MIR=false`)"
+        },
+        {
           "id": "input_iri",
           "longs": [
             "input-iri"
@@ -16321,7 +17543,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -16332,7 +17554,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -16372,12 +17594,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -16392,7 +17632,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -16556,6 +17796,23 @@
           "help": null
         },
         {
+          "id": "assignments",
+          "longs": [],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "VAR=VALUE"
+          ],
+          "min_values": 1,
+          "max_values": 18446744073709551615,
+          "variadic": true,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "`VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)"
+        },
+        {
           "id": "input_iri",
           "longs": [
             "input-iri"
@@ -16563,7 +17820,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -16574,7 +17831,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -16614,12 +17871,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -16634,7 +17909,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -16796,6 +18071,23 @@
           "help": null
         },
         {
+          "id": "assignments",
+          "longs": [],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "VAR=VALUE"
+          ],
+          "min_values": 1,
+          "max_values": 18446744073709551615,
+          "variadic": true,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "`VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)"
+        },
+        {
           "id": "input_iri",
           "longs": [
             "input-iri"
@@ -16803,7 +18095,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -16814,7 +18106,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -16854,12 +18146,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -16874,7 +18184,284 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
+        },
+        {
+          "id": "add_prefixes",
+          "longs": [
+            "add-prefixes"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Add prefixes from a JSON-LD context file (repeatable)"
+        },
+        {
+          "id": "noprefixes",
+          "longs": [
+            "noprefixes"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "NOPREFIXES"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Drop the standard built-in prefixes, keeping only those given explicitly"
+        },
+        {
+          "id": "xml_entities",
+          "longs": [
+            "xml-entities"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "XML_ENTITIES"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Emit `&prefix;` XML entities in RDF/XML output"
+        },
+        {
+          "id": "catalog",
+          "longs": [
+            "catalog"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "XML catalog used to resolve imports"
+        },
+        {
+          "id": "strict",
+          "longs": [
+            "strict"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "STRICT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Use strict parsing when loading"
+        },
+        {
+          "id": "verbose",
+          "longs": [
+            "verbose",
+            "very-verbose",
+            "very-very-verbose"
+          ],
+          "shorts": [
+            "v"
+          ],
+          "action": "count",
+          "value_names": [
+            "VERBOSE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable"
+        }
+      ]
+    },
+    {
+      "name": "update-repo",
+      "aliases": [
+        "update_repo"
+      ],
+      "about": "Bring the repository's files into step with the options in its `owlmake.yaml`: the edit file's imports, the XML catalog, and the files the build reads (`update_repo`)",
+      "passthrough": false,
+      "args": [
+        {
+          "id": "repo",
+          "longs": [
+            "directory",
+            "repo"
+          ],
+          "shorts": [
+            "C"
+          ],
+          "action": "set",
+          "value_names": [
+            "DIR"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [
+            "."
+          ],
+          "hidden": false,
+          "help": null
+        },
+        {
+          "id": "assignments",
+          "longs": [],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "VAR=VALUE"
+          ],
+          "min_values": 1,
+          "max_values": 18446744073709551615,
+          "variadic": true,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "`VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)"
+        },
+        {
+          "id": "input_iri",
+          "longs": [
+            "input-iri"
+          ],
+          "shorts": [
+            "I"
+          ],
+          "action": "append",
+          "value_names": [
+            "IRI"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
+        },
+        {
+          "id": "input_format",
+          "longs": [
+            "input-format"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FORMAT"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Override the input parser format"
+        },
+        {
+          "id": "prefixes",
+          "longs": [
+            "prefixes"
+          ],
+          "shorts": [
+            "P"
+          ],
+          "action": "set",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
+        },
+        {
+          "id": "add_prefix",
+          "longs": [
+            "add-prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -17276,7 +18863,7 @@
             "elk"
           ],
           "hidden": false,
-          "help": "Reasoner to use: `elk`/`structural`/`emr`/ `owlmake` use the built-in EL reasoner"
+          "help": "Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake` use the built-in EL reasoner (`owlmake` with union-elimination), `hermit`/`jfact` the hermit-rs OWL 2 DL reasoner, `whelk` the whelk-rs EL reasoner. The same reasoner decides the entailment, finds the unsatisfiable classes and minimizes the justifications. An unknown name is an error, as it is for `reason`"
         },
         {
           "id": "max",
@@ -17320,7 +18907,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Write the justification(s) to this file. Same content as --output; provided for compatibility with existing invocations"
+          "help": "Write the markdown report of the explanations to this file"
         },
         {
           "id": "output",
@@ -17341,7 +18928,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Output file for the justification. With `--format` (or an ontology file extension) this is an ontology of the union of justification axioms, as in `robot explain`; otherwise the human-readable report is written. Defaults to stdout (the report)"
+          "help": "Save the ontology this command was given, as it was given. The ontology of the justifications is what the next command in a chain receives. With neither this nor `--explanation`, the human-readable report goes to stdout"
         },
         {
           "id": "format",
@@ -17362,7 +18949,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Serialization format for the `--output` ontology of justification axioms: owl/owx/ofn/obo/omn/ttl/json. When omitted the format is inferred from the `--output` extension"
+          "help": "Serialization format for `--output`; inferred from its extension when omitted"
         },
         {
           "id": "input_iri",
@@ -17372,7 +18959,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -17383,7 +18970,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -17423,12 +19010,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -17443,7 +19048,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -17651,7 +19256,7 @@
           "shorts": [
             "r"
           ],
-          "action": "set_true",
+          "action": "set",
           "value_names": [
             "INVALID_REFERENCES"
           ],
@@ -17762,7 +19367,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -17773,7 +19378,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -17813,12 +19418,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -17833,7 +19456,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -18132,7 +19755,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Minimum number of named subclasses an intermediate class must have to be kept (default 2). Non-precious intermediates with fewer named subclasses are collapsed and their hierarchy is bridged"
+          "help": "Number of named subclasses an intermediate class needs to be kept (default 2, at least 2). One with fewer, but at least one, is collapsed and the hierarchy is bridged across it"
         },
         {
           "id": "input_iri",
@@ -18142,7 +19765,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -18153,7 +19776,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -18193,12 +19816,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -18213,7 +19854,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -18553,7 +20194,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -18564,7 +20205,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -18604,12 +20245,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -18624,7 +20283,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -18981,7 +20640,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -18992,7 +20651,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -19032,12 +20691,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -19052,7 +20729,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -19303,7 +20980,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -19314,7 +20991,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -19354,12 +21031,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -19374,7 +21069,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -19580,7 +21275,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -19591,7 +21286,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -19631,12 +21326,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -19651,7 +21364,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -19857,7 +21570,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -19868,7 +21581,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -19908,12 +21621,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -19928,7 +21659,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -20174,7 +21905,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -20185,7 +21916,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -20225,12 +21956,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -20245,7 +21994,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -20652,7 +22401,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -20663,7 +22412,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -20703,12 +22452,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -20723,7 +22490,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -21083,6 +22850,28 @@
           "help": "Keep non-subset classes in the output (default: remove them)"
         },
         {
+          "id": "prune_taxa",
+          "longs": [
+            "prune-taxa"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "PRUNE_TAXA"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "When removing, also remove every taxon under cellular organisms that is neither the taxon nor one of its ancestors or descendants"
+        },
+        {
           "id": "input_iri",
           "longs": [
             "input-iri"
@@ -21090,7 +22879,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -21101,7 +22890,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -21141,12 +22930,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -21161,7 +22968,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",
@@ -21407,7 +23214,7 @@
           "shorts": [
             "I"
           ],
-          "action": "set",
+          "action": "append",
           "value_names": [
             "IRI"
           ],
@@ -21418,7 +23225,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Load the input ontology from an IRI instead of a file"
+          "help": "Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files"
         },
         {
           "id": "input_format",
@@ -21458,12 +23265,30 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Use prefixes from a JSON-LD context file"
+          "help": "Bind the prefixes of a JSON-LD context file for reading CURIEs"
+        },
+        {
+          "id": "prefix",
+          "longs": [
+            "prefix"
+          ],
+          "shorts": [],
+          "action": "append",
+          "value_names": [
+            "PREFIX"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Bind a prefix `\"foo: http://bar\"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free"
         },
         {
           "id": "add_prefix",
           "longs": [
-            "prefix",
             "add-prefix"
           ],
           "shorts": [],
@@ -21478,7 +23303,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Add a single prefix `\"foo: http://bar\"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free"
+          "help": "Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)"
         },
         {
           "id": "add_prefixes",

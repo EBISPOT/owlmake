@@ -1,0 +1,14 @@
+Prefix(ex:=<http://example.org/ex#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<http://example.org/c.owl>
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(ObjectProperty(ex:p))
+Declaration(ObjectProperty(ex:q))
+Declaration(AnnotationProperty(ex:n))
+AnnotationAssertion(rdfs:label ex:A "a")
+AnnotationAssertion(ex:n ex:A "note")
+SubClassOf(ex:B ObjectSomeValuesFrom(ex:p ex:A))
+SubClassOf(ex:A ObjectSomeValuesFrom(ex:q ex:B))
+)

@@ -2079,8 +2079,9 @@ fn dosdp_merge_steps(
         }
         // The merge the recipe opens with, and the output bookkeeping it closes
         // with, are the caller's business.
-        if matches!(steps.first(), Some(Step::Op(Op::Merge { .. }))) {
-            steps.remove(0);
+        let opening = steps.iter().position(|s| !matches!(s, Step::Op(Op::Prefixes { .. })));
+        if let Some(k) = opening.filter(|&k| matches!(steps[k], Step::Op(Op::Merge { .. }))) {
+            steps.remove(k);
         }
         while matches!(steps.last(), Some(Step::File(_)) | Some(Step::Op(Op::RoundTrip { .. }))) {
             steps.pop();
@@ -2612,7 +2613,7 @@ fn component_build_gaps(make: &super::makefile::MakeModel, robot_prefix: &str, f
 /// filename suffix.
 fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontbase: &str) {
     use crate::cmd::oort::Variant;
-    use super::robot::{AnnotateSpec, Op, OortSpec, RemoveSpec};
+    use super::robot::{AnnotateSpec, Op, OortSpec, SelectionSpec};
     use std::collections::HashMap;
 
     let mut oort_targets: HashMap<String, OortSpec> = HashMap::new();
@@ -2657,10 +2658,15 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
                 axiom_generators: Vec::new(),
                 properties: Vec::new(),
             }),
-            Step::Op(Op::Reduce { reasoner: None, include_subproperties: None }),
+            Step::Op(Op::Reduce {
+                reasoner: None,
+                include_subproperties: None,
+                preserve_annotated_axioms: false,
+                named_classes_only: false,
+            }),
         ];
         if matches!(variant, Variant::Relaxed | Variant::Simple) {
-            steps.push(Step::Op(Op::Remove(RemoveSpec {
+            steps.push(Step::Op(Op::Remove(SelectionSpec {
                 axioms: vec!["equivalent".into()],
                 ..Default::default()
             })));
@@ -2692,7 +2698,7 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
 /// surfaced as gaps rather than silently dropped, so a thin "release" is flagged,
 /// not faked.
 fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
-    use super::robot::{AnnotateSpec, Op, RemoveSpec};
+    use super::robot::{AnnotateSpec, Op, SelectionSpec};
 
     let id = repo.yaml.id.clone();
     let edit = repo.edit_file.clone().unwrap_or_default();
@@ -2795,7 +2801,12 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             Step::Op(merge()),
             Step::Op(reason()),
             Step::Op(Op::Relax { include_subclass_of: false }),
-            Step::Op(Op::Reduce { reasoner: Some(reasoner.clone()), include_subproperties: None }),
+            Step::Op(Op::Reduce {
+                reasoner: Some(reasoner.clone()),
+                include_subproperties: None,
+                preserve_annotated_axioms: false,
+                named_classes_only: false,
+            }),
             Step::Op(ann_primary()),
         ],
         gaps: vec![],
@@ -2817,10 +2828,10 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         steps: vec![
             Step::Op(merge()),
             Step::Op(reason()),
-            Step::Op(Op::Remove(RemoveSpec {
+            Step::Op(Op::Remove(SelectionSpec {
                 axioms: vec!["external".into()],
                 base_iri: vec![base_prefix],
-                trim: Some(false),
+                trim: Some(false.into()),
                 ..Default::default()
             })),
             Step::Op(ann(&base_target)),
@@ -2845,7 +2856,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
             input: Some(full_target.clone()),
         needs: vec![],
         order_only: vec![],
-        steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, add_prefixes: vec![], check: None })],
+        steps: vec![Step::Op(Op::Convert { format: Some(fmt.clone()), clean_obo: None, output: None, check: None })],
             gaps: vec![],
             missing_rule: false,
         side_effect_only: false,
@@ -3590,7 +3601,7 @@ fn transient_targets(
 /// optional base-reduction (`make-base` / `base-iris` keep only the source's own
 /// axioms) followed by a ⊥-locality (BOT) module over the product's seed terms.
 fn synth_import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str) -> Vec<Step> {
-    use super::robot::{Op, RemoveSpec};
+    use super::robot::{Op, SelectionSpec};
     let mut steps = Vec::new();
     if p.make_base || !p.base_iris.is_empty() {
         let base_iri = if p.base_iris.is_empty() {
@@ -3598,18 +3609,10 @@ fn synth_import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str
         } else {
             p.base_iris.clone()
         };
-        steps.push(Step::Op(Op::Remove(RemoveSpec {
-            terms: vec![],
-            term_files: vec![],
-            selects: vec![],
+        steps.push(Step::Op(Op::Remove(SelectionSpec {
             axioms: vec!["external".into()],
             base_iri,
-            trim: None,
-            preserve_structure: None,
-            exclude_terms: vec![],
-            exclude_term_files: vec![],
-            signature: None,
-            drop_axiom_annotations: None,
+            ..Default::default()
         })));
     }
     // Seed from the product's committed terms file, resolved to its source.
@@ -3626,12 +3629,13 @@ fn synth_import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str
         individuals: None,
         branch_from_terms: vec![],
         branch_from_term_files: vec![],
+        force: true,
     }));
     resolve_seed_paths(&repo.make, repo, &mut steps);
     steps
 }
 
-/// Rewrite every `--term-file` path in `steps` to its committed source(s): when a
+/// Rewrite every term-file path in `steps` to its committed source(s): when a
 /// referenced term file is itself a Makefile target whose recipe is pure text
 /// shuffling (`cat`/`sort`/`uniq`/`cp`), replace it with that rule's
 /// prerequisites (one level of indirection — exactly the EFO
@@ -3696,8 +3700,11 @@ fn resolve_seed_paths(make: &super::makefile::MakeModel, repo: &OdkRepo, steps: 
         };
         match op {
             Op::Extract { term_files, .. } => *term_files = map(term_files),
-            Op::Filter(spec) => spec.term_files = map(&spec.term_files),
-            Op::Remove(spec) => spec.term_files = map(&spec.term_files),
+            Op::Filter(spec) | Op::Remove(spec) => {
+                spec.term_files = map(&spec.term_files);
+                spec.include_term_files = map(&spec.include_term_files);
+                spec.exclude_term_files = map(&spec.exclude_term_files);
+            }
             Op::Materialize { term_files, .. } => *term_files = map(term_files),
             _ => {}
         }
@@ -3779,7 +3786,6 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
                         format,
                         clean_obo: None,
                         output: None,
-                        add_prefixes: Vec::new(),
                         check: None,
                     });
                 }
@@ -3805,8 +3811,20 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
             i += 1;
             continue;
         };
-        let independent = !a.remove_annotations
-            && !b.remove_annotations
+        // Two steps are one when neither depends on what the other does first:
+        // header annotations and IRIs set once. What reads the IRIs or the
+        // axioms (interpolation, axiom annotations, merged files, derived-from,
+        // defined-by) stays a step of its own.
+        let alone = |s: &robot::AnnotateSpec| {
+            s.remove_annotations
+                || s.interpolate
+                || !s.axiom_annotations.is_empty()
+                || !s.annotation_files.is_empty()
+                || s.annotate_derived_from
+                || s.annotate_defined_by
+        };
+        let independent = !alone(a)
+            && !alone(b)
             && !(a.ontology_iri.is_some() && b.ontology_iri.is_some())
             && !(a.version_iri.is_some() && b.version_iri.is_some());
         if !independent {
@@ -3819,6 +3837,8 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
         a.version_iri = a.version_iri.take().or(b.version_iri);
         a.annotations.extend(b.annotations);
         a.link_annotations.extend(b.link_annotations);
+        a.language_annotations.extend(b.language_annotations);
+        a.typed_annotations.extend(b.typed_annotations);
     }
 }
 

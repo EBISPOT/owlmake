@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/>)
+Ontology(<http://example.org/mat2.owl>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:D))
+Declaration(ObjectProperty(:p))
+EquivalentClasses(:A ObjectIntersectionOf(:B ObjectSomeValuesFrom(:p :D)))
+)

@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Args as ClapArgs;
 use horned_owl::model::{
-    Annotation, AnnotatedComponent, AnnotationValue, ClassExpression as CE, Component, Literal,
-    MutableOntology, ObjectPropertyExpression as OPE, SubClassOf,
+    ClassExpression as CE, Component, MutableOntology, ObjectPropertyExpression as OPE, SubClassOf,
 };
 
+use crate::cmd::reason::ReasonerKind;
 use crate::cmd::select;
 use crate::reason::Reasoner;
 
@@ -31,21 +31,22 @@ pub struct Args {
     /// lines and `#` comments are ignored.
     #[arg(short = 'T', long = "term-file", value_name = "FILE")]
     pub term_file: Vec<PathBuf>,
-    /// Reasoner to use. Materializing existential restrictions is an EL
-    /// operation; `elk`/`structural`/`emr`/`owlmake` all use the built-in EL
-    /// reasoner.
+    /// Reasoner the ontology is checked with before anything is materialized:
+    /// `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake`. The
+    /// restrictions themselves are what the built-in EL reasoner infers, with
+    /// union-elimination under `owlmake`.
     #[arg(short = 'r', long, default_value = "elk")]
     pub reasoner: String,
-    /// Annotate asserted inferred axioms with `is_inferred true`.
-    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true")]
+    /// Any value. Changes nothing: what materialize asserts is never annotated.
+    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub annotate_inferred_axioms: Option<bool>,
-    /// Output a new ontology containing only the materialized axioms.
-    /// `<bool>`.
-    #[arg(short = 'n', long, num_args = 1, default_missing_value = "true")]
+    /// `true` or `yes` in any case: put the materialized axioms in an ontology
+    /// of their own, which is not written: what is written is the input as it
+    /// was.
+    #[arg(short = 'n', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub create_new_ontology: Option<bool>,
-    /// After materializing, remove redundant SubClassOf axioms by running
-    /// reduce. `<bool>`.
-    #[arg(short = 's', long, num_args = 1, default_missing_value = "true")]
+    /// Any value. Changes nothing: materialize removes no axiom.
+    #[arg(short = 's', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub remove_redundant_subclass_axioms: Option<bool>,
 
     #[command(flatten)]
@@ -61,13 +62,10 @@ pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
+    // A reasoner name that is no reasoner fails before anything is loaded.
+    let kind = ReasonerKind::parse_without_emr(&args.reasoner)?;
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
-
-    // Apply `--reasoner`: `owlmake` enables union-elimination, every other name
-    // runs on the EL engine (with a note for non-EL choices). Set before
-    // classification.
-    crate::reason::configure(&args.reasoner);
 
     // Gather properties from --term and any --term-file inputs.
     let mut raw: Vec<String> = args.term.clone();
@@ -76,20 +74,41 @@ pub fn step(
     }
     let props: HashSet<String> = raw.iter().map(|t| select::expand(&model, t)).collect();
 
-    let annotate = args.annotate_inferred_axioms.unwrap_or(false);
-    let mut model = materialize_with_opts(
-        model,
-        &props,
-        annotate,
-        args.create_new_ontology.unwrap_or(false),
-    );
-    // Reduce runs after materialization, so redundancy is judged against the
-    // newly asserted axioms as well.
-    if args.remove_redundant_subclass_axioms.unwrap_or(false) {
-        model = crate::cmd::reduce::reduce(&model);
-    }
+    let mut model = materialize_with(model, &props, kind, args.create_new_ontology.unwrap_or(false))?;
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(model))
+}
+
+/// Check `model` with `kind`, then, unless `create_new_ontology`, assert the
+/// existential restrictions entailed over `props` (all when empty). An
+/// inconsistent ontology fails, as does one with an unsatisfiable class or
+/// object property. With `create_new_ontology` the materialized axioms belong
+/// in an ontology of their own, which is not written: the input is returned
+/// as it was, once checked.
+pub fn materialize_with(
+    model: crate::model::Model,
+    props: &HashSet<String>,
+    kind: ReasonerKind,
+    create_new_ontology: bool,
+) -> Result<crate::model::Model> {
+    let el = matches!(kind, ReasonerKind::Elk | ReasonerKind::Owlmake);
+    crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
+    if kind == ReasonerKind::Owlmake {
+        status!("materialize: using the built-in EL reasoner with union-elimination");
+    } else if !el {
+        status!(
+            "note: materialize checks the ontology with '{}'; the restrictions are what the built-in EL reasoner infers",
+            format!("{kind:?}").to_lowercase()
+        );
+    }
+    // The EL reasoner's check rides the classification that materializes.
+    if create_new_ontology || !el {
+        crate::cmd::reason::validate_model(&model, kind, true)?;
+    }
+    if create_new_ontology {
+        return Ok(model);
+    }
+    assert_existentials(model, props, el)
 }
 
 /// Read property terms from a file: one IRI/CURIE per line, read the same way
@@ -100,31 +119,20 @@ fn read_terms(path: &std::path::Path) -> Result<Vec<String>> {
     Ok(text.lines().filter_map(crate::cmd::select::term_line).map(str::to_string).collect())
 }
 
-/// Assert inferred existential restrictions over `props` (all when empty).
-/// Entry point for callers that want no inferred-axiom annotation.
-pub fn materialize(model: crate::model::Model, props: &HashSet<String>) -> crate::model::Model {
-    materialize_with(model, props, false)
-}
-
 /// Assert inferred existential restrictions over `props` (all when empty),
-/// optionally annotating each asserted axiom with `is_inferred true`.
-pub fn materialize_with(
-    model: crate::model::Model,
-    props: &HashSet<String>,
-    annotate: bool,
-) -> crate::model::Model {
-    materialize_with_opts(model, props, annotate, false)
+/// once the ontology is checked with `elk` (see [`materialize_with`]).
+pub fn materialize(model: crate::model::Model, props: &HashSet<String>) -> Result<crate::model::Model> {
+    materialize_with(model, props, ReasonerKind::Elk, false)
 }
 
-/// Like [`materialize_with`], but when `create_new_ontology` is true the result
-/// contains only the materialized axioms (carrying the input's prefixes), so the
-/// output is the inference delta rather than the whole ontology.
-pub fn materialize_with_opts(
+/// Assert inferred existential restrictions over `props` (all when empty).
+/// With `check`, the classification that finds them first checks the
+/// ontology as `elk` wrapped for materialization does.
+fn assert_existentials(
     mut model: crate::model::Model,
     props: &HashSet<String>,
-    annotate: bool,
-    create_new_ontology: bool,
-) -> crate::model::Model {
+    check: bool,
+) -> Result<crate::model::Model> {
     // Directness is a question the CLASS HIERARCHY answers, so it is computed
     // in a synthetic space: one fresh named class per (property, filler) pair,
     // equivalent to the restriction it stands for, classified together with the
@@ -154,7 +162,20 @@ pub fn materialize_with_opts(
         v.sort();
         v
     };
-    let (relations, named_subs, _) = existential_relations(&model, &prop_list, &classes);
+    let Existentials { relations, named_subs, unsat, consistent } = existential_relations(&model, &prop_list, &classes);
+    if check {
+        let listed = crate::cmd::reason::unsatisfiable_in_node_order(ReasonerKind::Elk, &unsat, || {
+            crate::reason::elk_order::class_queue(&model.ont)
+        });
+        let told = crate::cmd::reason::told_unsatisfiable_properties(&model);
+        crate::cmd::reason::validate(&crate::cmd::reason::Validation {
+            consistent,
+            unsatisfiable: &listed,
+            unsatisfiable_properties: &told,
+            dump: None,
+            allow_incoherent: None,
+        })?;
+    }
 
     // Restrictions the ontology asserts WITH axiom annotations: the reification
     // points at a labeled node, and a materialized twin at the same owner
@@ -175,18 +196,6 @@ pub fn materialize_with_opts(
             Some((c.0.to_string(), p.0.to_string(), d.0.to_string()))
         })
         .collect();
-
-    let infer_prop = model
-        .build
-        .annotation_property("http://www.geneontology.org/formats/oboInOwl#is_inferred");
-
-    // When building a fresh ontology, insert into an empty model carrying prefixes.
-    if create_new_ontology {
-        model = crate::model::Model::from_parts(
-            horned_owl::ontology::set::SetOntology::new(),
-            crate::model::clone_prefixes(&model.prefixes),
-        );
-    }
 
     // One restriction OBJECT per (property, filler), however many classes get it:
     // every newly-asserted `C ⊑ ∃R.D` with the same (R, D) is the same object, so
@@ -222,37 +231,20 @@ pub fn materialize_with_opts(
                 bce: Box::new(CE::Class(model.build.class(d.clone()))),
             },
         });
-        let inserted = if annotate {
-            let ann = Annotation { ann: Default::default(),
-                ap: infer_prop.clone(),
-                av: AnnotationValue::Literal(Literal::Simple {
-                    literal: "true".to_string(),
-                }),
-            };
-            let mut anns = std::collections::BTreeSet::new();
-            anns.insert(ann);
-            model.ont.insert(AnnotatedComponent {
-                component: comp,
-                ann: anns,
-            })
-        } else {
-            model.ont.insert(comp)
-        };
-        if inserted {
+        if model.ont.insert(comp) {
             added += 1;
             let g = *groups.entry((r.clone(), d.clone())).or_insert_with(|| {
                 let v = next_group;
                 next_group += 1;
                 v
             });
-            if annotate || annotated_asserted.contains(&(c.clone(), r.clone(), d.clone())) {
+            if annotated_asserted.contains(&(c.clone(), r.clone(), d.clone())) {
                 // A reification points at a labeled node, so the minted object
                 // renders as ONE `rdf:nodeID` across every class that received
-                // it: either the assertion itself is annotated, or an annotated
-                // sibling of this class's new twin adopts the node. A class
-                // whose annotated axiom predates this step (its twin was NOT
-                // inserted here) keeps its own node — the sibling share there
-                // stays per-class.
+                // it: an annotated sibling of this class's new twin adopts the
+                // node. A class whose annotated axiom predates this step (its
+                // twin was NOT inserted here) keeps its own node — the sibling
+                // share there stays per-class.
                 model.cross_shared.insert(format!("{c}\u{1}{r}\u{1}{d}"), g);
             } else {
                 let sig = crate::io::genid::ce_sig(&CE::ObjectSomeValuesFrom {
@@ -276,28 +268,30 @@ pub fn materialize_with_opts(
             sub: CE::Class(model.build.class(sub)),
             sup: CE::Class(model.build.class(sup)),
         });
-        let inserted = if annotate {
-            let ann = Annotation { ann: Default::default(),
-                ap: infer_prop.clone(),
-                av: AnnotationValue::Literal(Literal::Simple { literal: "true".to_string() }),
-            };
-            let mut anns = std::collections::BTreeSet::new();
-            anns.insert(ann);
-            model.ont.insert(AnnotatedComponent { component: comp, ann: anns })
-        } else {
-            model.ont.insert(comp)
-        };
-        if inserted {
+        if model.ont.insert(comp) {
             named_added += 1;
         }
     }
     status!("materialize: asserted {added} existential restriction(s), {named_added} named subsumption(s)");
-    model
+    Ok(model)
+}
+
+/// What the classification behind materialize finds (see
+/// [`existential_relations`]).
+pub(crate) struct Existentials {
+    /// The direct existential superclasses, as `(class, property, filler)`.
+    pub relations: Vec<(String, String, String)>,
+    /// The direct named subsumptions.
+    pub named_subs: Vec<(String, String)>,
+    /// The named classes of the ontology that are unsatisfiable.
+    pub unsat: Vec<String>,
+    pub consistent: bool,
 }
 
 /// The DIRECT existential superclasses of every named class over `props`, as
-/// `(class, property, filler)`, with the direct named subsumptions and the
-/// unsatisfiable classes found on the way.
+/// `(class, property, filler)`, with the direct named subsumptions, the named
+/// classes of the ontology that are unsatisfiable, and whether it is
+/// consistent.
 ///
 /// Directness is a question the CLASS HIERARCHY answers, so it is computed in
 /// a synthetic space: one fresh named class per (property, filler) pair,
@@ -309,7 +303,7 @@ pub(crate) fn existential_relations(
     model: &crate::model::Model,
     prop_list: &[String],
     classes: &std::collections::BTreeSet<String>,
-) -> (Vec<(String, String, String)>, Vec<(String, String)>, Vec<String>) {
+) -> Existentials {
     const AUX_NS: &str = "urn:owlmake:materialize#";
         let mut aux = model.clone();
         let mut aux_map: std::collections::HashMap<String, (String, String)> = Default::default();
@@ -331,7 +325,14 @@ pub(crate) fn existential_relations(
             }
         }
         let reasoner = Reasoner::classify(&aux);
-        let unsat: Vec<String> = reasoner.unsatisfiable().into_iter().map(|u| u.to_string()).collect();
+        // The classes standing for restrictions say nothing of the ontology's
+        // own: a restriction on an unsatisfiable filler is unsatisfiable with it.
+        let unsat: Vec<String> = reasoner
+            .unsatisfiable()
+            .into_iter()
+            .map(|u| u.to_string())
+            .filter(|u| !u.starts_with(AUX_NS))
+            .collect();
         let direct = reasoner.direct_subsumptions();
         let mutual: std::collections::HashSet<(&str, &str)> =
             direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
@@ -357,5 +358,5 @@ pub(crate) fn existential_relations(
         relations.dedup();
         named_subs.sort();
         named_subs.dedup();
-        (relations, named_subs, unsat)
+        Existentials { relations, named_subs, unsat, consistent: reasoner.is_consistent() }
 }

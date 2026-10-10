@@ -38,7 +38,6 @@ pub const BOT: CId = 1;
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
-const OWL_BOTTOM_OP: &str = "http://www.w3.org/2002/07/owl#bottomObjectProperty";
 const OWL_TOP_OP: &str = "http://www.w3.org/2002/07/owl#topObjectProperty";
 
 /// EL normal-form general concept inclusions.
@@ -169,6 +168,8 @@ pub struct Reasoner {
     /// Ids that stand for asserted individuals (nominals). An unsatisfiable
     /// individual makes the whole ontology inconsistent.
     individuals: Vec<CId>,
+    /// Property probes, as built (see [`Reasoner::classify_probing`]).
+    probes: Vec<(CId, String)>,
 }
 
 /// Enable/disable the union-elimination completion rule for the current thread.
@@ -185,12 +186,22 @@ pub fn set_whelk_mode(on: bool) {
 impl Reasoner {
     /// Classify the TBox + RBox of `model`.
     pub fn classify(model: &Model) -> Reasoner {
+        Self::classify_probing(model, &[])
+    }
+
+    /// Classify `model` together with one probe per object property in
+    /// `properties`: an anonymous concept `P ⊑ ∃p.⊤`, saturated with the
+    /// ontology. A probe is no named class, so it shows up in no classification
+    /// result; [`Reasoner::unsatisfiable_probes`] reads back which are
+    /// unsatisfiable. A fresh concept that only has superclasses changes
+    /// nothing else the ontology entails.
+    pub fn classify_probing(model: &Model, properties: &[String]) -> Reasoner {
         // Arm the memory safety valve before any large structure is built, so the
         // reasoner can never drive the whole machine into the OOM-killer.
         let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
-        let b = Self::normalize(model, t0, timing);
+        let b = Self::normalize(model, properties, t0, timing);
         b.finish(timing, t0)
     }
 
@@ -201,13 +212,19 @@ impl Reasoner {
     /// RSS by that much. Use only when the caller no longer needs the model
     /// (reasoning-only / fresh-output modes).
     pub fn classify_consume(model: Model) -> Reasoner {
+        Self::classify_consume_probing(model, &[])
+    }
+
+    /// [`Reasoner::classify_consume`] with property probes, as
+    /// [`Reasoner::classify_probing`] adds them.
+    pub fn classify_consume_probing(model: Model, properties: &[String]) -> Reasoner {
         let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
         // `normalize` returns a fully-owned `Builder` (interned ids + normal
         // forms), borrowing the model only through the local `comps` Vec which is
         // dropped on return — so the model can be released here, before saturating.
-        let b = Self::normalize(&model, t0, timing);
+        let b = Self::normalize(&model, properties, t0, timing);
         if timing {
             status!("el: freeing parsed model before saturation (RSS {} MB)", vmrss_mb());
         }
@@ -221,7 +238,7 @@ impl Reasoner {
     /// Build the normalized [`Builder`] (interning + RBox/TBox normal forms) from
     /// a model. Shared by [`Reasoner::classify`] and [`Reasoner::classify_consume`];
     /// the returned `Builder` is fully owned and holds no reference to `model`.
-    fn normalize(model: &Model, t0: crate::time::Instant, timing: bool) -> Builder {
+    fn normalize(model: &Model, probes: &[String], t0: crate::time::Instant, timing: bool) -> Builder {
         let mut b = Builder::new();
         // Capture the elk-vs-owlmake mode once: it decides whether an axiom with
         // a non-EL sub-expression is dropped whole (elk) or has its EL part
@@ -231,11 +248,10 @@ impl Reasoner {
         b.intern_class(OWL_NOTHING); // -> BOT (1)
         debug_assert_eq!(b.iri_to_cid[OWL_THING], TOP);
         debug_assert_eq!(b.iri_to_cid[OWL_NOTHING], BOT);
-        // Intern the special object properties eagerly so the RBox-phase
-        // computation of bottom/top roles sees them even when they only occur
-        // inside TBox class expressions.
+        // Intern the universal role eagerly so the RBox-phase computation of
+        // the top roles sees it even when it only occurs inside TBox class
+        // expressions.
         b.intern_role(OWL_TOP_OP);
-        b.intern_role(OWL_BOTTOM_OP);
 
         // `SetOntology` iterates in `HashSet` order, which varies run-to-run.
         // Only the non-confluent WHELK union-elimination rule depends on axiom
@@ -275,6 +291,17 @@ impl Reasoner {
             }
         }
         bar.finish(base * 2);
+        // Probes last: `∃p.⊤` takes p's ranges, which the RBox pass settled.
+        let build = horned_owl::model::Build::new_rc();
+        for p in probes {
+            let probe = b.fresh_class(5);
+            let some = CE::ObjectSomeValuesFrom {
+                ope: OPE::ObjectProperty(build.object_property(p.as_str())),
+                bce: Box::new(CE::Class(build.class(OWL_THING))),
+            };
+            b.normalize_sup(probe, &some);
+            b.probes.push((probe, p.clone()));
+        }
         if timing {
             status!(
                 "el: normalize {:.1}s  ({} classes, {} roles, {} normal forms)",
@@ -298,6 +325,20 @@ impl Reasoner {
             }
         }
         out.sort();
+        out
+    }
+
+    /// The object properties whose probe is unsatisfiable — those for which
+    /// `∃p.⊤` entails ⊥ — sorted.
+    pub fn unsatisfiable_probes(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .probes
+            .iter()
+            .filter(|(c, _)| self.state.s[*c as usize].contains(&BOT))
+            .map(|(_, p)| p.clone())
+            .collect();
+        out.sort();
+        out.dedup();
         out
     }
 
@@ -860,9 +901,6 @@ struct Builder {
     /// Effective range of each role: union of the ranges of the role and all
     /// its super-roles (computed after the RBox pass).
     eff_range: HashMap<RId, Vec<CId>>,
-    /// Roles that are sub-roles of owl:bottomObjectProperty (the empty role):
-    /// any `∃r.C` over such a role is unsatisfiable.
-    bottom_roles: HashSet<RId>,
     /// Roles that are owl:topObjectProperty (the universal role).
     top_roles: HashSet<RId>,
     /// Roles asserted reflexive.
@@ -891,6 +929,9 @@ struct Builder {
     /// memory diagnostics only: 0 named, 1 ∃some, 2 ⊓conj, 3 ⊔union, 4 ¬compl,
     /// 5 opaque(self/data).
     kind: Vec<u8>,
+    /// Property probes: an anonymous concept `P ⊑ ∃p.⊤` per object property
+    /// asked about, with that property's IRI.
+    probes: Vec<(CId, String)>,
 }
 
 impl Builder {
@@ -909,7 +950,6 @@ impl Builder {
             unions: Vec::new(),
             ranges: Vec::new(),
             eff_range: HashMap::default(),
-            bottom_roles: HashSet::default(),
             top_roles: HashSet::default(),
             reflexive: Vec::new(),
             seen_as_class: HashSet::default(),
@@ -917,6 +957,7 @@ impl Builder {
             expr_memo: HashMap::default(),
             ignored: 0,
             whelk: false,
+            probes: Vec::new(),
         }
     }
 
@@ -1059,14 +1100,6 @@ impl Builder {
         }
         self.eff_range = eff;
 
-        // Roles that are sub-roles of owl:bottomObjectProperty are empty.
-        if let Some(&bot_rid) = self.role_to_rid.get(OWL_BOTTOM_OP) {
-            for r in 0..n as RId {
-                if supers[r as usize].contains(&bot_rid) {
-                    self.bottom_roles.insert(r);
-                }
-            }
-        }
         // owl:topObjectProperty is the universal role: model it as reflexive
         // (so `C ⊑ ∃top.C`) plus a link from ⊤ to each individual (so a
         // non-empty filler forces `⊤ ⊑ ∃top.filler`). The (⊤, a) links are
@@ -1210,11 +1243,6 @@ impl Builder {
                         return;
                     }
                 };
-                // ∃r.C over the empty role is unsatisfiable.
-                if self.bottom_roles.contains(&r) {
-                    self.nfs.push(Nf::Sub(lhs, BOT));
-                    return;
-                }
                 let filler = match self.flatten(bce) {
                     Some(f) => f,
                     None => {
@@ -1260,9 +1288,6 @@ impl Builder {
             }
             CE::ObjectSomeValuesFrom { ope, bce } => {
                 let r = self.role_of(ope)?;
-                if self.bottom_roles.contains(&r) {
-                    return Some(BOT); // ∃(empty role).C ≡ ⊥
-                }
                 let filler = self.flatten(bce)?;
                 Some(self.intern_some(r, filler))
             }
@@ -1832,6 +1857,7 @@ impl Builder {
             ignored: self.ignored,
             named,
             individuals,
+            probes: self.probes,
         }
     }
 }

@@ -334,3 +334,30 @@ fn every_step_variant_reaches_both_dispatch_loops() {
         missing.join("\n  ")
     );
 }
+
+/// **The Python bindings are the CLI's.** `crates/owlmake-py` renders a function
+/// per command from `owlmake_cli_spec.json`, which is the command tree the binary
+/// parses with (`om __cli-spec`). A command or an option the CLI gains, loses or
+/// redescribes without regenerating is one the bindings get wrong, so the
+/// checked-in spec must be the binary's, apart from the release number and the
+/// `sssom` and `jq` entries the generator writes by hand. Regenerate with
+/// `python3 crates/owlmake-py/scripts/generate.py` after `cargo build`.
+#[test]
+fn the_python_bindings_are_generated_from_this_cli() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_om")).arg("__cli-spec").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let mut live: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let spec = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/owlmake-py/owlmake_cli_spec.json");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    let mut committed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let packaged = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/owlmake-py/python/owlmake/_spec.json");
+    assert_eq!(std::fs::read_to_string(&packaged).unwrap(), text, "_spec.json is not the checked-in spec");
+    for key in ["version", "sssom", "jq"] {
+        live.as_object_mut().unwrap().remove(key);
+        committed.as_object_mut().unwrap().remove(key);
+    }
+    assert!(
+        live == committed,
+        "crates/owlmake-py is not generated from this CLI: run `python3 crates/owlmake-py/scripts/generate.py`"
+    );
+}

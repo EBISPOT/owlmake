@@ -884,6 +884,26 @@ impl DlReasoner {
         out
     }
 
+    /// The named object properties that are unsatisfiable, sorted: the members
+    /// of the bottom object-property node other than `owl:bottomObjectProperty`
+    /// itself, after the object properties are classified. The ontology must be
+    /// consistent.
+    pub fn unsatisfiable_object_properties(&self) -> Vec<String> {
+        let _hb = crate::progress::Heartbeat::start("reason: hermit-rs classifying object properties");
+        let node = hermit::get_bottom_object_property_node(&self.ont).unwrap_or_else(|e| die(e));
+        let mut out: Vec<String> = node
+            .into_iter()
+            .filter_map(|ope| match ope {
+                ho::ObjectPropertyExpression::ObjectProperty(p) => Some(p.0.to_string()),
+                ho::ObjectPropertyExpression::InverseObjectProperty(_) => None,
+            })
+            .filter(|iri| iri != "http://www.w3.org/2002/07/owl#bottomObjectProperty")
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Direct (transitively-reduced) subsumptions between satisfiable named
     /// classes, read off the classified taxonomy: for each class, the other
     /// members of its equivalence node (mutual subsumers) plus every member of

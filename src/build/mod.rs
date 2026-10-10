@@ -17,7 +17,7 @@ pub mod recipe;
 pub mod schedule;
 
 use crate::plan::{ArtefactPlan, Plan};
-use crate::plan::step::{Op, Step};
+use crate::plan::step::{Op, SelectionSpec, Step};
 use crate::odk::OdkRepo;
 
 /// Everything the executor is allowed to read: the repository's directories and
@@ -3920,6 +3920,10 @@ fn run_steps(
             Step::UnsupportedSubcommand(name) => {
                 bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
             }
+            Step::UnsupportedOptions { command, options } => {
+                bail!("recipe gives `{command}` options owlmake does not read: {}", options.join(", "))
+            }
+            Step::Refused { message } => bail!("{message}"),
             s if is_shell_step(s) => {
                 model = run_shell_step_in_pipeline(
                     repo,
@@ -3961,7 +3965,7 @@ fn inject_editsig_seed(steps: &[Step], editsig: &str) -> Vec<Step> {
         match step {
             Step::Op(Op::Extract {
                 method, terms, term_files, copy_ontology_annotations, individuals,
-                branch_from_terms, branch_from_term_files,
+                branch_from_terms, branch_from_term_files, force,
             }) => {
                 injected = true;
                 let mut tf = term_files.clone();
@@ -3974,6 +3978,7 @@ fn inject_editsig_seed(steps: &[Step], editsig: &str) -> Vec<Step> {
                     individuals: individuals.clone(),
                     branch_from_terms: branch_from_terms.clone(),
                     branch_from_term_files: branch_from_term_files.clone(),
+                    force: *force,
                 }));
             }
             Step::Op(Op::Filter(spec)) => {
@@ -4161,7 +4166,8 @@ fn run_mirror_pipeline(repo: &Repo, imp: &crate::plan::ImportPlan, dest: &Path) 
             // `mirror-hgnc` opens `merge -i mirror/hgnc_gene.nt`, built just
             // above from `mirror_inputs`. Read it, and let `pipeline_input` stop
             // the `merge` re-reading the same file.
-            if let Some(Step::Op(crate::plan::step::Op::Merge { inputs, .. })) = rest.first() {
+            let opening = rest.iter().find(|s| !matches!(s, Step::Op(Op::Prefixes { .. })));
+            if let Some(Step::Op(crate::plan::step::Op::Merge { inputs, .. })) = opening {
                 let Some(first) = inputs.first() else {
                     bail!("import `{}`: its mirror recipe merges nothing", imp.id)
                 };
@@ -4871,7 +4877,7 @@ fn run_artefact(
     // it writes the babelon table and threads nothing, so it belongs in the
     // side-effect branch with `step_writes_target`.
     let starts_from_source = matches!(
-        a.steps.first(),
+        a.steps.iter().find(|s| !matches!(s, Step::Op(Op::Prefixes { .. }))),
         Some(Step::Op(Op::Babelon { format, .. })) if format.as_deref() != Some("json")
     );
     if !starts_from_source
@@ -5213,6 +5219,10 @@ fn run_artefact(
             Step::UnsupportedSubcommand(name) => {
                 bail!("recipe names the ontology subcommand `{name}`, which owlmake does not implement")
             }
+            Step::UnsupportedOptions { command, options } => {
+                bail!("recipe gives `{command}` options owlmake does not read: {}", options.join(", "))
+            }
+            Step::Refused { message } => bail!("{message}"),
             _ => bail!("internal: uncovered step reached executor: {}", step.label()),
         };
         // Use the import closure only when the model still carries uncollapsed
@@ -5237,10 +5247,9 @@ fn run_artefact(
         }
     }
 
-    // Resolve the import closure BEFORE materialising declarations: a property the
-    // closure already declares must NOT get a fresh Declaration here, and the
-    // writer needs the closure's entities to decide what a document that imports
-    // states of an entity it only names.
+    // Resolve the import closure before writing: the writer needs the closure's
+    // entities to decide what a document that imports states of an entity it only
+    // names, so a property the closure declares gets no declaration of its own.
     let write_owlrdf = a.target.ends_with(".owl");
     let write_fmt = recipe_format(a).or_else(|| crate::io::Format::from_path(out).ok());
     if model_has_imports(&model) && writes_among_imports(write_fmt) {
@@ -5257,7 +5266,6 @@ fn run_artefact(
             // without the closure every such section falls back to the IRI.
             model.banner_labels = closure_labels(cl);
         }
-        withdraw_materialised_declarations(&mut model);
     }
     // An OBO document comments every clause target that has a label — and a
     // target the root only references (a GO process in a `relationship:`, a
@@ -5300,8 +5308,7 @@ fn run_artefact(
     // `xmlns:doap` (from `merged_import.owl`) and `xmlns:protege` (from
     // `omo_import.owl`) without a single triple using either — and, since each step
     // re-reads the previous file's prefix map, why every downstream artefact
-    // carries them too. The closure's entities are recorded above, before
-    // declarations are materialised.
+    // carries them too. The closure's entities are recorded above.
     let explicit_fmt = recipe_format(a);
     // A shell step already produced the artefact by redirection — that file IS the
     // output, and re-serialising the model would undo whatever the command did.
@@ -5380,8 +5387,8 @@ fn run_artefact(
         // writer lists an `idspace:` for every prefix the document declared, so
         // leaving MONDO's `config/prefixes.jsonld` set in the map would put it back
         // in through the back door. CURIEs a later step names
-        // (`--term MONDO:0700097`) still resolve: `select::expand` falls back to
-        // the OBO convention.
+        // (`--term MONDO:0700097`) still resolve: a command reads them with the
+        // command line's context ([`crate::context`]), not the document's map.
         {
             let mut p = horned_owl::curie::PrefixMapping::default();
             for (name, ns) in &model.rdf_prefixes {
@@ -5997,70 +6004,6 @@ fn closure_labels(
     labels
 }
 
-/// Withdraw the declarations owlmake's OBO reader SYNTHESISED for entities the
-/// import closure already has (see `Model::materialised_declarations`).
-///
-/// An OBO file carries no declaration for a property that appears only as a
-/// `property_value:` predicate; one is materialised when the document is written,
-/// and must be withheld when any imported ontology has the entity in its
-/// signature. owlmake materialises at read time instead, so it has to withdraw
-/// those again once the closure is known. On MONDO that is
-/// 11 annotation properties, 3 object properties and 4 classes; retaining their
-/// stubs puts `IAO_0000231` & co. in `tmp/simple_seed.txt` (its query asks for
-/// `?cls a owl:AnnotationProperty`) and keeps axioms `filter` must drop.
-fn withdraw_materialised_declarations(model: &mut crate::model::Model) {
-    use horned_owl::model::{Component, MutableOntology};
-    if model.materialised_declarations.is_empty() || model.imports_closure.is_none() {
-        return;
-    }
-    // Which classes are in question is settled at read time: a class named as the
-    // FILLER of a `relationship:` is declared by the document outright and never
-    // reaches the materialised set, so it keeps its stub whatever the closure holds,
-    // and an OBO-sourced ontology still stubs all 8,087 `identifiers.org/hgnc/*`
-    // classes. A class named only as a PLAIN operand — of `is_a:`,
-    // `disjoint_from:`, a bare `intersection_of:` or a `union_of:` — is left to the
-    // signature, so an imported ontology that types it suppresses the stub.
-    // Properties work the same way: an annotation property named by a
-    // `property_value:` predicate, and an object property used in a `relationship:`
-    // with no `[Typedef]` frame, get no declaration from the OBO translation.
-    //
-    // A BUILT-IN is never withdrawn. The property behind every OBO *tag* is declared,
-    // which is where `rdfs:label`, `rdfs:comment` and `owl:deprecated` come from;
-    // those are genuine, and the writer's signature path skips built-ins, so
-    // withdrawing them loses the section entirely.
-    let builtin = |iri: &str| {
-        iri.starts_with("http://www.w3.org/2001/XMLSchema#")
-            || iri.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-            || iri.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-            || iri.starts_with("http://www.w3.org/2002/07/owl#")
-    };
-    let doomed: Vec<_> = model
-        .ont
-        .iter()
-        .filter(|ac| {
-            let (key, iri) = match &ac.component {
-                Component::DeclareClass(d) => {
-                    (format!("class\u{0}{}", d.0 .0.as_ref()), d.0 .0.as_ref())
-                }
-                Component::DeclareObjectProperty(d) => {
-                    (format!("op\u{0}{}", d.0 .0.as_ref()), d.0 .0.as_ref())
-                }
-                Component::DeclareAnnotationProperty(d) => {
-                    (format!("ap\u{0}{}", d.0 .0.as_ref()), d.0 .0.as_ref())
-                }
-                _ => return false,
-            };
-            !builtin(iri)
-                && model.materialised_declarations.contains(&key)
-                && model.imports_have(&key)
-        })
-        .cloned()
-        .collect();
-    for ac in doomed {
-        model.ont.remove(&ac);
-    }
-}
-
 /// Load the model's import closure (resolved via the catalog) into one model,
 /// to be used as a read-only reasoning context. None when no imports are declared.
 pub(crate) fn load_closure(
@@ -6215,12 +6158,14 @@ fn reason_with_closure(
 fn reduce_with_closure(
     root: crate::model::Model,
     closure: &crate::model::Model,
+    preserve_annotated: bool,
+    named_classes_only: bool,
     include_subproperties: bool,
 ) -> crate::model::Model {
     use horned_owl::model::MutableOntology;
     let union = union_with_closure(&root, closure);
     let root_set: std::collections::HashSet<_> = root.ont.iter().cloned().collect();
-    let reduced = cmd::reduce::reduce_with_opts(&union, false, false, include_subproperties);
+    let reduced = cmd::reduce::reduce_with_opts(&union, preserve_annotated, named_classes_only, include_subproperties);
     let mut out = empty_model();
     out.prefixes = root.prefixes.clone();
     // The root's document state — blank-node sharing recorded by relax above
@@ -6476,7 +6421,6 @@ fn write_step_output(
         if let Some(cl) = load_closure(repo, model, &catalog)? {
             model.imports_closure = Some(crate::model::ImportsClosure::of(&cl));
         }
-        withdraw_materialised_declarations(model);
     }
     // An OBO write comments every clause target that has a label, and a target
     // the root only references is labelled by the ontology that declares it —
@@ -6495,7 +6439,31 @@ fn write_step_output(
     .with_context(|| format!("writing step output {}", out.display()))
 }
 
+/// Run `op` on `model`. The prefixes a command reads its CURIEs with, and the
+/// ones what it writes declares, are the command line's, not the document's: an
+/// op that builds a document afresh hands them on as they were, and only a
+/// `prefixes` step changes them.
 fn apply_op(
+    repo: &Repo,
+    op: &Op,
+    model: crate::model::Model,
+    catalog: &BTreeMap<String, PathBuf>,
+    work: &Path,
+    closure: Option<&crate::model::Model>,
+    pipeline_input: Option<&Path>,
+) -> Result<crate::model::Model> {
+    if matches!(op, Op::Prefixes { .. }) {
+        return run_op(repo, op, model, catalog, work, closure, pipeline_input);
+    }
+    let context = model.context.clone();
+    let added = model.added_prefixes.clone();
+    let mut out = run_op(repo, op, model, catalog, work, closure, pipeline_input)?;
+    out.context = context;
+    out.added_prefixes = added;
+    Ok(out)
+}
+
+fn run_op(
     repo: &Repo,
     op: &Op,
     model: crate::model::Model,
@@ -6669,110 +6637,70 @@ fn apply_op(
                 ..Default::default()
             },
         ),
-        Op::Reduce { include_subproperties, .. } => {
+        Op::Reduce { reasoner, include_subproperties, preserve_annotated_axioms, named_classes_only } => {
+            cmd::reduce::use_reasoner(cmd::reason::ReasonerKind::parse_without_emr(
+                reasoner.as_deref().unwrap_or("elk"),
+            )?);
             // `reduce` defaults --include-subproperties to false; honour an
             // explicit recipe value (e.g. UBERON's `--include-subproperties true`).
             let subprops = include_subproperties.unwrap_or(false);
+            let (preserve, named) = (*preserve_annotated_axioms, *named_classes_only);
             match closure {
-                None => cmd::reduce::reduce_with_opts(&model, false, false, subprops),
-                Some(c) => reduce_with_closure(model, c, subprops),
+                None => cmd::reduce::reduce_with_opts(&model, preserve, named, subprops),
+                Some(c) => reduce_with_closure(model, c, preserve, named, subprops),
             }
         }
-        Op::Materialize { properties, term_files } => {
+        Op::Materialize { reasoner, create_new_ontology, properties, term_files } => {
+            let kind = cmd::reason::ReasonerKind::parse_without_emr(reasoner.as_deref().unwrap_or("elk"))?;
             let mut raw = properties.clone();
             for tf in term_files {
                 raw.extend(read_terms(&repo.dir.join(tf))?);
             }
             let props: std::collections::HashSet<String> =
                 raw.iter().map(|t| cmd::select::expand(&model, t)).collect();
-            cmd::materialize::materialize(model, &props)
+            cmd::materialize::materialize_with(model, &props, kind, create_new_ontology.unwrap_or(false))?
         }
-        Op::Remove(spec) => {
-            let tf = resolve_term_files(repo, &spec.term_files, work)?;
-            let opts = cmd::remove::TermOptions {
-                trim: spec.trim,
-                preserve_structure: spec.preserve_structure,
-                // `--exclude-term` names what must SURVIVE the removal.
-                exclude_term: spec.exclude_terms.clone(),
-                exclude_terms: resolve_term_files(repo, &spec.exclude_term_files, work)?,
-                signature: spec.signature,
-                drop_axiom_annotations: spec.drop_axiom_annotations.clone(),
-                ..Default::default()
-            };
-            cmd::remove::remove_with(
-                model,
-                &spec.terms,
-                &tf,
-                &spec.selects,
-                &spec.axioms,
-                &spec.base_iri,
-                &opts,
-            )?
-        }
-        Op::Filter(spec) => {
-            let tf = resolve_term_files(repo, &spec.term_files, work)?;
-            // `filter` RUNS spanGaps unless `--preserve-structure false`: the flag
-            // defaults to true, and gap-spanning is part of what it produces.
-            // Without it a filtered ontology loses the `rdfs:subClassOf` chain
-            // through dropped intermediates, and MONDO's
-            // `tmp/rare-seed-entities.txt` — whose query is
-            // `?cls rdfs:subClassOf+ MONDO_0000001` — comes out 129 entries short,
-            // taking `subsets/mondo-rare.owl` with it.
-            //
-            // `trim` carries its usual meaning here (`partial = !trim`), which is
-            // what `filter_with` implements; `signature` keeps the
-            // `-simple`/`-basic` mapping. For MONDO's two filters the two agree:
-            // mondo-simple is `--trim true --signature true` (complete match) and
-            // the rare seed is `--trim false` (any-entity).
-            let opts = cmd::remove::TermOptions {
-                trim: spec.trim,
-                signature: spec.signature,
-                preserve_structure: Some(true),
-                ..Default::default()
-            };
-            // `--axioms` was dropped on the floor here: UBERON's
-            // `composite-*-basic.owl` is `filter --axioms "subclass equivalent
-            // annotation"`, and passing `&[]` kept every axiom type.
-            // The recipe's `--prefix` bindings decide what a `--select` CURIE
-            // resolves to, so they have to be on the model before the selector is
-            // read. UBERON's `cumbo` list selects `oboInOwl:inSubset=uberon:cumbo`,
-            // where `uberon:` is bound by the recipe to `…/obo/uberon/core#` and by
-            // nothing else.
-            if !spec.prefixes.is_empty() {
-                let common = cmd::CommonArgs {
-                    prefix: spec.prefixes.clone(),
-                    ..Default::default()
-                };
-                common.apply(&mut model)?;
-            }
-            cmd::filter::filter_with(
-                model,
-                &spec.terms,
-                &tf,
-                &spec.selects,
-                &spec.axioms,
-                &spec.base_iri,
-                &opts,
-            )?
-        }
+        Op::Remove(spec) => cmd::remove::remove_with(
+            model,
+            &spec.terms,
+            &resolve_term_files(repo, &spec.term_files, work)?,
+            &spec.selects,
+            &spec.axioms,
+            &spec.base_iri,
+            &selection_options(repo, spec, work)?,
+        )?,
+        Op::Filter(spec) => cmd::filter::filter_with(
+            model,
+            &spec.terms,
+            &resolve_term_files(repo, &spec.term_files, work)?,
+            &spec.selects,
+            &spec.axioms,
+            &spec.base_iri,
+            &selection_options(repo, spec, work)?,
+        )?,
         Op::Annotate(spec) => {
-            let mut annotation = Vec::new();
-            for (p, v) in &spec.annotations {
-                annotation.push(p.clone());
-                annotation.push(v.clone());
-            }
-            let mut link_annotation = Vec::new();
-            for (p, v) in &spec.link_annotations {
-                link_annotation.push(p.clone());
-                link_annotation.push(v.clone());
-            }
-            cmd::annotate::annotate(
+            let pairs = |v: &[(String, String)]| -> Vec<String> {
+                v.iter().flat_map(|(p, x)| [p.clone(), x.clone()]).collect()
+            };
+            let triples = |v: &[(String, String, String)]| -> Vec<String> {
+                v.iter().flat_map(|(p, x, y)| [p.clone(), x.clone(), y.clone()]).collect()
+            };
+            cmd::annotate::annotate_with(
                 model,
-                spec.ontology_iri.as_deref(),
-                spec.version_iri.as_deref(),
-                &annotation,
-                &link_annotation,
-                spec.remove_annotations,
+                &cmd::annotate::AnnotateOptions {
+                    ontology_iri: spec.ontology_iri.clone(),
+                    version_iri: spec.version_iri.clone(),
+                    annotation: pairs(&spec.annotations),
+                    link_annotation: pairs(&spec.link_annotations),
+                    language_annotation: triples(&spec.language_annotations),
+                    typed_annotation: triples(&spec.typed_annotations),
+                    axiom_annotation: spec.axiom_annotations.clone(),
+                    annotation_file: spec.annotation_files.iter().map(|f| repo.dir.join(f)).collect(),
+                    annotate_defined_by: spec.annotate_defined_by,
+                    annotate_derived_from: spec.annotate_derived_from,
+                    remove_annotations: spec.remove_annotations,
+                    interpolate: spec.interpolate,
+                },
             )?
         }
         Op::Repair { invalid_references, merge_axiom_annotations } => cmd::repair::repair_with(
@@ -6782,18 +6710,14 @@ fn apply_op(
                 merge_axiom_annotations: *merge_axiom_annotations,
             },
         ),
-        Op::Template { templates, merge, prefixes } => {
+        Op::Template { templates, merge, force } => {
             let rp = |s: &str| repo.dir.join(s);
-            // The recipe's `--prefix` bindings resolve the template's header
-            // CURIEs, so they have to reach the command that reads the header.
-            let common =
-                cmd::CommonArgs { prefix: prefixes.clone(), ..Default::default() };
             let targs = cmd::template::Args {
                 template: templates.iter().map(|t| rp(t)).collect(),
                 input: None,
                 output: None,
                 format: None,
-                force: Some(true),
+                force: Some(*force),
                 errors: None,
                 external_template: vec![],
                 ontology_iri: None,
@@ -6803,7 +6727,7 @@ fn apply_op(
                 ancestors: None,
                 include_annotations: None,
                 collapse_import_closure: None,
-                common,
+                common: Default::default(),
             };
             cmd::template::step(Some(model), &targs)?.unwrap_or_else(crate::model::Model::new)
         }
@@ -6824,7 +6748,7 @@ fn apply_op(
         }
         Op::Extract {
             method, terms, term_files, copy_ontology_annotations, individuals,
-            branch_from_terms, branch_from_term_files,
+            branch_from_terms, branch_from_term_files, force,
         } => {
             let rp = |s: &String| repo.dir.join(s);
             let eargs = cmd::extract::Args {
@@ -6846,7 +6770,7 @@ fn apply_op(
                 imports: "include".into(),
                 intermediates: "all".into(),
                 sources: None,
-                force: Some(true),
+                force: Some(*force),
                 output_iri: None,
                 common: Default::default(),
             };
@@ -6897,35 +6821,23 @@ fn apply_op(
             cmd::mint::step(Some(model), &args)?
                 .expect("mint returns the model it was piped")
         }
-        Op::AddPrefix { prefixes } => {
-            // `"foo: http://bar"` — the spelling ROBOT's global option takes. The
-            // binding goes on the model, so the document written at the end of the
-            // chain declares it even where nothing references it: an `xmlns:obo`
-            // the reference emits and owlmake did not is a byte difference, and a
-            // binding a later step DOES resolve a CURIE against is a different IRI.
-            //
-            // Both maps: an RDF/XML document's `xmlns` block is written from
-            // `idspaces` — the verbatim bindings its source carried — and the
-            // formal prefix map is consulted only where there are none. A binding
-            // that reaches one and not the other declares itself in some output
-            // formats and not others.
-            for spec in prefixes {
-                if let Some((name, ns)) = spec.split_once(':') {
-                    let (name, ns) = (name.trim(), ns.trim());
-                    let _ = model.prefixes.add_prefix(name, ns);
-                    if !model.idspaces.iter().any(|(p, _)| p == name) {
-                        model.idspaces.push((name.to_string(), ns.to_string()));
-                    }
-                    // …including the format prefixes an RDF/XML source carried:
-                    // those take precedence over both maps above when the xmlns
-                    // block is written, so a binding that reached only the others
-                    // would be declared in every output format except the one this
-                    // recipe writes.
-                    if !model.rdf_prefixes.iter().any(|(p, _)| p == name) {
-                        model.rdf_prefixes.push((name.to_string(), ns.to_string()));
-                    }
-                }
+        Op::Prefixes { prefixes, noprefixes, add_prefixes, prefix, add_prefix } => {
+            // The context is made afresh, and what the options add replaces what
+            // the ones before them added, as each command of a chain is given its
+            // own; the options then apply as a command line's do.
+            let mut model = model;
+            model.context = Default::default();
+            model.added_prefixes.clear();
+            let in_repo = |file: &String| repo.dir.join(file);
+            cmd::CommonArgs {
+                prefixes: prefixes.as_ref().map(in_repo),
+                noprefixes: *noprefixes,
+                add_prefixes: add_prefixes.iter().map(in_repo).collect(),
+                prefix: prefix.clone(),
+                add_prefix: add_prefix.clone(),
+                ..Default::default()
             }
+            .apply(&mut model)?;
             model
         }
         Op::Normalize { base_iris, subset_decls, synonym_decls, add_source } => {
@@ -6983,7 +6895,7 @@ fn apply_op(
                 term_file: vec![],
                 precious: precious.clone(),
                 precious_terms: precious_files.iter().map(PathBuf::from).collect(),
-                threshold: *threshold,
+                threshold: threshold.clone(),
                 common: Default::default(),
             };
             cmd::collapse::step(Some(model), &cargs)?.unwrap_or_else(crate::model::Model::new)
@@ -7155,8 +7067,8 @@ fn apply_op(
                     // writes TSV to a `.tsv` and CSV to a `.csv`. An extension that
                     // is not a result-format name — `$@.tmp` — resolves to CSV.
                     format: format.clone().unwrap_or_default(),
-                    use_graphs: Some(*use_graphs),
-                    tdb: Some(*tdb),
+                    use_graphs: Some((*use_graphs).into()),
+                    tdb: Some((*tdb).into()),
                     keep_tdb_mappings: None,
                     tdb_directory: None,
                     create_tdb: None,
@@ -7232,39 +7144,12 @@ fn apply_op(
             back.carry_meta_from(&model);
             back
         }
-        Op::Convert { clean_obo, format, add_prefixes, check, .. } => {
+        Op::Convert { clean_obo, format, check, .. } => {
             let mut model = model;
             // `--check false` writes the OBO document however its frames repeat
             // a single-valued tag; by default such a document is refused.
             if *check == Some(false) {
                 model.obo_structure_check = false;
-            }
-            // `--add-prefixes FILE`: fold each JSON-LD context's prefixes into
-            // the model's map so the OFN/OBO output declares AND abbreviates with
-            // them (and a cached-OFN re-read round-trips, e.g. `Orphanet:377788`).
-            for file in add_prefixes {
-                let path = repo.dir.join(file);
-                if let Ok(text) = std::fs::read_to_string(&path) {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                        let ctx = json.get("@context").unwrap_or(&json);
-                        if let Some(map) = ctx.as_object() {
-                            for (k, v) in map {
-                                // JSON-LD values are a bare namespace string or a
-                                // `{"@id": "...", "@prefix": true}` object.
-                                let ns =
-                                    v.as_str().or_else(|| v.get("@id").and_then(|x| x.as_str()));
-                                if let Some(ns) = ns {
-                                    let _ = model.prefixes.add_prefix(k, ns);
-                                    // Track as explicit so the OBO writer emits an
-                                    // `idspace:` for each, regardless of use.
-                                    if !model.explicit_prefixes.iter().any(|(p, _)| p == k) {
-                                        model.explicit_prefixes.push((k.clone(), ns.to_string()));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
             if let Some(spec) = clean_obo {
                 // clean-obo only applies to OBO output. The `convert` step's own
@@ -7772,6 +7657,24 @@ fn other_src(repo: &Repo, skip: &[&str], work: &Path) -> Result<Vec<PathBuf>> {
         );
     }
     Ok(out)
+}
+
+/// The options a planned `remove` or `filter` runs with: every one its step
+/// records, with its include and exclude term files at the plan's paths.
+fn selection_options(repo: &Repo, spec: &SelectionSpec, work: &Path) -> Result<cmd::remove::TermOptions> {
+    Ok(cmd::remove::TermOptions {
+        annotation_values: None,
+        exclude_term: spec.exclude_terms.clone(),
+        exclude_terms: resolve_term_files(repo, &spec.exclude_term_files, work)?,
+        include_term: spec.include_terms.clone(),
+        include_terms: resolve_term_files(repo, &spec.include_term_files, work)?,
+        drop_axiom_annotations: spec.drop_axiom_annotations.clone(),
+        signature: spec.signature.clone(),
+        trim: spec.trim.clone(),
+        allow_punning: spec.allow_punning.clone(),
+        preserve_structure: spec.preserve_structure.clone(),
+        whole_ontology_without_terms: true,
+    })
 }
 
 /// Resolve `--term-file` arguments to concrete paths, building a generated

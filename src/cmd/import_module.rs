@@ -61,7 +61,7 @@ pub fn step(
         for line in text.lines() {
             let line = line.trim();
             if !line.is_empty() && !line.starts_with('#') {
-                seed.insert(crate::cmd::select::expand(&source, line));
+                seed.insert(crate::cmd::select::expand_with_document_prefixes(&source, line));
             }
         }
     }

@@ -24,25 +24,6 @@ use crate::reason::Reasoner;
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 
-/// Case-insensitive value parser for the `<bool>`-valued flags.
-///
-/// Capitalisation of these values varies between ontologies: UBERON's release
-/// steps write `--annotate-inferred-axioms False` with a capital F while CL
-/// writes it lowercase. `clap`'s built-in bool parser accepts only
-/// `true`/`false` verbatim, which would reject the capitalised spelling during
-/// argument parsing, before the ontology is ever loaded.
-///
-/// Anything that is neither spelling is an error rather than a silent `false`:
-/// a mistyped `--exclude-owl-thing tru` quietly meaning "off" would turn a
-/// requested exclusion into a no-op that nothing reports.
-pub fn parse_bool_ci(s: &str) -> Result<bool, String> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "true" => Ok(true),
-        "false" => Ok(false),
-        other => Err(format!("expected 'true' or 'false' (any case), got '{other}'")),
-    }
-}
-
 #[derive(ClapArgs)]
 pub struct Args {
     /// Input ontology path.
@@ -66,8 +47,9 @@ pub struct Args {
     #[arg(short = 'r', long, default_value = "elk")]
     pub reasoner: String,
 
-    /// Annotate asserted inferred axioms with `is_inferred true` (`<bool>`).
-    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Annotate asserted inferred axioms with `is_inferred true` (`true` or
+    /// `yes` in any case).
+    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub annotate_inferred_axioms: Option<bool>,
 
     /// Inference types to assert: `SubClass`, `EquivalentClass`,
@@ -82,8 +64,9 @@ pub struct Args {
     #[arg(long, value_delimiter = ',')]
     pub properties: Vec<String>,
 
-    /// Assert all (indirect) subsumptions, not just the direct ones (`<bool>`).
-    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Assert all (indirect) subsumptions, not just the direct ones (`true` or
+    /// `yes` in any case).
+    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub include_indirect: Option<bool>,
 
     /// Equivalent-class policy: `all` (allow), `none` (error on any inferred
@@ -92,37 +75,43 @@ pub struct Args {
     #[arg(short = 'e', long, default_value = "all")]
     pub equivalent_classes_allowed: String,
 
-    /// Output a NEW ontology containing only the inferred axioms (`<bool>`).
-    #[arg(short = 'n', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Output a NEW ontology containing only the inferred axioms (`true` or
+    /// `yes` in any case).
+    #[arg(short = 'n', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub create_new_ontology: Option<bool>,
 
-    /// Like --create-new-ontology, also copying entity annotations (`<bool>`).
-    #[arg(short = 'm', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Like --create-new-ontology, also copying entity annotations (`true` or
+    /// `yes` in any case).
+    #[arg(short = 'm', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub create_new_ontology_with_annotations: Option<bool>,
 
-    /// Preserve annotated axioms when removing redundant ones (`<bool>`).
-    #[arg(short = 'p', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Preserve annotated axioms when removing redundant ones (`true` or `yes`
+    /// in any case).
+    #[arg(short = 'p', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub preserve_annotated_axioms: Option<bool>,
 
-    /// After asserting, remove redundant SubClassOf axioms (run reduce) (`<bool>`).
-    #[arg(short = 's', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// After asserting, remove redundant SubClassOf axioms (run reduce)
+    /// (`true` or `yes` in any case).
+    #[arg(short = 's', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub remove_redundant_subclass_axioms: Option<bool>,
 
     /// Exclude tautologies from output: `structural` or `all`.
     #[arg(short = 't', long)]
     pub exclude_tautologies: Option<String>,
 
-    /// Do not assert subsumptions whose superclass is owl:Thing (`<bool>`).
-    #[arg(short = 'T', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Do not assert subsumptions whose superclass is owl:Thing (`true` or
+    /// `yes` in any case).
+    #[arg(short = 'T', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub exclude_owl_thing: Option<bool>,
 
-    /// Do not assert an axiom already present in the ontology (`<bool>`, default
-    /// false, so an inferred edge can still be annotated).
-    #[arg(short = 'x', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Do not assert an axiom already present in the ontology (`true` or `yes`
+    /// in any case; default false, so an inferred edge can still be annotated).
+    #[arg(short = 'x', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub exclude_duplicate_axioms: Option<bool>,
 
-    /// Do not assert axioms whose subject is an external (undeclared) entity (`<bool>`).
-    #[arg(short = 'X', long, num_args = 1, default_missing_value = "true", value_parser = parse_bool_ci)]
+    /// Do not assert axioms whose subject is an external (undeclared) entity
+    /// (`true` or `yes` in any case).
+    #[arg(short = 'X', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub exclude_external_entities: Option<bool>,
 
     /// Write the unsatisfiable classes to this file.
@@ -194,13 +183,15 @@ pub enum ReasonerKind {
 }
 
 impl ReasonerKind {
-    /// Parse a `--reasoner` name case-insensitively, erroring on anything that
-    /// is not one of the accepted names. Falling back to the EL engine with a
-    /// `note:` line would let `--reasoner hermit` misspelled as `--reasoner
-    /// hermitt` classify in EL and report success on an ontology only a DL
-    /// reasoner can refute.
+    /// Parse a `--reasoner` name, trimmed and case-insensitively, for a
+    /// command that classifies with it directly (`reason`, `explain`), erroring
+    /// on anything that is not one of the accepted names. Falling back to the
+    /// EL engine with a `note:` line would let `--reasoner hermit` misspelled as
+    /// `--reasoner hermitt` classify in EL and report success on an ontology
+    /// only a DL reasoner can refute.
     pub fn parse(name: &str) -> Result<ReasonerKind> {
-        match name.trim().to_ascii_lowercase().as_str() {
+        let name = name.trim().to_lowercase();
+        match name.as_str() {
             "elk" => Ok(ReasonerKind::Elk),
             "owlmake" => Ok(ReasonerKind::Owlmake),
             "whelk" => Ok(ReasonerKind::Whelk),
@@ -208,10 +199,33 @@ impl ReasonerKind {
             "jfact" => Ok(ReasonerKind::JFact),
             "emr" => Ok(ReasonerKind::Emr),
             "structural" => Ok(ReasonerKind::Structural),
-            other => bail!(
-                "Invalid Reasoner Error: unknown reasoner '{other}' \
-                 (expected one of: ELK, HermiT, JFact, EMR, structural, whelk, owlmake)"
-            ),
+            _ => bail!("INVALID REASONER ERROR unknown reasoner: {name}"),
+        }
+    }
+
+    /// Parse a `--reasoner` name for a command that takes a reasoner but is no
+    /// classification itself (`materialize`, `reduce`): `emr` is not one of
+    /// its names.
+    pub fn parse_without_emr(name: &str) -> Result<ReasonerKind> {
+        match ReasonerKind::parse(name)? {
+            ReasonerKind::Emr => bail!("INVALID REASONER ERROR unknown reasoner: emr"),
+            kind => Ok(kind),
+        }
+    }
+
+    /// How this reasoner finds the unsatisfiable object properties. With
+    /// `materializing`, it is wrapped for expression materialization, as
+    /// `emr` is the EL reasoner wrapped: the wrapper's property hierarchy is
+    /// the wrapped reasoner's, which for the EL reasoner is the told one.
+    pub(crate) fn property_check(self, materializing: bool) -> PropertyCheck {
+        match self {
+            ReasonerKind::Elk | ReasonerKind::Owlmake if !materializing => PropertyCheck::Probe,
+            ReasonerKind::Whelk => PropertyCheck::Probe,
+            ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr | ReasonerKind::JFact => {
+                PropertyCheck::Told
+            }
+            ReasonerKind::Hermit => PropertyCheck::BottomNode,
+            ReasonerKind::Structural => PropertyCheck::None,
         }
     }
 
@@ -220,6 +234,22 @@ impl ReasonerKind {
     fn is_builtin_el(self) -> bool {
         matches!(self, ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr)
     }
+}
+
+/// How a reasoner finds the object properties that are unsatisfiable — those
+/// whose every use makes a class unsatisfiable.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PropertyCheck {
+    /// A probe class `P ⊑ ∃p.⊤` per object property in the signature,
+    /// classified with the ontology: `p` is unsatisfiable when its probe is.
+    Probe,
+    /// The bottom node of the classified object-property hierarchy.
+    BottomNode,
+    /// The told sub-properties of `owl:bottomObjectProperty`, directly or
+    /// through other properties: the bottom node of a told property hierarchy.
+    Told,
+    /// No property is ever unsatisfiable (`structural`).
+    None,
 }
 
 /// The `--axiom-generators` names. All fourteen are recognised; the ten
@@ -533,7 +563,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         .iter()
         .flat_map(|p| p.split([',', ' ']))
         .filter(|p| !p.is_empty())
-        .map(|p| crate::cmd::select::expand(&model, p))
+        .map(|p| crate::cmd::select::expand_with_document_prefixes(&model, p))
         .collect();
     let existing = existing_subclass_pairs(&model);
     // `--equivalent-classes-allowed asserted-only` subtracts the equivalences the
@@ -576,6 +606,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     } else {
         None
     };
+    let check = kind.property_check(false);
     let mut model = Some(model);
     let cls = if free_model {
         let union_elim = kind == ReasonerKind::Owlmake;
@@ -583,14 +614,22 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             status!("reason: using the built-in EL reasoner with union-elimination");
         }
         crate::reason::el::set_whelk_mode(union_elim);
+        // What the property check reads off the model is taken before the model
+        // is released.
+        let model = model.take().unwrap();
+        let probes = if check == PropertyCheck::Probe { object_property_signature(&model) } else { Vec::new() };
+        let told = if check == PropertyCheck::Told { told_unsatisfiable_properties(&model) } else { Vec::new() };
         // Hand ownership to the reasoner; it drops the model after normalization.
-        let r = Reasoner::classify_consume(model.take().unwrap());
+        let r = Reasoner::classify_consume_probing(model, &probes);
         if r.ignored() > 0 {
             status!("note: {} axiom(s) outside OWL 2 EL were ignored during reasoning", r.ignored());
         }
+        let consistent = r.is_consistent();
+        let unsat = r.unsatisfiable();
+        let unsat_properties = el_unsatisfiable_properties(&r, consistent, &unsat, check, told);
         Classification {
-            consistent: r.is_consistent(),
-            unsat: r.unsatisfiable(),
+            consistent,
+            unsat,
             direct: r.direct_subsumptions(),
             all: if need_all { r.all_subsumptions() } else { Vec::new() },
             equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
@@ -604,6 +643,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             } else {
                 Vec::new()
             },
+            unsat_properties,
         }
     } else {
         classify(
@@ -614,6 +654,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             want_class_assertion,
             want_property_assertion,
             &assertion_properties,
+            check,
         )
     };
     let Classification {
@@ -624,50 +665,23 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         equiv,
         class_assertions,
         mut property_assertions,
+        unsat_properties,
     } = cls;
     if !assertion_properties.is_empty() {
         property_assertions.retain(|(_, p, _)| assertion_properties.contains(p));
     }
 
-    if !consistent {
-        bail!("ontology is inconsistent (owl:Thing is unsatisfiable)");
-    }
-    if !unsat.is_empty() {
-        // A count line followed by one `    unsatisfiable: <IRI>` line each, on
-        // the console as a logged error, in the order the reasoner's bottom node
-        // lists its members: CI jobs grep the log for the wording, and a recipe
-        // that redirects the console (`reason … > report.txt`) keeps the whole
-        // list as its report.
-        let stamp = log_stamp();
-        let log = |msg: &str| {
-            crate::build::console_line(&format!(
-                "{stamp} ERROR org.obolibrary.robot.ReasonerHelper - {msg}"
-            ));
-        };
-        log(&format!("There are {} unsatisfiable classes in the ontology.", unsat.len()));
-        let names: Vec<String> = unsat.iter().map(|u| u.to_string()).collect();
-        let listed: Vec<String> = if kind.is_builtin_el() {
-            let queue = match released_queue {
-                Some(q) => q,
-                None => crate::reason::elk_order::class_queue(&model.as_ref().expect("model kept").ont),
-            };
-            crate::reason::elk_order::bottom_node_order(&queue, &names)
-        } else {
-            crate::owlapi_hash::class_node_order(&names).into_iter().map(|i| names[i].clone()).collect()
-        };
-        for name in &listed {
-            log(&format!("    unsatisfiable: {name}"));
-        }
-        if let Some(path) = &opts.dump_unsatisfiable {
-            dump_unsatisfiable_module(model.as_ref(), &unsat, path)?;
-        }
-        if !opts.allow_incoherent {
-            bail!(
-                "ontology is incoherent: {} unsatisfiable class(es). Use --allow-incoherent to override.",
-                unsat.len()
-            );
-        }
-    }
+    let listed = unsatisfiable_in_node_order(kind, &unsat, || match released_queue {
+        Some(q) => q,
+        None => crate::reason::elk_order::class_queue(&model.as_ref().expect("model kept").ont),
+    });
+    validate(&Validation {
+        consistent,
+        unsatisfiable: &listed,
+        unsatisfiable_properties: &unsat_properties,
+        dump: opts.dump_unsatisfiable.as_deref().map(|path| (path, model.as_ref())),
+        allow_incoherent: Some(opts.allow_incoherent),
+    })?;
 
     // `--equivalent-classes-allowed`: the inferred equivalence pairs come straight
     // from the backend (see `need_equiv` above), never from the full closure.
@@ -829,7 +843,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
                 sub: CE::Class(target.build.class(OWL_NOTHING.to_string())),
                 sup: CE::Class(target.build.class(OWL_NOTHING.to_string())),
             });
-            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
                 added += 1;
             }
         }
@@ -859,7 +873,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if taut_checker.as_ref().is_some_and(|t| t.is_tautology(&ax)) {
                 continue;
             }
-            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
                 added += 1;
             }
         }
@@ -877,7 +891,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if taut_checker.as_ref().is_some_and(|t| t.is_tautology(&ax)) {
                 continue;
             }
-            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
                 added += 1;
             }
         }
@@ -904,7 +918,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if taut_checker.as_ref().is_some_and(|t| t.is_tautology(&ax)) {
                 continue;
             }
-            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
                 added += 1;
             }
         }
@@ -929,7 +943,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if taut_checker.as_ref().is_some_and(|t| t.is_tautology(&ax)) {
                 continue;
             }
-            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop) {
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
                 added += 1;
             }
         }
@@ -1036,8 +1050,12 @@ struct Classification {
     /// Inferred object property assertions (subject, property, object) between
     /// named individuals; only the `property-assertion` generator populates this.
     property_assertions: Vec<(String, String, String)>,
+    /// The unsatisfiable object properties, sorted; asked only of an ontology
+    /// that is consistent and has no unsatisfiable class.
+    unsat_properties: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn classify(
     model: &Model,
     kind: ReasonerKind,
@@ -1046,6 +1064,7 @@ fn classify(
     need_class_assertions: bool,
     need_property_assertions: bool,
     assertion_properties: &HashSet<String>,
+    check: PropertyCheck,
 ) -> Classification {
     match kind {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so `hermit`/
@@ -1059,9 +1078,16 @@ fn classify(
             // on inconsistency right after this, so an inconsistent one just
             // gets no assertions.
             let consistent = r.is_consistent();
+            let unsat = r.unsatisfiable();
+            let unsat_properties = match check {
+                _ if !consistent || !unsat.is_empty() => Vec::new(),
+                PropertyCheck::BottomNode => r.unsatisfiable_object_properties(),
+                PropertyCheck::Told => told_unsatisfiable_properties(model),
+                PropertyCheck::Probe | PropertyCheck::None => Vec::new(),
+            };
             Classification {
                 consistent,
-                unsat: r.unsatisfiable(),
+                unsat,
                 direct,
                 all,
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
@@ -1075,6 +1101,7 @@ fn classify(
                 } else {
                     Vec::new()
                 },
+                unsat_properties,
             }
         }
         ReasonerKind::Whelk => {
@@ -1087,9 +1114,16 @@ fn classify(
             if need_property_assertions {
                 status!("note: the 'property-assertion' generator needs the built-in EL reasoner or hermit; no inferred property assertions from whelk");
             }
+            let consistent = r.is_consistent();
+            let unsat = r.unsatisfiable();
+            let unsat_properties = if consistent && unsat.is_empty() && check == PropertyCheck::Probe {
+                r.unsatisfiable_properties(&object_property_signature(model))
+            } else {
+                Vec::new()
+            };
             Classification {
-                consistent: r.is_consistent(),
-                unsat: r.unsatisfiable(),
+                consistent,
+                unsat,
                 // Read the saturated closure, NOT `direct`: the direct list drops
                 // equivalence-clique siblings, so aliasing `all` to it would make
                 // every equivalence invisible to `--equivalent-classes-allowed`
@@ -1099,6 +1133,7 @@ fn classify(
                 direct,
                 class_assertions: Vec::new(),
                 property_assertions: Vec::new(),
+                unsat_properties,
             }
         }
         // `structural`: the TOLD hierarchy, no reasoning at all.
@@ -1116,17 +1151,22 @@ fn classify(
                 status!("note: reasoner 'emr' wraps ELK; classifying with the built-in EL reasoner (use `om materialize` for the ∃-expression closure)");
             }
             crate::reason::el::set_whelk_mode(union_elim);
-            let r = Reasoner::classify(model);
+            let probes = if check == PropertyCheck::Probe { object_property_signature(model) } else { Vec::new() };
+            let r = Reasoner::classify_probing(model, &probes);
             if r.ignored() > 0 {
                 status!("note: {} axiom(s) outside OWL 2 EL were ignored during reasoning", r.ignored());
             }
+            let told = if check == PropertyCheck::Told { told_unsatisfiable_properties(model) } else { Vec::new() };
             // `all_subsumptions` is the full transitive closure — O(n·avg-supers)
             // entries, which is enormous on phenio-scale inputs; only build it when
             // indirect output actually needs it (the equivalence policy reads
             // `equivalent_class_pairs`, which scans the S-sets without a closure).
+            let consistent = r.is_consistent();
+            let unsat = r.unsatisfiable();
+            let unsat_properties = el_unsatisfiable_properties(&r, consistent, &unsat, check, told);
             Classification {
-                consistent: r.is_consistent(),
-                unsat: r.unsatisfiable(),
+                consistent,
+                unsat,
                 direct: r.direct_subsumptions(),
                 all: if need_all { r.all_subsumptions() } else { Vec::new() },
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
@@ -1140,9 +1180,98 @@ fn classify(
                 } else {
                     Vec::new()
                 },
+                unsat_properties,
             }
         }
     }
+}
+
+/// The unsatisfiable object properties of an EL classification under `check`:
+/// the probes [`Reasoner::classify_probing`] added, or the `told` ones.
+fn el_unsatisfiable_properties(
+    r: &Reasoner,
+    consistent: bool,
+    unsat: &[String],
+    check: PropertyCheck,
+    told: Vec<String>,
+) -> Vec<String> {
+    match check {
+        _ if !consistent || !unsat.is_empty() => Vec::new(),
+        PropertyCheck::Probe => r.unsatisfiable_probes(),
+        PropertyCheck::Told => told,
+        PropertyCheck::BottomNode | PropertyCheck::None => Vec::new(),
+    }
+}
+
+/// The object properties in the ontology's signature, sorted: one probe each.
+fn object_property_signature(model: &Model) -> Vec<String> {
+    use horned_owl::model::{ObjectProperty, RcStr};
+    use horned_owl::visitor::immutable::{Visit, Walk};
+
+    #[derive(Default)]
+    struct Properties(std::collections::BTreeSet<String>);
+    impl Visit<RcStr> for Properties {
+        fn visit_object_property(&mut self, p: &ObjectProperty<RcStr>) {
+            if !self.0.contains(p.0.as_ref()) {
+                self.0.insert(p.0.to_string());
+            }
+        }
+    }
+    let mut walk = Walk::new(Properties::default());
+    for ac in model.ont.iter() {
+        walk.component(&ac.component);
+    }
+    walk.into_visit().0.into_iter().collect()
+}
+
+/// The named object properties that are told sub-properties of
+/// `owl:bottomObjectProperty` — directly, through other named properties, or
+/// by a told equivalence — sorted.
+pub(crate) fn told_unsatisfiable_properties(model: &Model) -> Vec<String> {
+    use horned_owl::model::SubObjectPropertyExpression as SOPE;
+    const BOTTOM: &str = "http://www.w3.org/2002/07/owl#bottomObjectProperty";
+    // Each property's told sub-properties.
+    let mut subs: HashMap<&str, Vec<&str>> = HashMap::new();
+    for ac in model.ont.iter() {
+        match &ac.component {
+            Component::SubObjectPropertyOf(ax) => {
+                if let (SOPE::ObjectPropertyExpression(OPE::ObjectProperty(sub)), OPE::ObjectProperty(sup)) =
+                    (&ax.sub, &ax.sup)
+                {
+                    subs.entry(sup.0.as_ref()).or_default().push(sub.0.as_ref());
+                }
+            }
+            Component::EquivalentObjectProperties(ax) => {
+                let named: Vec<&str> = ax
+                    .0
+                    .iter()
+                    .filter_map(|ope| match ope {
+                        OPE::ObjectProperty(p) => Some(p.0.as_ref()),
+                        OPE::InverseObjectProperty(_) => None,
+                    })
+                    .collect();
+                for &a in &named {
+                    for &b in &named {
+                        if a != b {
+                            subs.entry(b).or_default().push(a);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut below: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut stack = vec![BOTTOM];
+    while let Some(p) = stack.pop() {
+        for &sub in subs.get(p).into_iter().flatten() {
+            if below.insert(sub) {
+                stack.push(sub);
+            }
+        }
+    }
+    below.remove(BOTTOM);
+    below.into_iter().map(str::to_string).collect()
 }
 
 /// `--reasoner structural` — the told class hierarchy.
@@ -1238,7 +1367,7 @@ fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Class
     direct.dedup();
     Classification {
         // A told hierarchy has no satisfiability test: it never reports an
-        // inconsistency and never reports an unsatisfiable class.
+        // inconsistency, an unsatisfiable class or an unsatisfiable property.
         consistent: true,
         unsat: Vec::new(),
         direct,
@@ -1246,33 +1375,154 @@ fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Class
         equiv,
         class_assertions: Vec::new(),
         property_assertions: Vec::new(),
+        unsat_properties: Vec::new(),
     }
 }
 
-/// Insert an axiom, optionally annotated with `is_inferred true`. Returns whether
-/// it was newly added.
+/// What a classification says about an ontology's coherence, for [`validate`].
+pub(crate) struct Validation<'a> {
+    pub consistent: bool,
+    /// The unsatisfiable classes, in the order the reasoner's bottom node lists
+    /// them (see [`unsatisfiable_in_node_order`]).
+    pub unsatisfiable: &'a [String],
+    /// The unsatisfiable object properties, sorted.
+    pub unsatisfiable_properties: &'a [String],
+    /// `-D/--dump-unsatisfiable`, with the model the module is extracted from.
+    pub dump: Option<(&'a std::path::Path, Option<&'a Model>)>,
+    /// `--allow-incoherent`, for a command that has it.
+    pub allow_incoherent: Option<bool>,
+}
+
+/// Check a classification before anything is inferred from it. An
+/// inconsistent ontology fails; then one with an unsatisfiable class, whose
+/// module is first written to the dump file; then one with an unsatisfiable
+/// object property. `--allow-incoherent` reports the unsatisfiable classes or
+/// properties and goes on.
+///
+/// Each failure is reported on the console as a logged error — a count line
+/// followed by one line per class or property: CI jobs grep the log for the
+/// wording, and a recipe that redirects the console (`reason … > report.txt`)
+/// keeps the whole list as its report.
+pub(crate) fn validate(v: &Validation) -> Result<()> {
+    let hint = if v.allow_incoherent.is_some() { " Use --allow-incoherent to override." } else { "" };
+    let allowed = v.allow_incoherent == Some(true);
+    if !v.consistent {
+        let mut lines = vec!["The ontology is inconsistent. TIP: use a tool like Protege to find explanations".to_string()];
+        if v.dump.is_some() {
+            // No module is written for an inconsistent ontology.
+            lines.push(
+                "Unfortunately, robot is not able to generate an unsatisfiable minimal model for inconsistent ontologies at this time.\n"
+                    .to_string(),
+            );
+            lines.push("TIP: remove individuals from ontology and try again".to_string());
+        }
+        log_reasoner_errors(&lines);
+        bail!("ontology is inconsistent (owl:Thing is unsatisfiable)");
+    }
+    if !v.unsatisfiable.is_empty() {
+        log_unsatisfiable(v.unsatisfiable);
+        if let Some((path, model)) = v.dump {
+            dump_unsatisfiable_module(model, v.unsatisfiable, path)?;
+        }
+        if !allowed {
+            bail!("ontology is incoherent: {} unsatisfiable class(es).{hint}", v.unsatisfiable.len());
+        }
+        return Ok(());
+    }
+    if !v.unsatisfiable_properties.is_empty() {
+        // Listed in the hash order of the set they are gathered in.
+        let names = v.unsatisfiable_properties;
+        let hashes: Vec<i32> = names.iter().map(|p| crate::owlapi_hash::object_property_hash(p)).collect();
+        let mut lines = vec![format!("There are {} unsatisfiable properties in the ontology.", names.len())];
+        for i in crate::owlapi_hash::hashset_order(&hashes) {
+            lines.push(format!("    unsatisfiable property: {}", names[i]));
+        }
+        log_reasoner_errors(&lines);
+        if !allowed {
+            bail!("ontology is incoherent: {} unsatisfiable object propert{}.{hint}", names.len(),
+                if names.len() == 1 { "y" } else { "ies" });
+        }
+    }
+    Ok(())
+}
+
+/// Classify `model` with `kind` and [`validate`] the result, for a command that
+/// reasons only to check the ontology first. `materializing` selects the
+/// property check of a reasoner wrapped for expression materialization.
+pub(crate) fn validate_model(model: &Model, kind: ReasonerKind, materializing: bool) -> Result<()> {
+    let cls = classify(model, kind, false, false, false, false, &HashSet::new(), kind.property_check(materializing));
+    let listed = unsatisfiable_in_node_order(kind, &cls.unsat, || crate::reason::elk_order::class_queue(&model.ont));
+    validate(&Validation {
+        consistent: cls.consistent,
+        unsatisfiable: &listed,
+        unsatisfiable_properties: &cls.unsat_properties,
+        dump: None,
+        allow_incoherent: None,
+    })
+}
+
+/// The unsatisfiable classes in the order the reasoner's bottom node lists its
+/// members. The EL engine's node lists them in the order its index first names
+/// them, which is read off the model (`queue`, asked for only when a class is
+/// unsatisfiable); every other reasoner's node in its classes' hash order.
+pub(crate) fn unsatisfiable_in_node_order(
+    kind: ReasonerKind,
+    unsat: &[String],
+    queue: impl FnOnce() -> Vec<horned_owl::model::IRI<horned_owl::model::RcStr>>,
+) -> Vec<String> {
+    if unsat.is_empty() {
+        Vec::new()
+    } else if kind.is_builtin_el() {
+        crate::reason::elk_order::bottom_node_order(&queue(), unsat)
+    } else {
+        crate::owlapi_hash::class_node_order(unsat).into_iter().map(|i| unsat[i].clone()).collect()
+    }
+}
+
+/// Log a reasoner check's failure on the console as errors, one per line, all
+/// under one time stamp.
+fn log_reasoner_errors(lines: &[String]) {
+    let stamp = log_stamp();
+    for msg in lines {
+        crate::build::console_line(&format!("{stamp} ERROR org.obolibrary.robot.ReasonerHelper - {msg}"));
+    }
+}
+
+/// Report unsatisfiable classes on the console as a logged error: a count line,
+/// then one `    unsatisfiable: <IRI>` line per class in the order given.
+fn log_unsatisfiable(listed: &[String]) {
+    let mut lines = vec![format!("There are {} unsatisfiable classes in the ontology.", listed.len())];
+    lines.extend(listed.iter().map(|name| format!("    unsatisfiable: {name}")));
+    log_reasoner_errors(&lines);
+}
+
+/// Insert an inferred axiom. Returns whether it was newly added.
+///
+/// Annotated with `is_inferred true`, it takes the place of the same axiom
+/// asserted without annotations, which is then the inferred one. Only a
+/// `SubClassOf` can be annotated: any other inferred axiom is refused.
 fn insert_axiom(
     model: &mut Model,
     component: Component<crate::model::Str>,
     annotate: bool,
     infer_prop: &horned_owl::model::AnnotationProperty<crate::model::Str>,
-) -> bool {
-    if annotate {
-        let ann = Annotation { ann: Default::default(),
-            ap: infer_prop.clone(),
-            av: AnnotationValue::Literal(Literal::Simple {
-                literal: "true".to_string(),
-            }),
-        };
-        let mut anns = std::collections::BTreeSet::new();
-        anns.insert(ann);
-        model.ont.insert(AnnotatedComponent {
-            component,
-            ann: anns,
-        })
-    } else {
-        model.ont.insert(component)
+) -> Result<bool> {
+    if !annotate {
+        return Ok(model.ont.insert(component));
     }
+    if !matches!(component, Component::SubClassOf(_)) {
+        bail!(
+            "AXIOM TYPE ERROR cannot annotate axioms of type: {:?}",
+            horned_owl::model::Kinded::kind(&component)
+        );
+    }
+    model.ont.remove(&AnnotatedComponent { component: component.clone(), ann: Default::default() });
+    let ann = Annotation {
+        ann: Default::default(),
+        ap: infer_prop.clone(),
+        av: AnnotationValue::Literal(Literal::Simple { literal: "true".to_string() }),
+    };
+    Ok(model.ont.insert(AnnotatedComponent { component, ann: std::collections::BTreeSet::from([ann]) }))
 }
 
 fn existing_subclass_pairs(model: &Model) -> HashSet<(String, String)> {
@@ -1486,18 +1736,6 @@ mod tests {
         vec![decl(b, "A"), decl(b, "B"), sub(b, "A", "B"), sub(b, "B", "A")]
     }
 
-    // --- case-insensitive <bool> -----------------------------------------
-
-    #[test]
-    fn bool_values_are_case_insensitive() {
-        // UBERON writes `--annotate-inferred-axioms False`, with a capital F.
-        assert_eq!(parse_bool_ci("False"), Ok(false));
-        assert_eq!(parse_bool_ci("FALSE"), Ok(false));
-        assert_eq!(parse_bool_ci("True"), Ok(true));
-        assert_eq!(parse_bool_ci(" true "), Ok(true));
-        assert!(parse_bool_ci("flase").is_err());
-    }
-
     // --- --equivalent-classes-allowed ------------------------------------
 
     #[test]
@@ -1586,8 +1824,12 @@ mod tests {
         for name in ["elk", "ELK", "HermiT", "jfact", "whelk", "EMR", "Structural", "owlmake"] {
             assert!(ReasonerKind::parse(name).is_ok(), "{name} should parse");
         }
-        let err = ReasonerKind::parse("Hermitt").unwrap_err().to_string();
-        assert!(err.contains("Invalid Reasoner Error"), "{err}");
+        let err = ReasonerKind::parse(" Hermitt ").unwrap_err().to_string();
+        assert_eq!(err, "INVALID REASONER ERROR unknown reasoner: hermitt");
+        // `materialize` and `reduce` take every name but `emr`.
+        assert!(ReasonerKind::parse_without_emr("WHELK").is_ok());
+        let err = ReasonerKind::parse_without_emr("EMR").unwrap_err().to_string();
+        assert_eq!(err, "INVALID REASONER ERROR unknown reasoner: emr");
         // …and the error surfaces from `reason_with` before any classification.
         let b = Build::new_rc();
         assert!(reason_with(model_of(vec![decl(&b, "A")]), "elkk", &ReasonOptions::default()).is_err());

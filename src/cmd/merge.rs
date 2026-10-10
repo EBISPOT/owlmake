@@ -38,24 +38,24 @@ pub struct Args {
 
     /// Keep secondary inputs' ontology-level annotations (`<bool>`, default false:
     /// by default only the primary ontology's annotations survive).
-    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub include_annotations: Option<bool>,
 
     /// Merge the imports closure (`<bool>`, default true). When true, each
     /// input's `owl:imports` transitive closure is resolved (via `--catalog` or
     /// as sibling files) and merged in, then the import declarations are dropped.
     /// When false, imports are kept and their content is not merged.
-    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub collapse_import_closure: Option<bool>,
 
     /// Annotate each entity with rdfs:isDefinedBy = its source ontology IRI
     /// (`<bool>`, default false).
-    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub annotate_defined_by: Option<bool>,
 
     /// Annotate merged axioms with prov:wasDerivedFrom = their source ontology
     /// IRI (`<bool>`, default false).
-    #[arg(short = 'f', long = "annotate-derived-from", num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'f', long = "annotate-derived-from", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub annotate_derived_from: Option<bool>,
 
     #[command(flatten)]

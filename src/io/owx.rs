@@ -807,13 +807,7 @@ pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -
     let mut axioms: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
     for ac in model.ont.iter() {
         match NaturalOrder::axiom_index(&ac.component) {
-            0 => {
-                let supplied = entities::declaration(&ac.component)
-                    .is_some_and(|(kind, iri)| entities::is_materialised(model, kind, iri));
-                if !supplied {
-                    decls.push(ac);
-                }
-            }
+            0 => decls.push(ac),
             99 => {}
             _ => axioms.push(ac),
         }

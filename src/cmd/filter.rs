@@ -1,21 +1,18 @@
-//! `filter` — keep only selected axioms (the complement of `remove`). Supports a
-//! term whitelist (`--term`/`--term-file`), include/exclude term forcing, and the
-//! signature-subset filter that builds the `-basic`/`-simple` products
-//! (`--signature true --select "annotations ontology anonymous self"`): keep an
-//! axiom when its whole signature lies in the seed, plus annotation/ontology
-//! axioms over the seed.
+//! `filter` — keep the axioms a selection selects, in a new ontology. How the
+//! terms and `--select` groups choose objects, and how an axiom is judged
+//! against them, is [`crate::cmd::objects`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Args as ClapArgs;
-use horned_owl::model::{Component, MutableOntology, OntologyID, RcStr};
+use horned_owl::model::{AnnotatedComponent, Component, MutableOntology, OntologyID, RcStr};
 
+use crate::cmd::objects::{self, Judge, Request, Selection};
 use crate::cmd::remove::TermOptions;
-use crate::cmd::select;
+use crate::cmd::{select, Switch};
 use crate::model::Model;
-use crate::sig;
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -31,48 +28,59 @@ pub struct Args {
     /// Files listing terms to keep, one per line.
     #[arg(short = 'T', long)]
     pub term_file: Vec<PathBuf>,
-    /// Selectors (space- or repeat-separated): `annotations`, `ontology`,
-    /// `anonymous`, `self`, …
+    /// Selector groups, applied in turn: each value's space-separated
+    /// selectors (`self`, `classes`, `parents`, `anonymous`, `complement`,
+    /// `PROP=VALUE`, `<IRI-pattern>`, …) select the union of what each maps the
+    /// set to. `annotations`, `imports` and `ontology` ask for the kept
+    /// entities' annotation assertions, the imports and the ontology
+    /// annotations.
     #[arg(short = 's', long)]
     pub select: Vec<String>,
-    /// Axiom categories to filter for (accepted for compatibility; advisory).
+    /// Axiom types to keep: `all` (the default), `logical`, `annotation`,
+    /// `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`,
+    /// `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by
+    /// name, or `internal`/`external` to the `--base-iri` namespaces.
     #[arg(short = 'a', long)]
     pub axioms: Vec<String>,
     /// If false, do not preserve hierarchical relationships (`<bool>`).
-    #[arg(short = 'p', long, num_args = 1, default_missing_value = "true")]
-    pub preserve_structure: Option<bool>,
-    /// If true, keep axioms containing only selected objects (`<bool>`).
-    #[arg(short = 'r', long, num_args = 1, default_missing_value = "true")]
-    pub trim: Option<bool>,
-    /// Terms to force-exclude (never kept on their own account). Repeatable.
+    #[arg(short = 'p', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub preserve_structure: Option<crate::cmd::Switch>,
+    /// If true (the default), keep the axioms all of whose objects are
+    /// selected; if false, those with any selected object (`<bool>`).
+    #[arg(short = 'r', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub trim: Option<crate::cmd::Switch>,
+    /// Terms to take out of the selection. Repeatable.
     #[arg(short = 'e', long = "exclude-term", value_name = "TERM")]
     pub exclude_term: Vec<String>,
-    /// Files of terms to force-exclude. Repeatable.
+    /// Files of terms to take out of the selection. Repeatable.
     #[arg(short = 'E', long = "exclude-terms", value_name = "FILE")]
     pub exclude_terms: Vec<PathBuf>,
-    /// Terms to force-include in the seed. Repeatable.
+    /// Terms to add to the selection. Repeatable.
     #[arg(short = 'n', long = "include-term", value_name = "TERM")]
     pub include_term: Vec<String>,
-    /// Files of terms to force-include in the seed. Repeatable.
+    /// Files of terms to add to the selection. Repeatable.
     #[arg(short = 'N', long = "include-terms", value_name = "FILE")]
     pub include_terms: Vec<PathBuf>,
-    /// Drop axiom annotations involving a particular annotation property, or
-    /// `all`/`true` to strip every annotation from kept axioms.
+    /// Drop the annotations of the kept axioms: `PROP` drops a property's,
+    /// `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value
+    /// the regex finds (`'` taken out of either); `all` drops every one.
+    /// Repeatable.
     #[arg(short = 'd', long = "drop-axiom-annotations", value_name = "ARG")]
-    pub drop_axiom_annotations: Option<String>,
-    /// Signature mode: when true keep an axiom if ANY of its entities is in the
-    /// seed; when false (the OBO sub-ontology filter) keep only when *all* of its
-    /// entities are in the seed (`<bool>`).
-    #[arg(short = 'S', long, num_args = 1, default_missing_value = "true")]
-    pub signature: Option<bool>,
-    /// If true, allow selecting punned entities (`<bool>`).
-    #[arg(long = "allow-punning", num_args = 1, default_missing_value = "true")]
-    pub allow_punning: Option<bool>,
+    pub drop_axiom_annotations: Vec<String>,
+    /// If true, judge an axiom by the IRIs it names rather than by its
+    /// objects, which include its anonymous class expressions and individuals
+    /// (`<bool>`).
+    #[arg(short = 'S', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub signature: Option<crate::cmd::Switch>,
+    /// If true, a term naming entities of several kinds selects all of them;
+    /// otherwise it selects none (`<bool>`).
+    #[arg(long = "allow-punning", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub allow_punning: Option<crate::cmd::Switch>,
     /// Base IRI(s): the namespaces `--axioms internal` and `--axioms external`
     /// judge an axiom's subjects by. Repeatable.
     #[arg(long = "base-iri", value_name = "IRI")]
     pub base_iri: Vec<String>,
-    /// Set the output ontology IRI.
+    /// The IRI of the output ontology, taken as written; the input's when absent.
     #[arg(short = 'O', long = "ontology-iri", value_name = "IRI")]
     pub ontology_iri: Option<String>,
 
@@ -89,17 +97,11 @@ impl Args {
             include_term: self.include_term.clone(),
             include_terms: self.include_terms.clone(),
             drop_axiom_annotations: self.drop_axiom_annotations.clone(),
-            signature: self.signature,
-            trim: self.trim,
-            allow_punning: self.allow_punning,
-            // `--preserve-structure` defaults to true: a filtered product keeps its
-            // hierarchy connected across the classes it drops. Resolved here so the
-            // value this CLI path passes is explicit, not so it differs — the core
-            // applies the same default (`unwrap_or(true)`), as `remove` does. The
-            // in-process `filter()` entry point builds its own
-            // `TermOptions::default()`, leaving this `None`, and bridges for that
-            // reason rather than this one.
-            preserve_structure: Some(self.preserve_structure.unwrap_or(true)),
+            signature: self.signature.clone(),
+            trim: self.trim.clone(),
+            allow_punning: self.allow_punning.clone(),
+            preserve_structure: self.preserve_structure.clone(),
+            whole_ontology_without_terms: false,
         }
     }
 }
@@ -131,23 +133,9 @@ pub fn step(
     Ok(Some(kept))
 }
 
-/// How an axiom's signature is matched against the seed.
-#[derive(Clone, Copy)]
-enum SigMode {
-    /// Keep when EVERY signature entity is in the seed (the OBO sub-ontology
-    /// filter, which is what [`filter`]'s `signature_opt == Some(true)` selects).
-    All,
-    /// Keep when ANY signature entity is in the seed.
-    Any,
-}
-
-/// In-process entry point (used by `extract`'s subset path and the in-memory
-/// API). Here `signature_opt == Some(true)` means "whole signature within the
-/// seed" (the `-simple`/`-basic` filter); anything else means "mentions any".
-///
-/// Like the CLI path, it does NOT exempt the built-in vocabulary from the seed
-/// test: exempting it would keep 27,279 annotation assertions on IRIs outside
-/// MONDO's simple seed.
+/// In-process entry point (`extract`'s subset path and the in-memory API). With
+/// `signature_opt == Some(true)` an axiom is kept when every IRI it names is
+/// selected; otherwise when any of its objects is.
 pub fn filter(
     model: crate::model::Model,
     term: &[String],
@@ -155,16 +143,25 @@ pub fn filter(
     select: &[String],
     signature_opt: Option<bool>,
 ) -> Result<crate::model::Model> {
-    let mode = if signature_opt.unwrap_or(false) { SigMode::All } else { SigMode::Any };
-    // `signature` must reach the options too: it decides whether a literal-valued
-    // axiom annotation passes the keep-whole test in the kept loop below.
-    let opts = TermOptions { signature: signature_opt, ..TermOptions::default() };
-    filter_core(model, term, term_file, select, &[], &[], &opts, mode, false)
+    let opts = TermOptions {
+        signature: signature_opt.map(Switch::Bool),
+        trim: Some(Switch::Bool(signature_opt == Some(true))),
+        ..TermOptions::default()
+    };
+    filter_with(model, term, term_file, select, &[], &[], &opts)
 }
 
-/// CLI entry point. The default keeps axioms whose whole signature is selected;
-/// `--trim false` widens it to axioms whose signature contains ANY selected
-/// entity.
+/// Keep what a selection selects (pure core). The objects are what the terms
+/// name — or, with no term naming an IRI, every object of the ontology —
+/// mapped through each `--select` group in turn ([`objects::objects`]). An
+/// axiom is kept when every one of its objects is selected (`--trim true`, the
+/// default) or any is (`--trim false`), judged by the IRIs it names alone
+/// under `--signature true`; one whose annotations are not all selected is kept
+/// without them. The hierarchy among the kept objects is re-asserted across
+/// what is left out, and `--select annotations` adds every annotation
+/// assertion on a kept entity. The result is a new ontology with the input's
+/// IRI and no version IRI, its imports under `--select imports` and its
+/// annotations under `--select ontology`; only the input's own axioms are read.
 pub fn filter_with(
     model: crate::model::Model,
     term: &[String],
@@ -174,363 +171,106 @@ pub fn filter_with(
     base_iri: &[String],
     opts: &TermOptions,
 ) -> Result<crate::model::Model> {
-    // `--trim` decides the match and defaults to TRUE, so the default is the
-    // COMPLETE match — every entity of the axiom's signature must be selected — and
-    // `--trim false` is what widens it to "uses at least one". Keying the mode off
-    // `--signature` instead (true → any-entity) would leave MONDO's
-    // `mondo-simple.owl` carrying 27,279 annotation assertions on IRIs outside the
-    // seed.
-    let mode = if opts.trim.unwrap_or(true) { SigMode::All } else { SigMode::Any };
-    filter_core(model, term, term_file, select, axioms, base_iri, opts, mode, false)
-}
+    let terms = select::collect_terms(&model, term, term_file)?;
+    let include = select::collect_terms(&model, &opts.include_term, &opts.include_terms)?;
+    let exclude = select::collect_terms(&model, &opts.exclude_term, &opts.exclude_terms)?;
 
-/// Apply the `filter` selectors to `model` (pure core).
-#[allow(clippy::too_many_arguments)]
-fn filter_core(
-    mut model: crate::model::Model,
-    term: &[String],
-    term_file: &[std::path::PathBuf],
-    select: &[String],
-    axioms: &[String],
-    base_iri: &[String],
-    opts: &TermOptions,
-    mode: SigMode,
-    exempt_builtins: bool,
-) -> Result<crate::model::Model> {
-    // Effective seed = (--term ∪ --include-term) \ --exclude-term.
-    // Each of the three lists is resolved to ENTITIES, so a punned or unknown IRI
-    // silently drops out of all of them — see `select::resolve_entity_terms`.
-    let ent = |t| select::resolve_entity_terms(&model, t);
-    let mut terms = ent(select::collect_terms(&model, term, term_file)?);
-    let included = ent(select::collect_terms(&model, &opts.include_term, &opts.include_terms)?);
-    terms.extend(included);
-    let excluded = ent(select::collect_terms(&model, &opts.exclude_term, &opts.exclude_terms)?);
-
-    // --base-iri: the namespaces `--axioms internal|external` judge subjects by.
-    let base_iris: Vec<String> = base_iri.iter().map(|b| select::expand(&model, b)).collect();
-
-    let selects: HashSet<String> = select
-        .iter()
-        .flat_map(|s| s.split_whitespace())
-        .map(str::to_string)
-        .collect();
-    let keep_ontology = selects.contains("ontology");
-    // `--select imports` keeps the root's `owl:imports` declarations; without it
-    // the result imports nothing.
-    let keep_imports = selects.contains("imports");
-
-    // Entity/relation selectors EXPAND the seed before filtering: a type selector
-    // (`object-properties`, `classes`, …) adds every entity of that type; a
-    // relation selector (`parents`, `ancestors`, `children`, `descendants`,
-    // `equivalents`, `types`, `instances`, `domains`, `ranges`) adds related
-    // entities. This is how a `-simple` product keeps the seed classes plus their
-    // parents and all object properties (e.g. WBls: `--select "… parents
-    // object-properties self"`). `complement` inverts the resulting selection.
-    let mut complement_select = false;
-    {
-        // Signature rather than declarations, so an entity that is only referenced
-        // still selects — see the note on the same call in `cmd::remove`.
-        let ent = select::signature_entities(&model);
-        let mut extra: HashSet<String> = HashSet::new();
-        for kw in &selects {
-            if let Some(set) = select::category_members(&ent, kw) {
-                extra.extend(set);
-            } else {
-                match kw.as_str() {
-                    "parents" => extra.extend(select::direct_parents(&model, &terms)),
-                    "ancestors" => extra.extend(select::ancestors(&model, &terms)),
-                    "children" => extra.extend(select::direct_children(&model, &terms)),
-                    "descendants" => extra.extend(select::descendants(&model, &terms)),
-                    "equivalents" => extra.extend(select::equivalents_of(&model, &terms)),
-                    "types" => extra.extend(select::types_of(&model, &terms)),
-                    "instances" => extra.extend(select::instances_of(&model, &terms)),
-                    "domains" => extra.extend(select::domains_of(&model, &terms)),
-                    "ranges" => extra.extend(select::ranges_of(&model, &terms)),
-                    "complement" => complement_select = true,
-                    // `PROP=VALUE`: every entity carrying that annotation. UBERON's
-                    // `cumbo` subset is built by exporting the IDs this selects
-                    // (`--select 'oboInOwl:inSubset=uberon:cumbo'`) and extracting
-                    // them. Unhandled, the token fell through to the no-op arm
-                    // below, leaving an empty seed that then selected the WHOLE
-                    // ontology: the term list came out with 16,417 IDs instead of
-                    // 14, and `subsets/cumbo.owl` at 48 MB instead of 123 KB.
-                    _ if select::parse_annotation_value(kw).is_some() => {
-                        let (p, v) = select::parse_annotation_value(kw).unwrap();
-                        extra.extend(select::annotation_value_members(&model, p, v));
-                    }
-                    // `named`/`anonymous`: owlmake selects entities by IRI, so
-                    // every selectable entity is named; `named` is a no-op pass
-                    // and `anonymous` selects nothing extra.
-                    _ => {}
-                }
+    // `annotations`, `imports` and `ontology` are the command's own words, taken
+    // out of the group that names them; a group left empty selects nothing more.
+    let values: Vec<String> = if select.is_empty() { vec!["self".to_string()] } else { select.to_vec() };
+    let (mut annotations, mut keep_imports, mut keep_ontology) = (false, false, false);
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    for value in &values {
+        let mut group = objects::split_selects(value);
+        for (word, flag) in
+            [("annotations", &mut annotations), ("imports", &mut keep_imports), ("ontology", &mut keep_ontology)]
+        {
+            if let Some(i) = group.iter().position(|s| s == word) {
+                *flag = true;
+                group.remove(i);
             }
         }
-        terms.extend(extra);
+        if !group.is_empty() {
+            groups.push(group);
+        }
     }
+    let drops = crate::cmd::remove::AnnotationDrops::read(&model, &opts.drop_axiom_annotations)?;
+    let axiom_selectors = objects::axiom_selectors(axioms);
+    let base = objects::base_namespaces(&model, base_iri);
 
-    // `--select complement`: invert the selection so the seed becomes every
-    // declared entity NOT currently selected.
-    if complement_select {
-        let inverted: HashSet<String> = select::entities(&model)
-            .all()
-            .filter(|e| !terms.contains(*e))
-            .cloned()
-            .collect();
-        terms = inverted;
-    }
-
-    // With no `--term`/`--term-file` and no selector to narrow it, the object set is
-    // the whole ontology, so `filter --axioms <types>` on its own keeps every axiom
-    // of those types rather than nothing.
-    //
-    // "The whole ontology" is its ENTITIES. An IRI that appears only as an
-    // annotation subject or value is not one — nothing declares it and no logical
-    // axiom mentions it — so an assertion pointing at such an IRI is not wholly
-    // within the object set and falls out of the signature test below. That is what
-    // leaves a `-basic` composite holding the assertions whose value names a real
-    // entity. Materialising the seed here also means nothing counts as removed, so
-    // the gap-spanning pass below has no gaps to bridge.
-    if terms.is_empty() && term.is_empty() && term_file.is_empty() {
-        terms = select::signature_entities(&model).all().cloned().collect();
-    }
-
-    // `--exclude-term`/`--exclude-terms` names what must NOT be selected, and it
-    // is the last word: it applies after the selectors have expanded the seed and
-    // after the whole-ontology default above, so an excluded entity cannot be
-    // reintroduced by either. Applying it earlier left `filter --exclude-terms F`
-    // — no `--term` at all — selecting everything, F included.
-    for e in &excluded {
-        terms.remove(e);
-    }
-
-    // --preserve-structure (default true): bridge the hierarchy across the classes
-    // being dropped (everything not in the kept seed) so a kept subclass still
-    // connects to its nearest kept superclass expression. Reuses `remove`'s
-    // `spanGaps` with the *removed* set = declared entities − seed, over the root
-    // ontology's own axioms, as the axioms kept are the root's. The bridges join
-    // the result below whatever axiom types `--axioms` names. The default is on,
-    // matching `remove`, so an unset option bridges rather than silently
-    // flattening.
+    let mut kept: Vec<AnnotatedComponent<RcStr>> = Vec::new();
     let mut bridges: Vec<Component<RcStr>> = Vec::new();
-    if opts.preserve_structure.unwrap_or(true) {
-        let removed: HashSet<String> = select::entities(&model)
-            .all()
-            .filter(|e| !terms.contains(*e))
-            .cloned()
-            .collect();
-        let no_exclude = HashSet::new();
-        // Same object identity as `remove`'s path: re-links made from one source
-        // expression are one blank node, however many classes now carry them.
-        let mut span_shared = std::collections::HashMap::new();
-        let mut cross_add = std::collections::HashMap::new();
-        let root_view;
-        let span_model = if model.imported_components.is_empty() {
-            &model
-        } else {
-            use horned_owl::model::MutableOntology;
-            let mut root = model.clone();
-            for ac in &model.imported_components {
-                root.ont.remove(ac);
-            }
-            root_view = root;
-            &root_view
+    let mut span_shared = HashMap::new();
+    let mut cross_add = HashMap::new();
+    {
+        let sel = Selection::new(&model);
+        let request = Request {
+            terms: &terms,
+            include: &include,
+            exclude: &exclude,
+            groups: &groups,
+            selected: !select.is_empty(),
+            axiom_selectors: &axiom_selectors,
+            allow_punning: Switch::read(opts.allow_punning.as_ref(), "allow-punning", false)?,
         };
-        bridges = crate::cmd::remove::span_gaps_shared(
-            span_model,
-            &removed,
-            &no_exclude,
-            Some(&terms),
-            &mut span_shared,
-            &mut cross_add,
-        );
-        model.cross_shared.extend(cross_add);
-        if std::env::var("OM_SPAN_LOG").is_ok() {
-            let mut v: Vec<_> = span_shared.iter().collect();
-            v.sort();
-            let mut out = String::new();
-            for (k, g) in v {
-                out.push_str(&format!("{g}\t{}\n", k.replace('\u{1}', " | ")));
+        let chosen = objects::objects(&sel, &request)?;
+        if !chosen.is_empty() {
+            let judge = Judge {
+                selectors: &axiom_selectors,
+                base: &base,
+                partial: !Switch::read(opts.trim.as_ref(), "trim", true)?,
+                named_only: Switch::read(opts.signature.as_ref(), "signature", false)?,
+                annotation_values: opts.annotation_values.unwrap_or(true),
+                plain: objects::plain_datatype(&model),
+            };
+            kept = objects::judge_axioms(sel.axioms(), &chosen, &judge)?;
+            if Switch::read(opts.preserve_structure.as_ref(), "preserve-structure", true)? {
+                bridges = span_kept(&model, &chosen, &axiom_selectors, &base, &mut span_shared, &mut cross_add);
             }
-            std::fs::write("/tmp/om_span_groups.txt", out).ok();
+            if annotations {
+                kept.extend(sel.annotation_axioms(&chosen));
+            }
         }
-        model.span_shared.extend(span_shared);
     }
 
-    // --axioms: the axiom types the seed selects from (`logical|annotation|
-    // subclass|…`; none named ⇒ every type), plus the namespace selector, which
-    // takes the axioms internal or external to the base IRIs whatever the seed.
-    let axiom_toks: Vec<String> = axioms
-        .iter()
-        .flat_map(|a| a.split_whitespace())
-        .map(str::to_string)
-        .collect();
-    let namespace = select::namespace_selectors(&axiom_toks);
-    let by_namespace = |comp: &Component<RcStr>| {
-        namespace.iter().any(|n| select::axiom_in_category(comp, n, &base_iris))
-    };
-
-    // The signature matched against the seed counts an annotation property as an
-    // entity — so `AnnotationAssertion(rdfs:label X "…")` has `rdfs:label` in its
-    // signature and is dropped by a seed that does not list it. The `annotations`
-    // selector then adds back every annotation assertion whose SUBJECT is selected,
-    // which is how each seed class keeps its labels while the assertions on classes
-    // outside the seed are dropped.
-    let axiom_sig = |comp: &Component<RcStr>| -> HashSet<String> {
-        let mut s = sig::signature(comp);
-        s.extend(sig::annotation_properties(comp));
-        // …and, for an annotation assertion, its SUBJECT and any IRI value. The
-        // logical signature has neither (an annotation subject is not an entity),
-        // so counting the property alone would decide the axiom's fate — and
-        // MONDO's simple seed DOES list `rdfs:label`, which would let all 27,279
-        // labels on IRIs outside the seed (`http://identifiers.org/hgnc/…`) through.
-        // The seed test covers all three: subject, then property, then value.
-        if let Component::AnnotationAssertion(aa) = comp {
-            if let horned_owl::model::AnnotationSubject::IRI(i) = &aa.subject {
-                s.insert(i.as_ref().to_string());
-            }
-            if let horned_owl::model::AnnotationValue::IRI(i) = &aa.ann.av {
-                s.insert(i.as_ref().to_string());
-            }
-        }
-        s
-    };
-    let keep_annotations = selects.contains("annotations");
-    let annotation_backfill: Vec<horned_owl::model::AnnotatedComponent<RcStr>> = if keep_annotations
-    {
-        model
-            .ont
-            .iter()
-            .filter(|ac| !model.imported_components.contains(*ac))
-            .filter(|ac| match &ac.component {
-                Component::AnnotationAssertion(aa) => match &aa.subject {
-                    horned_owl::model::AnnotationSubject::IRI(i) => {
-                        terms.contains(i.as_ref())
-                    }
-                    _ => false,
-                },
-                _ => false,
-            })
-            .cloned()
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    // Whether the seed selects `comp`: its signature lies in the seed, or meets
-    // it under `--trim false`.
-    let seed_selects = |comp: &Component<RcStr>| -> bool {
-        let sig = axiom_sig(comp);
-        match mode {
-            SigMode::Any => sig.iter().any(|s| terms.contains(s)),
-            // Keep when the whole signature is within the seed, exempting nothing:
-            // an `AnnotationAssertion(rdfs:label X "…")` has `rdfs:label` in its
-            // signature, and MONDO's simple seed lists only class IRIs plus two
-            // oboInOwl properties — so every annotation assertion falls out here and
-            // comes back through the `annotations` selector, for selected SUBJECTS
-            // only. `exempt_builtins` would waive the OWL/RDF vocabulary, but both
-            // callers of this private core pass `false`, so no `filter` run reaches
-            // that arm of the test — waiving it would keep 27,279 assertions on IRIs
-            // outside the seed.
-            SigMode::All => sig
-                .iter()
-                .all(|s| terms.contains(s) || (exempt_builtins && is_builtin(s))),
-        }
-    };
-    let matches_seed = |comp: &Component<RcStr>| -> bool {
-        if matches!(comp, Component::OntologyID(_) | Component::DocIRI(_)) {
-            return true;
-        }
-        if matches!(comp, Component::OntologyAnnotation(_)) {
-            return keep_ontology;
-        }
-        if matches!(comp, Component::Import(_)) {
-            return keep_imports;
-        }
-        axiom_type_match(comp, &axiom_toks) && seed_selects(comp)
-    };
-
+    let mut model = model;
+    model.cross_shared.extend(cross_add);
+    model.span_shared.extend(span_shared);
     let mut kept = {
         use horned_owl::model::MutableOntology;
         use horned_owl::ontology::set::SetOntology;
         let mut ont = SetOntology::new();
-        // The terms resolve against the whole import closure, but the axioms
-        // kept are the root ontology's own: what an import lent stays with the
-        // import.
         for ac in model.ont.iter().filter(|ac| !model.imported_components.contains(*ac)) {
-            // What the namespace selector takes is kept whole, annotations and all.
-            if by_namespace(&ac.component) {
-                ont.insert(ac.clone());
-            }
-            if !matches_seed(&ac.component) {
-                continue;
-            }
-            // A matched axiom keeps its logical content either way; what differs is
-            // its axiom ANNOTATIONS. A COMPLETE match (`SigMode::All`, the default)
-            // keeps them only when the annotations themselves also lie in the seed:
-            // every annotation property, and every IRI value, must be selected. A
-            // LITERAL value is ignored under `--signature true` — which is how the
-            // `-simple` products keep their 6,637 `oboInOwl:source`-annotated
-            // `subClassOf` reifications, `oboInOwl:source` being in the seed — but
-            // fails the test otherwise, so without `--signature` any literal-valued
-            // annotation is stripped (a `-basic` composite carries no `owl:Axiom`
-            // block at all). The test is all-or-nothing per axiom: one failing
-            // annotation strips them all. `--trim false` (`SigMode::Any`) keeps the
-            // axiom whole — HPO's `hp-simple-non-classified.owl` filters that way and
-            // would lose 15,777 of its 25,529 `owl:Axiom` blocks to stripping.
-            // And an assertion the `annotations` selector re-adds keeps its axiom
-            // annotations regardless: subject selected ⇒ whole.
-            let backfilled = keep_annotations
-                && matches!(&ac.component, Component::AnnotationAssertion(aa)
-                    if matches!(&aa.subject,
-                        horned_owl::model::AnnotationSubject::IRI(i) if terms.contains(i.as_ref())));
-            let literal_ok = opts.signature.unwrap_or(false);
-            let ann_in_seed = ac.ann.iter().all(|a| {
-                terms.contains(a.ap.0.as_ref())
-                    && match &a.av {
-                        horned_owl::model::AnnotationValue::IRI(i) => terms.contains(i.as_ref()),
-                        horned_owl::model::AnnotationValue::Literal(_) => literal_ok,
-                        horned_owl::model::AnnotationValue::AnonymousIndividual(_) => false,
-                    }
-            });
-            if let Component::OntologyID(id) = &ac.component {
+            match &ac.component {
                 // `filter` builds a NEW ontology from the retained axioms, and a
                 // new ontology is not the release the input was: it keeps the
                 // ontology IRI and carries no version IRI. EFO's
                 // `tmp/mirror-efo.owl` is `merge … filter --term EFO:0001444`, and
                 // the version IRI it inherits from `efo-dl.owl`
                 // (`…/releases/v3.93.0/efo.owl`) is not in the ODK's output.
-                ont.insert(horned_owl::model::AnnotatedComponent {
-                    component: Component::OntologyID(OntologyID {
-                        iri: id.iri.clone(),
-                        viri: None,
-                    }),
-                    ann: ac.ann.clone(),
-                });
-                continue;
-            }
-            if ac.ann.is_empty() || matches!(mode, SigMode::Any) || backfilled || ann_in_seed {
-                ont.insert(ac.clone());
-            } else {
-                ont.insert(horned_owl::model::AnnotatedComponent {
-                    component: ac.component.clone(),
-                    ann: Default::default(),
-                });
+                Component::OntologyID(id) => {
+                    ont.insert(AnnotatedComponent {
+                        component: Component::OntologyID(OntologyID { iri: id.iri.clone(), viri: None }),
+                        ann: ac.ann.clone(),
+                    });
+                }
+                Component::DocIRI(_) => {
+                    ont.insert(ac.clone());
+                }
+                Component::OntologyAnnotation(_) if keep_ontology => {
+                    ont.insert(ac.clone());
+                }
+                Component::Import(_) if keep_imports => {
+                    ont.insert(ac.clone());
+                }
+                _ => {}
             }
         }
-        for ac in annotation_backfill {
+        for ac in kept {
             ont.insert(ac);
         }
-        // The bridges, whatever axiom types were asked for. Under `internal` or
-        // `external` — the first named — only those whose subject is in, or
-        // outside, the base namespaces.
-        let bridge_namespace =
-            axiom_toks.iter().map(String::as_str).find(|t| matches!(*t, "internal" | "external"));
         for b in bridges {
-            let in_namespace =
-                bridge_namespace.is_none_or(|n| select::axiom_in_category(&b, n, &base_iris));
-            if in_namespace && seed_selects(&b) {
-                ont.insert(b);
-            }
+            ont.insert(b);
         }
         if keep_imports {
             for iri in &model.inlined_imports {
@@ -556,6 +296,10 @@ fn filter_core(
         // `mondo-simple.obo`.
         out.explicit_prefixes = model.explicit_prefixes;
         out.format_prefixes_cleared = true;
+        // What the command line binds and adds is the command's, not the
+        // document's: the new ontology is written with the prefixes it adds.
+        out.context = model.context;
+        out.added_prefixes = model.added_prefixes;
         out.owl_genid_refs = model.owl_genid_refs;
         out.owl_label_order = model.owl_label_order;
         out.imports_closure = model.imports_closure;
@@ -569,15 +313,31 @@ fn filter_core(
         out
     };
 
-    if let Some(drop) = &opts.drop_axiom_annotations {
-        crate::cmd::remove::drop_axiom_annotations(&mut kept, drop);
-    }
+    drops.apply(&mut kept)?;
     Ok(kept)
 }
 
-/// Replace the ontology's OntologyID IRI with `iri`.
+/// The hierarchy among the kept objects, re-asserted across what the filter
+/// leaves out: each kept class's nearest kept superclass expressions and each
+/// kept property's nearest kept super-properties, from the ontology's own
+/// axioms. Under `--axioms internal` or `external`, the first named, only those
+/// whose subject is inside, or outside, the base namespaces.
+fn span_kept(
+    model: &Model,
+    chosen: &HashSet<objects::Obj>,
+    axiom_selectors: &[String],
+    base: &[String],
+    shared: &mut HashMap<String, u64>,
+    cross: &mut HashMap<String, u64>,
+) -> Vec<Component<RcStr>> {
+    let root = crate::cmd::remove::own_ontology(model);
+    let bridges = crate::cmd::remove::span_gaps(root.as_ref().unwrap_or(model), chosen, shared, cross);
+    let (internal, external) = objects::namespace_flags(axiom_selectors);
+    bridges.into_iter().filter(|b| objects::in_namespace(b, internal, external, base)).collect()
+}
+
+/// Name the ontology `iri`, taken as written (`--ontology-iri`).
 fn set_ontology_iri(model: &mut Model, iri: &str) {
-    let expanded = select::expand(model, iri);
     let mut existing: Option<OntologyID<_>> = None;
     for ac in model.ont.iter() {
         if let Component::OntologyID(id) = &ac.component {
@@ -586,7 +346,7 @@ fn set_ontology_iri(model: &mut Model, iri: &str) {
         }
     }
     let mut id = existing.unwrap_or(OntologyID { iri: None, viri: None });
-    id.iri = Some(model.build.iri(expanded.as_str()));
+    id.iri = Some(model.build.iri(iri));
     let kept: Vec<_> = model
         .ont
         .iter()
@@ -599,35 +359,4 @@ fn set_ontology_iri(model: &mut Model, iri: &str) {
     }
     ont.insert(Component::OntologyID(id));
     model.ont = ont;
-}
-
-/// `filter --axioms`: whether `comp` has one of the requested axiom types, which
-/// is every type when none is named. `internal` and `external` name no type: they
-/// select by namespace, apart from the seed.
-///
-/// A declaration is an axiom type like any other, kept only when the request
-/// names it. Keeping declarations regardless would not dangle — the writer
-/// re-declares whatever the signature holds — but it would keep every declared
-/// entity in the signature, which changes what later steps can see. After
-/// UBERON's `-basic` composites' `filter --axioms "subclass equivalent
-/// annotation"`, a class with annotations and no logical axiom is only an
-/// annotation subject, which no signature holds, so the later `remove --term
-/// rdfs:label --select complement --axioms annotation --trim false` cannot reach
-/// its definition and keeps it. A kept declaration would put the class back in
-/// the signature, and that step would remove the 1,512 definitions on such
-/// classes.
-fn axiom_type_match(comp: &Component<horned_owl::model::RcStr>, toks: &[String]) -> bool {
-    toks.is_empty()
-        || toks
-            .iter()
-            .filter(|t| !matches!(t.as_str(), "internal" | "external"))
-            .any(|t| select::axiom_in_category(comp, t, &[]))
-}
-
-/// Built-in OWL/RDF/RDFS/XSD vocabulary IRIs are not part of a term seed.
-fn is_builtin(iri: &str) -> bool {
-    iri.starts_with("http://www.w3.org/2002/07/owl#")
-        || iri.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-        || iri.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-        || iri.starts_with("http://www.w3.org/2001/XMLSchema#")
 }

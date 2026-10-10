@@ -52,8 +52,9 @@ pub struct Args {
     /// release diff invokes it.
     #[arg(short = 'i', long)]
     pub input: Option<PathBuf>,
-    /// Append rdfs:label after entity IRIs in the report.
-    #[arg(long = "labels", num_args = 1, default_missing_value = "true")]
+    /// Append rdfs:label after entity IRIs in the report (`true` or `yes` in
+    /// any case).
+    #[arg(long = "labels", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub labels: Option<bool>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,

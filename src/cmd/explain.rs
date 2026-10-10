@@ -152,7 +152,7 @@ pub fn step(
                     u
                 }
                 _ => {
-                    let c = select::expand(&model, selector);
+                    let c = select::expand_with_document_prefixes(&model, selector);
                     if !unsat.contains(&c) {
                         bail!("{c} is satisfiable (not entailed to be ⊑ owl:Nothing)");
                     }
@@ -398,7 +398,7 @@ struct Term {
 fn term(model: &Model, raw: &str) -> Term {
     Term {
         raw: raw.to_string(),
-        iri: select::expand(model, raw),
+        iri: select::expand_with_document_prefixes(model, raw),
     }
 }
 
@@ -443,8 +443,8 @@ fn require_class(classes: &HashSet<String>, t: &Term) -> anyhow::Result<()> {
         ),
     };
     bail!(
-        "`{raw}` did not expand to an IRI: the prefix `{pre}` is bound neither in the ontology's \
-         prefix map nor in the bundled OBO context, so it names no class.{hint}"
+        "`{raw}` did not expand to an IRI: no prefix `{pre}` is bound where it is read, so it \
+         names no class.{hint}"
     )
 }
 
@@ -475,8 +475,11 @@ fn parse_subclassof_axiom(model: &Model, axiom: &str) -> anyhow::Result<(Term, T
     if sub_str.is_empty() || sup_str.is_empty() {
         bail!("--axiom must name both a subclass and a superclass");
     }
+    // The axiom's CURIEs are read with the command line's context
+    // ([`crate::context`]); `--sub` and `--sup` read theirs as the document does.
+    let prefixes = model.context.prefix_mapping();
     let parse_side = |side: &str| -> anyhow::Result<Term> {
-        let iri = match crate::io::manchester::parse_class_expression(&model.build, &model.prefixes, side) {
+        let iri = match crate::io::manchester::parse_class_expression(&model.build, &prefixes, side) {
             Some(horned_owl::model::ClassExpression::Class(c)) => c.0.as_ref().to_string(),
             Some(_) => bail!("--axiom: only named classes are supported (got a complex expression in '{side}')"),
             None => select::expand(model, side), // fall back to CURIE/IRI expansion
@@ -613,7 +616,7 @@ impl<'a> Search<'a> {
         let mut candidates = Vec::new();
         let mut declarations = std::collections::HashMap::new();
         for ac in module.ont.iter() {
-            if is_logical(&ac.component) {
+            if select::is_logical(&ac.component) {
                 candidates.push(ac.clone());
             } else if is_declaration(&ac.component) {
                 if let Some((_, iri)) = crate::sig::typed_signature(&ac.component).into_iter().next() {
@@ -852,19 +855,3 @@ fn is_declaration(c: &Component<RcStr>) -> bool {
     )
 }
 
-fn is_logical(c: &Component<RcStr>) -> bool {
-    !matches!(
-        c,
-        Component::DeclareClass(_)
-            | Component::DeclareObjectProperty(_)
-            | Component::DeclareDataProperty(_)
-            | Component::DeclareAnnotationProperty(_)
-            | Component::DeclareNamedIndividual(_)
-            | Component::DeclareDatatype(_)
-            | Component::AnnotationAssertion(_)
-            | Component::OntologyAnnotation(_)
-            | Component::OntologyID(_)
-            | Component::DocIRI(_)
-            | Component::Import(_)
-    )
-}

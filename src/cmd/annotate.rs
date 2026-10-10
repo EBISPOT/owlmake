@@ -1,17 +1,22 @@
 //! `annotate` — add ontology-level annotations and set the ontology/version IRI,
 //! the provenance every released ontology file is expected to carry.
 
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use clap::Args as ClapArgs;
 use horned_owl::model::{
-    AnnotatedComponent, Annotation, AnnotationAssertion, AnnotationSubject, AnnotationValue,
-    Component, DeclareAnnotationProperty, Literal, MutableOntology, OntologyID,
+    AnnotatedComponent, Annotation, AnnotationAssertion, AnnotationProperty, AnnotationSubject,
+    AnnotationValue, Component, Kinded, Literal, MutableOntology, OntologyID,
 };
 
 const RDFS_IS_DEFINED_BY: &str = "http://www.w3.org/2000/01/rdf-schema#isDefinedBy";
 const PROV_WAS_DERIVED_FROM: &str = "http://www.w3.org/ns/prov#wasDerivedFrom";
+const OWL: &str = "http://www.w3.org/2002/07/owl#";
+const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+const RDFS: &str = "http://www.w3.org/2000/01/rdf-schema#";
+const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -37,9 +42,11 @@ pub struct Args {
     /// Add an ontology annotation as `PROP IRI` (IRI value). May be repeated.
     #[arg(short = 'k', long, num_args = 2, value_names = ["PROP", "IRI"])]
     pub link_annotation: Vec<String>,
-    /// Annotate every axiom in the ontology with `PROP VALUE` (literal value).
-    /// May be repeated.
-    #[arg(short = 'x', long, num_args = 2, value_names = ["PROP", "VALUE"])]
+    /// Annotate the axioms with `PROP VALUE` (literal value). Each occurrence
+    /// takes three values, and the values of every occurrence are read in
+    /// `PROP VALUE` pairs. Each pair replaces the annotations of every
+    /// `SubClassOf`; an ontology with an axiom of any other type is refused.
+    #[arg(short = 'x', long, num_args = 3, value_names = ["PROP", "VALUE", "PROP"])]
     pub axiom_annotation: Vec<String>,
     /// Add an ontology annotation with a language-tagged literal as
     /// `PROP VALUE LANG`. May be repeated.
@@ -49,24 +56,26 @@ pub struct Args {
     /// (TYPE is a datatype CURIE/IRI). May be repeated.
     #[arg(short = 't', long, num_args = 3, value_names = ["PROP", "VALUE", "TYPE"])]
     pub typed_annotation: Vec<String>,
-    /// Load ontology annotations from a Turtle/OWL file and merge them.
-    /// May be repeated.
+    /// Merge the axioms and ontology annotations of an ontology file, but not
+    /// its imports. May be repeated.
     #[arg(short = 'A', long, value_name = "FILE")]
     pub annotation_file: Vec<PathBuf>,
-    /// Add an `rdfs:isDefinedBy` annotation to each entity, pointing at the
-    /// ontology IRI (`<bool>`, default false).
-    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true")]
+    /// Assert `rdfs:isDefinedBy` the ontology IRI of every entity of the
+    /// signature outside the OWL, RDF, RDFS and XSD vocabularies that has no
+    /// `rdfs:isDefinedBy` (`<bool>`, default false).
+    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub annotate_defined_by: Option<bool>,
-    /// Add a `prov:wasDerivedFrom` ontology annotation pointing at the version
-    /// IRI (`<bool>`, default false).
-    #[arg(short = 'f', long, num_args = 1, default_missing_value = "true")]
+    /// Annotate every axiom with no `prov:wasDerivedFrom` with one naming the
+    /// version IRI, or the ontology IRI where there is no version IRI
+    /// (`<bool>`, default false).
+    #[arg(short = 'f', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub annotate_derived_from: Option<bool>,
     /// Remove all existing ontology annotations first.
     #[arg(short = 'R', long)]
     pub remove_annotations: bool,
     /// If true, replace `%{ontology_iri}` and `%{version_iri}` in each annotation
     /// value with the ontology's IRI and version IRI. `<bool>`.
-    #[arg(short = 'e', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'e', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub interpolate: Option<bool>,
 
     #[command(flatten)]
@@ -77,7 +86,6 @@ pub fn run(args: Args) -> anyhow::Result<()> {
     step(None, &args)?;
     Ok(())
 }
-
 pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
@@ -86,44 +94,21 @@ pub fn step(
     args.common.apply(&mut model)?;
     // The annotated document is written among the ontologies it imports.
     crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
-    // `--interpolate`: each value names the ontology's IRI as `%{ontology_iri}`
-    // and its version IRI as `%{version_iri}` — the IRIs it has as this command
-    // reads it, before `--ontology-iri`/`--version-iri` change them.
-    let interpolate = |values: &[String], width: usize| -> Vec<String> {
-        if !args.interpolate.unwrap_or(false) {
-            return values.to_vec();
-        }
-        let (ontology, version) = ontology_iris(&model);
-        values
-            .iter()
-            .enumerate()
-            .map(|(i, v)| match i % width {
-                1 => interpolated(v, ontology.as_deref(), version.as_deref()),
-                _ => v.clone(),
-            })
-            .collect()
-    };
-    let (annotation, link_annotation, axiom_annotation, language_annotation, typed_annotation) = (
-        interpolate(&args.annotation, 2),
-        interpolate(&args.link_annotation, 2),
-        interpolate(&args.axiom_annotation, 2),
-        interpolate(&args.language_annotation, 3),
-        interpolate(&args.typed_annotation, 3),
-    );
     let mut model = annotate_with(
         model,
         &AnnotateOptions {
             ontology_iri: args.ontology_iri.clone(),
             version_iri: args.version_iri.clone(),
-            annotation,
-            link_annotation,
-            axiom_annotation,
-            language_annotation,
-            typed_annotation,
+            annotation: args.annotation.clone(),
+            link_annotation: args.link_annotation.clone(),
+            language_annotation: args.language_annotation.clone(),
+            typed_annotation: args.typed_annotation.clone(),
+            axiom_annotation: args.axiom_annotation.clone(),
             annotation_file: args.annotation_file.clone(),
             annotate_defined_by: args.annotate_defined_by.unwrap_or(false),
             annotate_derived_from: args.annotate_derived_from.unwrap_or(false),
             remove_annotations: args.remove_annotations,
+            interpolate: args.interpolate.unwrap_or(false),
         },
     )?;
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
@@ -167,22 +152,47 @@ fn interpolated(value: &str, ontology: Option<&str>, version: Option<&str>) -> S
     }
     value
 }
-
-/// Full set of `annotate` options. Defaults are empty / false so callers can set
-/// only what they need.
+/// The options of `annotate`. Pairs and triples are flattened in the order
+/// they are given. Defaults are empty / false so callers can set only what they
+/// need.
 #[derive(Default)]
 pub struct AnnotateOptions {
     pub ontology_iri: Option<String>,
     pub version_iri: Option<String>,
+    /// `PROP VALUE` pairs.
     pub annotation: Vec<String>,
+    /// `PROP IRI` pairs.
     pub link_annotation: Vec<String>,
-    pub axiom_annotation: Vec<String>,
+    /// `PROP VALUE LANG` triples.
     pub language_annotation: Vec<String>,
+    /// `PROP VALUE TYPE` triples.
     pub typed_annotation: Vec<String>,
+    /// `PROP VALUE` pairs.
+    pub axiom_annotation: Vec<String>,
     pub annotation_file: Vec<PathBuf>,
     pub annotate_defined_by: bool,
     pub annotate_derived_from: bool,
     pub remove_annotations: bool,
+    /// Replace `%{ontology_iri}` and `%{version_iri}` in each value with the
+    /// IRIs the ontology has before these options set them.
+    pub interpolate: bool,
+}
+
+impl AnnotateOptions {
+    /// Whether these options ask for any change. `interpolate` alone does not.
+    fn ask_for_anything(&self) -> bool {
+        self.remove_annotations
+            || !self.annotation.is_empty()
+            || !self.link_annotation.is_empty()
+            || !self.language_annotation.is_empty()
+            || !self.typed_annotation.is_empty()
+            || !self.axiom_annotation.is_empty()
+            || !self.annotation_file.is_empty()
+            || self.ontology_iri.is_some()
+            || self.version_iri.is_some()
+            || self.annotate_derived_from
+            || self.annotate_defined_by
+    }
 }
 
 /// Narrow entry point for the common case: set the ontology/version IRI and add
@@ -209,296 +219,255 @@ pub fn annotate(
     )
 }
 
-/// Apply the ontology-level annotations, the ontology/version IRIs and the rest
-/// of the `annotate` options to `model` (pure core).
+/// Apply `opts` to `model`, in this order: remove the ontology annotations; add
+/// the literal, link, language-tagged and typed ontology annotations; annotate
+/// the axioms; merge the annotation files; set the ontology and version IRIs;
+/// annotate every axiom with what it is derived from; and assert what defines
+/// every entity. Options that ask for no change are refused.
 pub fn annotate_with(
     mut model: crate::model::Model,
     opts: &AnnotateOptions,
 ) -> Result<crate::model::Model> {
-    let ontology_iri = opts.ontology_iri.as_deref();
-    let version_iri = opts.version_iri.as_deref();
-    let annotation = &opts.annotation;
-    let link_annotation = &opts.link_annotation;
-    let remove_annotations = opts.remove_annotations;
-    if remove_annotations {
-        let kept: Vec<_> = model
+    if !opts.ask_for_anything() {
+        bail!("MISSING ANNOTATION ERROR at least one annotation option or annotation file is required");
+    }
+    if opts.remove_annotations {
+        let header: Vec<_> = model
             .ont
             .iter()
-            .filter(|ac| !matches!(ac.component, Component::OntologyAnnotation(_)))
+            .filter(|ac| matches!(ac.component, Component::OntologyAnnotation(_)))
             .cloned()
             .collect();
-        let mut ont = horned_owl::ontology::set::SetOntology::new();
-        for ac in kept {
-            ont.insert(ac);
-        }
-        model.ont = ont;
-    }
-
-    // Set ontology / version IRI by replacing the OntologyID component.
-    if ontology_iri.is_some() || version_iri.is_some() {
-        let mut existing: Option<OntologyID<_>> = None;
-        for ac in model.ont.iter() {
-            if let Component::OntologyID(id) = &ac.component {
-                existing = Some(id.clone());
-                break;
-            }
-        }
-        let mut id = existing.clone().unwrap_or(OntologyID {
-            iri: None,
-            viri: None,
-        });
-        if let Some(iri) = ontology_iri {
-            id.iri = Some(model.build.iri(iri));
-        }
-        if let Some(viri) = version_iri {
-            id.viri = Some(model.build.iri(viri));
-        }
-        // Remove old OntologyID, insert the new one.
-        let kept: Vec<_> = model
-            .ont
-            .iter()
-            .filter(|ac| !matches!(ac.component, Component::OntologyID(_)))
-            .cloned()
-            .collect();
-        let mut ont = horned_owl::ontology::set::SetOntology::new();
-        for ac in kept {
-            ont.insert(ac);
-        }
-        ont.insert(Component::OntologyID(id));
-        model.ont = ont;
-    }
-
-    for pair in annotation.chunks(2) {
-        let [prop, value] = pair else { bail!("--annotation needs PROP VALUE") };
-        let full = expand(&model, prop);
-        let ap = model.build.annotation_property(full.as_str());
-        model.ont.insert(Component::OntologyAnnotation(
-            horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
-                ap,
-                av: AnnotationValue::Literal(string_literal(&model, value)),
-            }),
-        ));
-        declare_ap_if_custom(&mut model, &full);
-    }
-    for pair in link_annotation.chunks(2) {
-        let [prop, iri] = pair else { bail!("--link-annotation needs PROP IRI") };
-        let full = expand(&model, prop);
-        let ap = model.build.annotation_property(full.as_str());
-        model.ont.insert(Component::OntologyAnnotation(
-            horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
-                ap,
-                av: AnnotationValue::IRI(model.build.iri(expand(&model, iri).as_str())),
-            }),
-        ));
-        declare_ap_if_custom(&mut model, &full);
-    }
-
-    // Language-tagged ontology annotations: PROP VALUE LANG.
-    for triple in opts.language_annotation.chunks(3) {
-        let [prop, value, lang] = triple else {
-            bail!("--language-annotation needs PROP VALUE LANG")
-        };
-        let full = expand(&model, prop);
-        let ap = model.build.annotation_property(full.as_str());
-        model.ont.insert(Component::OntologyAnnotation(
-            horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
-                ap,
-                av: AnnotationValue::Literal(crate::model::literal_as_made(Literal::Language {
-                    literal: value.clone(),
-                    lang: lang.clone(),
-                })),
-            }),
-        ));
-        declare_ap_if_custom(&mut model, &full);
-    }
-
-    // Typed ontology annotations: PROP VALUE TYPE (TYPE is a datatype CURIE/IRI).
-    for triple in opts.typed_annotation.chunks(3) {
-        let [prop, value, ty] = triple else {
-            bail!("--typed-annotation needs PROP VALUE TYPE")
-        };
-        let full = expand(&model, prop);
-        let ap = model.build.annotation_property(full.as_str());
-        model.ont.insert(Component::OntologyAnnotation(
-            horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
-                ap,
-                av: AnnotationValue::Literal(crate::model::literal_as_made(Literal::Datatype {
-                    literal: value.clone(),
-                    datatype_iri: model.build.iri(expand(&model, ty).as_str()),
-                })),
-            }),
-        ));
-        declare_ap_if_custom(&mut model, &full);
-    }
-
-    // Merge ontology annotations from external files.
-    for file in &opts.annotation_file {
-        let loaded = crate::io::load(file)?;
-        for ac in loaded.ont.iter() {
-            if let Component::OntologyAnnotation(oa) = &ac.component {
-                model
-                    .ont
-                    .insert(Component::OntologyAnnotation(oa.clone()));
-            }
+        for ac in header {
+            model.ont.remove(&ac);
         }
     }
 
-    // Annotate every axiom with PROP VALUE (literal). horned-owl groups an axiom
-    // with its axiom-level annotations in `AnnotatedComponent.ann`, so we rebuild
-    // the ontology adding the annotation to each component's annotation set.
-    for pair in opts.axiom_annotation.chunks(2) {
-        let [prop, value] = pair else { bail!("--axiom-annotation needs PROP VALUE") };
-        let full = expand(&model, prop);
-        let ann = Annotation { ann: Default::default(),
-            ap: model.build.annotation_property(full.as_str()),
-            av: AnnotationValue::Literal(string_literal(&model, value)),
-        };
-        declare_ap_if_custom(&mut model, &full);
-        let rebuilt: Vec<AnnotatedComponent<_>> = model
-            .ont
-            .iter()
-            .map(|ac| {
-                let mut ac = ac.clone();
-                ac.ann.insert(ann.clone());
-                ac
-            })
-            .collect();
-        let mut ont = horned_owl::ontology::set::SetOntology::new();
-        for ac in rebuilt {
-            ont.insert(ac);
+    // `interpolate` names the IRIs the ontology has as it is read, before the
+    // ontology and version IRIs below change them.
+    let (ontology, version) = ontology_iris(&model);
+    let value = |v: &str| -> String {
+        if opts.interpolate {
+            interpolated(v, ontology.as_deref(), version.as_deref())
+        } else {
+            v.to_string()
         }
-        model.ont = ont;
-    }
-
-    // Effective ontology / version IRI, used by the defined-by / derived-from
-    // options (after any --ontology-iri/--version-iri have been applied above).
-    let (eff_ont_iri, eff_viri) = {
-        let mut o = None;
-        let mut v = None;
-        for ac in model.ont.iter() {
-            if let Component::OntologyID(id) = &ac.component {
-                o = id.iri.as_ref().map(|i| i.as_ref().to_string());
-                v = id.viri.as_ref().map(|i| i.as_ref().to_string());
-                break;
-            }
-        }
-        (o, v)
     };
 
-    // --annotate-defined-by: add rdfs:isDefinedBy <ontology IRI> to each entity.
-    if opts.annotate_defined_by {
-        if let Some(ont_iri) = &eff_ont_iri {
-            let subjects = entity_iris(&model);
-            let ap = model.build.annotation_property(RDFS_IS_DEFINED_BY);
-            let target = model.build.iri(ont_iri.as_str());
-            for subj in subjects {
-                model.ont.insert(Component::AnnotationAssertion(AnnotationAssertion {
-                    subject: AnnotationSubject::IRI(model.build.iri(subj.as_str())),
-                    ann: Annotation { ann: Default::default(),
-                        ap: ap.clone(),
-                        av: AnnotationValue::IRI(target.clone()),
-                    },
-                }));
-            }
-        } else {
-            status!("annotate: --annotate-defined-by ignored (no ontology IRI set)");
+    for pair in opts.annotation.chunks(2) {
+        let [prop, v] = pair else {
+            bail!("ANNOTATION FORMAT ERROR each annotation must include PROP VALUE")
+        };
+        let ap = annotation_property(&model, prop)?;
+        let literal = string_literal(&model, &value(v));
+        add_ontology_annotation(&mut model, ap, AnnotationValue::Literal(literal));
+    }
+    for pair in opts.link_annotation.chunks(2) {
+        let [prop, v] = pair else {
+            bail!("ANNOTATION FORMAT ERROR each link annotation must include PROP LINK")
+        };
+        let ap = annotation_property(&model, prop)?;
+        let link = model.build.iri(iri(&model, &value(v), "value")?.as_str());
+        add_ontology_annotation(&mut model, ap, AnnotationValue::IRI(link));
+    }
+    for triple in opts.language_annotation.chunks(3) {
+        let [prop, v, lang] = triple else {
+            bail!("ANNOTATION FORMAT ERROR each language annotation must include PROP VALUE LANG")
+        };
+        let ap = annotation_property(&model, prop)?;
+        let literal = crate::model::literal_as_made(Literal::Language { literal: value(v), lang: lang.clone() });
+        add_ontology_annotation(&mut model, ap, AnnotationValue::Literal(literal));
+    }
+    for triple in opts.typed_annotation.chunks(3) {
+        let [prop, v, ty] = triple else {
+            bail!("ANNOTATION FORMAT ERROR each typed annotation must include PROP VALUE TYPE")
+        };
+        let ap = annotation_property(&model, prop)?;
+        let literal = crate::model::literal_as_made(Literal::Datatype {
+            literal: value(v),
+            datatype_iri: model.build.iri(iri(&model, ty, "datatype")?.as_str()),
+        });
+        add_ontology_annotation(&mut model, ap, AnnotationValue::Literal(literal));
+    }
+
+    // Each axiom annotation replaces the annotations of every `SubClassOf`, and
+    // annotates nothing else: an ontology with an axiom of another type is
+    // refused.
+    for pair in opts.axiom_annotation.chunks(2) {
+        let [prop, v] = pair else {
+            bail!("ANNOTATION FORMAT ERROR each axiom annotation must include PROP VALUE")
+        };
+        let annotation = Annotation {
+            ann: BTreeSet::new(),
+            ap: annotation_property(&model, prop)?,
+            av: AnnotationValue::Literal(string_literal(&model, &value(v))),
+        };
+        let axioms: Vec<_> = model.ont.iter().filter(|ac| own_axiom(&model, ac)).cloned().collect();
+        if let Some(other) = axioms.iter().find(|ac| !matches!(ac.component, Component::SubClassOf(_))) {
+            bail!("AXIOM TYPE ERROR cannot annotate axioms of type: {:?}", other.component.kind());
+        }
+        for ac in axioms {
+            model.ont.remove(&ac);
+            model.ont.insert(AnnotatedComponent { component: ac.component, ann: BTreeSet::from([annotation.clone()]) });
         }
     }
 
-    // --annotate-derived-from: add prov:wasDerivedFrom <version IRI> as an
-    // ontology annotation.
+    // An annotation file lends its own axioms and ontology annotations, not its
+    // imports or its name.
+    for file in &opts.annotation_file {
+        let other = crate::io::load(file)?;
+        let lent: Vec<_> = other
+            .ont
+            .iter()
+            .filter(|ac| {
+                !matches!(ac.component, Component::OntologyID(_) | Component::DocIRI(_) | Component::Import(_))
+                    && !other.imported_components.contains(*ac)
+            })
+            .cloned()
+            .collect();
+        for ac in lent {
+            model.ont.insert(ac);
+        }
+    }
+
+    // Set ontology / version IRI by replacing the OntologyID component; an IRI
+    // not given keeps its value.
+    if opts.ontology_iri.is_some() || opts.version_iri.is_some() {
+        let existing = model.ont.iter().find_map(|ac| match &ac.component {
+            Component::OntologyID(id) => Some(id.clone()),
+            _ => None,
+        });
+        let mut id = existing.unwrap_or(OntologyID { iri: None, viri: None });
+        if let Some(iri) = &opts.ontology_iri {
+            id.iri = Some(model.build.iri(iri.as_str()));
+        }
+        if let Some(viri) = &opts.version_iri {
+            id.viri = Some(model.build.iri(viri.as_str()));
+        }
+        let old: Vec<_> = model
+            .ont
+            .iter()
+            .filter(|ac| matches!(ac.component, Component::OntologyID(_)))
+            .cloned()
+            .collect();
+        for ac in old {
+            model.ont.remove(&ac);
+        }
+        model.ont.insert(Component::OntologyID(id));
+    }
+
+    // Every axiom with no `prov:wasDerivedFrom` gets one naming the version IRI,
+    // or the ontology IRI where there is none.
     if opts.annotate_derived_from {
-        if let Some(viri) = &eff_viri {
-            let ap = model.build.annotation_property(PROV_WAS_DERIVED_FROM);
-            model.ont.insert(Component::OntologyAnnotation(
-                horned_owl::model::OntologyAnnotation(Annotation { ann: Default::default(),
-                    ap,
-                    av: AnnotationValue::IRI(model.build.iri(viri.as_str())),
-                }),
-            ));
-        } else {
-            status!("annotate: --annotate-derived-from ignored (no version IRI set)");
+        let (ontology, version) = ontology_iris(&model);
+        match version.or(ontology) {
+            Some(source) => {
+                let ap = model.build.annotation_property(PROV_WAS_DERIVED_FROM);
+                let annotation = Annotation {
+                    ann: BTreeSet::new(),
+                    ap: ap.clone(),
+                    av: AnnotationValue::IRI(model.build.iri(source.as_str())),
+                };
+                let axioms: Vec<_> = model
+                    .ont
+                    .iter()
+                    .filter(|ac| own_axiom(&model, ac) && !ac.ann.iter().any(|a| a.ap == ap))
+                    .cloned()
+                    .collect();
+                for mut ac in axioms {
+                    model.ont.remove(&ac);
+                    ac.ann.insert(annotation.clone());
+                    model.ont.insert(ac);
+                }
+            }
+            None => status!("annotate: --annotate-derived-from: the ontology has no IRI"),
+        }
+    }
+
+    // Every entity of the signature outside the reserved vocabularies that has
+    // no `rdfs:isDefinedBy` is defined by the ontology.
+    if opts.annotate_defined_by {
+        match ontology_iris(&model).0 {
+            Some(ontology) => {
+                let ap = model.build.annotation_property(RDFS_IS_DEFINED_BY);
+                let defined: HashSet<String> = model
+                    .ont
+                    .iter()
+                    .filter(|ac| !model.imported_components.contains(*ac))
+                    .filter_map(|ac| match &ac.component {
+                        Component::AnnotationAssertion(AnnotationAssertion {
+                            subject: AnnotationSubject::IRI(subject),
+                            ann,
+                        }) if ann.ap == ap => Some(subject.as_ref().to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                let entities: BTreeSet<String> = crate::io::entities::root_signature(&model)
+                    .into_iter()
+                    .map(|(_, iri)| iri)
+                    .filter(|iri| !reserved(iri) && !defined.contains(iri))
+                    .collect();
+                let target = model.build.iri(ontology.as_str());
+                for entity in entities {
+                    model.ont.insert(Component::AnnotationAssertion(AnnotationAssertion {
+                        subject: AnnotationSubject::IRI(model.build.iri(entity.as_str())),
+                        ann: Annotation {
+                            ann: BTreeSet::new(),
+                            ap: ap.clone(),
+                            av: AnnotationValue::IRI(target.clone()),
+                        },
+                    }));
+                }
+            }
+            None => status!("annotate: --annotate-defined-by: the ontology has no IRI"),
         }
     }
 
     Ok(model)
 }
 
-/// Collect the IRIs of declared entities (classes, object/data/annotation
-/// properties, named individuals, datatypes) for `--annotate-defined-by`.
-fn entity_iris(model: &crate::model::Model) -> Vec<String> {
-    let mut out = std::collections::BTreeSet::new();
-    for ac in model.ont.iter() {
-        match &ac.component {
-            Component::DeclareClass(d) => {
-                out.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareObjectProperty(d) => {
-                out.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareDataProperty(d) => {
-                out.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareAnnotationProperty(d) => {
-                out.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareNamedIndividual(d) => {
-                out.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareDatatype(d) => {
-                out.insert(d.0 .0.as_ref().to_string());
-            }
-            _ => {}
-        }
-    }
-    out.into_iter().collect()
+/// The annotation property `prop` names.
+fn annotation_property(
+    model: &crate::model::Model,
+    prop: &str,
+) -> Result<AnnotationProperty<crate::model::Str>> {
+    Ok(model.build.annotation_property(iri(model, prop, "property")?.as_str()))
 }
 
-/// Expand a CURIE (`prefix:local`) against the model's prefix map; pass full
-/// IRIs through unchanged.
-/// Declare every *non-built-in* annotation property `annotate` adds, so the
-/// property is never dangling (a base module built with
-/// `annotate --link-annotation dc:type …` carries `Declaration(AnnotationProperty(dc:type))`).
-/// Built-in OWL/RDFS annotation properties are never declared: OWL 2 predeclares
-/// them, so an added declaration would be pure noise in the output.
-/// `model.ont` is a set, so re-declaring an already-declared property is a no-op.
-fn declare_ap_if_custom(model: &mut crate::model::Model, iri: &str) {
-    const BUILTIN: &[&str] = &[
-        "http://www.w3.org/2000/01/rdf-schema#label",
-        "http://www.w3.org/2000/01/rdf-schema#comment",
-        "http://www.w3.org/2000/01/rdf-schema#seeAlso",
-        "http://www.w3.org/2000/01/rdf-schema#isDefinedBy",
-        "http://www.w3.org/2002/07/owl#versionInfo",
-        "http://www.w3.org/2002/07/owl#backwardCompatibleWith",
-        "http://www.w3.org/2002/07/owl#priorVersion",
-        "http://www.w3.org/2002/07/owl#incompatibleWith",
-        "http://www.w3.org/2002/07/owl#deprecated",
-    ];
-    if BUILTIN.contains(&iri) {
-        return;
-    }
-    let ap = model.build.annotation_property(iri);
-    model
-        .ont
-        .insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(ap)));
+/// Add an ontology annotation. Its property is not declared: a written document
+/// declares the properties the ontology uses and does not declare.
+fn add_ontology_annotation(
+    model: &mut crate::model::Model,
+    ap: AnnotationProperty<crate::model::Str>,
+    av: AnnotationValue<crate::model::Str>,
+) {
+    model.ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(Annotation {
+        ann: BTreeSet::new(),
+        ap,
+        av,
+    })));
 }
 
-fn expand(model: &crate::model::Model, s: &str) -> String {
-    if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
-        return s.to_string();
-    }
-    // A CURIE on the COMMAND LINE expands against the context map, where `dc` is
-    // dc/TERMS/ — not against the document's own map, where `dc` is the
-    // elements/1.1/ namespace that documents declare. `--annotation dc:description`
-    // therefore annotates with `…/dc/terms/description`; the same split already
-    // applies to template CURIEs (`template::robot_context_prefixes`).
-    if let Some((pfx, local)) = s.split_once(':') {
-        if pfx == "dc" && !local.starts_with('/') {
-            return format!("http://purl.org/dc/terms/{local}");
-        }
-    }
-    model
-        .prefixes
-        .expand_curie_string(s)
-        .unwrap_or_else(|_| s.to_string())
+/// Whether `ac` is an axiom of the ontology's own: not its name, a header
+/// annotation or an import, and not lent by an import.
+fn own_axiom(model: &crate::model::Model, ac: &AnnotatedComponent<crate::model::Str>) -> bool {
+    !matches!(
+        ac.component,
+        Component::OntologyID(_) | Component::DocIRI(_) | Component::OntologyAnnotation(_) | Component::Import(_)
+    ) && !model.imported_components.contains(ac)
+}
+
+/// Whether `iri` belongs to the OWL, RDF, RDFS or XSD vocabulary: its namespace,
+/// what precedes its longest NCName suffix, is one of theirs.
+fn reserved(iri: &str) -> bool {
+    matches!(crate::owlapi_hash::iri_split(iri).0, OWL | RDF | RDFS | XSD)
+}
+
+/// The IRI `term` names, read with the command line's context
+/// ([`crate::context`]), where `dc` is dc/TERMS/ and a document's own prefixes
+/// play no part. A term that names none is refused, naming the `field` it was
+/// given for.
+fn iri(model: &crate::model::Model, term: &str, field: &str) -> anyhow::Result<String> {
+    crate::cmd::select::iri(model, term)
+        .ok_or_else(|| anyhow::anyhow!("INVALID IRI ERROR {field} \"{term}\" is not a valid CURIE or IRI"))
 }

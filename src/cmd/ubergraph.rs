@@ -109,7 +109,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     let props: HashSet<String> = args
         .term
         .iter()
-        .map(|t| crate::cmd::select::expand(&model, t))
+        .map(|t| crate::cmd::select::expand_with_document_prefixes(&model, t))
         .collect();
     let transitive = transitive_properties(&model);
     let subprop = subproperty_closure(&model);

@@ -3,11 +3,12 @@
 
 Pipeline:
 
-1. Obtain the clap-introspected command/flag tree, in order of preference:
-   a JSON file passed as ``argv[1]``; else the installed native extension
-   (``owlmake._owlmake.cli_spec()``); else ``owlmake __cli-spec`` from a freshly
-   built binary under ``target/``. All three are the same data — produced by
-   introspecting the one ``clap::Command`` tree (see ``src/cli.rs``).
+1. Obtain the clap-introspected command/flag tree: a JSON file passed as
+   ``argv[1]``, else ``om __cli-spec`` from the binary built from this tree
+   (the newer of ``target/release/om`` and ``target/debug/om``). Both are the
+   same data — produced by introspecting the one ``clap::Command`` tree (see
+   ``src/cli.rs``). An installed extension is never consulted: it is built from
+   whatever tree it was built from, not this one.
 2. Merge in the hand-authored description of the ``sssom`` sub-CLI (parsed by
    hand rather than by clap, so its grammar — positional inputs and dynamic
    ``--<slot>`` options — is not in the clap tree) and a note for ``jq``.
@@ -501,25 +502,20 @@ from ._runtime import Chain, OwlmakeResult, StrOrPath
 # Spec acquisition
 # --------------------------------------------------------------------------- #
 def load_clap_spec() -> Dict[str, Any]:
-    """Return the clap CLI spec dict, from argv[1] / the installed extension /
-    a built binary, in that order."""
+    """Return the clap CLI spec dict, from argv[1] or else the newest binary
+    built from this tree."""
     if len(sys.argv) > 1:
         return json.loads(Path(sys.argv[1]).read_text())
-    try:
-        from owlmake._owlmake import cli_spec  # type: ignore
-        return json.loads(cli_spec())
-    except Exception:
-        pass
-    for build in ("release", "debug"):
-        exe = REPO / "target" / build / "owlmake"
-        if exe.exists():
-            out = subprocess.run([str(exe), "__cli-spec"], capture_output=True,
-                                 text=True, check=True)
-            return json.loads(out.stdout)
-    raise SystemExit(
-        "could not obtain the CLI spec: pass a spec JSON file as argv[1], install "
-        "the owlmake extension, or build the binary (cargo build)."
-    )
+    built = [REPO / "target" / build / "om" for build in ("release", "debug")]
+    built = [exe for exe in built if exe.exists()]
+    if not built:
+        raise SystemExit(
+            "could not obtain the CLI spec: pass a spec JSON file as argv[1], or "
+            "build the binary (cargo build)."
+        )
+    exe = max(built, key=lambda p: p.stat().st_mtime)
+    out = subprocess.run([str(exe), "__cli-spec"], capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
 
 
 def main() -> int:

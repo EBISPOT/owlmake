@@ -42,6 +42,8 @@ pub mod plan;
 pub mod spec;
 pub mod table;
 pub mod cmd;
+/// The prefixes a command reads the CURIEs it is given with.
+pub mod context;
 // The command-chaining CLI dispatch — the `Cli`/`Command` clap tree and
 // `run_argv`, the in-process entry point both the binary (`src/main.rs`) and
 // the Python extension call. Native-only: it reaches the embedded text

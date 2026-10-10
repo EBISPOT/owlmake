@@ -1006,7 +1006,7 @@ fn resolve_property(model: &Model, token: &str) -> Option<String> {
         return Some(token.to_string());
     }
     if token.contains(':') && !token.contains(' ') {
-        let iri = crate::cmd::select::expand(model, token);
+        let iri = crate::cmd::select::expand_with_document_prefixes(model, token);
         if iri != token {
             return Some(iri);
         }

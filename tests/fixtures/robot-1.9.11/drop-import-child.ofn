@@ -1,0 +1,7 @@
+Prefix(:=<http://example.org/c#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/drop-import-child.owl>
+Declaration(Class(:X))
+Declaration(Class(:Y))
+SubClassOf(Annotation(rdfs:comment "imported") :Y :X)
+)

@@ -1,0 +1,42 @@
+Prefix(:=<http://example.org/s#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(oboInOwl:=<http://www.geneontology.org/formats/oboInOwl#>)
+
+
+Ontology(<http://example.org/s>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(AnnotationProperty(oboInOwl:source))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (a)
+
+AnnotationAssertion(rdfs:label :A "a")
+
+# Class: :B (b)
+
+AnnotationAssertion(rdfs:label :B "b")
+SubClassOf(Annotation(rdfs:comment "keep") :B :A)
+
+# Class: :D (d)
+
+AnnotationAssertion(rdfs:label :D "d")
+
+# Class: :E (e)
+
+AnnotationAssertion(rdfs:label :E "e")
+SubClassOf(:E :D)
+
+
+)

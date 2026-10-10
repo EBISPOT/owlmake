@@ -161,9 +161,10 @@ jobs:
           assert "http://x/Neuron" in dlo.dl_query("part_of some Brain", "descendants")
           assert "http://x/Cell" in dlo.dl_query("Neuron", "ancestors")
           assert dlo.dl_query_dataframe("Cell", "descendants").shape[0] == 1
-          # Template from a DataFrame; DOSDP pattern from a DataFrame
+          # Template from a DataFrame, whose CURIEs are the built-in map's; DOSDP
+          # pattern from a DataFrame
           from owlmake import Ontology as O
-          tdf = pd.DataFrame([{"ID":"ID","Label":"LABEL"},{"ID":"ex:1","Label":"One"},{"ID":"ex:2","Label":"Two"}])
+          tdf = pd.DataFrame([{"ID":"ID","Label":"LABEL"},{"ID":"UBERON:1","Label":"One"},{"ID":"UBERON:2","Label":"Two"}])
           ot = O(); ot.template(tdf); assert len(ot.classes()) == 2
           pat = "pattern_name: t\nclasses: {thing: owl:Thing}\nrelations: {part_of: BFO:0000050}\nvars: {item: \"'thing'\"}\nname: {text: \"n %s\", vars: [item]}\nequivalentTo: {text: \"'thing' and ('part_of' some %s)\", vars: [item]}\n"
           assert len(owlmake.dosdp(pat, pl.DataFrame([{"defined_class":"ex:1","item":"ex:0"}]))) > 0

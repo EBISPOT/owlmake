@@ -278,21 +278,12 @@ pub fn declaration(c: &Component<RcStr>) -> Option<(Kind, &str)> {
     }
 }
 
-/// Whether a declaration of `model` is one its reader supplied for an entity
-/// the source document names without declaring (`Model::materialised_declarations`).
-/// A written document declares such an entity among those it declares for the
-/// ontology, not among the ontology's own declarations.
-pub fn is_materialised(model: &Model, kind: Kind, iri: &str) -> bool {
-    model.materialised_declarations.contains(&closure_key(kind, iri))
-}
-
 /// The entities `model` declares itself.
 pub fn declared(model: &Model) -> HashSet<(Kind, String)> {
     model
         .ont
         .iter()
         .filter_map(|ac| declaration(&ac.component))
-        .filter(|(kind, iri)| !is_materialised(model, *kind, iri))
         .map(|(kind, iri)| (kind, iri.to_string()))
         .collect()
 }
@@ -320,8 +311,7 @@ pub fn illegal_punnings(signature: &BTreeSet<(Kind, String)>) -> HashSet<String>
         .collect()
 }
 
-/// The `kind\0IRI` key of an entity in `Model::imports_closure` and
-/// `Model::materialised_declarations`.
+/// The `kind\0IRI` key of an entity in `Model::imports_closure`.
 pub(crate) fn closure_key(kind: Kind, iri: &str) -> String {
     format!("{}\0{iri}", key_name(kind))
 }

@@ -189,7 +189,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     };
     let html = format.starts_with("html");
 
-    let ctx = Ctx::new(&model, &args.common)?;
+    let ctx = Ctx::new(&model)?;
     let names = java_split(header, '|');
     if names.is_empty() {
         bail!("export: --header '{header}' names no column");
@@ -583,9 +583,10 @@ fn string_set_order(values: Vec<String>) -> Vec<String> {
 }
 
 impl<'m> Ctx<'m> {
-    fn new(model: &'m Model, common: &crate::cmd::CommonArgs) -> Result<Ctx<'m>> {
+    fn new(model: &'m Model) -> Result<Ctx<'m>> {
         let order = NaturalOrder::new(model.plain_literals_typed);
-        let terms = prefix_map(common)?;
+        // CURIEs are written and read with the command line's context.
+        let terms = model.context.entries();
         let mut curies = terms.clone();
         // Longest namespace first; namespaces of one length in the order bound.
         curies.sort_by_key(|(_, ns)| std::cmp::Reverse(ns.encode_utf16().count()));
@@ -1501,43 +1502,6 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::NamedIndividual => "Named individual",
         Kind::Datatype => "Datatype",
     }
-}
-
-/// The prefixes CURIEs are written and read with: the built-in map (or the
-/// `--prefixes` file in its place, or none with `--noprefixes`), then
-/// `--add-prefixes`, then each `--prefix` and `--add-prefix`. A prefix bound
-/// again keeps its place and takes the later namespace.
-fn prefix_map(common: &crate::cmd::CommonArgs) -> Result<Vec<(String, String)>> {
-    let mut map: Vec<(String, String)> = Vec::new();
-    let bind = |map: &mut Vec<(String, String)>, name: String, ns: String| {
-        match map.iter_mut().find(|(p, _)| *p == name) {
-            Some(slot) => slot.1 = ns,
-            None => map.push((name, ns)),
-        }
-    };
-    if let Some(file) = &common.prefixes {
-        let only = crate::cmd::CommonArgs { prefixes: Some(file.clone()), ..Default::default() };
-        for (name, ns) in only.given_prefixes()? {
-            bind(&mut map, name, ns);
-        }
-    } else if !common.noprefixes {
-        for (name, ns) in crate::report::obo_context_prefixes() {
-            bind(&mut map, name.clone(), ns.clone());
-        }
-    }
-    for file in &common.add_prefixes {
-        let only = crate::cmd::CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
-        for (name, ns) in only.given_prefixes()? {
-            bind(&mut map, name, ns);
-        }
-    }
-    for spec in common.prefix.iter().chain(&common.add_prefix) {
-        let (name, ns) = spec
-            .split_once(':')
-            .with_context(|| format!("export: bad prefix (want \"name: iri\"): {spec}"))?;
-        bind(&mut map, name.trim().to_string(), ns.trim().to_string());
-    }
-    Ok(map)
 }
 
 // === Sorting and writing ==================================================

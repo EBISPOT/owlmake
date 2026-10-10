@@ -56,12 +56,12 @@ pub struct Args {
 
     /// Copy the source ontology's ontology-level annotations into the module
     /// (`<bool>`, default false).
-    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub copy_ontology_annotations: Option<bool>,
 
     /// Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their
-    /// source ontology IRI (`<bool>`, default false).
-    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true")]
+    /// source ontology IRI (`true` or `yes` in any case; default false).
+    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub annotate_with_source: Option<bool>,
 
     /// Handle individuals: include|minimal|definitions|exclude.
@@ -83,9 +83,9 @@ pub struct Args {
     #[arg(short = 's', long, value_name = "FILE")]
     pub sources: Option<PathBuf>,
 
-    /// Warn (instead of error) when no input terms are given (`<bool>`,
-    /// default false).
-    #[arg(short = 'f', long, num_args = 1, default_missing_value = "true")]
+    /// Extract even when the ontology names none of the terms (`true` or `yes`
+    /// in any case; default false).
+    #[arg(short = 'f', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub force: Option<bool>,
 
     /// Set the module's ontology IRI.
@@ -133,11 +133,40 @@ pub fn step(
         seed.extend(desc);
     }
 
-    if seed.is_empty() {
-        if args.force.unwrap_or(false) {
-            status!("extract: WARNING — no input terms; producing an empty module");
-        } else {
-            bail!("extract requires at least one --term / --lower-term / --branch-from-term (use --force to warn instead)");
+    if args.method.eq_ignore_ascii_case("MIREOT") {
+        // MIREOT climbs from lower terms and descends from branch terms; upper
+        // terms only bound the climb. `--term` and `--term-file` stand for the
+        // lower terms when none is given.
+        let upper = select::collect_terms(&model, &args.upper_term, &args.upper_terms)?;
+        let term = select::collect_terms(&model, &args.term, &args.term_file)?;
+        let lower = if lower.is_empty() { &term } else { &lower };
+        if lower.is_empty() && branch.is_empty() {
+            bail!("MISSING MIREOT TERMS ERROR either lower term(s) or branch term(s) must be specified for MIREOT");
+        }
+        if lower.is_empty() && !upper.is_empty() {
+            bail!("MISSING LOWER TERMS ERROR lower term(s) must be specified with upper term(s) for MIREOT");
+        }
+    } else {
+        // Every other method is seeded by `--term` and `--term-file` alone, and
+        // refuses an ontology that names none of them unless forced.
+        if !(args.upper_term.is_empty()
+            && args.upper_terms.is_empty()
+            && args.lower_term.is_empty()
+            && args.lower_terms.is_empty()
+            && args.branch_from_term.is_empty()
+            && args.branch_from_terms.is_empty())
+        {
+            bail!(
+                "INVALID OPTION ERROR only --term or --term-file can be used to specify extract term(s) for methods: star, top, bot, subset"
+            );
+        }
+        let given = select::collect_terms(&model, &args.term, &args.term_file)?;
+        if given.is_empty() {
+            bail!("MISSING TERMS ERROR term(s) are required with --term or --term-file");
+        }
+        let named = crate::cmd::objects::signature_entity_iris(&model, !args.imports.eq_ignore_ascii_case("exclude"));
+        if !given.iter().any(|t| named.contains(t)) && !args.force.unwrap_or(false) {
+            bail!("EMPTY TERMS ERROR ontology does not contain input terms");
         }
     }
 

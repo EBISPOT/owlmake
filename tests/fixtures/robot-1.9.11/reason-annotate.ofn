@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/>)
+Ontology(<http://example.org/inf.owl>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(ObjectProperty(:p))
+SubClassOf(:A :B)
+SubClassOf(:B :C)
+EquivalentClasses(:D ObjectSomeValuesFrom(:p :C))
+SubClassOf(:E ObjectSomeValuesFrom(:p :A))
+)

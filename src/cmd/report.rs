@@ -31,8 +31,9 @@ pub struct Args {
     /// (default), WARN, INFO, or none.
     #[arg(short = 'F', long = "fail-on", default_value = "ERROR")]
     pub fail_on: String,
-    /// Report labels instead of CURIEs for entities.
-    #[arg(short = 'l', long = "labels", num_args = 1, default_missing_value = "true")]
+    /// Report labels instead of CURIEs for entities (`true` or `yes` in any
+    /// case).
+    #[arg(short = 'l', long = "labels", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub labels: Option<bool>,
     /// Print this many violations to the terminal (long-only: the `-P` short is
     /// taken by the global `--prefixes`).
@@ -47,17 +48,17 @@ pub struct Args {
     pub limit: Option<usize>,
     /// Load RDF onto disk via TDB. Accepted for compatibility; owlmake
     /// always evaluates the report in memory.
-    #[arg(short = 't', long = "tdb", num_args = 1, default_missing_value = "true")]
+    #[arg(short = 't', long = "tdb", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub tdb: Option<bool>,
     /// TDB directory. No-op (no TDB).
     #[arg(short = 'd', long = "tdb-directory")]
     pub tdb_directory: Option<PathBuf>,
-    /// Keep the TDB directory. No-op (no TDB).
-    #[arg(short = 'k', long = "keep-tdb-mappings", num_args = 1, default_missing_value = "true")]
+    /// Keep the TDB directory (`true` or `yes` in any case). No-op (no TDB).
+    #[arg(short = 'k', long = "keep-tdb-mappings", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub keep_tdb_mappings: Option<bool>,
-    /// Wrap HTML output in a complete document (default true). Only affects
-    /// `--format html`.
-    #[arg(long = "standalone", num_args = 1, default_missing_value = "true")]
+    /// Wrap HTML output in a complete document (`true` or `yes` in any case;
+    /// default true). Only affects `--format html`.
+    #[arg(long = "standalone", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub standalone: Option<bool>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,

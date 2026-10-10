@@ -606,37 +606,14 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
     // referenced-only typeless ones. `owl:Nothing` in a graph asserting
     // `SubClassOf(owl:Nothing owl:Nothing)` is the case that shows it.
     let mut subclass_typed: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Every entity the ontology names outright: in the signature, or carrying a
-    // `Declaration`. A `subclass_typed` IRI absent from this is the tier-1 case.
+    // Every entity the ontology declares. A `subclass_typed` IRI absent from this
+    // is the tier-1 case.
+    //
+    // A kind comes from a `Declaration` axiom of the ontology and from nothing
+    // else: a property the ontology uses without declaring is no node at all. A
+    // document that is read back declares what its writer typed, so a graph made
+    // from a written RDF/XML file has a node for every property that file types.
     let mut named: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // Node kinds come from the ontology SIGNATURE, not from `Declaration` axioms,
-    // the same rule the RDF/XML writer applies. MONDO's `mondo-base.json` needs
-    // `BFO_0000050`/`BFO_0000051` as `"type": "PROPERTY"` nodes even though the
-    // step's `remove --select imports` stripped the import that declared them.
-    // Seed the kinds from the signature first so a later real `Declaration` still
-    // wins. Built-ins are excluded on the same rule as there.
-    {
-        let sig = crate::cmd::select::signature_entities(model);
-        let builtin = |iri: &str| {
-            iri.starts_with("http://www.w3.org/2001/XMLSchema#")
-                || iri.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-                || iri.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-                || iri.starts_with("http://www.w3.org/2002/07/owl#")
-        };
-        for (set, kind) in [
-            (&sig.object_properties, Kind::ObjectProperty),
-            (&sig.annotation_properties, Kind::AnnotationProperty),
-            (&sig.data_properties, Kind::DataProperty),
-        ] {
-            for iri in set {
-                if !builtin(iri) {
-                    kinds.entry(iri.clone()).or_insert(kind);
-                    named.insert(iri.clone());
-                }
-            }
-        }
-    }
 
     for ac in model.ont.iter() {
         match &ac.component {

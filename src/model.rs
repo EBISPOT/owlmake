@@ -317,20 +317,10 @@ pub struct Model {
     /// ([`crate::cmd::owltools_ops`]) saves under this profile; every other save
     /// shares blank nodes between an annotated edge and its reification.
     pub owlapi_456: bool,
-    /// Declarations owlmake SYNTHESISED at read time rather than ones the source
-    /// document states, keyed `kind\0IRI` (`class`, `op`, `ap`, …).
-    ///
-    /// Only the OBO reader fills this. OBO has no declaration syntax, so
-    /// `declare_referenced_entities` invents one for every referenced entity: those
-    /// are writer-side materialisation, not statements the source document makes.
-    /// Recording which they are lets them be withdrawn once the import closure is
-    /// known to declare the entity (see `withdraw_materialised_declarations`), so
-    /// `filtered.owl`'s `IAO_0000231`, `RO_0002175`, `dc:title`, `foaf:homepage` and
-    /// friends — used only as `property_value:` predicates, and all declared in
-    /// `omo_import.owl` / `merged_import.owl` — get no stub of the form
-    /// `<owl:AnnotationProperty rdf:about="…"/>`. A genuine declaration read from an
-    /// OWL document is NOT in this set and is always rendered.
-    pub materialised_declarations: std::collections::HashSet<String>,
+    /// The prefixes a CURIE the command line gives is read with
+    /// ([`crate::context`]): never this document's own, which say only how it
+    /// writes its IRIs.
+    pub context: crate::context::Context,
     /// `owner\u{1}signature -> group` for superclass expressions that are ONE
     /// object asserted for several owners, rendered inline at each.
     ///
@@ -424,7 +414,7 @@ impl Model {
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
-            materialised_declarations: std::collections::HashSet::new(),
+            context: Default::default(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
@@ -461,7 +451,7 @@ impl Model {
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
-            materialised_declarations: std::collections::HashSet::new(),
+            context: Default::default(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
@@ -501,7 +491,7 @@ impl Model {
         self.anon_doc_order = other.anon_doc_order.clone();
         self.plain_literals_typed = other.plain_literals_typed;
         self.owlapi_456 = other.owlapi_456;
-        self.materialised_declarations = other.materialised_declarations.clone();
+        self.context = other.context.clone();
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
         self.shared_occurrences = other.shared_occurrences.clone();
@@ -580,7 +570,7 @@ impl Clone for Model {
         m.anon_doc_order = self.anon_doc_order.clone();
         m.plain_literals_typed = self.plain_literals_typed;
         m.owlapi_456 = self.owlapi_456;
-        m.materialised_declarations = self.materialised_declarations.clone();
+        m.context = self.context.clone();
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
         m.shared_occurrences = self.shared_occurrences.clone();
@@ -619,9 +609,9 @@ pub fn default_prefixes() -> PrefixMapping {
     let _ = p.add_prefix("xsd", "http://www.w3.org/2001/XMLSchema#");
     let _ = p.add_prefix("owl", "http://www.w3.org/2002/07/owl#");
     // `dc` is dc/elements/1.1/ HERE, which is what documents declare and what the
-    // OBO writer's `idspace:` table and the RDF/XML xmlns block need. Template
-    // CURIEs expand against a separate context map that binds `dc` to dc/TERMS/
-    // instead — see `template::robot_context_prefixes`.
+    // OBO writer's `idspace:` table and the RDF/XML xmlns block need. A CURIE a
+    // command is given is read with the command line's context, which binds `dc`
+    // to dc/TERMS/ instead — see [`crate::context`].
     // The two are genuinely different maps: binding this one to dc/terms/ would
     // shadow the elements/1.1/ namespace, dropping MONDO's `idspace: dc` line and
     // every `dc:date`/`dc:title` abbreviation in `mondo.obo`.

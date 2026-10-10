@@ -74,8 +74,9 @@ pub fn step_outputs(steps: &[Step]) -> HashSet<String> {
     out
 }
 
-/// `--term-file` paths referenced by remove / filter / materialize steps,
-/// including inside a conditional branch (which `Step::gaps` also descends).
+/// The term files remove / filter / materialize steps read — a remove's or
+/// filter's include and exclude lists too — including inside a conditional
+/// branch (which `Step::gaps` also descends).
 pub fn step_term_files(steps: &[Step]) -> Vec<String> {
     let mut out = Vec::new();
     collect_term_files(steps, &mut out);
@@ -98,8 +99,7 @@ fn collect_term_files(steps: &[Step], out: &mut Vec<String>) {
             _ => continue,
         };
         match op {
-            Op::Remove(spec) => out.extend(spec.term_files.clone()),
-            Op::Filter(spec) => out.extend(spec.term_files.clone()),
+            Op::Remove(spec) | Op::Filter(spec) => out.extend(spec.files().cloned()),
             Op::Materialize { term_files, .. } => out.extend(term_files.clone()),
             _ => {}
         }
@@ -280,5 +280,30 @@ mod tests {
         let (cached, gaps) = import_state(Path::new("."), &imp, false);
         assert!(!cached, "an empty output must not resolve to the directory");
         assert_eq!(gaps.len(), 1);
+    }
+
+    /// A remove's or filter's include and exclude term files are read like its
+    /// term files: one that is absent with no rule to build it is a gap, and one
+    /// a planned target builds is not.
+    #[test]
+    fn an_absent_include_or_exclude_term_file_is_a_gap() {
+        use crate::plan::step::SelectionSpec;
+        let steps = vec![
+            Step::Op(Op::Remove(SelectionSpec {
+                include_term_files: vec!["include.txt".into()],
+                exclude_term_files: vec!["planned.txt".into()],
+                ..Default::default()
+            })),
+            Step::Op(Op::Filter(SelectionSpec { exclude_term_files: vec!["exclude.txt".into()], ..Default::default() })),
+        ];
+        let planned: HashSet<String> = ["planned.txt".to_string()].into_iter().collect();
+        let gaps = term_file_gaps(Path::new("/nonexistent"), &steps, &planned);
+        assert_eq!(
+            gaps,
+            [
+                "requires term file `include.txt`, which is absent and has no rule to build",
+                "requires term file `exclude.txt`, which is absent and has no rule to build",
+            ]
+        );
     }
 }

@@ -622,7 +622,10 @@ pub fn run_chain(argv: &[String]) -> Result<()> {
     // Hoist the leading globals onto the first command instead. Only the tokens
     // listed in `GLOBAL_OPTIONS` move — the long forms and the `-v`/`-vv`/`-vvv`
     // short forms alike — and only when a recognised command follows them, so
-    // `om --help` / `om --version` and a bare `om` are left alone.
+    // `om --help` / `om --version` and a bare `om` are left alone. The prefix
+    // options among them are given to every later command too (see
+    // `run_clap_chain`).
+    let chain_prefixes = leading_prefix_options(argv);
     let hoisted: Vec<String>;
     let argv: &[String] = match hoist_global_options(argv, &names) {
         Some(v) => {
@@ -682,7 +685,7 @@ pub fn run_chain(argv: &[String]) -> Result<()> {
         // own option segment off (up to the next chained command), apply it, then
         // run the remainder with the renamed model as the initial state.
         if sub == "rename" || sub == "inject" {
-            let pre = if k > 0 { run_clap_chain(&argv[..k], &names, &flags, None)? } else { None };
+            let pre = if k > 0 { run_clap_chain(&argv[..k], &names, &flags, None, &chain_prefixes)? } else { None };
             let mut end = k + 1;
             while end < argv.len()
                 && !names.contains_key(&argv[end])
@@ -698,16 +701,18 @@ pub fn run_chain(argv: &[String]) -> Result<()> {
                 "rename" => crate::sssom::owl::rename(pre, &argv[k + 1..end])?,
                 _ => crate::sssom::owl::inject(pre, &argv[k + 1..end])?,
             };
-            return run_clap_chain(&argv[end..], &names, &flags, Some(produced)).map(|_| ());
+            return run_clap_chain(&argv[end..], &names, &flags, Some(produced), &chain_prefixes)
+                .map(|_| ());
         }
         // Terminal SSSOM step (`sssom:xref-extract`), possibly preceded by ontology
         // commands (`merge … sssom:xref-extract …`); k may be 0 for a standalone
         // `sssom:xref-extract -i …`.
-        let model = if k > 0 { run_clap_chain(&argv[..k], &names, &flags, None)? } else { None };
+        let model =
+            if k > 0 { run_clap_chain(&argv[..k], &names, &flags, None, &chain_prefixes)? } else { None };
         return crate::sssom::owl::chain_step(model, &sub, &argv[k + 1..]);
     }
 
-    run_clap_chain(argv, &names, &flags, None).map(|_| ())
+    run_clap_chain(argv, &names, &flags, None, &chain_prefixes).map(|_| ())
 }
 
 /// Segment `argv` into chained command segments, parse each with clap, and
@@ -719,6 +724,7 @@ fn run_clap_chain(
     names: &HashMap<String, ()>,
     flags: &HashMap<String, CommandFlags>,
     initial: Option<Model>,
+    chain_prefixes: &[String],
 ) -> Result<Option<Model>> {
     let segments = segment(argv, names, flags)?;
     if segments.is_empty() {
@@ -732,7 +738,17 @@ fn run_clap_chain(
     }
 
     let mut state: Option<Model> = initial;
-    for seg in segments {
+    for mut seg in segments {
+        // A command handed its predecessor's model reads its CURIEs with the
+        // chain's prefix options and its own, and declares what those add: the
+        // context its predecessor read with, and the prefixes it added, go.
+        if let Some(model) = state.as_mut() {
+            model.context = Default::default();
+            model.added_prefixes.clear();
+            if flags.get(&seg[0]).is_some_and(|f| f.contains_key("--add-prefix")) {
+                seg.splice(1..1, chain_prefixes.iter().cloned());
+            }
+        }
         // `--help`/`--version` inside a segment: let clap print to the right
         // stream and exit with the right code (0 for help/version), exactly as a
         // normal clap CLI would, instead of surfacing them as errors.
@@ -932,8 +948,9 @@ fn is_sssom_command(token: &str) -> bool {
 const PLUGIN_CHAIN_STEPS: &[&str] = &["rename", "inject", "xref-extract"];
 
 /// The global options, which may precede the first command. Each maps to a
-/// field of owlmake's per-command `CommonArgs`, so hoisting them onto the first
-/// command is exactly equivalent.
+/// field of owlmake's per-command `CommonArgs`, so they are hoisted onto the
+/// first command; the prefix options are given to every later command as well
+/// ([`leading_prefix_options`]).
 const GLOBAL_OPTIONS: &[(&str, bool)] = &[
     ("--catalog", true),
     ("--prefix", true),
@@ -948,6 +965,31 @@ const GLOBAL_OPTIONS: &[(&str, bool)] = &[
     ("-vv", false),
     ("-vvv", false),
 ];
+
+/// The prefix options among the global options that precede the first command,
+/// as they are written.
+fn leading_prefix_options(argv: &[String]) -> Vec<String> {
+    const PREFIX_OPTIONS: &[&str] =
+        &["--prefix", "--prefixes", "--add-prefix", "--add-prefixes", "--noprefixes"];
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        let tok = argv[i].as_str();
+        let (name, inline) = match tok.split_once('=') {
+            Some((n, _)) => (n, true),
+            None => (tok, false),
+        };
+        let Some((_, takes_value)) = GLOBAL_OPTIONS.iter().find(|(g, _)| *g == name) else {
+            break;
+        };
+        let end = if *takes_value && !inline { i + 2 } else { i + 1 };
+        if PREFIX_OPTIONS.contains(&name) {
+            out.extend(argv[i..end.min(argv.len())].iter().cloned());
+        }
+        i = end;
+    }
+    out
+}
 
 /// Move any global options that precede the first command onto that
 /// command. Returns `None` when there is nothing to hoist (so the caller keeps the

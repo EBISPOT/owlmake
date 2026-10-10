@@ -131,6 +131,33 @@ impl CommonArgs {
         Ok(out)
     }
 
+    /// Bind this command line's prefixes into `context`, the one a CURIE it is
+    /// given is read with: a `--prefixes` file in place of the built-in map, or
+    /// none under `--noprefixes`, then each `--add-prefixes` file, `--prefix` and
+    /// `--add-prefix`, in that order.
+    pub fn bind(&self, context: &mut crate::context::Context) -> Result<()> {
+        if let Some(file) = &self.prefixes {
+            *context = crate::context::Context::without_builtin();
+            let only = CommonArgs { prefixes: Some(file.clone()), ..Default::default() };
+            for (name, ns) in only.given_prefixes()? {
+                context.bind(&name, &ns);
+            }
+        } else if self.noprefixes {
+            *context = crate::context::Context::without_builtin();
+        }
+        for file in &self.add_prefixes {
+            let only = CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
+            for (name, ns) in only.given_prefixes()? {
+                context.bind(&name, &ns);
+            }
+        }
+        for spec in self.prefix.iter().chain(&self.add_prefix) {
+            let (name, ns) = Self::binding(spec)?;
+            context.bind(&name, &ns);
+        }
+        Ok(())
+    }
+
     fn binding(spec: &str) -> Result<(String, String)> {
         let (name, ns) = spec
             .split_once(':')
@@ -142,13 +169,15 @@ impl CommonArgs {
     /// loading, on top of the document's own prefixes (`--noprefixes` clears the
     /// built-in defaults first).
     ///
-    /// Every prefix given binds a name for reading CURIEs. `--prefix` and
-    /// `--prefixes` do nothing else. An ADDED prefix (`--add-prefix`,
-    /// `--add-prefixes`) is also declared by whatever is written next, used or
-    /// not, even by an ontology built from nothing, which declares no other. An
-    /// OBO document takes added prefixes as idspaces only when it is cleaned
-    /// (see `convert::apply_clean_obo`).
+    /// Every prefix given binds a name for reading the CURIEs this command is
+    /// given ([`CommonArgs::bind`]), and joins the document's own prefix map.
+    /// `--prefix` and `--prefixes` do nothing more: nothing written declares
+    /// them. An ADDED prefix (`--add-prefix`, `--add-prefixes`) is also declared
+    /// by what this command writes, used or not, even by an ontology built from
+    /// nothing, which declares no other. An OBO document takes added prefixes as
+    /// idspaces only when it is cleaned (see `convert::apply_clean_obo`).
     pub fn apply(&self, model: &mut Model) -> Result<()> {
+        self.bind(&mut model.context)?;
         if self.noprefixes {
             model.prefixes = PrefixMapping::default();
         }
@@ -316,6 +345,123 @@ impl std::fmt::Display for Reported {
 
 impl std::error::Error for Reported {}
 
+/// Whether an option's value switches it on: `true` or `yes`, in any case and
+/// with white space around it. Any other value switches it off.
+pub fn option_is_true(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "true" | "yes")
+}
+
+/// [`option_is_true`] as an argument parser: such an option takes any value.
+pub fn parse_option_true(value: &str) -> Result<bool, std::convert::Infallible> {
+    Ok(option_is_true(value))
+}
+
+/// The message refusing a value of switch `name` that is neither `true` nor
+/// `false`.
+pub fn boolean_value_error(name: &str) -> String {
+    format!("BOOLEAN VALUE ERROR arg for {name} must be true or false")
+}
+
+/// `value` read as switch `name` (named without hyphens): `true` or `false`,
+/// exactly.
+pub fn read_bool(name: &str, value: &str) -> std::result::Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(boolean_value_error(name)),
+    }
+}
+
+/// A switch as a command line gives it. Text that is neither `true` nor
+/// `false` is kept as written, and fails the command where the command reads
+/// the switch.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum Switch {
+    Bool(bool),
+    Text(String),
+}
+
+impl Switch {
+    pub fn parse(text: &str) -> Switch {
+        match read_bool("", text) {
+            Ok(on) => Switch::Bool(on),
+            Err(_) => Switch::Text(text.to_string()),
+        }
+    }
+
+    /// The value of switch `name` (named without hyphens) given as `switch`,
+    /// or `default` when it is not given.
+    pub fn read(switch: Option<&Switch>, name: &str, default: bool) -> Result<bool> {
+        match switch {
+            None => Ok(default),
+            Some(Switch::Bool(on)) => Ok(*on),
+            Some(Switch::Text(_)) => bail!(boolean_value_error(name)),
+        }
+    }
+}
+
+impl From<bool> for Switch {
+    fn from(on: bool) -> Switch {
+        Switch::Bool(on)
+    }
+}
+
+impl std::fmt::Display for Switch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Switch::Bool(on) => write!(f, "{on}"),
+            Switch::Text(text) => write!(f, "{text:?}"),
+        }
+    }
+}
+
+/// The argument parser for a switch the command reads later: it takes any
+/// text ([`Switch::parse`]).
+#[derive(Clone, Copy, Debug)]
+pub struct SwitchParser;
+
+impl clap::builder::TypedValueParser for SwitchParser {
+    type Value = Switch;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> std::result::Result<Switch, clap::Error> {
+        Ok(Switch::parse(&value.to_string_lossy()))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(["true", "false"].into_iter().map(clap::builder::PossibleValue::new)))
+    }
+}
+
+/// The argument parser for a switch: `true` or `false`, exactly, and any other
+/// value refused with the message naming the option ([`read_bool`]).
+#[derive(Clone, Copy, Debug)]
+pub struct BoolParser;
+
+impl clap::builder::TypedValueParser for BoolParser {
+    type Value = bool;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> std::result::Result<bool, clap::Error> {
+        let name = arg.and_then(|a| a.get_long()).unwrap_or_default();
+        read_bool(name, &value.to_string_lossy())
+            .map_err(|message| clap::Error::raw(clap::error::ErrorKind::InvalidValue, format!("{message}\n")).with_cmd(cmd))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(["true", "false"].into_iter().map(clap::builder::PossibleValue::new)))
+    }
+}
+
 /// Resolve an output format from an explicit `--format` name, else the output
 /// path's extension.
 pub fn resolve_format(format: Option<&str>, output: &Path) -> Result<Format> {
@@ -439,6 +585,12 @@ pub(crate) fn resolve_import_closure(
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: Vec<String> = imports_of(model);
     let direct: std::collections::HashSet<String> = queue.iter().cloned().collect();
+    // Every document opened with this one is one more a functional write's
+    // banners draw their labels from; the document itself gives the labels it
+    // has when it is written.
+    if !queue.is_empty() && model.banner_docs.is_empty() {
+        model.banner_docs.push(crate::cmd::banner_doc_of(model, true));
+    }
     // Say that this ran, and with how many imports, BEFORE resolving any. The
     // per-import lines below are printed only when there is something to print,
     // so their absence would otherwise be ambiguous between "this path resolves
@@ -530,11 +682,7 @@ pub(crate) fn resolve_import_closure(
         // borrowed axioms again, which is exactly when this record is the only
         // thing left that knows.
         model.imports_closure.get_or_insert_with(Default::default).add(&imported);
-        // A closure member was opened with the document, so a functional
-        // write's banners draw on its labels too.
-        if !model.banner_docs.is_empty() {
-            model.banner_docs.push(crate::cmd::banner_doc_of(&imported, false));
-        }
+        model.banner_docs.push(crate::cmd::banner_doc_of(&imported, false));
         crate::cmd::merge::merge_into(model, &imported, &opts);
         for c in borrowed {
             if model.ont.i().contains(&c) {
@@ -573,13 +721,14 @@ pub(crate) fn resolve_import_closure(
         for ac in decls {
             model.ont.remove(&ac);
         }
-        // A functional-syntax banner names its entity `# Class: <IRI> (label)`,
-        // and the label is the one anywhere in the closure — an edit file that
-        // only DECLARES a class still banners it with the label its imported
-        // pattern module asserts. The closure is inlined right now and is dropped
-        // again on save, so this is the one moment the whole label set is in hand.
+        // The labels the imports give, for a writer naming an entity the
+        // document does not label itself: an edit file that only DECLARES a
+        // class is still commented with the label its imported pattern module
+        // asserts.
         if model.banner_labels.is_empty() {
-            model.banner_labels = rdfs_labels(model);
+            let (iri, version) = crate::build::model_ontology_id(model);
+            let none = std::collections::HashMap::new();
+            model.banner_labels = fold_banner_docs(&model.banner_docs, iri.as_deref(), version.as_deref(), &none);
         }
     }
     Ok(())
@@ -972,6 +1121,7 @@ pub mod merge_equivalent_sets;
 pub mod merge_species;
 pub mod create_species_subset;
 pub mod mint;
+pub mod objects;
 pub mod mirror;
 pub mod make;
 pub mod oort;
@@ -1025,5 +1175,46 @@ mod catalog_tests {
         let map = super::parse_catalog(&catalog).unwrap();
         assert_eq!(map["http://example.org/cafe.owl"], dir.join("imports/café_import.owl"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::*;
+
+    /// A switch read leniently is on for `true` or `yes`, in any case and with
+    /// white space around it, and off for anything else.
+    #[test]
+    fn a_lenient_switch_is_on_for_true_or_yes() {
+        for value in ["true", "TRUE", " True ", "yes", "Yes"] {
+            assert!(option_is_true(value), "{value:?}");
+        }
+        for value in ["false", "False", "no", "1", "on", "", "nope"] {
+            assert!(!option_is_true(value), "{value:?}");
+        }
+    }
+
+    /// A switch read strictly is `true` or `false` exactly; anything else is
+    /// refused with the message naming the switch.
+    #[test]
+    fn a_strict_switch_is_true_or_false_exactly() {
+        assert_eq!(read_bool("trim", "true"), Ok(true));
+        assert_eq!(read_bool("trim", "false"), Ok(false));
+        for value in ["TRUE", "False", " true", "yes", ""] {
+            assert_eq!(
+                read_bool("trim", value),
+                Err("BOOLEAN VALUE ERROR arg for trim must be true or false".to_string()),
+                "{value:?}"
+            );
+        }
+        assert_eq!(Switch::parse("true"), Switch::Bool(true));
+        assert_eq!(Switch::parse("TRUE"), Switch::Text("TRUE".into()));
+        assert!(!Switch::read(None, "trim", false).unwrap());
+        assert!(Switch::read(None, "trim", true).unwrap());
+        assert!(!Switch::read(Some(&Switch::Bool(false)), "trim", true).unwrap());
+        assert_eq!(
+            Switch::read(Some(&Switch::parse("TRUE")), "preserve-structure", true).unwrap_err().to_string(),
+            "BOOLEAN VALUE ERROR arg for preserve-structure must be true or false"
+        );
     }
 }

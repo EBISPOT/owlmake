@@ -221,9 +221,10 @@ impl Ontology {
     /// Assert inferred existential restrictions (`om materialize`), in place.
     /// `properties` limits which object properties to materialize (all if empty).
     #[pyo3(signature = (properties=None))]
-    fn materialize(&mut self, properties: Option<Vec<String>>) {
+    fn materialize(&mut self, properties: Option<Vec<String>>) -> PyResult<()> {
         let model = std::mem::replace(&mut self.model, Model::new());
-        self.model = api::materialize(model, &properties.unwrap_or_default());
+        self.model = api::materialize(model, &properties.unwrap_or_default()).map_err(pyerr)?;
+        Ok(())
     }
 
     /// Extract a module for a seed term set (`om extract`) as a new ontology,

@@ -25,7 +25,7 @@ pub struct Args {
     /// Check OBO document structure on write (`<bool>`, default true). When
     /// false, OBO-structure strictness is suppressed (the OBO writer is already
     /// lenient and never errors, so this controls only the OBO strictness gate).
-    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub check: Option<bool>,
 
     /// Options for clean OBO output, comma-separated. Recognized tokens:

@@ -1,0 +1,7 @@
+Prefix(:=<http://example.org/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/extra.owl>
+Annotation(rdfs:seeAlso "from extra")
+Declaration(Class(:X))
+SubClassOf(:X :A)
+)

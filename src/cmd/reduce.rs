@@ -30,18 +30,20 @@ pub struct Args {
     /// Reasoner to use. Reduction runs on the built-in EL reasoner.
     #[arg(short = 'r', long, default_value = "elk")]
     pub reasoner: String,
-    /// Preserve redundant axioms that carry annotations (`<bool>`).
-    #[arg(short = 'p', long, num_args = 1, default_missing_value = "true")]
+    /// Preserve redundant axioms that carry annotations (`true` or `yes` in
+    /// any case; default false).
+    #[arg(short = 'p', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub preserve_annotated_axioms: Option<bool>,
-    /// Take subproperties into account over existential restrictions (`<bool>`,
-    /// default false). A bare `reduce`, as OBA's build runs it, therefore does
+    /// Take subproperties into account over existential restrictions (`true`
+    /// or `yes` in any case; default false). A bare `reduce`, as OBA's build runs it, therefore does
     /// NOT eliminate existentials entailed only via sub-property or
     /// property-chain reasoning. Pass `--include-subproperties true` for the more
     /// aggressive reduction.
-    #[arg(short = 's', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 's', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub include_subproperties: Option<bool>,
-    /// Only reduce named `A ⊑ B` subclass axioms (`<bool>`).
-    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true")]
+    /// Only reduce named `A ⊑ B` subclass axioms (`true` or `yes` in any case;
+    /// default false).
+    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub named_classes_only: Option<bool>,
     /// Use exact entailment-based reduction (drop an axiom iff the ontology minus
     /// it still entails it), via ⊥-module localization. Slower on huge ontologies
@@ -57,15 +59,31 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
+/// Set the EL engine up for reducing under `kind`: `owlmake` turns on
+/// union-elimination; every other reasoner reduces with the plain EL engine,
+/// with a note where it is not an EL reasoner. Set before classifying.
+pub fn use_reasoner(kind: crate::cmd::reason::ReasonerKind) {
+    use crate::cmd::reason::ReasonerKind;
+    crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
+    match kind {
+        ReasonerKind::Owlmake => status!("reduce: using the built-in EL reasoner with union-elimination"),
+        ReasonerKind::Hermit | ReasonerKind::JFact | ReasonerKind::Whelk => status!(
+            "note: reduce runs on the built-in EL reasoner; '{}' is not available for it",
+            format!("{kind:?}").to_lowercase()
+        ),
+        _ => {}
+    }
+}
+
 pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> Result<Option<crate::model::Model>> {
+    // A reasoner name that is no reasoner fails before anything is loaded.
+    let kind = crate::cmd::reason::ReasonerKind::parse_without_emr(&args.reasoner)?;
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
-    // `--reasoner owlmake` enables union-elimination in the reduce reasoner; every
-    // other value runs on the plain EL engine. Set before classifying.
-    crate::reason::configure(&args.reasoner);
+    use_reasoner(kind);
     let preserve = args.preserve_annotated_axioms.unwrap_or(false);
     let named_only = args.named_classes_only.unwrap_or(false);
     // `--include-subproperties` defaults to false, so existentials entailed only

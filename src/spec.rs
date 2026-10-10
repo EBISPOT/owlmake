@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::plan::{ArtefactPlan, ImportPlan, Plan};
 use crate::build::recipe::FileOp;
-use crate::plan::step::{self as step, AnnotateSpec, FilterSpec, Op, RemoveSpec, Step};
+use crate::plan::step::{self as step, AnnotateSpec, Op, SelectionSpec, Step};
 
 /// Conventional filename of the build plan at the repository root. YAML is the
 /// default — the plan is meant to be read and edited by hand, and YAML keeps the
@@ -871,7 +871,7 @@ pub enum StepSpec {
     },
     /// Relax equivalence axioms into weaker existentials.
     Relax {
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default, skip_serializing_if = "is_false")]
         include_subclass_of: bool,
     },
     /// Transitive reduction of the asserted hierarchy.
@@ -880,66 +880,111 @@ pub enum StepSpec {
         reasoner: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         include_subproperties: Option<bool>,
+        /// Keep a redundant axiom that carries annotations.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        preserve_annotated_axioms: bool,
+        /// Reduce only axioms between named classes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        named_classes_only: bool,
     },
     /// Materialize inferred existential restrictions over the given properties.
     Materialize {
+        /// The reasoner the ontology is checked with; `elk` when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoner: Option<String>,
+        /// Check the ontology only, and keep it as it was.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        create_new_ontology: Option<bool>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         properties: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         term_files: Vec<String>,
     },
-    /// Remove axioms mentioning the selected terms/IRIs. Named `remove-terms` in
-    /// the plan to distinguish it from the `remove-file` (`rm`) file operation.
+    /// Remove the axioms a selection selects. Named `remove-terms` in the plan
+    /// to distinguish it from the `remove-file` (`rm`) file operation.
     #[serde(rename = "remove-terms")]
     Remove {
+        /// `--term`, `--term-file`: the terms the object set starts from.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         term_files: Vec<String>,
+        /// `--include-term`, `--include-terms`: terms added to the selection.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        axioms: Vec<String>,
+        include_terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        selects: Vec<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        base_iri: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        trim: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        preserve_structure: Option<bool>,
-        /// ROBOT `--exclude-term`/`--exclude-terms`: terms that survive whatever
-        /// the selectors match.
+        include_term_files: Vec<String>,
+        /// `--exclude-term`, `--exclude-terms`: terms taken out of the selection.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         exclude_terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         exclude_term_files: Vec<String>,
+        /// `--select`: the selector groups, each mapping the set it is given.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        selects: Vec<String>,
+        /// `--axioms`: the axiom types acted on.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        axioms: Vec<String>,
+        /// `--base-iri`: the namespaces `--axioms internal|external` judge an
+        /// axiom's subjects by.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        base_iri: Vec<String>,
+        /// `--trim`, `--signature`, `--preserve-structure`, `--allow-punning`:
+        /// `true`, `false`, or the text the recipe gives, which fails the step
+        /// where it reads the switch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        signature: Option<bool>,
-        /// ROBOT `--drop-axiom-annotations <selector>`.
+        trim: Option<crate::cmd::Switch>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        drop_axiom_annotations: Option<String>,
+        signature: Option<crate::cmd::Switch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preserve_structure: Option<crate::cmd::Switch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allow_punning: Option<crate::cmd::Switch>,
+        /// `--drop-axiom-annotations`, every value in recipe order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        drop_axiom_annotations: Vec<String>,
     },
-    /// Keep only axioms mentioning the selected terms/IRIs.
+    /// Keep the axioms a selection selects.
     Filter {
+        /// `--term`, `--term-file`: the terms the object set starts from.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         term_files: Vec<String>,
+        /// `--include-term`, `--include-terms`: terms added to the selection.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        include_terms: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        include_term_files: Vec<String>,
+        /// `--exclude-term`, `--exclude-terms`: terms taken out of the selection.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        exclude_terms: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        exclude_term_files: Vec<String>,
+        /// `--select`: the selector groups, each mapping the set it is given.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         selects: Vec<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        signature: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        trim: Option<bool>,
-        /// ROBOT `--axioms`: keep only these axiom types.
+        /// `--axioms`: the axiom types acted on.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         axioms: Vec<String>,
-        /// ROBOT `--base-iri`: the namespaces `--axioms internal|external` judge
-        /// an axiom's subjects by.
+        /// `--base-iri`: the namespaces `--axioms internal|external` judge an
+        /// axiom's subjects by.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         base_iri: Vec<String>,
-        /// `--prefix "name: namespace"`, which is how a `--select` CURIE resolves.
+        /// `--trim`, `--signature`, `--preserve-structure`, `--allow-punning`:
+        /// `true`, `false`, or the text the recipe gives, which fails the step
+        /// where it reads the switch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trim: Option<crate::cmd::Switch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<crate::cmd::Switch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preserve_structure: Option<crate::cmd::Switch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allow_punning: Option<crate::cmd::Switch>,
+        /// `--drop-axiom-annotations`, every value in recipe order.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        prefixes: Vec<String>,
+        drop_axiom_annotations: Vec<String>,
     },
     /// Add ontology annotations / set the ontology and version IRIs.
     Annotate {
@@ -951,8 +996,27 @@ pub enum StepSpec {
         annotations: Vec<AnnotationSpec>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         link_annotations: Vec<AnnotationSpec>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        language_annotations: Vec<LanguageAnnotationSpec>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        typed_annotations: Vec<TypedAnnotationSpec>,
+        /// `--axiom-annotation`'s values as given, read in `PROP VALUE` pairs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        axiom_annotations: Vec<String>,
+        /// Ontologies whose axioms and ontology annotations are merged in.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        annotation_files: Vec<String>,
         #[serde(default, skip_serializing_if = "is_false")]
         remove_annotations: bool,
+        /// Replace `%{ontology_iri}` and `%{version_iri}` in each value.
+        #[serde(default, skip_serializing_if = "is_false")]
+        interpolate: bool,
+        /// Assert `rdfs:isDefinedBy` the ontology of every entity that has none.
+        #[serde(default, skip_serializing_if = "is_false")]
+        annotate_defined_by: bool,
+        /// Annotate every axiom with the `prov:wasDerivedFrom` it lacks.
+        #[serde(default, skip_serializing_if = "is_false")]
+        annotate_derived_from: bool,
     },
     /// Re-serialize into another format (applied by the final write).
     Convert {
@@ -963,8 +1027,6 @@ pub enum StepSpec {
         /// The step's own `-o/--output`, when it names one — see `Op::Convert`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        add_prefixes: Vec<String>,
         /// `--check false`: an OBO document is written as it is, however many
         /// times a frame repeats a single-valued tag.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -982,23 +1044,25 @@ pub enum StepSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         format: Option<String>,
         /// `-g,--use-graphs`: query the import closure, not just the root.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default, skip_serializing_if = "is_false")]
         use_graphs: bool,
         /// `-t,--tdb`: for a SELECT with no `ORDER BY`, order rows by each term's
         /// first appearance in the input document — see [`crate::plan::step::Op`].
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default, skip_serializing_if = "is_false")]
         tdb: bool,
     },
     /// Remove intermediate classes with fewer than `threshold` named subclasses
     /// (default 2), bridging the hierarchy across them. Leaves, top-level classes
     /// and the `precious` terms are kept whatever their subclass count.
+    /// `threshold` is the recipe's text; a step whose text is not an integer of
+    /// at least 2 fails.
     Collapse {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         precious: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         precious_files: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        threshold: Option<usize>,
+        threshold: Option<String>,
     },
     /// Materialise uPheno's phenotype shortcut relations from EQ definitions
     /// (`upheno:extract-upheno-relations`).
@@ -1033,11 +1097,23 @@ pub enum StepSpec {
         #[serde(default)]
         add_source: bool,
     },
-    /// A prefix binding stated by the launcher, before any subcommand; it binds
-    /// for the whole chain and the written document declares it.
-    AddPrefix {
+    /// The prefix options in force from here: the commands that follow read their
+    /// CURIEs with a context made afresh from them, and the document written next
+    /// declares what they add. A chain's head states its command line's own; a
+    /// command with options of its own has a step for those with them, and the
+    /// command after it a step for the chain's again. Files are read when the
+    /// step runs.
+    Prefixes {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prefixes: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        noprefixes: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        prefixes: Vec<String>,
+        add_prefixes: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        prefix: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        add_prefix: Vec<String>,
     },
     /// Generate axioms from template tables — TSV/CSV carrying a row of template
     /// strings over a table of terms — and merge them in.
@@ -1046,11 +1122,10 @@ pub enum StepSpec {
         templates: Vec<String>,
         #[serde(default)]
         merge: bool,
-        /// ROBOT `--prefix "foo: http://bar"` bindings for the template's header
-        /// CURIEs. They decide which IRI a column asserts, so they are plan
-        /// content, not a run input.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        prefixes: Vec<String>,
+        /// `--force true`: a row the tables cannot be read into is reported and
+        /// skipped instead of failing the step.
+        #[serde(default, skip_serializing_if = "is_false")]
+        force: bool,
     },
     /// Rewrite entity IRIs from a mapping file. Named `rename-terms` in the plan
     /// to make clear it renames ontology entities, not files.
@@ -1079,6 +1154,9 @@ pub enum StepSpec {
         branch_from_terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         branch_from_term_files: Vec<String>,
+        /// Extract even when the ontology names none of the terms.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
     },
     /// Write the model to `output` and read it back — the round trip a recipe
     /// performs when one step writes a file and a later step reads it in again.
@@ -1332,6 +1410,12 @@ pub enum StepSpec {
     /// An ontology subcommand a recipe names that owlmake does not implement (a
     /// coverage gap).
     UnsupportedSubcommand { command: String },
+    /// Options a recipe gives a command that owlmake does not read, each with
+    /// its values (a coverage gap).
+    UnsupportedOptions { command: String, options: Vec<String> },
+    /// A command line its commands cannot read, with the message that says
+    /// why; the step fails.
+    Refused { message: String },
     /// An ontology subcommand owlmake implements on its CLI but not as a pipeline
     /// op; executed by invoking the owlmake binary's matching subcommand with
     /// `args` (the invocation's own option tokens, in argv order).
@@ -1363,6 +1447,24 @@ pub enum StepSpec {
 pub struct AnnotationSpec {
     pub property: String,
     pub value: String,
+}
+
+/// An annotation property and a value with its language tag.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LanguageAnnotationSpec {
+    pub property: String,
+    pub value: String,
+    pub lang: String,
+}
+
+/// An annotation property and a value with its datatype.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TypedAnnotationSpec {
+    pub property: String,
+    pub value: String,
+    pub datatype: String,
 }
 
 // --- Conversions: runtime Plan → spec ------------------------------------------
@@ -1791,6 +1893,10 @@ impl StepSpec {
                 else_steps: else_steps.iter().map(StepEntry::from_step).collect(),
             },
             Step::UnsupportedSubcommand(c) => StepSpec::UnsupportedSubcommand { command: c.clone() },
+            Step::UnsupportedOptions { command, options } => {
+                StepSpec::UnsupportedOptions { command: command.clone(), options: options.clone() }
+            }
+            Step::Refused { message } => StepSpec::Refused { message: message.clone() },
             Step::OwlmakeCli { name, args } => {
                 StepSpec::OwlmakeCli { command: name.clone(), args: args.clone() }
             }
@@ -1926,55 +2032,98 @@ impl StepSpec {
             Op::Relax { include_subclass_of } => {
                 StepSpec::Relax { include_subclass_of: *include_subclass_of }
             }
-            Op::Reduce { reasoner, include_subproperties } => StepSpec::Reduce {
+            Op::Reduce { reasoner, include_subproperties, preserve_annotated_axioms, named_classes_only } => {
+                StepSpec::Reduce {
+                    reasoner: reasoner.clone(),
+                    include_subproperties: *include_subproperties,
+                    preserve_annotated_axioms: *preserve_annotated_axioms,
+                    named_classes_only: *named_classes_only,
+                }
+            }
+            Op::Materialize { reasoner, create_new_ontology, properties, term_files } => StepSpec::Materialize {
                 reasoner: reasoner.clone(),
-                include_subproperties: *include_subproperties,
-            },
-            Op::Materialize { properties, term_files } => StepSpec::Materialize {
+                create_new_ontology: *create_new_ontology,
                 properties: properties.clone(),
                 term_files: term_files.clone(),
             },
-            Op::Remove(s) => StepSpec::Remove {
-                terms: s.terms.clone(),
-                term_files: s.term_files.clone(),
-                axioms: s.axioms.clone(),
-                selects: s.selects.clone(),
-                base_iri: s.base_iri.clone(),
-                trim: s.trim,
-                preserve_structure: s.preserve_structure,
-                exclude_terms: s.exclude_terms.clone(),
-                exclude_term_files: s.exclude_term_files.clone(),
-                signature: s.signature,
-                drop_axiom_annotations: s.drop_axiom_annotations.clone(),
-            },
-            Op::Filter(s) => StepSpec::Filter {
-                terms: s.terms.clone(),
-                term_files: s.term_files.clone(),
-                selects: s.selects.clone(),
-                signature: s.signature,
-                trim: s.trim,
-                axioms: s.axioms.clone(),
-                base_iri: s.base_iri.clone(),
-                prefixes: s.prefixes.clone(),
-            },
+            Op::Remove(s) => {
+                let s = s.clone();
+                StepSpec::Remove {
+                    terms: s.terms,
+                    term_files: s.term_files,
+                    include_terms: s.include_terms,
+                    include_term_files: s.include_term_files,
+                    exclude_terms: s.exclude_terms,
+                    exclude_term_files: s.exclude_term_files,
+                    selects: s.selects,
+                    axioms: s.axioms,
+                    base_iri: s.base_iri,
+                    trim: s.trim.clone(),
+                    signature: s.signature.clone(),
+                    preserve_structure: s.preserve_structure.clone(),
+                    allow_punning: s.allow_punning.clone(),
+                    drop_axiom_annotations: s.drop_axiom_annotations,
+                }
+            }
+            Op::Filter(s) => {
+                let s = s.clone();
+                StepSpec::Filter {
+                    terms: s.terms,
+                    term_files: s.term_files,
+                    include_terms: s.include_terms,
+                    include_term_files: s.include_term_files,
+                    exclude_terms: s.exclude_terms,
+                    exclude_term_files: s.exclude_term_files,
+                    selects: s.selects,
+                    axioms: s.axioms,
+                    base_iri: s.base_iri,
+                    trim: s.trim.clone(),
+                    signature: s.signature.clone(),
+                    preserve_structure: s.preserve_structure.clone(),
+                    allow_punning: s.allow_punning.clone(),
+                    drop_axiom_annotations: s.drop_axiom_annotations,
+                }
+            }
             Op::Annotate(s) => StepSpec::Annotate {
                 ontology_iri: s.ontology_iri.clone(),
                 version_iri: s.version_iri.clone(),
                 annotations: s.annotations.iter().map(AnnotationSpec::from_pair).collect(),
                 link_annotations: s.link_annotations.iter().map(AnnotationSpec::from_pair).collect(),
+                language_annotations: s
+                    .language_annotations
+                    .iter()
+                    .map(|(property, value, lang)| LanguageAnnotationSpec {
+                        property: property.clone(),
+                        value: value.clone(),
+                        lang: lang.clone(),
+                    })
+                    .collect(),
+                typed_annotations: s
+                    .typed_annotations
+                    .iter()
+                    .map(|(property, value, datatype)| TypedAnnotationSpec {
+                        property: property.clone(),
+                        value: value.clone(),
+                        datatype: datatype.clone(),
+                    })
+                    .collect(),
+                axiom_annotations: s.axiom_annotations.clone(),
+                annotation_files: s.annotation_files.clone(),
                 remove_annotations: s.remove_annotations,
+                interpolate: s.interpolate,
+                annotate_defined_by: s.annotate_defined_by,
+                annotate_derived_from: s.annotate_derived_from,
             },
-            Op::Convert { format, clean_obo, output, add_prefixes, check } => StepSpec::Convert {
+            Op::Convert { format, clean_obo, output, check } => StepSpec::Convert {
                 format: format.clone(),
                 clean_obo: clean_obo.clone(),
                 output: output.clone(),
-                add_prefixes: add_prefixes.clone(),
                 check: *check,
             },
-            Op::Template { templates, merge, prefixes } => StepSpec::Template {
+            Op::Template { templates, merge, force } => StepSpec::Template {
                 templates: templates.clone(),
                 merge: *merge,
-                prefixes: prefixes.clone(),
+                force: *force,
             },
             Op::Rename { mappings, prefix_mappings, allow_missing } => StepSpec::Rename {
                 mappings: mappings.clone(),
@@ -1984,7 +2133,7 @@ impl StepSpec {
             Op::RoundTrip { path } => StepSpec::RoundTrip { output: path.clone() },
             Op::Extract {
                 method, terms, term_files, copy_ontology_annotations, individuals,
-                branch_from_terms, branch_from_term_files,
+                branch_from_terms, branch_from_term_files, force,
             } => {
                 StepSpec::Extract {
                     method: method.clone(),
@@ -1994,12 +2143,13 @@ impl StepSpec {
                     individuals: individuals.clone(),
                     branch_from_terms: branch_from_terms.clone(),
                     branch_from_term_files: branch_from_term_files.clone(),
+                    force: *force,
                 }
             }
             Op::Collapse { precious, precious_files, threshold } => StepSpec::Collapse {
                 precious: precious.clone(),
                 precious_files: precious_files.clone(),
-                threshold: *threshold,
+                threshold: threshold.clone(),
             },
             Op::ExtractUphenoRelations { relations, terms, term_files, roots, root_files } => {
                 StepSpec::ExtractUphenoRelations {
@@ -2015,7 +2165,13 @@ impl StepSpec {
                 id_range_name: id_range_name.clone(),
                 id_ranges: id_ranges.clone(),
             },
-            Op::AddPrefix { prefixes } => StepSpec::AddPrefix { prefixes: prefixes.clone() },
+            Op::Prefixes { prefixes, noprefixes, add_prefixes, prefix, add_prefix } => StepSpec::Prefixes {
+                prefixes: prefixes.clone(),
+                noprefixes: *noprefixes,
+                add_prefixes: add_prefixes.clone(),
+                prefix: prefix.clone(),
+                add_prefix: add_prefix.clone(),
+            },
             Op::Normalize { base_iris, subset_decls, synonym_decls, add_source } => StepSpec::Normalize {
                 base_iris: base_iris.clone(),
                 subset_decls: *subset_decls,
@@ -2144,56 +2300,66 @@ impl StepSpec {
             StepSpec::Relax { include_subclass_of } => {
                 Step::Op(Op::Relax { include_subclass_of })
             }
-            StepSpec::Reduce { reasoner, include_subproperties } => {
-                Step::Op(Op::Reduce { reasoner, include_subproperties })
+            StepSpec::Reduce { reasoner, include_subproperties, preserve_annotated_axioms, named_classes_only } => {
+                Step::Op(Op::Reduce { reasoner, include_subproperties, preserve_annotated_axioms, named_classes_only })
             }
-            StepSpec::Materialize { properties, term_files } => {
-                Step::Op(Op::Materialize { properties, term_files })
+            StepSpec::Materialize { reasoner, create_new_ontology, properties, term_files } => {
+                Step::Op(Op::Materialize { reasoner, create_new_ontology, properties, term_files })
             }
             // remove/filter recompute their partial-ness from the option set.
             StepSpec::Remove {
-                terms, term_files, axioms, selects, base_iri, trim, preserve_structure,
-                exclude_terms, exclude_term_files, signature, drop_axiom_annotations,
-            } => step::remove_step(RemoveSpec {
-                terms,
-                term_files,
-                axioms,
-                selects,
-                base_iri,
-                trim,
-                preserve_structure,
-                exclude_terms,
-                exclude_term_files,
-                signature,
+                terms, term_files, include_terms, include_term_files, exclude_terms, exclude_term_files,
+                selects, axioms, base_iri, trim, signature, preserve_structure, allow_punning,
+                drop_axiom_annotations,
+            } => step::remove_step(SelectionSpec {
+                terms, term_files, include_terms, include_term_files, exclude_terms, exclude_term_files,
+                selects, axioms, base_iri, trim, signature, preserve_structure, allow_punning,
                 drop_axiom_annotations,
             }),
             StepSpec::Filter {
-                terms, term_files, selects, signature, trim, axioms, base_iri, prefixes,
-            } => step::filter_step(FilterSpec {
-                terms,
-                term_files,
-                selects,
-                signature,
-                trim,
-                axioms,
-                base_iri,
-                prefixes,
+                terms, term_files, include_terms, include_term_files, exclude_terms, exclude_term_files,
+                selects, axioms, base_iri, trim, signature, preserve_structure, allow_punning,
+                drop_axiom_annotations,
+            } => step::filter_step(SelectionSpec {
+                terms, term_files, include_terms, include_term_files, exclude_terms, exclude_term_files,
+                selects, axioms, base_iri, trim, signature, preserve_structure, allow_punning,
+                drop_axiom_annotations,
             }),
             StepSpec::Annotate {
                 ontology_iri,
                 version_iri,
                 annotations,
                 link_annotations,
+                language_annotations,
+                typed_annotations,
+                axiom_annotations,
+                annotation_files,
                 remove_annotations,
+                interpolate,
+                annotate_defined_by,
+                annotate_derived_from,
             } => Step::Op(Op::Annotate(AnnotateSpec {
                 ontology_iri,
                 version_iri,
                 annotations: annotations.into_iter().map(AnnotationSpec::into_pair).collect(),
                 link_annotations: link_annotations.into_iter().map(AnnotationSpec::into_pair).collect(),
+                language_annotations: language_annotations
+                    .into_iter()
+                    .map(|a| (a.property, a.value, a.lang))
+                    .collect(),
+                typed_annotations: typed_annotations
+                    .into_iter()
+                    .map(|a| (a.property, a.value, a.datatype))
+                    .collect(),
+                axiom_annotations,
+                annotation_files,
                 remove_annotations,
+                interpolate,
+                annotate_defined_by,
+                annotate_derived_from,
             })),
-            StepSpec::Convert { format, clean_obo, output, add_prefixes, check } => {
-                Step::Op(Op::Convert { format, clean_obo, output, add_prefixes, check })
+            StepSpec::Convert { format, clean_obo, output, check } => {
+                Step::Op(Op::Convert { format, clean_obo, output, check })
             }
             StepSpec::Query { updates, selects, constructs, format, use_graphs, tdb } => Step::Op(Op::Query {
                 updates,
@@ -2218,12 +2384,14 @@ impl StepSpec {
             StepSpec::Mint { temp_id_prefix, id_range_name, id_ranges } => {
                 Step::Op(Op::Mint { temp_id_prefix, id_range_name, id_ranges })
             }
-            StepSpec::AddPrefix { prefixes } => Step::Op(Op::AddPrefix { prefixes }),
+            StepSpec::Prefixes { prefixes, noprefixes, add_prefixes, prefix, add_prefix } => {
+                Step::Op(Op::Prefixes { prefixes, noprefixes, add_prefixes, prefix, add_prefix })
+            }
             StepSpec::Normalize { base_iris, subset_decls, synonym_decls, add_source } => {
                 Step::Op(Op::Normalize { base_iris, subset_decls, synonym_decls, add_source })
             }
-            StepSpec::Template { templates, merge, prefixes } => {
-                Step::Op(Op::Template { templates, merge, prefixes })
+            StepSpec::Template { templates, merge, force } => {
+                Step::Op(Op::Template { templates, merge, force })
             }
             StepSpec::Rename { mappings, prefix_mappings, allow_missing } => {
                 Step::Op(Op::Rename { mappings, prefix_mappings, allow_missing })
@@ -2231,11 +2399,11 @@ impl StepSpec {
             StepSpec::RoundTrip { output } => Step::Op(Op::RoundTrip { path: output }),
             StepSpec::Extract {
                 method, terms, term_files, copy_ontology_annotations, individuals,
-                branch_from_terms, branch_from_term_files,
+                branch_from_terms, branch_from_term_files, force,
             } => {
                 Step::Op(Op::Extract {
                     method, terms, term_files, copy_ontology_annotations, individuals,
-                    branch_from_terms, branch_from_term_files,
+                    branch_from_terms, branch_from_term_files, force,
                 })
             }
             StepSpec::Repair { invalid_references, merge_axiom_annotations } => {
@@ -2352,6 +2520,8 @@ impl StepSpec {
                 else_steps: else_steps.into_iter().map(StepEntry::into_step).collect(),
             },
             StepSpec::UnsupportedSubcommand { command } => Step::UnsupportedSubcommand(command),
+            StepSpec::UnsupportedOptions { command, options } => Step::UnsupportedOptions { command, options },
+            StepSpec::Refused { message } => Step::Refused { message },
             StepSpec::OwlmakeCli { command, args } => Step::OwlmakeCli { name: command, args },
 
             StepSpec::Oort { input, outdir, reasoner, simple, relaxed, asserted } => {
@@ -2654,7 +2824,17 @@ fn is_free_text_key(key: &str) -> bool {
 /// Keys whose value is a LITERAL — an annotation's text, which may contain a `/`
 /// or end in something that looks like a file suffix and is neither.
 fn is_literal_key(key: &str) -> bool {
-    matches!(key, "value" | "annotations" | "add_annotation" | "add_annotation_iri")
+    matches!(
+        key,
+        "value"
+            | "annotations"
+            | "language_annotations"
+            | "typed_annotations"
+            | "axiom_annotations"
+            | "add_annotation"
+            | "add_annotation_iri"
+            | "drop_axiom_annotations"
+    )
 }
 
 /// Walk a serialized plan and rebase every path it declares.
@@ -2725,7 +2905,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.8";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.13";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3354,15 +3534,23 @@ imports:
         std::fs::create_dir_all(&onto).unwrap();
         // NOTE: `build/` is deliberately NOT created — that is the whole point.
 
+        // A remove's term files are paths; the text of its
+        // `--drop-axiom-annotations` is not, `/` and all.
+        let remove = crate::plan::step::SelectionSpec {
+            term_files: vec!["imports/x_terms.txt".into()],
+            exclude_term_files: vec!["exclude.txt".into()],
+            drop_axiom_annotations: vec!["oboInOwl:source=ZFIN curators/2020".into()],
+            ..Default::default()
+        };
         let artefact = ArtefactPlan {
             target: "build/tiny.owl".into(),
             input: Some("tiny-edit.owl".into()),
             needs: vec!["tiny-edit.owl".into(), "components/c.owl".into()],
             order_only: vec![],
-            steps: vec![Step::Op(Op::Merge {
-                inputs: vec!["tiny-edit.owl".into()],
-                collapse_import_closure: None,
-            })],
+            steps: vec![
+                Step::Op(Op::Merge { inputs: vec!["tiny-edit.owl".into()], collapse_import_closure: None }),
+                Step::Op(Op::Remove(remove.clone())),
+            ],
             gaps: vec![],
             missing_rule: false,
             side_effect_only: false,
@@ -3433,6 +3621,9 @@ imports:
             "src/ontology/tiny-edit.owl",
             "src/ontology/components/c.owl",
             "src/ontology/catalog-v001.xml",
+            "src/ontology/imports/x_terms.txt",
+            "src/ontology/exclude.txt",
+            "oboInOwl:source=ZFIN curators/2020",
         ] {
             assert!(text.contains(want), "`{want}` is not spelled relative to the plan:\n{text}");
         }
@@ -3445,10 +3636,11 @@ imports:
         assert_eq!(back.artefacts[0].input, plan.artefacts[0].input);
         assert_eq!(back.artefacts[0].needs, plan.artefacts[0].needs);
         match &back.artefacts[0].steps[..] {
-            [Step::Op(Op::Merge { inputs, .. })] => {
-                assert_eq!(inputs, &vec!["tiny-edit.owl".to_string()], "a merge input did not survive")
+            [Step::Op(Op::Merge { inputs, .. }), Step::Op(Op::Remove(back_remove))] => {
+                assert_eq!(inputs, &vec!["tiny-edit.owl".to_string()], "a merge input did not survive");
+                assert_eq!(back_remove, &remove, "a remove's options did not survive");
             }
-            other => panic!("the merge step did not survive: {} step(s)", other.len()),
+            other => panic!("the merge and remove steps did not survive: {} step(s)", other.len()),
         }
         assert_eq!(back.edit_file, plan.edit_file);
         assert_eq!(back.catalog_file, plan.catalog_file);
@@ -3679,7 +3871,57 @@ mod format_floor_tests {
         // states `obo_prefixes` whatever its value, so a 0.4.8 build refuses
         // any plan with a dosdp module, loudly (`DosdpPattern` denies unknown
         // fields), and nothing is silently built differently: the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "f1c94e951aeb2f76";
+        //
+        // `add-prefix` becomes `prefixes`, the prefix options in force from
+        // where it stands — `--prefixes`, `--noprefixes`, `--add-prefixes` and
+        // `--prefix` beside `--add-prefix` — and a command's own options are one
+        // too, so a template step's `prefixes`, a filter step's `prefixes` and a
+        // convert step's `add_prefixes` go. A 0.4.8 build refuses a plan with the
+        // step as an unknown `op`, so nothing is silently built differently: the
+        // floor stays.
+        //
+        // A template step carries `force`, and a row it cannot read fails it
+        // unless the recipe asks otherwise. A 0.4.8 build forces every template
+        // step and ignores the field, so it would write an ontology without the
+        // rows a plan says must fail the build. That is the silent case, so the
+        // floor moves to 0.4.9.
+        //
+        // An annotate step carries every option of the command: language and
+        // typed annotations, axiom annotations, annotation files, interpolation,
+        // defined-by and derived-from. A 0.4.9 build ignores the fields it does
+        // not know and would annotate less than the plan says, so the floor
+        // moves to 0.4.10.
+        //
+        // A materialize step carries the reasoner the ontology is checked with
+        // and `create_new_ontology`, which keeps the input as it was once
+        // checked. A 0.4.10 build ignores both: it would check with `elk` and
+        // assert the restrictions a plan says to leave out, so the floor moves
+        // to 0.4.11.
+        //
+        // A collapse step's `threshold` is the recipe's text, read as an integer
+        // when the step runs, so a value that is not one of at least 2 fails the
+        // step. A 0.4.11 build reads the field as a number and refuses the text,
+        // loudly, so the floor stays.
+        //
+        // A remove and a filter step carry every option of the two commands:
+        // include and exclude terms and term files, `allow_punning`, a filter's
+        // `preserve_structure`, and every `drop_axiom_annotations` value as a
+        // list. A 0.4.11 build refuses the list, but ignores the fields it does
+        // not know and would select more or less than the plan says, so the
+        // floor moves to 0.4.12.
+        //
+        // An extract step carries `force` and a reduce step
+        // `preserve_annotated_axioms` and `named_classes_only`; a step lists the
+        // options a recipe gives a command that it does not read, and a line its
+        // commands cannot read is a step that fails. A 0.4.12 build ignores the
+        // switches and would refuse a forced module and reduce what the plan
+        // says to keep, so the floor moves to 0.4.13.
+        //
+        // A remove and a filter step's `trim`, `signature`, `preserve_structure`
+        // and `allow_punning` may be the recipe's text where it is neither
+        // `true` nor `false`, which fails the step where it reads the switch. A
+        // 0.4.13 build refuses the text, loudly, so the floor stays.
+        const PLAN_SCHEMA_DIGEST: &str = "9a2ebefa15e6a384";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3829,20 +4071,126 @@ mod round_trip_tests {
         );
     }
 
-    /// A filter step's `--base-iri` survives the spec: `--axioms internal`
-    /// judges each axiom's subjects against those namespaces.
+    /// Every option of a `remove` and a `filter` survives the spec, and each
+    /// comes back as the command it was.
     #[test]
-    fn filter_base_iri_survives_a_spec_round_trip() {
-        let op = Op::Filter(FilterSpec {
+    fn selection_options_survive_a_spec_round_trip() {
+        let spec = SelectionSpec {
+            terms: vec!["UBERON:1".into()],
+            term_files: vec!["terms.txt".into()],
+            include_terms: vec!["UBERON:2".into()],
+            include_term_files: vec!["include.txt".into()],
+            exclude_terms: vec!["BFO:0000050".into()],
+            exclude_term_files: vec!["exclude.txt".into()],
+            selects: vec!["self parents".into(), "object-properties".into()],
             axioms: vec!["internal".into()],
             base_iri: vec!["http://example.org/X_".into()],
-            ..Default::default()
+            trim: Some(false.into()),
+            signature: Some(crate::cmd::Switch::Text("TRUE".into())),
+            preserve_structure: Some(false.into()),
+            allow_punning: Some(true.into()),
+            drop_axiom_annotations: vec!["oboInOwl:source=ZFIN curators/2020".into(), "all".into()],
+        };
+        match StepSpec::from_op(&Op::Remove(spec.clone())).into_step() {
+            Step::Op(Op::Remove(back)) => assert_eq!(back, spec),
+            other => panic!("remove came back as {other:?}"),
+        }
+        match StepSpec::from_op(&Op::Filter(spec.clone())).into_step() {
+            Step::Op(Op::Filter(back)) => assert_eq!(back, spec),
+            other => panic!("filter came back as {other:?}"),
+        }
+    }
+
+    /// A step's switches, the options it does not read and the line it
+    /// refuses survive the spec.
+    #[test]
+    fn switches_and_refusals_survive_a_spec_round_trip() {
+        let steps = [
+            Step::Op(Op::Extract {
+                method: "BOT".into(),
+                terms: vec![],
+                term_files: vec!["terms.txt".into()],
+                copy_ontology_annotations: true,
+                individuals: Some("exclude".into()),
+                branch_from_terms: vec![],
+                branch_from_term_files: vec![],
+                force: true,
+            }),
+            Step::Op(Op::Reduce {
+                reasoner: Some("ELK".into()),
+                include_subproperties: Some(true),
+                preserve_annotated_axioms: true,
+                named_classes_only: true,
+            }),
+            Step::UnsupportedOptions {
+                command: "reason".into(),
+                options: vec!["--include-indirect true".into(), "--dump-unsatisfiable unsat.txt".into()],
+            },
+            Step::Refused { message: "UNKNOWN ARG ERROR unknown command or option: --no-check".into() },
+        ];
+        for step in steps {
+            let back = StepSpec::from_step(&step).into_step();
+            assert_eq!(format!("{back:?}"), format!("{step:?}"));
+        }
+    }
+
+    /// Every prefix option of a chain survives the spec.
+    #[test]
+    fn prefix_options_survive_a_spec_round_trip() {
+        let op = Op::Prefixes {
+            prefixes: Some("config/prefixes.json".into()),
+            noprefixes: true,
+            add_prefixes: vec!["config/context.json".into()],
+            prefix: vec!["ex: http://example.org/ex#".into()],
+            add_prefix: vec!["obo: http://purl.obolibrary.org/obo/".into()],
+        };
+        let back = StepSpec::from_op(&op).into_step();
+        assert_eq!(format!("{back:?}"), format!("{:?}", Step::Op(op)));
+    }
+
+    /// Every option of an annotate step survives the spec.
+    #[test]
+    fn annotate_options_survive_a_spec_round_trip() {
+        let op = Op::Annotate(AnnotateSpec {
+            ontology_iri: Some("http://example.org/x.owl".into()),
+            version_iri: Some("http://example.org/v1/x.owl".into()),
+            annotations: vec![("rdfs:comment".into(), "c".into())],
+            link_annotations: vec![("rdfs:seeAlso".into(), "http://example.org/y".into())],
+            language_annotations: vec![("rdfs:label".into(), "chien".into(), "fr".into())],
+            typed_annotations: vec![("rdfs:comment".into(), "5".into(), "xsd:integer".into())],
+            axiom_annotations: vec!["rdfs:comment".into(), "x".into()],
+            annotation_files: vec!["extra.owl".into()],
+            remove_annotations: true,
+            interpolate: true,
+            annotate_defined_by: true,
+            annotate_derived_from: true,
         });
         let back = StepSpec::from_op(&op).into_step();
-        assert!(
-            matches!(&back, Step::Op(Op::Filter(s)) if s.base_iri == ["http://example.org/X_"]),
-            "{back:?}"
-        );
+        assert_eq!(format!("{back:?}"), format!("{:?}", Step::Op(op)));
+    }
+
+    #[test]
+    fn materialize_options_survive_a_spec_round_trip() {
+        let op = Op::Materialize {
+            reasoner: Some("hermit".into()),
+            create_new_ontology: Some(true),
+            properties: vec!["BFO:0000050".into()],
+            term_files: vec!["terms.txt".into()],
+        };
+        let back = StepSpec::from_op(&op).into_step();
+        assert_eq!(format!("{back:?}"), format!("{:?}", Step::Op(op)));
+    }
+
+    /// A collapse step's threshold travels as the text the recipe gave.
+    #[test]
+    fn collapse_threshold_survives_a_spec_round_trip() {
+        let op = Op::Collapse {
+            precious: vec!["EX:1".into()],
+            precious_files: vec!["precious.txt".into()],
+            threshold: Some("x".into()),
+        };
+        let back = StepSpec::from_op(&op).into_step();
+        assert_eq!(format!("{back:?}"), format!("{:?}", Step::Op(op)));
     }
 
     /// `into_plan` takes a `&Path`, not a repo. If this stops compiling because

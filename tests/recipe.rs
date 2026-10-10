@@ -373,6 +373,268 @@ fn a_shell_built_data_file_is_not_read_as_an_ontology() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// The prefix options a chain states before its first command bind for every
+/// command of it, as a command line's own do: what `--add-prefixes` (read from
+/// its file as the step runs) and `--add-prefix` bind is declared by the
+/// document written — by a functional-syntax document, and not as an OBO
+/// document's `idspace` — and what `--prefix` binds is not. A command that
+/// builds its ontology afresh, as `filter` does, hands them on. As ROBOT 1.9.11
+/// runs `robot --add-prefixes ctx.json --add-prefix "baz: …" --prefix "bar: …"
+/// annotate -i source.ofn --annotation foo:p x --annotation bar:q y
+/// --annotation baz:r z`, and `robot --add-prefixes ctx.json --add-prefix
+/// "baz: …" filter -i source.ofn --term http://example.org/A annotate
+/// --annotation foo:p x --annotation baz:r z`.
+#[test]
+fn a_chains_prefix_options_bind_for_each_of_its_commands() {
+    let root = workdir("chain-prefixes");
+    std::fs::write(root.join("ctx.json"), "{\"@context\": {\"foo\": \"http://example.org/foo#\"}}\n").unwrap();
+    let mut targets: String = ["ofn", "obo"]
+        .iter()
+        .map(|format| {
+            format!(
+                "  - target: stamped.{format}\n    input: source.ofn\n    needs: [source.ofn, ctx.json]\n    steps:\n\
+                 \x20     - op: prefixes\n        add_prefixes: [ctx.json]\n\
+                 \x20       add_prefix: ['baz: http://example.org/baz#']\n\
+                 \x20       prefix: ['bar: http://example.org/bar#']\n\
+                 \x20     - op: annotate\n        annotations:\n\
+                 \x20         - {{property: 'foo:p', value: x}}\n\
+                 \x20         - {{property: 'bar:q', value: y}}\n\
+                 \x20         - {{property: 'baz:r', value: z}}\n"
+            )
+        })
+        .collect();
+    targets.push_str(
+        "  - target: filtered.ofn\n    input: source.ofn\n    needs: [source.ofn, ctx.json]\n    steps:\n\
+         \x20     - op: prefixes\n        add_prefixes: [ctx.json]\n\
+         \x20       add_prefix: ['baz: http://example.org/baz#']\n\
+         \x20     - op: filter\n        terms: ['http://example.org/A']\n\
+         \x20     - op: annotate\n        annotations:\n\
+         \x20         - {property: 'foo:p', value: x}\n\
+         \x20         - {property: 'baz:r', value: z}\n",
+    );
+    let built = ["stamped.ofn", "stamped.obo", "filtered.ofn"];
+    let (ok, err) = make_own_plan(&root, &targets, &built);
+    assert!(ok, "the build failed:\n{err}");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for (target, robot) in built.iter().zip([
+        "chain-prefixes.robot.ofn",
+        "chain-prefixes.robot.obo",
+        "chain-prefixes-filtered.robot.ofn",
+    ]) {
+        assert_eq!(
+            std::fs::read_to_string(root.join(target)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{target}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A `prefixes` step makes the context afresh: what one command's own options
+/// added is gone once the step before the next command restates the chain's,
+/// and stays when the chain stated it. As ROBOT 1.9.11 writes
+/// `template --add-prefix "zz: …" --template own-prefix.tsv annotate
+/// --annotation rdfs:comment x` and the same with `--add-prefix` stated first.
+#[test]
+fn a_prefixes_step_makes_the_context_afresh() {
+    let root = workdir("prefix-scope");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    std::fs::copy(fixtures.join("own-prefix.tsv"), root.join("own-prefix.tsv")).unwrap();
+    let target = |name: &str, between: &str| {
+        format!(
+            "  - target: {name}\n    needs: [own-prefix.tsv]\n    steps:\n\
+             \x20     - op: prefixes\n        add_prefix: ['zz: http://example.org/zz#']\n\
+             \x20     - op: template\n        templates: [own-prefix.tsv]\n\
+             {between}\
+             \x20     - op: annotate\n        annotations:\n\
+             \x20         - {{property: 'rdfs:comment', value: x}}\n"
+        )
+    };
+    let targets = target("own.ofn", "      - op: prefixes\n") + &target("chain.ofn", "");
+    let (ok, err) = make_own_plan(&root, &targets, &["own.ofn", "chain.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    for (built, robot) in [("own.ofn", "own-add-prefix.robot.ofn"), ("chain.ofn", "chain-add-prefix.robot.ofn")] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(built)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{built}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A template step fails on a row it cannot read unless the recipe says
+/// `--force true`, and with it reports the row and leaves it out. As ROBOT
+/// 1.9.11 refuses `template --template template-force.tsv`, whose `ex:2` names
+/// nothing, and writes the other two rows with `--force true`.
+#[test]
+fn a_template_step_fails_on_an_unreadable_row_unless_forced() {
+    let root = workdir("template-force");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    std::fs::copy(fixtures.join("template-force.tsv"), root.join("template-force.tsv")).unwrap();
+    let targets = "  - target: unforced.ofn\n    needs: [template-force.tsv]\n    steps:\n\
+                   \x20     - op: template\n        templates: [template-force.tsv]\n\
+                   \x20 - target: forced.ofn\n    needs: [template-force.tsv]\n    steps:\n\
+                   \x20     - op: template\n        templates: [template-force.tsv]\n        force: true\n";
+    let (ok, err) = make_own_plan(&root, targets, &["unforced.ofn"]);
+    assert!(!ok && err.contains("could not interpret 'ex:2'"), "the build should refuse the row:\n{err}");
+    let (ok, err) = make_own_plan(&root, targets, &["forced.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("forced.ofn")).unwrap(),
+        std::fs::read_to_string(fixtures.join("template-force.robot.ofn")).unwrap()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned annotate step does everything its options say, as ROBOT 1.9.11
+/// does it: merge an annotation file, annotate the axioms with where they are
+/// derived from, assert what defines each entity, and replace the annotations
+/// of the axioms.
+#[test]
+fn a_planned_annotate_does_what_every_option_says() {
+    let root = workdir("annotate-options");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["annotate-options.ofn", "annotate-options-extra.ofn", "annotate-options-subclasses.ofn"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    let targets = "  - target: all.ofn\n    input: annotate-options.ofn\n\
+                   \x20   needs: [annotate-options.ofn, annotate-options-extra.ofn]\n    steps:\n\
+                   \x20     - op: annotate\n        annotations:\n\
+                   \x20         - {property: 'dc:creator', value: me}\n\
+                   \x20       annotation_files: [annotate-options-extra.ofn]\n\
+                   \x20       annotate_derived_from: true\n        annotate_defined_by: true\n\
+                   \x20 - target: axiom.ofn\n    input: annotate-options-subclasses.ofn\n\
+                   \x20   needs: [annotate-options-subclasses.ofn]\n    steps:\n\
+                   \x20     - op: annotate\n\
+                   \x20       axiom_annotations: ['rdfs:comment', x, 'rdfs:comment', y, 'dc:source', s]\n";
+    let (ok, err) = make_own_plan(&root, targets, &["all.ofn", "axiom.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    for (target, robot) in [
+        ("all.ofn", "annotate-options.all.robot.ofn"),
+        ("axiom.ofn", "annotate-options-subclasses.axiom.robot.ofn"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(target)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{target}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned remove and filter do everything their options say, as ROBOT 1.9.11
+/// does: a punned term selects both its entities, include and exclude terms
+/// and files change the selection, the hierarchy is not re-linked across what
+/// goes, and the annotations a property names come off the axioms kept.
+#[test]
+fn a_planned_remove_and_filter_do_what_every_option_says() {
+    let root = workdir("selection-options");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["selection-options.ofn", "selection-options-include.txt", "selection-options-exclude.txt"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    let step = |op: &str, term: &str, exclude: &str, selects: &str| {
+        format!(
+            "    input: selection-options.ofn\n\
+             \x20   needs: [selection-options.ofn, selection-options-include.txt, selection-options-exclude.txt]\n\
+             \x20   steps:\n\
+             \x20     - op: {op}\n\
+             \x20       terms: ['http://example.org/s#{term}']\n\
+             \x20       include_terms: ['http://example.org/s#P']\n\
+             \x20       include_term_files: [selection-options-include.txt]\n\
+             \x20       exclude_terms: ['http://example.org/s#{exclude}']\n\
+             \x20       exclude_term_files: [selection-options-exclude.txt]\n\
+             \x20       selects: ['{selects}']\n\
+             \x20       allow_punning: true\n\
+             \x20       preserve_structure: false\n\
+             \x20       drop_axiom_annotations: ['oboInOwl:source']\n"
+        )
+    };
+    let targets = format!(
+        "  - target: removed.ofn\n{}  - target: filtered.ofn\n{}",
+        step("remove-terms", "C", "E", "self descendants"),
+        step("filter", "E", "C", "self ancestors annotations"),
+    );
+    let (ok, err) = make_own_plan(&root, &targets, &["removed.ofn", "filtered.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    for (target, robot) in
+        [("removed.ofn", "selection-options.remove.robot.ofn"), ("filtered.ofn", "selection-options.filter.robot.ofn")]
+    {
+        assert_eq!(
+            std::fs::read_to_string(root.join(target)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{target}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned extract and reduce do what their switches say, as ROBOT 1.9.11
+/// does: a forced extract builds the module of a term the ontology does not
+/// name, and a reduce keeps a redundant axiom that carries an annotation, or
+/// reduces only between named classes.
+#[test]
+fn a_planned_extract_and_reduce_do_what_their_switches_say() {
+    let root = workdir("switches");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["selection-options.ofn", "reduce-annotated.ofn"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    let reduce = |target: &str, switch: &str| {
+        format!(
+            "  - target: {target}\n    input: reduce-annotated.ofn\n    needs: [reduce-annotated.ofn]\n    steps:\n\
+             \x20     - op: reduce\n        {switch}: true\n"
+        )
+    };
+    let targets = format!(
+        "  - target: extracted.ofn\n    input: selection-options.ofn\n    needs: [selection-options.ofn]\n    steps:\n\
+         \x20     - op: extract\n        method: BOT\n        terms: ['http://example.org/s#Z']\n        force: true\n{}{}",
+        reduce("preserved.ofn", "preserve_annotated_axioms"),
+        reduce("named.ofn", "named_classes_only"),
+    );
+    let (ok, err) = make_own_plan(&root, &targets, &["extracted.ofn", "preserved.ofn", "named.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    for (target, robot) in [
+        ("extracted.ofn", "extract-missing.force.robot.ofn"),
+        ("preserved.ofn", "reduce-annotated.preserve.robot.ofn"),
+        ("named.ofn", "reduce-annotated.named.robot.ofn"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(target)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{target}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned remove reads its switches where the command does: a `trim` that
+/// is neither `true` nor `false` fails the step once something is selected,
+/// and says nothing when nothing is, as ROBOT 1.9.11 does.
+#[test]
+fn a_planned_remove_reads_a_switch_where_the_command_does() {
+    let root = workdir("switch-text");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    std::fs::copy(fixtures.join("selection-options.ofn"), root.join("selection-options.ofn")).unwrap();
+    let step = |target: &str, term: &str| {
+        format!(
+            "  - target: {target}\n    input: selection-options.ofn\n    needs: [selection-options.ofn]\n    steps:\n\
+             \x20     - op: remove-terms\n        terms: ['http://example.org/s#{term}']\n        trim: 'TRUE'\n"
+        )
+    };
+    let (ok, err) = make_own_plan(&root, &step("kept.ofn", "Z"), &["kept.ofn"]);
+    assert!(ok, "the build failed:\n{err}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("kept.ofn")).unwrap(),
+        std::fs::read_to_string(fixtures.join("switch-remove-empty.robot.ofn")).unwrap()
+    );
+    let (ok, err) = make_own_plan(&root, &step("removed.ofn", "C"), &["removed.ofn"]);
+    assert!(!ok, "a step with `trim: TRUE` built");
+    assert!(err.contains("BOOLEAN VALUE ERROR arg for trim must be true or false"), "{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A plan's shell step runs its command line as one shell, so a `cd` in it
 /// reaches the commands after it.
 #[test]

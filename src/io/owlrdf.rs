@@ -4137,13 +4137,12 @@ fn save_inner<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<String>> {
         if want.is_empty() || name.contains(&want) {
             eprintln!(
                 "model[{name}]: shared_anon={} owl_genid_refs={} \
-closure_signature={} closure_declared={} materialised_decls={} \
+closure_signature={} closure_declared={} \
 idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared={} axioms={}",
                 model.shared_anon.len(),
                 model.owl_genid_refs.len(),
                 model.imports_closure.as_ref().map_or(0, |c| c.signature.len()),
                 model.imports_closure.as_ref().map_or(0, |c| c.declared.len()),
-                model.materialised_declarations.len(),
                 model.idspaces.len(),
                 model.rdf_prefixes.len(),
                 model.explicit_prefixes.len(),

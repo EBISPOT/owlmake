@@ -321,10 +321,11 @@ pub fn rename(model: Model, mapping: &std::collections::HashMap<String, String>)
 }
 
 /// Assert inferred existential restrictions (`om materialize`). `properties`
-/// limits which object properties to materialize (all when empty).
-pub fn materialize(model: Model, properties: &[String]) -> Model {
+/// limits which object properties to materialize (all when empty). An
+/// inconsistent or incoherent ontology is refused.
+pub fn materialize(model: Model, properties: &[String]) -> Result<Model> {
     let props: std::collections::HashSet<String> = properties.iter().cloned().collect();
-    crate::cmd::materialize::materialize(model, &props)
+    Ok(crate::cmd::materialize::materialize(model, &props)?)
 }
 
 /// Extract a module for a seed term set (`om extract`). `method` is one of

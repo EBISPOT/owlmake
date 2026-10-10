@@ -22,25 +22,3 @@ pub use dl::DlReasoner;
 pub use el::Reasoner;
 pub use entail::{entails, instances, is_instance, types};
 pub use whelk::WhelkClassification;
-
-/// Configure the shared EL engine for a `--reasoner` choice, for the commands
-/// that run on the EL [`Reasoner`] (`reduce`, `materialize`, `explain`).
-/// `owlmake` turns on union-elimination; the other EL names (`elk`/`structural`/
-/// `emr`) use plain EL; the non-EL names (`hermit`/`jfact`/`whelk`) fall back to
-/// the EL engine for these operations with a one-line note (rather than being
-/// silently ignored). Must be called before `Reasoner::classify`, since the mode
-/// is process-global. Returns whether union-elimination was enabled.
-pub fn configure(reasoner: &str) -> bool {
-    let lc = reasoner.to_ascii_lowercase();
-    let union_elim = lc == "owlmake";
-    el::set_whelk_mode(union_elim);
-    match lc.as_str() {
-        "elk" | "structural" | "emr" => {}
-        "owlmake" => status!("reason: using the built-in EL reasoner with union-elimination"),
-        "whelk" | "hermit" | "jfact" => status!(
-            "note: reasoner '{reasoner}' is not available for this operation; using the built-in EL reasoner"
-        ),
-        _ => status!("note: unknown reasoner '{reasoner}'; using the built-in EL reasoner"),
-    }
-    union_elim
-}

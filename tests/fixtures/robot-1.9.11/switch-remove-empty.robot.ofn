@@ -1,0 +1,68 @@
+Prefix(:=<http://example.org/s#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(oboInOwl:=<http://www.geneontology.org/formats/oboInOwl#>)
+
+
+Ontology(<http://example.org/s>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:P))
+Declaration(ObjectProperty(:r))
+Declaration(NamedIndividual(:P))
+Declaration(AnnotationProperty(oboInOwl:source))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (a)
+
+AnnotationAssertion(Annotation(oboInOwl:source "PMID:2") rdfs:label :A "a")
+
+# Class: :B (b)
+
+AnnotationAssertion(rdfs:label :B "b")
+SubClassOf(Annotation(oboInOwl:source "PMID:1") Annotation(rdfs:comment "keep") :B :A)
+
+# Class: :C (c)
+
+AnnotationAssertion(rdfs:label :C "c")
+SubClassOf(:C :B)
+
+# Class: :D (d)
+
+AnnotationAssertion(rdfs:label :D "d")
+SubClassOf(:D :C)
+
+# Class: :E (e)
+
+AnnotationAssertion(rdfs:label :E "e")
+SubClassOf(:E :D)
+
+# Class: :P (p)
+
+AnnotationAssertion(rdfs:label :P "p")
+SubClassOf(:P :A)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :P (p)
+
+ClassAssertion(:A :P)
+ObjectPropertyAssertion(:r :P :P)
+
+
+)

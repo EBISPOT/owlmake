@@ -113,7 +113,7 @@ pub fn step(
     // Resolve the annotation property and declare it (plus referenceCount's, if
     // requested) so the result carries no dangling property reference.
     let prop_iri = match &args.property {
-        Some(p) => crate::cmd::select::expand(&model, p),
+        Some(p) => crate::cmd::select::expand_with_document_prefixes(&model, p),
         None => iri::NORMALIZED_IC.to_string(),
     };
     let ic_ap = model.build.annotation_property(prop_iri.as_str());

@@ -26,6 +26,9 @@ use crate::reason::whelk_order;
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+/// The namespace of the probe concepts [`WhelkClassification::unsatisfiable_properties`]
+/// adds; no ontology names a class in it.
+const PROBE_NS: &str = "urn:owlmake:probe#";
 
 /// A whelk classification, shaped like the built-in EL reasoner's outputs.
 pub struct WhelkClassification {
@@ -119,10 +122,46 @@ impl WhelkClassification {
         self.subs.get(a).is_some_and(|s| s.contains(b))
     }
 
-    /// Whether the ontology is consistent: inconsistency surfaces as `owl:Thing`
-    /// becoming unsatisfiable (`owl:Thing ⊑ owl:Nothing`).
+    /// Whether the ontology is consistent: inconsistency surfaces as
+    /// `owl:Thing` becoming unsatisfiable (`owl:Thing ⊑ owl:Nothing`), or as an
+    /// individual — which must exist — becoming unsatisfiable.
     pub fn is_consistent(&self) -> bool {
-        !self.sub_of(OWL_THING, OWL_NOTHING)
+        if self.sub_of(OWL_THING, OWL_NOTHING) {
+            return false;
+        }
+        let bottom = self.state.interner.bottom();
+        !self.state.closure_subs_by_superclass.get(&bottom).is_some_and(|subs| {
+            subs.iter().any(|&c| matches!(self.state.interner.concept_data(c), ConceptData::Nominal(_)))
+        })
+    }
+
+    /// The object properties among `properties` for which `∃p.⊤` is
+    /// unsatisfiable, sorted. One probe concept `P ⊑ ∃p.⊤` per property is
+    /// asserted onto the saturated state and saturated in turn; the state is
+    /// persistent, so extending a copy of it costs only the probes.
+    pub fn unsatisfiable_properties(&self, properties: &[String]) -> Vec<String> {
+        use whelk::whelk::model::ConceptInclusion;
+        let mut state = self.state.clone();
+        let top = state.interner.top();
+        let bottom = state.interner.bottom();
+        let mut axioms: whelk::whelk::model::HashSet<ConceptInclusion> = Default::default();
+        let mut probes: Vec<(ConceptId, &String)> = Vec::new();
+        for (i, p) in properties.iter().enumerate() {
+            let role = state.interner.intern_role(p);
+            let some = state.interner.intern_concept(ConceptData::ExistentialRestriction { role, concept: top });
+            let probe = state.interner.intern_concept(ConceptData::AtomicConcept(format!("{PROBE_NS}{i}")));
+            axioms.insert(ConceptInclusion { subclass: probe, superclass: some });
+            probes.push((probe, p));
+        }
+        let saturated = whelk::whelk::reasoner::assert_append(&axioms, &state);
+        let mut out: Vec<String> = probes
+            .into_iter()
+            .filter(|&(probe, _)| saturated.is_subclass_of(probe, bottom))
+            .map(|(_, p)| p.clone())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// IRIs of named classes that are unsatisfiable (entail `owl:Nothing`).

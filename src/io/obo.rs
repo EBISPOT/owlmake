@@ -116,6 +116,23 @@ thread_local! {
     /// touches it.
     static IDSPACES: std::cell::RefCell<HashMap<String, String>> =
         std::cell::RefCell::new(HashMap::new());
+    /// The annotation properties a tag or qualifier of the document being
+    /// parsed has introduced; [`load`] declares these and no other annotation
+    /// property. A property met only as a `property_value:` predicate, as a
+    /// subset or synonym-type id, or as the `rdfs:label` of an xref's
+    /// description is named, not introduced.
+    static TAG_PROPERTIES: std::cell::RefCell<BTreeSet<String>> =
+        const { std::cell::RefCell::new(BTreeSet::new()) };
+    /// The namespace an unprefixed id of the document being parsed lives in:
+    /// `http://purl.obolibrary.org/obo/<ontology>#`, the ontology being the
+    /// header's `ontology:` id as written, or `TEMP`.
+    static DEFAULT_ID_SPACE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// `prop`, recorded as introduced by a tag of the document being parsed.
+fn tag_prop(prop: &str) -> &str {
+    TAG_PROPERTIES.with(|t| t.borrow_mut().insert(prop.to_string()));
+    prop
 }
 
 /// Expand an OBO id, honouring the document's `idspace:` declarations before
@@ -131,12 +148,16 @@ fn expand_curie(id: &str) -> String {
     if id.starts_with("http://") || id.starts_with("https://") {
         return id.to_string();
     }
-    if let Some((pre, local)) = id.split_once(':') {
-        if let Some(ns) = IDSPACES.with(|m| m.borrow().get(pre).cloned()) {
-            return format!("{ns}{local}");
+    match id.split_once(':') {
+        Some((pre, local)) => {
+            if let Some(ns) = IDSPACES.with(|m| m.borrow().get(pre).cloned()) {
+                return format!("{ns}{local}");
+            }
+            expand_obo_id(id)
         }
+        // An unprefixed id lives in the document's own id space.
+        None => format!("{}{}", DEFAULT_ID_SPACE.with(|d| d.borrow().clone()), url_encode_local(id)),
     }
-    expand_obo_id(id)
 }
 
 /// Compress a full IRI to an OBO id where possible (inverse of [`expand_id`]).
@@ -252,6 +273,7 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
 
     // `idspace: PREFIX NAMESPACE [description]` header lines: the document's own
     // CURIE bindings, consulted by `expand_curie` for the rest of the parse.
+    TAG_PROPERTIES.with(|t| t.borrow_mut().clear());
     IDSPACES.with(|m| {
         let mut m = m.borrow_mut();
         m.clear();
@@ -267,6 +289,7 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // is the ontology `TEMP`, and `TEMP` is the idspace its bare local names
     // resolve in.
     let ontology_id: &str = header.get("ontology").unwrap_or("TEMP");
+    DEFAULT_ID_SPACE.with(|d| *d.borrow_mut() = format!("{OBO_BASE}{ontology_id}#"));
     {
         let ont_id = ontology_id;
         let iri = if ont_id.starts_with("http") {
@@ -305,17 +328,14 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // term/typedef that does not declare its own `namespace`.
     let default_ns = header.get("default-namespace").map(|s| s.to_string());
     // It is also recorded as an ontology-level `oboInOwl:default-namespace`
-    // annotation, so an obo→owl→obo trip can re-derive the header tag (the
-    // property is declared by declare_referenced_entities).
+    // annotation, so an obo→owl→obo trip can re-derive the header tag.
     if let Some(ns) = &default_ns {
         ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
-            ann(&b, &format!("{OIO}default-namespace"), ns),
+            ann(&b, tag_prop(&format!("{OIO}default-namespace")), ns),
         )));
     }
 
-    let onto_ns_for_defs = Some(ontology_id)
-        .filter(|o| !o.starts_with("http"))
-        .map(|o| format!("{OBO_BASE}{o}#"));
+    let onto_ns_for_defs = Some(format!("{OBO_BASE}{ontology_id}#"));
     // `synonymtypedef:`/`subsetdef:` header lines declare an annotation property
     // that is a sub-property of oboInOwl:SynonymTypeProperty / :SubsetProperty.
     // The quoted description is carried as `rdfs:label` for a synonymtypedef but
@@ -324,15 +344,10 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         ("synonymtypedef", "SynonymTypeProperty", RDFS_LABEL),
         ("subsetdef", "SubsetProperty", RDFS_COMMENT),
     ] {
-        // Declare the oboInOwl parent property itself. Without its declaration
-        // the RDF reader can't classify a `X rdfs:subPropertyOf
-        // SubsetProperty` triple as a SubAnnotationPropertyOf when the model is
-        // round-tripped through RDF (e.g. owlmake's `query --update`), silently
-        // dropping every subsetdef/synonymtypedef.
+        // The tag introduces the oboInOwl parent property; the subset or synonym
+        // type it names is only named, so it stays undeclared.
         if header.all(tag).next().is_some() {
-            ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
-                b.annotation_property(format!("{OIO}{parent}").as_str()),
-            )));
+            tag_prop(&format!("{OIO}{parent}"));
         }
         for s in header.all(tag) {
             let id = s.split_whitespace().next().unwrap_or(s);
@@ -341,16 +356,13 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
             } else {
                 resolve_local(id, onto_ns_for_defs.as_deref())
             };
-            // The property itself is declared as every referenced property is
-            // — by `declare_referenced_entities`, so that an import closure
-            // that already types it can withdraw the declaration.
             ont.insert(Component::SubAnnotationPropertyOf(SubAnnotationPropertyOf {
                 sub: b.annotation_property(iri.as_str()),
                 sup: b.annotation_property(format!("{OIO}{parent}").as_str()),
             }));
             if let Some(rest) = s.strip_prefix(id) {
                 if let Some((name, after)) = parse_quoted(rest.trim()) {
-                    assert_ann(&b, &mut ont, &iri, descr_prop, &name);
+                    assert_ann(&b, &mut ont, &iri, tag_prop(descr_prop), &name);
                     // A synonym type's scope is the synonym property its
                     // synonyms take.
                     let scope = match after.split_whitespace().next() {
@@ -361,9 +373,15 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
                         _ => None,
                     };
                     if let (true, Some(scope)) = (tag == "synonymtypedef", scope) {
+                        // `hasScope` and the synonym property it names are both
+                        // introduced here.
                         ont.insert(Component::AnnotationAssertion(AnnotationAssertion {
                             subject: AnnotationSubject::IRI(b.iri(iri.as_str())),
-                            ann: ann_iri(&b, &format!("{OIO}hasScope"), &format!("{OIO}{scope}")),
+                            ann: ann_iri(
+                                &b,
+                                tag_prop(&format!("{OIO}hasScope")),
+                                tag_prop(&format!("{OIO}{scope}")),
+                            ),
                         }));
                     }
                 }
@@ -373,11 +391,10 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
 
     // Subset and (local) synonym-type names map to IRIs in the ontology's own
     // namespace, `http://purl.obolibrary.org/obo/<ontology>#<name>` — e.g.
-    // `ontology: uberon/core` ⇒ `obo/uberon/core#efo_slim`. That is the OBO→OWL
-    // mapping for a bare local name.
-    let onto_ns = Some(ontology_id)
-        .filter(|o| !o.starts_with("http"))
-        .map(|o| format!("{OBO_BASE}{o}#"));
+    // `ontology: uberon/core` ⇒ `obo/uberon/core#efo_slim`, and
+    // `ontology: http://example.org/b` ⇒ `obo/http://example.org/b#name`. That
+    // is the OBO→OWL mapping for a bare local name.
+    let onto_ns = Some(format!("{OBO_BASE}{ontology_id}#"));
 
     // Relation shorthands: a `[Typedef]` whose `id` is a bare name and which has
     // a single `xref` to an ontology term (e.g. `id: disease_has_basis_in_…` +
@@ -446,14 +463,18 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         }
     }
     for r in header.all("remark") {
-        ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(ann(&b, RDFS_COMMENT, r))));
+        ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(ann(
+            &b,
+            tag_prop(RDFS_COMMENT),
+            r,
+        ))));
     }
     // Other OBO header tags become ontology-level annotations in the oboInOwl
     // namespace: `format-version` → `hasOBOFormatVersion`, and the
     // `treat-xrefs-as-*` macro directives (their tag name is the property local).
     for fv in header.all("format-version") {
         ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
-            ann(&b, &format!("{OIO}hasOBOFormatVersion"), fv),
+            ann(&b, tag_prop(&format!("{OIO}hasOBOFormatVersion")), fv),
         )));
     }
     for key in [
@@ -464,20 +485,10 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         "treat-xrefs-as-is_a",
         "treat-xrefs-as-has-subclass",
     ] {
-        let mut any = false;
         for v in header.all(key) {
-            any = true;
             ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
-                ann(&b, &format!("{OIO}{key}"), v),
+                ann(&b, tag_prop(&format!("{OIO}{key}")), v),
             )));
-        }
-        // A used macro-directive property is declared, carrying the tag name
-        // itself as its `rdfs:label` (the format's built-in label for it).
-        if any {
-            ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
-                b.annotation_property(format!("{OIO}{key}").as_str()),
-            )));
-            assert_ann(&b, &mut ont, &format!("{OIO}{key}"), RDFS_LABEL, key);
         }
     }
     // Every other header tag is an ontology annotation in the oboInOwl
@@ -509,22 +520,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         }
         let local = if key == "namespace-id-rule" { "NamespaceIdRule" } else { key.as_str() };
         ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(
-            ann(&b, &format!("{OIO}{local}"), value),
+            ann(&b, tag_prop(&format!("{OIO}{local}")), value),
         )));
     }
-    // The built-in oboInOwl annotation properties carry an `rdfs:label` whenever
-    // they are used. The synonym/xref/etc. ones come labelled from imports; these
-    // edit-file metadata properties do not, so add them.
-    for (local, label, present) in [
-        ("created_by", "created by", stanzas.iter().any(|(_, s)| s.get("created_by").is_some())),
-        ("creation_date", "creation date", stanzas.iter().any(|(_, s)| s.get("creation_date").is_some())),
-        ("id", "id", true),
-    ] {
-        if present {
-            assert_ann(&b, &mut ont, &format!("{OIO}{local}"), RDFS_LABEL, label);
-        }
-    }
-
     // The `owl-axioms:` header clause carries, in OWL functional syntax, the axioms
     // OBO has no tag for (ClassAssertion, DifferentIndividuals,
     // IrreflexiveObjectProperty, extra DisjointClasses/SubClassOf, re-declarations,
@@ -561,11 +559,9 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         }
     }
 
-    add_oboinowl_builtin_labels(&b, &mut ont);
-    let materialised = declare_referenced_entities(&b, &mut ont);
+    declare_tag_properties(&b, &mut ont);
 
     let mut m = Model::from_parts(ont, default_prefixes());
-    m.materialised_declarations = materialised;
     // OBO carries no document prefix map, so a model read from OBO must not claim
     // one: every prefix such a document ends up declaring is either a builtin or
     // generated from an entity's namespace. Converting a two-term obo yields an
@@ -600,17 +596,7 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
 }
 
 /// The OBO built-in annotation properties, each with the canonical `rdfs:label`
-/// it carries (`hasExactSynonym` → "has_exact_synonym").
-///
-/// A property in this table is INTRODUCED by the OBO tag that used it — `def:`
-/// gives `IAO_0000115`, `synonym:` gives `oboInOwl:hasExactSynonym`, `xref:`
-/// gives `oboInOwl:hasDbXref` — so its declaration is the document's own and
-/// stands whatever the import closure declares. A property merely named as a
-/// `property_value:` predicate is referenced rather than introduced, and an
-/// imported ontology that declares it takes that job over.
-///
-/// One table, two readers: [`add_oboinowl_builtin_labels`] labels them, and
-/// [`declare_referenced_entities`] keeps them out of the withdrawable set.
+/// a tag that introduces it gives it (`hasExactSynonym` → "has_exact_synonym").
 fn obo_builtin_annotation_properties() -> [(String, &'static str); 31] {
     // Full IRIs so the IAO_* and oboInOwl meta-properties (SubsetProperty …) sit
     // alongside the oboInOwl synonym/xref properties.
@@ -653,205 +639,34 @@ fn obo_builtin_annotation_properties() -> [(String, &'static str); 31] {
     ]
 }
 
-/// Each standard oboInOwl annotation property *that is actually used* carries a
-/// canonical `rdfs:label` (e.g. `hasExactSynonym` → "has_exact_synonym"). Add
-/// those for any used+unlabelled built-in property.
-fn add_oboinowl_builtin_labels(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>) {
-    let labels = obo_builtin_annotation_properties();
-    // Annotation-property IRIs referenced anywhere (assertions, axiom/ontology
-    // annotations, declarations, sub-property axioms) and subjects already labelled.
-    let mut used: BTreeSet<String> = BTreeSet::new();
-    let mut labelled: BTreeSet<String> = BTreeSet::new();
-    for ac in ont.iter() {
-        for a in ac.ann.iter() {
-            used.insert(a.ap.0.to_string());
-        }
-        match &ac.component {
-            Component::AnnotationAssertion(ax) => {
-                used.insert(ax.ann.ap.0.to_string());
-                if ax.ann.ap.0.as_ref() == RDFS_LABEL {
-                    if let horned_owl::model::AnnotationSubject::IRI(i) = &ax.subject {
-                        labelled.insert(i.to_string());
-                    }
-                }
-            }
-            Component::OntologyAnnotation(oa) => {
-                used.insert(oa.0.ap.0.to_string());
-            }
-            Component::DeclareAnnotationProperty(d) => {
-                used.insert(d.0 .0.to_string());
-            }
-            Component::SubAnnotationPropertyOf(s) => {
-                used.insert(s.sub.0.to_string());
-                used.insert(s.sup.0.to_string());
-            }
-            _ => {}
-        }
-    }
-    for (iri, label) in &labels {
-        if used.contains(iri) && !labelled.contains(iri) {
-            assert_ann(b, ont, iri, RDFS_LABEL, label);
-        }
-    }
-}
-
-/// Declare every entity referenced by an axiom that is not already declared —
-/// classes/object-properties used in logical axioms and annotation properties
-/// used in assertions or axiom annotations.
-///
-/// These declarations are a WRITER-side materialisation, not anything the OBO
-/// document states: a property that only ever appears as a `property_value:`
-/// predicate is declared nowhere, yet a serialised RDF/XML document has to give it
-/// a type. Returns the set it synthesised, keyed `kind\0IRI`, so a caller that
-/// knows the import closure can withdraw the ones whose entity is already typed
-/// there — see `Model::materialised_declarations`.
-fn declare_referenced_entities(
-    b: &Build<RcStr>,
-    ont: &mut SetOntology<RcStr>,
-) -> std::collections::HashSet<String> {
-    let mut classes: BTreeSet<String> = BTreeSet::new();
-    // Classes met as the FILLER of a relation restriction. An OBO `relationship:`
-    // (and an `intersection_of:` that names a relation) declares its filler
-    // outright, because obo format allows a dangling reference there and the
-    // translation makes the class explicit to be sure. Such a declaration is the
-    // document's own, so it stands whatever the import closure holds — unlike a
-    // class named as a PLAIN operand of `is_a:`, `disjoint_from:`, a bare
-    // `intersection_of:` or a `union_of:`, which the translation leaves to the
-    // signature and which the closure therefore suppresses.
-    let mut filler_classes: BTreeSet<String> = BTreeSet::new();
-    let mut obj_props: BTreeSet<String> = BTreeSet::new();
-    let mut ann_props: BTreeSet<String> = BTreeSet::new();
-    let mut declared_c: BTreeSet<String> = BTreeSet::new();
-    let mut declared_o: BTreeSet<String> = BTreeSet::new();
-    let mut declared_a: BTreeSet<String> = BTreeSet::new();
-
-    fn walk_ce(
-        ce: &CE<RcStr>,
-        classes: &mut BTreeSet<String>,
-        filler_classes: &mut BTreeSet<String>,
-        ops: &mut BTreeSet<String>,
-        in_filler: bool,
-    ) {
-        match ce {
-            CE::Class(c) => {
-                classes.insert(c.0.to_string());
-                if in_filler {
-                    filler_classes.insert(c.0.to_string());
-                }
-            }
-            CE::ObjectSomeValuesFrom { ope, bce } | CE::ObjectAllValuesFrom { ope, bce } => {
-                if let OPE::ObjectProperty(p) = ope {
-                    ops.insert(p.0.to_string());
-                }
-                walk_ce(bce, classes, filler_classes, ops, true);
-            }
-            CE::ObjectIntersectionOf(v) | CE::ObjectUnionOf(v) => {
-                for x in v {
-                    walk_ce(x, classes, filler_classes, ops, in_filler);
-                }
-            }
-            CE::ObjectComplementOf(x) => walk_ce(x, classes, filler_classes, ops, in_filler),
-            _ => {}
-        }
-    }
-
-    for ac in ont.iter() {
-        for a in ac.ann.iter() {
-            ann_props.insert(a.ap.0.to_string());
-        }
-        match &ac.component {
-            Component::DeclareClass(d) => {
-                declared_c.insert(d.0 .0.to_string());
-            }
-            Component::DeclareObjectProperty(d) => {
-                declared_o.insert(d.0 .0.to_string());
-            }
-            Component::DeclareAnnotationProperty(d) => {
-                declared_a.insert(d.0 .0.to_string());
-            }
-            Component::SubClassOf(ax) => {
-                walk_ce(&ax.sub, &mut classes, &mut filler_classes, &mut obj_props, false);
-                walk_ce(&ax.sup, &mut classes, &mut filler_classes, &mut obj_props, false);
-            }
-            Component::EquivalentClasses(ax) => {
-                for ce in &ax.0 {
-                    walk_ce(ce, &mut classes, &mut filler_classes, &mut obj_props, false);
-                }
-            }
-            Component::DisjointClasses(ax) => {
-                for ce in &ax.0 {
-                    walk_ce(ce, &mut classes, &mut filler_classes, &mut obj_props, false);
-                }
-            }
-            // An `instance_of:` class is a plain operand, as an `is_a:` parent is.
-            Component::ClassAssertion(ax) => {
-                walk_ce(&ax.ce, &mut classes, &mut filler_classes, &mut obj_props, false);
-            }
-            // The relation of an [Instance] `relationship:` is an object property,
-            // declared the way a [Term] `relationship:` relation with no
-            // `[Typedef]` frame is.
-            Component::ObjectPropertyAssertion(ax) => {
-                if let OPE::ObjectProperty(p) = &ax.ope {
-                    obj_props.insert(p.0.to_string());
-                }
-            }
-            // Both ends of a property hierarchy are properties the document
-            // names: a synonym type or subset is declared by its line alone.
-            Component::SubAnnotationPropertyOf(ax) => {
-                ann_props.insert(ax.sub.0.to_string());
-                ann_props.insert(ax.sup.0.to_string());
-            }
-            Component::AnnotationAssertion(ax) => {
-                ann_props.insert(ax.ann.ap.0.to_string());
-            }
-            // Annotation properties used only in the ontology header (e.g.
-            // `dc:title`, `dc:description`, `dcterms:license`,
-            // `oboInOwl:hasOBOFormatVersion`) must still be declared: every
-            // referenced annotation property gets a declaration.
-            Component::OntologyAnnotation(oa) => {
-                ann_props.insert(oa.0.ap.0.to_string());
-            }
-            _ => {}
-        }
-    }
-
-    let mut materialised: std::collections::HashSet<String> = Default::default();
-    for c in classes.difference(&declared_c) {
-        ont.insert(Component::DeclareClass(DeclareClass(b.class(c.as_str()))));
-        // A relation's filler is declared by the document itself, so it is not
-        // withdrawable; a plain operand is ours to withdraw once the closure is
-        // known to type it.
-        if !filler_classes.contains(c) {
-            materialised.insert(format!("class\u{0}{c}"));
-        }
-    }
-    for p in obj_props.difference(&declared_o) {
-        ont.insert(Component::DeclareObjectProperty(DeclareObjectProperty(
-            b.object_property(p.as_str()),
-        )));
-        materialised.insert(format!("op\u{0}{p}"));
-    }
-    // A built-in property is introduced by the tag that used it, so its
-    // declaration is the document's own and no import can stand in for it; one
-    // named as a `property_value:` predicate is ours to withdraw once the closure
-    // is known to type it.
-    // Every property the OBO vocabulary itself names — a tag's property, a
-    // qualifier's — is introduced by the line that used it, so its declaration
-    // is the document's own whatever an import declares.
-    let builtin: BTreeSet<String> =
-        obo_builtin_annotation_properties().into_iter().map(|(iri, _)| iri).collect();
-    // `name:`, `comment:` and `is_obsolete:` introduce `rdfs:label`,
-    // `rdfs:comment` and `owl:deprecated` the same way.
-    let tag_properties = [RDFS_LABEL, RDFS_COMMENT, OWL_DEPRECATED];
-    for p in ann_props.difference(&declared_a) {
+/// Declare every annotation property a tag of the document introduced (see
+/// `TAG_PROPERTIES`), and give each built-in one among them its canonical
+/// `rdfs:label` unless the document labels it itself. Nothing else is declared
+/// here: a class named only by `is_a:` or `disjoint_from:`, a relation with no
+/// `[Typedef]` frame and a `property_value:` predicate stay undeclared, and a
+/// writer declares what the written axioms name.
+fn declare_tag_properties(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>) {
+    let labels: HashMap<String, &str> = obo_builtin_annotation_properties().into_iter().collect();
+    let labelled: HashSet<String> = ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            Component::AnnotationAssertion(ax) if ax.ann.ap.0.as_ref() == RDFS_LABEL => match &ax.subject {
+                AnnotationSubject::IRI(i) => Some(i.to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    for prop in TAG_PROPERTIES.with(|t| t.borrow().clone()) {
         ont.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(
-            b.annotation_property(p.as_str()),
+            b.annotation_property(prop.as_str()),
         )));
-        if !builtin.contains(p) && !p.starts_with(OIO) && !tag_properties.contains(&p.as_str()) {
-            materialised.insert(format!("ap\u{0}{p}"));
+        if let Some(label) = labels.get(&prop) {
+            if !labelled.contains(&prop) {
+                assert_ann(b, ont, &prop, RDFS_LABEL, label);
+            }
         }
     }
-    materialised
 }
 
 fn strip_comment(line: &str) -> String {
@@ -973,6 +788,7 @@ fn assert_ann_with(
     value: &str,
     axiom_anns: Vec<Annotation<RcStr>>,
 ) {
+    tag_prop(prop);
     if axiom_anns.is_empty() {
         assert_ann(b, ont, subj, prop, value);
         return;
@@ -996,6 +812,7 @@ fn assert_ann_iri_with(
     iri: &str,
     axiom_anns: Vec<Annotation<RcStr>>,
 ) {
+    tag_prop(prop);
     if axiom_anns.is_empty() {
         assert_ann_iri(b, ont, subj, prop, iri);
         return;
@@ -1091,7 +908,7 @@ fn xref_label_ann(b: &Build<RcStr>, x: &str) -> Vec<Annotation<RcStr>> {
 fn dbxref_anns(b: &Build<RcStr>, rest: &str) -> Vec<Annotation<RcStr>> {
     parse_bracket_xrefs(rest)
         .iter()
-        .map(|x| ann(b, &format!("{OIO}hasDbXref"), x))
+        .map(|x| ann(b, tag_prop(&format!("{OIO}hasDbXref")), x))
         .collect()
 }
 
@@ -1170,8 +987,18 @@ fn qualifier_anns(b: &Build<RcStr>, rest: &str) -> Vec<Annotation<RcStr>> {
                     | "gci_filler"
             )
         })
-        .map(|(k, v)| ann(b, &qualifier_prop(k), v))
+        .map(|(k, v)| ann(b, tag_prop(&qualifier_prop(k)), v))
         .collect()
+}
+
+/// Declare the class a relation is restricted to — the filler of a
+/// `relationship:`, of a relation `intersection_of:` or of a GCI — as the
+/// document's own: unlike a class named only by `is_a:`, `disjoint_from:`, a
+/// genus or a `union_of:`, a filler is declared even where no frame defines it.
+fn declare_filler(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>, iri: &str) -> horned_owl::model::Class<RcStr> {
+    let class = b.class(iri);
+    ont.insert(Component::DeclareClass(DeclareClass(class.clone())));
+    class
 }
 
 /// Build the class expression for an OBO `relationship`/`intersection_of`
@@ -1246,7 +1073,7 @@ fn boolean_tags(b: &Build<RcStr>, ont: &mut SetOntology<RcStr>, subj: &str, st: 
                     subject: AnnotationSubject::IRI(b.iri(subj)),
                     ann: Annotation {
                         ann: Default::default(),
-                        ap: b.annotation_property(*prop),
+                        ap: b.annotation_property(tag_prop(prop)),
                         av: AnnotationValue::Literal(Literal::Datatype {
                             literal: value.to_string(),
                             datatype_iri: b.iri(XSD_BOOLEAN),
@@ -1503,7 +1330,7 @@ fn frame_annotations_to_owl(
     rel_map: &HashMap<String, String>,
 ) {
     // Every frame carries its OBO id as an `oboInOwl:id` annotation.
-    assert_ann(b, ont, iri, &format!("{OIO}id"), id);
+    assert_ann(b, ont, iri, tag_prop(&format!("{OIO}id")), id);
 
     // EVERY `name:` clause, not just the first. One line is written per
     // `rdfs:label` (see the `name` emission), so a stanza can legitimately carry
@@ -1512,17 +1339,17 @@ fn frame_annotations_to_owl(
     // on an obo→obo trip, which MONDO's build performs — a step re-reads the
     // written target and the artefact's write re-serialises it.
     for name in st.all("name") {
-        assert_ann(b, ont, iri, RDFS_LABEL, name);
+        assert_ann(b, ont, iri, tag_prop(RDFS_LABEL), name);
     }
     // `hasOBONamespace`: explicit `namespace`, else the header default.
     if let Some(ns) = st.get("namespace").or(default_ns) {
-        assert_ann(b, ont, iri, &format!("{OIO}hasOBONamespace"), ns);
+        assert_ann(b, ont, iri, tag_prop(&format!("{OIO}hasOBONamespace")), ns);
     }
     for cb in st.all("created_by") {
-        assert_ann(b, ont, iri, &format!("{OIO}created_by"), cb);
+        assert_ann(b, ont, iri, tag_prop(&format!("{OIO}created_by")), cb);
     }
     for cd in st.all("creation_date") {
-        assert_ann(b, ont, iri, &format!("{OIO}creation_date"), cd);
+        assert_ann(b, ont, iri, tag_prop(&format!("{OIO}creation_date")), cd);
     }
     for pv in st.all("property_value") {
         // A [Term] or [Instance] property_value. The stanza flag is `true` here, but
@@ -1559,7 +1386,7 @@ fn frame_annotations_to_owl(
             if let Some(type_id) = toks.next() {
                 anns.push(ann_iri(
                     b,
-                    &format!("{OIO}hasSynonymType"),
+                    tag_prop(&format!("{OIO}hasSynonymType")),
                     &resolve_local(type_id, onto_ns),
                 ));
             }
@@ -1582,7 +1409,7 @@ fn frame_annotations_to_owl(
             ont,
             Component::AnnotationAssertion(AnnotationAssertion {
                 subject: AnnotationSubject::IRI(b.iri(iri)),
-                ann: ann_iri(b, &format!("{OIO}inSubset"), &resolve_local(sid, onto_ns)),
+                ann: ann_iri(b, tag_prop(&format!("{OIO}inSubset")), &resolve_local(sid, onto_ns)),
             }),
             qualifier_anns(b, s),
         );
@@ -1604,7 +1431,7 @@ fn frame_annotations_to_owl(
     }
     for a in st.all("alt_id") {
         let t = a.split_whitespace().next().unwrap_or(a);
-        assert_ann(b, ont, iri, &format!("{OIO}hasAlternativeId"), t);
+        assert_ann(b, ont, iri, tag_prop(&format!("{OIO}hasAlternativeId")), t);
     }
 }
 
@@ -1654,7 +1481,7 @@ fn term_to_owl(
                 CE::Class(b.class(iri.clone())),
                 CE::ObjectSomeValuesFrom {
                     ope: OPE::ObjectProperty(b.object_property(resolve_rel(gr, rel_map))),
-                    bce: Box::new(CE::Class(b.class(expand_curie(gf)))),
+                    bce: Box::new(CE::Class(declare_filler(b, ont, &expand_curie(gf)))),
                 },
             ]),
             _ => CE::Class(b.class(iri.clone())),
@@ -1707,12 +1534,13 @@ fn term_to_owl(
                         CE::Class(b.class(iri.clone())),
                         CE::ObjectSomeValuesFrom {
                             ope: OPE::ObjectProperty(b.object_property(resolve_rel(gr, rel_map))),
-                            bce: Box::new(CE::Class(b.class(expand_curie(gf)))),
+                            bce: Box::new(CE::Class(declare_filler(b, ont, &expand_curie(gf)))),
                         },
                     ]),
                     _ => CE::Class(b.class(iri.clone())),
                 };
                 let target_iri = expand_curie(target);
+                declare_filler(b, ont, &target_iri);
                 // The relationship's primary axiom is the existential `R some F`. The
                 // *snake_case* `min_cardinality`/`max_cardinality` qualifiers are
                 // non-standard and ride along as `oboInOwl:*` axiom annotations on
@@ -1803,12 +1631,11 @@ fn term_to_owl(
             let toks: Vec<&str> = body.split_whitespace().collect();
             match toks.as_slice() {
                 [genus] => conj.push(CE::Class(b.class(expand_curie(genus)))),
-                [rel, filler] => conj.push(relation_ce(
-                    b,
-                    resolve_rel(rel, rel_map),
-                    expand_curie(filler),
-                    line,
-                )),
+                [rel, filler] => {
+                    let filler = expand_curie(filler);
+                    declare_filler(b, ont, &filler);
+                    conj.push(relation_ce(b, resolve_rel(rel, rel_map), filler, line))
+                }
                 _ => {}
             }
         }
@@ -1846,12 +1673,16 @@ fn term_to_owl(
             );
         }
     }
-    for eq in st.all("equivalent_to") {
-        let eq = eq.split_whitespace().next().unwrap_or(eq);
-        ont.insert(Component::EquivalentClasses(EquivalentClasses(vec![
-            CE::Class(b.class(iri.clone())),
-            CE::Class(b.class(expand_curie(eq))),
-        ])));
+    for line in st.all("equivalent_to") {
+        let eq = line.split_whitespace().next().unwrap_or(line);
+        insert_annotated(
+            ont,
+            Component::EquivalentClasses(EquivalentClasses(vec![
+                CE::Class(b.class(iri.clone())),
+                CE::Class(b.class(expand_curie(eq))),
+            ])),
+            qualifier_anns(b, line),
+        );
     }
 }
 
@@ -1880,13 +1711,13 @@ fn typedef_to_owl(
             b.object_property(iri.clone()),
         )));
     }
-    assert_ann(b, ont, &iri, &format!("{OIO}id"), id);
+    assert_ann(b, ont, &iri, tag_prop(&format!("{OIO}id")), id);
     // Every `name:` clause — see the term reader above.
     for name in st.all("name") {
-        assert_ann(b, ont, &iri, RDFS_LABEL, name);
+        assert_ann(b, ont, &iri, tag_prop(RDFS_LABEL), name);
     }
     if let Some(ns) = st.get("namespace").or(default_ns) {
-        assert_ann(b, ont, &iri, &format!("{OIO}hasOBONamespace"), ns);
+        assert_ann(b, ont, &iri, tag_prop(&format!("{OIO}hasOBONamespace")), ns);
     }
     if let Some(raw) = st.get("def") {
         if let Some((def, rest)) = parse_quoted(raw.trim()) {
@@ -1918,7 +1749,7 @@ fn typedef_to_owl(
         x.starts_with("http") || x.contains(':')
     });
     if !id.contains(':') && remapped_by_xref {
-        assert_ann(b, ont, &iri, &format!("{OIO}shorthand"), id);
+        assert_ann(b, ont, &iri, tag_prop(&format!("{OIO}shorthand")), id);
     }
     for x in st.all("xref") {
         let id = unescape_obo(x.split_whitespace().next().unwrap_or(x));
@@ -1949,10 +1780,10 @@ fn typedef_to_owl(
         }
     }
     for cb in st.all("created_by") {
-        assert_ann(b, ont, &iri, &format!("{OIO}created_by"), cb);
+        assert_ann(b, ont, &iri, tag_prop(&format!("{OIO}created_by")), cb);
     }
     for cd in st.all("creation_date") {
-        assert_ann(b, ont, &iri, &format!("{OIO}creation_date"), cd);
+        assert_ann(b, ont, &iri, tag_prop(&format!("{OIO}creation_date")), cd);
     }
     for pv in st.all("property_value") {
         // Typedef (object-property) property_value: an OBO `\n` stays a literal
@@ -1993,6 +1824,32 @@ fn typedef_to_owl(
                 ),
                 sup: OPE::ObjectProperty(b.object_property(parent_iri)),
             }));
+        }
+    }
+    // An object property's `equivalent_to:` and `disjoint_from:` relate it to
+    // another object property; an annotation property has neither.
+    if !metadata_tags.contains(&iri) {
+        for line in st.all("equivalent_to") {
+            let other = line.split_whitespace().next().unwrap_or(line);
+            insert_annotated(
+                ont,
+                Component::EquivalentObjectProperties(horned_owl::model::EquivalentObjectProperties(vec![
+                    OPE::ObjectProperty(b.object_property(iri.clone())),
+                    OPE::ObjectProperty(b.object_property(resolve_rel(other, rel_map))),
+                ])),
+                qualifier_anns(b, line),
+            );
+        }
+        for line in st.all("disjoint_from") {
+            let other = line.split_whitespace().next().unwrap_or(line);
+            insert_annotated(
+                ont,
+                Component::DisjointObjectProperties(horned_owl::model::DisjointObjectProperties(vec![
+                    OPE::ObjectProperty(b.object_property(iri.clone())),
+                    OPE::ObjectProperty(b.object_property(resolve_rel(other, rel_map))),
+                ])),
+                qualifier_anns(b, line),
+            );
         }
     }
     if st.get("is_transitive") == Some("true") || st.get("transitive") == Some("true") {
@@ -2109,7 +1966,7 @@ fn typedef_to_owl(
             let mut toks = before_brackets.split_whitespace();
             toks.next();
             if let Some(type_id) = toks.next() {
-                anns.push(ann_iri(b, &format!("{OIO}hasSynonymType"), &resolve_local(type_id, onto_ns)));
+                anns.push(ann_iri(b, tag_prop(&format!("{OIO}hasSynonymType")), &resolve_local(type_id, onto_ns)));
             }
             anns.extend(qualifier_anns(b, rest));
             assert_ann_with(b, ont, &iri, &format!("{OIO}{prop}"), &text, anns);
@@ -3420,10 +3277,13 @@ pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
         }
     }
     // A clause target with no stanza of its own — an entity declared and
-    // labelled by an import — is commented from the closure's labels. The
-    // document's own label wins where both exist.
-    for (iri, label) in &model.banner_labels {
-        labels.entry(ctx.id(iri)).or_insert_with(|| label.clone());
+    // labelled by an import — is commented from the closure's labels, while the
+    // document imports them. The document's own label wins where both exist.
+    let importing = model.ont.iter().any(|ac| matches!(ac.component, horned_owl::model::Component::Import(_)));
+    if importing {
+        for (iri, label) in &model.banner_labels {
+            labels.entry(ctx.id(iri)).or_insert_with(|| label.clone());
+        }
     }
 
     // The body is buffered because the header's `idspace:` lines can only be
@@ -5765,7 +5625,13 @@ fn write_stanza<W: Write>(
     let _ = &sd.id;
 
     // --- The tags shared by [Term], [Typedef] and [Instance], in OBO's tag order. ---
-    writeln!(writer, "id: {id}")?;
+    // A stanza with no `name:` is commented with the label its entity has in the
+    // ontology's imports, the name its references are commented with.
+    let named = sd.name.is_some() || !sd.extra_names.is_empty();
+    match labels.get(&id).filter(|_| !named) {
+        Some(label) => writeln!(writer, "id: {id} ! {label}")?,
+        None => writeln!(writer, "id: {id}")?,
+    }
     if let Some(v) = sd.bool_tags.get("is_anonymous") {
         writeln!(writer, "is_anonymous: {v}")?;
     }

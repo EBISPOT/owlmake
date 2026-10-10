@@ -138,7 +138,7 @@ fn materialize_existentials_over_transitive_chain() {
         }),
     ]);
     let props = std::collections::HashSet::new(); // all properties
-    let out = owlmake::cmd::materialize::materialize(m, &props);
+    let out = owlmake::cmd::materialize::materialize(m, &props).unwrap();
     let direct = Component::SubClassOf(horned_owl::model::SubClassOf {
         sub: c("Endocardium"),
         sup: some(c("HeartWall")),

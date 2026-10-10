@@ -30,11 +30,11 @@ pub struct Args {
     pub mappings: Option<PathBuf>,
     /// Allow mappings for entities that do not appear in the ontology
     /// (default false). `<bool>`.
-    #[arg(short = 'M', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'M', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub allow_missing_entities: Option<bool>,
     /// Allow two or more terms to be renamed to the same full IRI
     /// (default false). `<bool>`.
-    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub allow_duplicates: Option<bool>,
     /// A TSV file of `oldNamespace<TAB>newNamespace` mappings; every IRI starting
     /// with an old namespace has that prefix rewritten to the new one.

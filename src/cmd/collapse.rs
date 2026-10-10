@@ -5,13 +5,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use anyhow::bail;
 use clap::Args as ClapArgs;
-use horned_owl::model::{ClassExpression as CE, Component, MutableOntology, RcStr, SubClassOf};
-use horned_owl::ontology::set::SetOntology;
+use horned_owl::model::{ClassExpression as CE, Component, MutableOntology, RcStr};
 
+use crate::cmd::objects::{self, Judge, Obj, Selection};
 use crate::cmd::select;
-use crate::model::{clone_prefixes, Model};
-use crate::sig;
+use crate::io::entities::Kind;
+use crate::model::Model;
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 
@@ -35,11 +36,11 @@ pub struct Args {
     /// File(s) listing CURIEs/IRIs of classes to keep.
     #[arg(short = 'R', long = "precious-terms", value_name = "FILE")]
     pub precious_terms: Vec<PathBuf>,
-    /// Minimum number of named subclasses an intermediate class must have to be
-    /// kept (default 2). Non-precious intermediates with fewer named subclasses
-    /// are collapsed and their hierarchy is bridged.
-    #[arg(short = 't', long)]
-    pub threshold: Option<usize>,
+    /// Number of named subclasses an intermediate class needs to be kept
+    /// (default 2, at least 2). One with fewer, but at least one, is collapsed
+    /// and the hierarchy is bridged across it.
+    #[arg(short = 't', long, allow_hyphen_values = true)]
+    pub threshold: Option<String>,
 
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
@@ -55,111 +56,115 @@ pub fn step(
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
+    let threshold = read_threshold(args.threshold.as_deref())?;
     args.common.apply(&mut model)?;
     // --term/--term-file and --precious/--precious-terms name the same set.
     let mut terms = args.term.clone();
     terms.extend(args.precious.iter().cloned());
     let mut term_files = args.term_file.clone();
     term_files.extend(args.precious_terms.iter().cloned());
-    let keep = select::collect_terms(&model, &terms, &term_files)?;
+    let precious = select::collect_terms(&model, &terms, &term_files)?;
 
-    // `collapse` removes *sparse intermediate* classes — those with at least one
-    // but fewer than `--threshold` named subclasses — and bridges the hierarchy
-    // across them. Leaves (no subclasses), top-level classes (directly under
-    // owl:Thing only), owl:Thing, and precious terms are kept. The default
-    // threshold is 2.
-    let precious = keep; // the protected ("precious") set
-    let threshold = args.threshold.unwrap_or(2);
-
-    // Named direct-subclass counts and named-superclass edges.
-    let mut sub_count: HashMap<String, usize> = HashMap::new();
-    let mut parents: HashMap<String, Vec<String>> = HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
-                let sub_s = sub.0.as_ref().to_string();
-                let sup_s = sup.0.as_ref().to_string();
-                *sub_count.entry(sup_s.clone()).or_default() += 1;
-                parents.entry(sub_s).or_default().push(sup_s);
-            }
-        }
-    }
-    let has_named_super = |c: &str| {
-        parents
-            .get(c)
-            .is_some_and(|ps| ps.iter().any(|p| p != OWL_THING))
-    };
-
-    // Removed = non-precious intermediates with 1..threshold named subclasses and
-    // a named superclass. (Leaves never appear in `sub_count`, so are kept.)
-    let mut removed: HashSet<String> = HashSet::new();
-    for (cls, &cnt) in &sub_count {
-        if cls == OWL_THING || precious.contains(cls) {
-            continue;
-        }
-        if has_named_super(cls) && cnt < threshold {
-            removed.insert(cls.clone());
-        }
-    }
-
-    // Rewire each kept class to its nearest kept ancestors, walking up the named
-    // class hierarchy to bridge the removed intermediates.
-    let mut edges: HashSet<(String, String)> = HashSet::new();
-    for (sub, sups) in &parents {
-        if removed.contains(sub) {
-            continue; // a removed class contributes no edges of its own
-        }
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut stack: Vec<String> = sups.clone();
-        while let Some(p) = stack.pop() {
-            if !seen.insert(p.clone()) {
-                continue;
-            }
-            if removed.contains(&p) {
-                if let Some(gp) = parents.get(&p) {
-                    stack.extend(gp.iter().cloned());
-                }
-            } else if &p != sub {
-                edges.insert((sub.clone(), p.clone()));
-            }
-        }
-    }
-
-    // Keep every axiom except: named SubClassOf edges (rebuilt below) and any
-    // axiom that references a removed class — a removed class must not survive in
-    // the remains of an axiom that mentioned it.
-    let mut ont: SetOntology<RcStr> = SetOntology::new();
-    for ac in model.ont.iter() {
-        let drop = match &ac.component {
-            Component::OntologyID(_)
-            | Component::DocIRI(_)
-            | Component::Import(_)
-            | Component::OntologyAnnotation(_) => false,
-            Component::SubClassOf(sc)
-                if matches!((&sc.sub, &sc.sup), (CE::Class(_), CE::Class(_))) =>
-            {
-                true
-            }
-            other => sig::signature(other).iter().any(|s| removed.contains(s.as_str())),
-        };
-        if !drop {
-            ont.insert(ac.clone());
-        }
-    }
-    for (sub, sup) in &edges {
-        ont.insert(Component::SubClassOf(SubClassOf {
-            sub: CE::Class(model.build.class(sub.clone())),
-            sup: CE::Class(model.build.class(sup.clone())),
-        }));
-    }
-
-    status!(
-        "collapse: removed {} intermediate class(es) (threshold {}), {} reconnected subclass edge(s)",
-        removed.len(),
-        threshold,
-        edges.len()
-    );
-    let mut result = Model::from_parts(ont, clone_prefixes(&model.prefixes));
+    let mut result = collapse(model, threshold, &precious)?;
     crate::cmd::maybe_save(&mut result, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(result))
+}
+
+/// The `--threshold` text as an `int` of at least 2; 2 when it is not given.
+fn read_threshold(text: Option<&str>) -> anyhow::Result<usize> {
+    let text = text.unwrap_or("2");
+    let Some(n) = crate::java_number::parse_int(text) else {
+        bail!("THRESHOLD ERROR threshold ('{text}') must be a valid integer.");
+    };
+    if n < 2 {
+        bail!("THRESHOLD VALUE ERROR threshold ('{n}') must be 2 or greater.");
+    }
+    Ok(n as usize)
+}
+
+/// Collapse the class hierarchy of `model`, until no class qualifies:
+///
+/// - a class qualifies when it is not `owl:Thing` nor `precious`, has a named
+///   superclass other than `owl:Thing`, and is the superclass of at least one
+///   and fewer than `threshold` `SubClassOf` axioms with a named subclass;
+/// - every axiom any of whose objects, or any of whose annotations' properties
+///   and values, is a qualifying class goes;
+/// - the hierarchy among the objects still named is re-asserted from the
+///   ontology as it was before any class went, across the classes that went —
+///   so an entity only the removed axioms named is not reached, and each
+///   remaining edge is asserted once more without annotations.
+pub fn collapse(model: Model, threshold: usize, precious: &HashSet<String>) -> anyhow::Result<Model> {
+    let original = model.clone();
+    let mut model = model;
+    let plain = objects::plain_datatype(&model);
+    let all = ["all".to_string()];
+    let judge = Judge { selectors: &all, base: &[], partial: true, named_only: false, annotation_values: true, plain };
+    let mut removed = 0usize;
+    loop {
+        let classes = classes_to_remove(&model, threshold, precious);
+        if classes.is_empty() {
+            break;
+        }
+        removed += classes.len();
+        let selected: HashSet<Obj> =
+            classes.iter().map(|c| Obj::Entity(Kind::Class, RcStr::from(c.as_str()))).collect();
+        let (doomed, surviving) = {
+            let sel = Selection::new(&model);
+            let doomed: HashSet<_> = objects::judge_axioms(sel.axioms(), &selected, &judge)?.into_iter().collect();
+            let mut surviving: HashSet<Obj> = HashSet::new();
+            for ac in sel.axioms().iter().filter(|ac| !doomed.contains(**ac)) {
+                surviving.extend(objects::axiom_objects(&ac.component, Some(&ac.ann), plain));
+            }
+            (doomed, surviving)
+        };
+        for ac in &doomed {
+            model.ont.remove(ac);
+        }
+        let mut shared = HashMap::new();
+        let mut cross = HashMap::new();
+        for bridge in crate::cmd::remove::span_gaps(&original, &surviving, &mut shared, &mut cross) {
+            model.ont.insert(bridge);
+        }
+        merge_groups(&mut model, shared, cross);
+    }
+    status!("collapse: removed {removed} intermediate class(es) (threshold {threshold})");
+    Ok(model)
+}
+
+/// The classes one pass of [`collapse`] removes.
+fn classes_to_remove(model: &Model, threshold: usize, precious: &HashSet<String>) -> HashSet<String> {
+    let mut named_subs: HashMap<&str, usize> = HashMap::new();
+    let mut has_named_super: HashSet<&str> = HashSet::new();
+    for ac in model.ont.iter() {
+        let Component::SubClassOf(sc) = &ac.component else { continue };
+        if let CE::Class(sup) = &sc.sup {
+            if matches!(sc.sub, CE::Class(_)) {
+                *named_subs.entry(sup.0.as_ref()).or_default() += 1;
+            }
+            if let CE::Class(sub) = &sc.sub {
+                if sup.0.as_ref() != OWL_THING {
+                    has_named_super.insert(sub.0.as_ref());
+                }
+            }
+        }
+    }
+    named_subs
+        .into_iter()
+        .filter(|&(class, n)| {
+            class != OWL_THING && !precious.contains(class) && has_named_super.contains(class) && n < threshold
+        })
+        .map(|(class, _)| class.to_string())
+        .collect()
+}
+
+/// Add one pass's blank-node groups to the model's, numbered above every group
+/// the model already holds, so groups from different passes stay apart.
+fn merge_groups(model: &mut Model, shared: HashMap<String, u64>, cross: HashMap<String, u64>) {
+    let base = model.span_shared.values().chain(model.cross_shared.values()).copied().max().map_or(0, |m| m + 1);
+    for (key, group) in shared {
+        model.span_shared.entry(key).or_insert(base + group);
+    }
+    for (key, group) in cross {
+        model.cross_shared.entry(key).or_insert(base + group);
+    }
 }
