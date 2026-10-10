@@ -4663,11 +4663,11 @@ def explain(*, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = N
 
     Flags:
     input: (--input / -i)
-    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax. Only `<SUBCLASS> SubClassOf <SUPERCLASS>` axioms are supported; this is the ROBOT-style alternative to owlmake's --sub/--sup pair
+    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax: `<SUBCLASS> SubClassOf <SUPERCLASS>` between two named classes, each named by a label, the short form of its IRI, a CURIE or an IRI. An axiom the ontology does not entail has no explanation
     sub: (--sub) The subclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom. Required unless --axiom/--mode is given
     sup: (--sup) The superclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom
-    mode: (--mode / -M) What to explain: `entailment` (default), or `inconsistency`/`unsatisfiability` (explain why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing)
-    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability/inconsistency mode, which class(es) to explain: `all`, `root`, or a specific CLASS IRI/CURIE. Default `all`
+    mode: (--mode / -M) What to explain: `entailment` (default), `unsatisfiability` (why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing), or `inconsistency` (why the ontology is inconsistent, i.e. owl:Thing ⊑ owl:Nothing)
+    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability mode, which unsatisfiable classes to explain: `all`; `root`, those no other unsatisfiable class's told definition explains; `most_general`, those with no unsatisfiable told superclass; `random:N`, the first N by IRI (all of them when N is not positive); a class's IRI or CURIE; or `list`, which explains none and writes their CURIEs to --explanation, one per line. Without it nothing is explained
     reasoner: (--reasoner / -r) Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake` use the built-in EL reasoner (`owlmake` with union-elimination), `hermit`/`jfact` the hermit-rs OWL 2 DL reasoner, `whelk` the whelk-rs EL reasoner. The same reasoner decides the entailment, finds the unsatisfiable classes and minimizes the justifications. An unknown name is an error, as it is for `reason`
     max: (--max / -m) Maximum number of justifications (distinct minimal explanations) to retrieve. Default 1
     explanation: (--explanation / -e) Write the markdown report of the explanations to this file
@@ -4716,11 +4716,11 @@ def _chain_explain(self, *, input: Optional[StrOrPath] = None, axiom: Optional[S
 
     Flags:
     input: (--input / -i)
-    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax. Only `<SUBCLASS> SubClassOf <SUPERCLASS>` axioms are supported; this is the ROBOT-style alternative to owlmake's --sub/--sup pair
+    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax: `<SUBCLASS> SubClassOf <SUPERCLASS>` between two named classes, each named by a label, the short form of its IRI, a CURIE or an IRI. An axiom the ontology does not entail has no explanation
     sub: (--sub) The subclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom. Required unless --axiom/--mode is given
     sup: (--sup) The superclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom
-    mode: (--mode / -M) What to explain: `entailment` (default), or `inconsistency`/`unsatisfiability` (explain why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing)
-    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability/inconsistency mode, which class(es) to explain: `all`, `root`, or a specific CLASS IRI/CURIE. Default `all`
+    mode: (--mode / -M) What to explain: `entailment` (default), `unsatisfiability` (why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing), or `inconsistency` (why the ontology is inconsistent, i.e. owl:Thing ⊑ owl:Nothing)
+    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability mode, which unsatisfiable classes to explain: `all`; `root`, those no other unsatisfiable class's told definition explains; `most_general`, those with no unsatisfiable told superclass; `random:N`, the first N by IRI (all of them when N is not positive); a class's IRI or CURIE; or `list`, which explains none and writes their CURIEs to --explanation, one per line. Without it nothing is explained
     reasoner: (--reasoner / -r) Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake` use the built-in EL reasoner (`owlmake` with union-elimination), `hermit`/`jfact` the hermit-rs OWL 2 DL reasoner, `whelk` the whelk-rs EL reasoner. The same reasoner decides the entailment, finds the unsatisfiable classes and minimizes the justifications. An unknown name is an error, as it is for `reason`
     max: (--max / -m) Maximum number of justifications (distinct minimal explanations) to retrieve. Default 1
     explanation: (--explanation / -e) Write the markdown report of the explanations to this file

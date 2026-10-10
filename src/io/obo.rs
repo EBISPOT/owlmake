@@ -29,6 +29,7 @@ use horned_owl::ontology::set::SetOntology;
 use std::collections::BTreeSet;
 
 use crate::model::{default_prefixes, Model};
+use crate::owlapi_hash::axiom_annotations_hash;
 
 const OBO_BASE: &str = "http://purl.obolibrary.org/obo/";
 const OIO: &str = "http://www.geneontology.org/formats/oboInOwl#";
@@ -4276,7 +4277,7 @@ fn record_ac(
                 // per-type axiom table — hence the tie-order of same-value
                 // is_a/relationship clauses. Computed once here (full IRIs in hand); a
                 // superclass conjunction that splits into several clauses shares it.
-                let sc_hash = owlapi_subclassof_hash(ctx, &sc.sub, &sc.sup, &axanns);
+                let sc_hash = owlapi_subclassof_hash(&sc.sub, &sc.sup, &axanns);
                 let e = data.entry(s).or_default();
                 e.framed |= framed;
                 // The GCI context rides along as extra qualifiers on the line.
@@ -5296,13 +5297,8 @@ pub(crate) fn av_lit_parts(av: &AnnotationValue<RcStr>) -> (String, Option<Strin
     }
 }
 
-/// The annotation hash for an un-nested annotation (plain value).
-fn owlapi_annotation_hash(prop_iri: &str, value: &str, is_iri: bool) -> i32 {
-    owlapi_annotation_hash_full(prop_iri, value, None, None, is_iri)
-}
-
-/// [`owlapi_annotation_hash`] with the value's datatype/language, so typed and
-/// language-tagged qualifier values hash exactly.
+/// The hash of an annotation of `prop_iri` whose value is an IRI (`is_iri`) or a
+/// literal with the given datatype and language.
 pub(crate) fn owlapi_annotation_hash_full(
     prop_iri: &str,
     value: &str,
@@ -5317,53 +5313,6 @@ pub(crate) fn owlapi_annotation_hash_full(
         owlapi_lit_hash(value, datatype, lang)
     };
     31i32.wrapping_mul(prop).wrapping_add(val).wrapping_add(6064871)
-}
-
-/// The hash of an axiom's annotation collection, as it feeds the axiom hash (see
-/// [`owlapi_aa_axiom_hash`]). Empty → 0; otherwise a list hash
-/// (`acc = 1; acc = 31*acc + element`) over the annotations *sorted* canonically
-/// (property IRI, then value) — the same order [`owlapi_hashset_order`]
-/// uses. Each element is an [`owlapi_annotation_hash`].
-fn owlapi_aa_collection_hash(_ctx: &Ctx, anns: &BTreeSet<Annotation<RcStr>>) -> i32 {
-    if anns.is_empty() {
-        return 0;
-    }
-    // The hash is over the *full* IRI / raw literal — not the shortened
-    // CURIE `ann_value_ctx` renders — so read the value straight off the annotation.
-    let mut elems: Vec<(String, String, Option<String>, Option<String>, bool)> = anns
-        .iter()
-        .map(|a| {
-            let (val, dt, lang, is_iri) = av_lit_parts(&a.av);
-            (a.ap.0.as_ref().to_string(), val, dt, lang, is_iri)
-        })
-        .collect();
-    // Annotations compare on the property, then the VALUE — and a value compares on
-    // its TYPE index BEFORE its content. An IRI's index is below a literal's, so an
-    // IRI-valued qualifier always precedes a literal-valued one on the same
-    // property, whatever the two strings are.
-    //
-    // Ranking on the string alone inverts every synonym xref block in HPO, which
-    // are uniformly one plain literal (wikipedia/mayoclinic/radiopaedia) plus one
-    // ORCID IRI whose string sorts ABOVE it. That shifts the annotation-collection
-    // hash, hence the axiom hash, hence the bucket the frame is built from —
-    // putting the annotated synonym on the wrong side of its bare twin in all 18 of
-    // the stanzas whose order is determinate.
-    elems.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| (!a.4).cmp(&(!b.4)))
-            .then_with(|| a.1.cmp(&b.1))
-    });
-    let mut acc: i32 = 1;
-    for (p, v, dt, lang, is_iri) in &elems {
-        acc = acc.wrapping_mul(31).wrapping_add(owlapi_annotation_hash_full(
-            p,
-            v,
-            dt.as_deref(),
-            lang.as_deref(),
-            *is_iri,
-        ));
-    }
-    acc
 }
 
 /// The hash of an annotation-assertion axiom: seed 739, then
@@ -5439,8 +5388,7 @@ fn owlapi_label_axiom_hash(subj: &str, value: &str, lang: Option<&str>, coll: i3
 /// subject's annotation-assertion axioms.
 ///
 /// The bucket pick is applied only when it is unambiguous — every label axiom has
-/// no annotations (so the collection hash, which is exact only for plain literals,
-/// is 0) AND the labels fall in distinct buckets (a within-bucket tie is decided by
+/// no annotations AND the labels fall in distinct buckets (a within-bucket tie is decided by
 /// insertion order, which an unordered model cannot recover). That settles the
 /// clean multi-label cases (OBI:0000295, PR:000003918, part_of). Otherwise — the
 /// multilingual terms with `{source}`-annotated labels (GSSO) whose buckets collide
@@ -5456,7 +5404,7 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
             .label_axioms
             .iter()
             .map(|(v, lang, anns)| {
-                owlapi_label_bucket(subj_iri, v, lang.as_deref(), owlapi_aa_collection_hash(ctx, anns), cap)
+                owlapi_label_bucket(subj_iri, v, lang.as_deref(), axiom_annotations_hash(anns), cap)
             })
             .collect();
         if std::env::var("OM_LABEL_DEBUG").is_ok() {
@@ -5469,7 +5417,7 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
                         subj_iri,
                         v,
                         lang.as_deref(),
-                        owlapi_aa_collection_hash(ctx, anns),
+                        axiom_annotations_hash(anns),
                     );
                     format!(
                         "{b}\u{1}{h}\u{1}{}\u{1}{}\u{1}{}",
@@ -5494,7 +5442,7 @@ fn pick_comment_name(ctx: &Ctx, subj_iri: &str, sd: &SubjData) -> Option<String>
             .iter()
             .zip(buckets.iter())
             .map(|((v, lang, anns), b)| {
-                let h = owlapi_label_axiom_hash(subj_iri, v, lang.as_deref(), owlapi_aa_collection_hash(ctx, anns));
+                let h = owlapi_label_axiom_hash(subj_iri, v, lang.as_deref(), axiom_annotations_hash(anns));
                 (*b, owlapi_aa_bucket(h, all))
             })
             .collect();
@@ -5634,7 +5582,7 @@ pub(crate) fn owlapi_equivalent_classes_hash(
 ) -> i32 {
     let mut h: i32 = 811;
     h = h.wrapping_mul(31).wrapping_add(crate::owlapi_hash::ce_set_hash(members));
-    h.wrapping_mul(31).wrapping_add(owlapi_aa_collection_hash(&Ctx::default(), anns))
+    h.wrapping_mul(31).wrapping_add(axiom_annotations_hash(anns))
 }
 
 /// The hash of a SubClassOf axiom: seed 2063, then
@@ -5643,7 +5591,6 @@ pub(crate) fn owlapi_equivalent_classes_hash(
 /// `is_a:`/`relationship:` clauses left tied by the value comparison come out in
 /// this hash's bucket order within that global set (see [`owlapi_aa_bucket`]).
 fn owlapi_subclassof_hash(
-    ctx: &Ctx,
     sub: &CE<RcStr>,
     sup: &CE<RcStr>,
     anns: &BTreeSet<Annotation<RcStr>>,
@@ -5652,7 +5599,7 @@ fn owlapi_subclassof_hash(
     h = h.wrapping_mul(31).wrapping_add(crate::owlapi_hash::ce_hash(sub));
     h = h.wrapping_mul(31).wrapping_add(crate::owlapi_hash::ce_hash(sup));
     h.wrapping_mul(31)
-        .wrapping_add(owlapi_aa_collection_hash(ctx, anns))
+        .wrapping_add(axiom_annotations_hash(anns))
 }
 
 /// Reorder a qualifier list into hash-set iteration order for the annotations'
@@ -6020,7 +5967,7 @@ fn write_stanza<W: Write>(
             if let Some(st) = syn_type {
                 quals.push((format!("{OIO}hasSynonymType"), "has_synonym_type".to_string(), st.clone(), false, None, None, st));
             }
-            let coll = owlapi_aa_collection_hash(ctx, anns);
+            let coll = axiom_annotations_hash(anns);
             // The literal's LANGUAGE TAG is part of the axiom hash, so it has to be
             // recovered here — `sd.name`/`sd.extra_names` carry only the text.
             // Without it a `"X"@ja` label hashes as if it were plain, which lands it
@@ -6075,7 +6022,7 @@ fn write_stanza<W: Write>(
         }
         write_sorted(writer, "def", ditems.into_iter().map(|(text, anns)| {
             let (dbxrefs, _, quals) = ax_ann_pieces(ctx, anns);
-            let coll = owlapi_aa_collection_hash(ctx, anns);
+            let coll = axiom_annotations_hash(anns);
             let bucket = aa_set_key(owlapi_aa_axiom_hash(iri, IAO_DEF, text, false, coll), aa_cap);
             (
                 format!("{}\u{0}{}\u{1}{bucket:020}", fold(text), text),
@@ -6105,7 +6052,7 @@ fn write_stanza<W: Write>(
         // annotation-assertion bucket order `name:` and `xref:`
         // already use. EFO:0000218 carries `gard_rare` twice, with different
         // `{source=…}` qualifiers, and sorting on the name alone reverses them.
-        let coll = owlapi_aa_collection_hash(ctx, anns);
+        let coll = axiom_annotations_hash(anns);
         let bucket = aa_set_key(
             owlapi_aa_axiom_hash(iri, &format!("{OIO}inSubset"), raw, *is_iri, coll), aa_cap);
         (
@@ -6132,7 +6079,7 @@ fn write_stanza<W: Write>(
             "BROAD" => format!("{OIO}hasBroadSynonym"),
             _ => format!("{OIO}hasRelatedSynonym"),
         };
-        let coll = owlapi_aa_collection_hash(ctx, anns);
+        let coll = axiom_annotations_hash(anns);
         let bucket = aa_set_key(
             owlapi_aa_axiom_hash_full(iri, &syn_prop, text, None, lang.as_deref(), false, coll), aa_cap);
         (
@@ -6151,7 +6098,7 @@ fn write_stanza<W: Write>(
     let mut in_owlapi_order: Vec<(&String, &BTreeSet<Annotation<RcStr>>)> =
         sd.xrefs.iter().map(|(x, a)| (x, a)).collect();
     in_owlapi_order.sort_by_key(|(x, anns)| {
-        let coll = owlapi_aa_collection_hash(ctx, anns);
+        let coll = axiom_annotations_hash(anns);
         let h = owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x.trim(), false, coll);
         aa_set_key(h, aa_cap)
     });
@@ -6181,7 +6128,7 @@ fn write_stanza<W: Write>(
         }
     }
     write_sorted(writer, "xref", merged_xrefs.iter().map(|(x, anns)| {
-        let coll = owlapi_aa_collection_hash(ctx, anns);
+        let coll = axiom_annotations_hash(anns);
         let bucket = aa_set_key(owlapi_aa_axiom_hash(iri, &format!("{OIO}hasDbXref"), x, false, coll), aa_cap);
         let (dbxrefs, _, mut quals) = ax_ann_pieces(ctx, anns);
         // An xref value may carry a trailing quoted description in the OBO
@@ -6271,7 +6218,7 @@ fn write_stanza<W: Write>(
         // "Verified"` twice, once sourced to a ROR id and once to an ORCID — and
         // the tie goes to the axiom-set bucket order, not to whichever qualifier
         // sorts first.
-        let coll = owlapi_aa_collection_hash(ctx, anns);
+        let coll = axiom_annotations_hash(anns);
         // The value's DATATYPE is part of the axiom hash. A `property_value:` is the
         // one clause whose main value is routinely typed — GSSO's Dewey numbers are
         // `xsd:decimal` — and hashing them as if they were plain puts three clauses

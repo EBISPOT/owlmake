@@ -375,7 +375,7 @@ impl NaturalOrder {
         }
     }
 
-    fn darg(&self, a: &DArgument<RcStr>, b: &DArgument<RcStr>) -> Ordering {
+    pub(crate) fn darg(&self, a: &DArgument<RcStr>, b: &DArgument<RcStr>) -> Ordering {
         // A variable (6006) precedes a literal argument (6008).
         match (a, b) {
             (DArgument::Variable(x), DArgument::Variable(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),

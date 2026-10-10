@@ -176,7 +176,7 @@ fn assert_existentials(
         v
     };
     let Existentials { mut relations, mut named_subs, unsat, consistent } =
-        existential_relations(&model, &prop_list, &classes, kind);
+        existential_relations(&model, &prop_list, &classes, kind)?;
     relations.retain(|(c, _, _)| defined.contains(c));
     named_subs.retain(|(c, d)| defined.contains(c) && known.contains(d));
     if kind.is_builtin_el() {
@@ -328,7 +328,7 @@ pub(crate) fn existential_relations(
     prop_list: &[String],
     classes: &std::collections::BTreeSet<String>,
     kind: ReasonerKind,
-) -> Existentials {
+) -> Result<Existentials> {
         let mut aux = model.clone();
         let mut aux_map: std::collections::HashMap<String, (String, String)> = Default::default();
         for r in prop_list {
@@ -347,7 +347,7 @@ pub(crate) fn existential_relations(
             }
         }
         if !kind.is_builtin_el() {
-            let direct = crate::cmd::reason::direct_superclass_nodes(&aux, kind);
+            let direct = crate::cmd::reason::direct_superclass_nodes(&aux, kind, kind.datatypes(true))?;
             let mut relations: Vec<(String, String, String)> = Vec::new();
             let mut named_subs: Vec<(String, String)> = Vec::new();
             for (sub, sup) in direct {
@@ -363,7 +363,7 @@ pub(crate) fn existential_relations(
             relations.dedup();
             named_subs.sort();
             named_subs.dedup();
-            return Existentials { relations, named_subs, unsat: Vec::new(), consistent: true };
+            return Ok(Existentials { relations, named_subs, unsat: Vec::new(), consistent: true });
         }
         let reasoner = Reasoner::classify(&aux);
         // The classes standing for restrictions say nothing of the ontology's
@@ -399,7 +399,7 @@ pub(crate) fn existential_relations(
         relations.dedup();
         named_subs.sort();
         named_subs.dedup();
-        Existentials { relations, named_subs, unsat, consistent: reasoner.is_consistent() }
+        Ok(Existentials { relations, named_subs, unsat, consistent: reasoner.is_consistent() })
 }
 
 /// The classes a class axiom defines: the subclass of a `SubClassOf` that is

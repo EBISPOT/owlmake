@@ -18758,7 +18758,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "The axiom to explain, in Manchester syntax. Only `<SUBCLASS> SubClassOf <SUPERCLASS>` axioms are supported; this is the ROBOT-style alternative to owlmake's --sub/--sup pair"
+          "help": "The axiom to explain, in Manchester syntax: `<SUBCLASS> SubClassOf <SUPERCLASS>` between two named classes, each named by a label, the short form of its IRI, a CURIE or an IRI. An axiom the ontology does not entail has no explanation"
         },
         {
           "id": "sub",
@@ -18819,7 +18819,7 @@
             "entailment"
           ],
           "hidden": false,
-          "help": "What to explain: `entailment` (default), or `inconsistency`/`unsatisfiability` (explain why class(es) are unsatisfiable, i.e. C \u2291 owl:Nothing)"
+          "help": "What to explain: `entailment` (default), `unsatisfiability` (why class(es) are unsatisfiable, i.e. C \u2291 owl:Nothing), or `inconsistency` (why the ontology is inconsistent, i.e. owl:Thing \u2291 owl:Nothing)"
         },
         {
           "id": "unsatisfiable",
@@ -18840,7 +18840,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "For unsatisfiability/inconsistency mode, which class(es) to explain: `all`, `root`, or a specific CLASS IRI/CURIE. Default `all`"
+          "help": "For unsatisfiability mode, which unsatisfiable classes to explain: `all`; `root`, those no other unsatisfiable class's told definition explains; `most_general`, those with no unsatisfiable told superclass; `random:N`, the first N by IRI (all of them when N is not positive); a class's IRI or CURIE; or `list`, which explains none and writes their CURIEs to --explanation, one per line. Without it nothing is explained"
         },
         {
           "id": "reasoner",

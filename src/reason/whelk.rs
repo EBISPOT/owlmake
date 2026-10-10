@@ -15,9 +15,11 @@
 //! subsumptions, satisfiability, and consistency here using the same rules
 //! [`super::el::Reasoner`] applies to its own S-sets.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+use horned_owl::model::{AnnotatedComponent, ClassExpression as CE, Component, RcStr};
 use whelk::whelk::model::{ConceptData, ConceptId};
 use whelk::whelk::reasoner::ReasonerState;
 
@@ -29,6 +31,147 @@ const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 /// The namespace of the probe concepts [`WhelkClassification::unsatisfiable_properties`]
 /// adds; no ontology names a class in it.
 const PROBE_NS: &str = "urn:owlmake:probe#";
+
+/// `model`'s axioms in whelk's normal form, each as the reasoner reads it
+/// ([`as_read`]).
+pub(crate) fn translate(model: &Model) -> whelk::whelk::model::TranslatedOntology {
+    let axioms = crate::reason::owl_axioms(model);
+    let read: Vec<Option<Cow<'_, Component<RcStr>>>> = axioms.iter().map(|ac| as_read(&ac.component)).collect();
+    if read.iter().all(|r| matches!(r, Some(Cow::Borrowed(_)))) {
+        return whelk::whelk::owl::translate_ontology(axioms.as_ref());
+    }
+    let read: crate::model::Onto = read
+        .into_iter()
+        .flatten()
+        .map(|c| AnnotatedComponent { component: c.into_owned(), ann: Default::default() })
+        .collect();
+    whelk::whelk::owl::translate_ontology(&read)
+}
+
+/// An axiom as the reasoner reads it: `None` for a disjoint union, which it
+/// does not read at all — its classes are neither equivalent to the union nor
+/// disjoint by it — and otherwise the axiom with each class expression read as
+/// [`read_expression`] reads it.
+fn as_read(c: &Component<RcStr>) -> Option<Cow<'_, Component<RcStr>>> {
+    use horned_owl::model::{
+        ClassAssertion, DisjointClasses, EquivalentClasses, ObjectPropertyDomain, ObjectPropertyRange, SubClassOf,
+    };
+    let one = |ce: &CE<RcStr>| read_expression(ce).unwrap_or_else(|| ce.clone());
+    let read = match c {
+        Component::DisjointUnion(_) => return None,
+        Component::SubClassOf(ax) if read_expression(&ax.sub).is_some() || read_expression(&ax.sup).is_some() => {
+            Component::SubClassOf(SubClassOf { sub: one(&ax.sub), sup: one(&ax.sup) })
+        }
+        Component::EquivalentClasses(ax) => match read_all(&ax.0) {
+            Some(v) => Component::EquivalentClasses(EquivalentClasses(v)),
+            None => return Some(Cow::Borrowed(c)),
+        },
+        Component::DisjointClasses(ax) => match read_all(&ax.0) {
+            Some(v) => Component::DisjointClasses(DisjointClasses(v)),
+            None => return Some(Cow::Borrowed(c)),
+        },
+        Component::ObjectPropertyDomain(ax) => match read_expression(&ax.ce) {
+            Some(ce) => Component::ObjectPropertyDomain(ObjectPropertyDomain { ope: ax.ope.clone(), ce }),
+            None => return Some(Cow::Borrowed(c)),
+        },
+        Component::ObjectPropertyRange(ax) => match read_expression(&ax.ce) {
+            Some(ce) => Component::ObjectPropertyRange(ObjectPropertyRange { ope: ax.ope.clone(), ce }),
+            None => return Some(Cow::Borrowed(c)),
+        },
+        Component::ClassAssertion(ax) => match read_expression(&ax.ce) {
+            Some(ce) => Component::ClassAssertion(ClassAssertion { ce, i: ax.i.clone() }),
+            None => return Some(Cow::Borrowed(c)),
+        },
+        _ => return Some(Cow::Borrowed(c)),
+    };
+    Some(Cow::Owned(read))
+}
+
+/// A class expression as the reasoner reads it, where whelk-rs would read it
+/// otherwise; `None` where the two agree. `p value i` is `p some {i}`; a one-of
+/// is the union of its named members, each alone in a one-of; `p max 0 C` is
+/// `not (p some C)`. Operands are read the same way.
+fn read_expression(ce: &CE<RcStr>) -> Option<CE<RcStr>> {
+    use horned_owl::model::Individual;
+    let one = |ce: &CE<RcStr>| read_expression(ce).unwrap_or_else(|| ce.clone());
+    match ce {
+        CE::ObjectHasValue { ope, i } => {
+            Some(CE::ObjectSomeValuesFrom { ope: ope.clone(), bce: Box::new(CE::ObjectOneOf(vec![i.clone()])) })
+        }
+        CE::ObjectOneOf(v) => {
+            let mut named: Vec<&Individual<RcStr>> = v.iter().filter(|i| matches!(i, Individual::Named(_))).collect();
+            named.sort();
+            named.dedup();
+            match named.as_slice() {
+                _ if v.len() == 1 => None,
+                [] => None,
+                [only] => Some(CE::ObjectOneOf(vec![(*only).clone()])),
+                many => Some(CE::ObjectUnionOf(many.iter().map(|i| CE::ObjectOneOf(vec![(*i).clone()])).collect())),
+            }
+        }
+        CE::ObjectMaxCardinality { n: 0, ope, bce } => Some(CE::ObjectComplementOf(Box::new(
+            CE::ObjectSomeValuesFrom { ope: ope.clone(), bce: Box::new(one(bce)) },
+        ))),
+        CE::ObjectSomeValuesFrom { ope, bce } => {
+            read_expression(bce).map(|bce| CE::ObjectSomeValuesFrom { ope: ope.clone(), bce: Box::new(bce) })
+        }
+        CE::ObjectComplementOf(b) => read_expression(b).map(|b| CE::ObjectComplementOf(Box::new(b))),
+        CE::ObjectIntersectionOf(v) => read_all(v).map(CE::ObjectIntersectionOf),
+        CE::ObjectUnionOf(v) => read_all(v).map(CE::ObjectUnionOf),
+        _ => None,
+    }
+}
+
+/// `v` with each member read as [`read_expression`] reads it; `None` where no
+/// member is read otherwise.
+fn read_all(v: &[CE<RcStr>]) -> Option<Vec<CE<RcStr>>> {
+    let read: Vec<Option<CE<RcStr>>> = v.iter().map(read_expression).collect();
+    if read.iter().all(Option::is_none) {
+        return None;
+    }
+    Some(read.into_iter().zip(v).map(|(r, ce)| r.unwrap_or_else(|| ce.clone())).collect())
+}
+
+/// Saturate `translated`, completing what whelk-rs leaves out ([`complete_bottom`]).
+pub(crate) fn saturate(translated: &whelk::whelk::model::TranslatedOntology) -> ReasonerState {
+    complete_bottom(whelk::whelk::reasoner::assert(translated))
+}
+
+/// Saturate `axioms` onto `state`, completing what whelk-rs leaves out.
+fn saturate_append(
+    axioms: &whelk::whelk::model::HashSet<whelk::whelk::model::ConceptInclusion>,
+    state: &ReasonerState,
+) -> ReasonerState {
+    complete_bottom(whelk::whelk::reasoner::assert_append(axioms, state))
+}
+
+/// `state` with the subject of every link to an unsatisfiable concept
+/// unsatisfiable too, and all that follows from that.
+///
+/// whelk-rs makes a link's subject unsatisfiable when the link is made to a
+/// concept already known to be unsatisfiable, and not when the concept becomes
+/// unsatisfiable after the link is made. Which comes first follows the order
+/// its hash maps iterate in, which differs from run to run, so without this a
+/// class could be unsatisfiable in one run and not the next. Each round asserts
+/// the subjects the links leave out and saturates again, until a round finds
+/// none.
+fn complete_bottom(mut state: ReasonerState) -> ReasonerState {
+    use whelk::whelk::model::ConceptInclusion;
+    loop {
+        let bottom = state.interner.bottom();
+        let unsatisfiable = |c: &ConceptId| state.closure_subs_by_superclass.get(&bottom).is_some_and(|s| s.contains(c));
+        let mut axioms: whelk::whelk::model::HashSet<ConceptInclusion> = Default::default();
+        for (subject, roles) in state.links_by_subject() {
+            if !unsatisfiable(subject) && roles.values().any(|targets| targets.iter().any(&unsatisfiable)) {
+                axioms.insert(ConceptInclusion { subclass: *subject, superclass: bottom });
+            }
+        }
+        if axioms.is_empty() {
+            return state;
+        }
+        state = whelk::whelk::reasoner::assert_append(&axioms, &state);
+    }
+}
 
 /// A whelk classification, shaped like the built-in EL reasoner's outputs.
 pub struct WhelkClassification {
@@ -57,13 +200,13 @@ impl WhelkClassification {
     /// Translate `model` into whelk's normal form, saturate, and capture the
     /// named-subsumption closure.
     pub fn classify(model: &Model) -> WhelkClassification {
-        let translated = whelk::whelk::owl::translate_ontology(crate::reason::owl_axioms(model).as_ref());
+        let translated = translate(model);
         let top = translated.interner.top();
         let top_named = translated.concept_inclusions.iter().any(|ci| {
             translated.interner.concept_signature(ci.subclass).contains(&top)
                 || translated.interner.concept_signature(ci.superclass).contains(&top)
         });
-        let state = whelk::whelk::reasoner::assert(&translated);
+        let state = saturate(&translated);
 
         let mut subs: HashMap<String, HashSet<String>> = HashMap::new();
         for (sub, sup) in state.named_subsumptions() {
@@ -255,7 +398,7 @@ impl WhelkClassification {
             axioms.insert(ConceptInclusion { subclass: probe, superclass: some });
             probes.push((probe, p));
         }
-        let saturated = whelk::whelk::reasoner::assert_append(&axioms, &state);
+        let saturated = saturate_append(&axioms, &state);
         let mut out: Vec<String> = probes
             .into_iter()
             .filter(|&(probe, _)| saturated.is_subclass_of(probe, bottom))

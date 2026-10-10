@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/inc-negobj#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/inc-negobj>
+Declaration(ObjectProperty(:r))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+ObjectPropertyAssertion(:r :i :j)
+NegativeObjectPropertyAssertion(:r :i :j)
+)

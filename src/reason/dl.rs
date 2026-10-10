@@ -19,6 +19,11 @@
 //! a Self restriction on a non-simple role, instead of silently weakening them.
 //! Those errors surface as a panic with the hermit-rs message; every answer the
 //! reasoner does give is sound and complete.
+//!
+//! A datatype outside the OWL 2 datatype map is read past, as HermiT's reasoner
+//! factory reads it: a literal of one is a value of no known datatype. A
+//! reasoner made [`Datatypes::Strict`] refuses it instead, with HermiT's
+//! message, which [`DlReasoner::try_classify`] returns.
 
 use std::sync::OnceLock;
 
@@ -95,28 +100,49 @@ impl ClassificationProgressMonitor<Class<ArcStr>> for ProgressMonitor {
     }
 }
 
-/// Run `classify` under a live terminal progress display. A heartbeat thread
-/// renders elapsed time through the silent setup phase and a `done/total` bar
-/// with ETA once per-concept classification begins; the final summary line is
-/// printed when classification returns. Falls back to a plain classify when
-/// progress is disabled.
-/// The hermit-rs configuration every classification here runs under: the
-/// defaults, except that an inconsistent ontology classifies to the collapsed
-/// hierarchy (every class in the one ⊤/⊥ node) instead of raising an error.
-/// Inconsistency is an answer the callers read off that hierarchy, through
-/// [`DlReasoner::is_consistent`] and [`DlReasoner::unsatisfiable`], and report
-/// as they see fit; it is not a failure of the reasoner.
-fn configuration() -> hermit_rs::configuration::Configuration {
+/// How the reasoner treats a datatype outside the OWL 2 datatype map.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Datatypes {
+    /// Reasoning reads past it: a literal of such a datatype is a value of no
+    /// known datatype, and a data range over one has values of its own.
+    Lenient,
+    /// The ontology is refused, with HermiT's message naming the datatype.
+    Strict,
+}
+
+/// The hermit-rs configuration a query runs under: the defaults, with
+/// `datatypes` deciding what a datatype outside the OWL 2 datatype map does.
+fn configuration(datatypes: Datatypes) -> hermit_rs::configuration::Configuration {
     hermit_rs::configuration::Configuration {
-        throw_inconsistent_ontology_exception: false,
+        ignore_unsupported_datatypes: datatypes == Datatypes::Lenient,
         ..Default::default()
     }
 }
 
-fn classify_with_progress(ont: &SetOntology<ArcStr>) -> Hierarchy<Class<ArcStr>> {
+/// [`configuration`], under which an inconsistent ontology is answered rather
+/// than refused: it classifies to the collapsed hierarchy (every class in the
+/// one ⊤/⊥ node). Inconsistency is an answer the callers read off that
+/// hierarchy, through [`DlReasoner::is_consistent`] and
+/// [`DlReasoner::unsatisfiable`], and report as they see fit; it is not a
+/// failure of the reasoner.
+fn answering_configuration(datatypes: Datatypes) -> hermit_rs::configuration::Configuration {
+    hermit_rs::configuration::Configuration {
+        throw_inconsistent_ontology_exception: false,
+        ..configuration(datatypes)
+    }
+}
+
+/// Classify `ont` under `configuration`, with a live terminal progress display.
+/// A heartbeat thread renders elapsed time through the silent setup phase and a
+/// `done/total` bar with ETA once per-concept classification begins; the final
+/// summary line is printed when classification returns. Without progress it is
+/// a plain classify. hermit-rs's refusal of the ontology is returned.
+fn classify_with_progress(
+    ont: &SetOntology<ArcStr>,
+    configuration: &hermit_rs::configuration::Configuration,
+) -> Result<Hierarchy<Class<ArcStr>>, String> {
     if !crate::progress::enabled() {
-        return hermit::classify_with_configuration(ont, &configuration())
-            .unwrap_or_else(|e| die(e));
+        return hermit::classify_with_configuration(ont, configuration);
     }
 
     let state = Arc::new(ProgressState::default());
@@ -168,10 +194,10 @@ fn classify_with_progress(ont: &SetOntology<ArcStr>) -> Hierarchy<Class<ArcStr>>
     };
 
     let mut monitor = ProgressMonitor { state };
-    let result = hermit::classify_with_configuration_and_monitor(ont, &configuration(), &mut monitor);
+    let result = hermit::classify_with_configuration_and_monitor(ont, configuration, &mut monitor);
     finished.store(true, Ordering::Relaxed);
     let _ = hb.join();
-    result.unwrap_or_else(|e| die(e))
+    result
 }
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
@@ -192,6 +218,8 @@ pub struct DlReasoner {
     /// `owl:topObjectProperty` and `owl:bottomObjectProperty` left out: the
     /// properties [`DlReasoner::object_property_assertions`] retrieves.
     object_properties: Vec<String>,
+    /// What a datatype outside the OWL 2 datatype map does to every query.
+    datatypes: Datatypes,
     consistent: OnceLock<bool>,
     hierarchy: OnceLock<Hierarchy<Class<ArcStr>>>,
 }
@@ -737,9 +765,16 @@ fn is_named(iri: &str) -> bool {
 }
 
 impl DlReasoner {
-    /// Snapshot `model` for DL reasoning. Cheap: the classification itself
-    /// runs lazily on the first query that needs it.
+    /// Snapshot `model` for DL reasoning, reading past a datatype outside the
+    /// OWL 2 datatype map. Cheap: the classification itself runs lazily on the
+    /// first query that needs it.
     pub fn classify(model: &Model) -> DlReasoner {
+        DlReasoner::classify_with(model, Datatypes::Lenient)
+    }
+
+    /// [`DlReasoner::classify`], treating a datatype outside the OWL 2 datatype
+    /// map as `datatypes` says.
+    pub fn classify_with(model: &Model, datatypes: Datatypes) -> DlReasoner {
         // The RcStr→ArcStr conversion rebuilds every component of the whole
         // ontology, which on a large input takes seconds before any reasoning
         // even starts; tick a heartbeat so it isn't a silent gap.
@@ -763,9 +798,21 @@ impl DlReasoner {
         DlReasoner {
             ont,
             object_properties,
+            datatypes,
             consistent: OnceLock::new(),
             hierarchy: OnceLock::new(),
         }
+    }
+
+    /// Classify now, unless that is done: hermit-rs's refusal of the ontology,
+    /// such as the datatype a [`Datatypes::Strict`] reasoner refuses, is returned
+    /// rather than raised. Every later query reads the hierarchy it computed.
+    pub fn try_classify(&self) -> Result<(), String> {
+        if self.hierarchy.get().is_none() {
+            let h = classify_with_progress(&self.ont, &answering_configuration(self.datatypes))?;
+            let _ = self.hierarchy.set(h);
+        }
+        Ok(())
     }
 
     /// The direct types of every named individual, as `(individual, class)`
@@ -773,7 +820,8 @@ impl DlReasoner {
     /// of. The ontology must be consistent.
     pub fn class_assertions(&self) -> Vec<(String, String)> {
         let _hb = crate::progress::Heartbeat::start("reason: hermit-rs realising individuals");
-        let types = hermit::realize(&self.ont).unwrap_or_else(|e| die(e));
+        let types = hermit::realize_with_configuration(&self.ont, &configuration(self.datatypes))
+            .unwrap_or_else(|e| die(e));
         let mut out: Vec<(String, String)> = types
             .iter()
             .flat_map(|(ind, classes)| {
@@ -802,9 +850,11 @@ impl DlReasoner {
         let _hb = crate::progress::Heartbeat::start(
             "reason: hermit-rs retrieving object property instances",
         );
-        let mut index =
-            hermit::ObjectPropertyInstanceIndex::with_configuration(&self.ont, &configuration())
-                .unwrap_or_else(|e| die(e));
+        let mut index = hermit::ObjectPropertyInstanceIndex::with_configuration(
+            &self.ont,
+            &answering_configuration(self.datatypes),
+        )
+        .unwrap_or_else(|e| die(e));
         let build = Build::new_arc();
         let mut out = Vec::new();
         let mut asked: Vec<String> = properties.iter().cloned().collect();
@@ -826,18 +876,21 @@ impl DlReasoner {
     /// single-node "empty" hierarchy for an inconsistent ontology, where every
     /// class sits in the collapsed ⊤/⊥ node.
     fn hierarchy(&self) -> &Hierarchy<Class<ArcStr>> {
-        self.hierarchy
-            .get_or_init(|| classify_with_progress(&self.ont))
+        self.hierarchy.get_or_init(|| {
+            classify_with_progress(&self.ont, &answering_configuration(self.datatypes))
+                .unwrap_or_else(|e| die(e))
+        })
     }
 
     /// Whether `sub ⊑ sup` is entailed, for two named-class IRIs — a single
     /// tableau test (`sub ⊓ ¬sup` unsatisfiable), no classification.
     pub fn is_subsumed(&self, sub: &str, sup: &str) -> bool {
         let build = Build::new_arc();
-        hermit::is_subsumed_by(
+        hermit::is_subsumed_by_with_configuration(
             &self.ont,
             ClassExpression::Class(build.class(sub)),
             ClassExpression::Class(build.class(sup)),
+            &configuration(self.datatypes),
         )
         .unwrap_or_else(|e| die(e))
     }
@@ -855,7 +908,8 @@ impl DlReasoner {
                 return h.top_node() != h.bottom_node();
             }
             let _hb = crate::progress::Heartbeat::start("reason: hermit-rs consistency check");
-            hermit::is_ontology_consistent(&self.ont).unwrap_or_else(|e| die(e))
+            hermit::is_ontology_consistent_with_configuration(&self.ont, &configuration(self.datatypes))
+                .unwrap_or_else(|e| die(e))
         })
     }
 
@@ -904,8 +958,16 @@ impl DlReasoner {
     /// consistent.
     pub fn unsatisfiable_object_properties(&self) -> Vec<String> {
         let _hb = crate::progress::Heartbeat::start("reason: hermit-rs classifying object properties");
-        let node = hermit::get_bottom_object_property_node(&self.ont).unwrap_or_else(|e| die(e));
-        let mut out: Vec<String> = node
+        let hierarchy = hermit::classify_object_property_expressions_with_configuration(
+            &self.ont,
+            &configuration(self.datatypes),
+        )
+        .unwrap_or_else(|e| die(e));
+        let bottom = ho::ObjectPropertyExpression::ObjectProperty(
+            Build::new_arc().object_property("http://www.w3.org/2002/07/owl#bottomObjectProperty"),
+        );
+        let mut out: Vec<String> = hierarchy
+            .equivalent_elements_of(&bottom)
             .into_iter()
             .filter_map(|ope| match ope {
                 ho::ObjectPropertyExpression::ObjectProperty(p) => Some(p.0.to_string()),

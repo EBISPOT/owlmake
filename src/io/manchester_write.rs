@@ -540,6 +540,24 @@ struct Objects<'o> {
     names: &'o dyn Names,
 }
 
+/// The Manchester syntax for a facet: `>=` for `xsd:minInclusive`, `length` for
+/// `xsd:length`, and so on.
+pub(crate) fn facet_symbol(f: &Facet) -> &'static str {
+    match f {
+        Facet::Length => "length",
+        Facet::MinLength => "minLength",
+        Facet::MaxLength => "maxLength",
+        Facet::Pattern => "pattern",
+        Facet::MinInclusive => ">=",
+        Facet::MinExclusive => ">",
+        Facet::MaxInclusive => "<=",
+        Facet::MaxExclusive => "<",
+        Facet::TotalDigits => "totalDigits",
+        Facet::FractionDigits => "fractionDigits",
+        Facet::LangRange => "langRange",
+    }
+}
+
 impl Objects<'_> {
     fn entity(&mut self, iri: &str) {
         let s = self.names.entity(iri);
@@ -740,22 +758,6 @@ impl Objects<'_> {
         self.dr(filler);
     }
 
-    fn facet_symbol(f: &Facet) -> &'static str {
-        match f {
-            Facet::Length => "length",
-            Facet::MinLength => "minLength",
-            Facet::MaxLength => "maxLength",
-            Facet::Pattern => "pattern",
-            Facet::MinInclusive => ">=",
-            Facet::MinExclusive => ">",
-            Facet::MaxInclusive => "<=",
-            Facet::MaxExclusive => "<",
-            Facet::TotalDigits => "totalDigits",
-            Facet::FractionDigits => "fractionDigits",
-            Facet::LangRange => "langRange",
-        }
-    }
-
     fn dr(&mut self, dr: &DR<RcStr>) {
         let order = self.order;
         match dr {
@@ -806,7 +808,7 @@ impl Objects<'_> {
                 let indent = self.out.indent();
                 self.out.push_tab(indent);
                 for (i, f) in facets.iter().enumerate() {
-                    self.out.write(Self::facet_symbol(&f.f));
+                    self.out.write(facet_symbol(&f.f));
                     self.out.space();
                     self.literal(&f.l);
                     if i + 1 < facets.len() {

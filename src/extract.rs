@@ -216,7 +216,9 @@ pub fn extract_with(
 }
 
 /// The ⊥⊤*-module of exactly the axioms `comps` for the seed IRIs, as indices
-/// into `comps`. Each seed IRI enters as every kind of entity `comps` use it as.
+/// into `comps`: the non-local axioms, then every same- and
+/// different-individual axiom naming an individual of the seed or of those
+/// axioms. Each seed IRI enters as every kind of entity `comps` use it as.
 pub(crate) fn star_module_indices(comps: &[Component<RcStr>], seed: &HashSet<String>) -> Vec<usize> {
     let mut source_kinds: Sigma = Sigma::default();
     for c in comps {
@@ -228,7 +230,14 @@ pub(crate) fn star_module_indices(comps: &[Component<RcStr>], seed: &HashSet<Str
             seed_sig.add(k, iri);
         }
     }
-    star_module(comps, &seed_sig, &all_indices(comps))
+    let mut module = star_module(comps, &seed_sig, &all_indices(comps));
+    let mut sigma = seed_sig;
+    for &i in &module {
+        sigma.add_component(&comps[i]);
+    }
+    let held: HashSet<usize> = module.iter().copied().collect();
+    module.extend((0..comps.len()).filter(|i| !held.contains(i) && is_individual_identity_on(&comps[*i], &sigma)));
+    module
 }
 
 fn all_indices(comps: &[Component<RcStr>]) -> Vec<usize> {

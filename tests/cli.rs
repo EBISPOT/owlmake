@@ -2989,7 +2989,7 @@ fn explain_justifies_a_non_el_unsatisfiability_with_the_reasoner_that_decided_it
         let out = bin()
             .args(["explain", "-i"])
             .arg(&ont)
-            .args(["-M", "unsatisfiability", "-r", reasoner])
+            .args(["-M", "unsatisfiability", "-u", "all", "-r", reasoner])
             .output()
             .unwrap();
         assert!(out.status.success(), "{reasoner}: {}", String::from_utf8_lossy(&out.stderr));
@@ -3038,7 +3038,7 @@ fn explain_does_not_test_every_axiom_of_the_module() {
     let out = bin()
         .args(["explain", "-i"])
         .arg(&ont)
-        .args(["-M", "unsatisfiability"])
+        .args(["-M", "unsatisfiability", "-u", "all"])
         .output()
         .unwrap();
     let err = String::from_utf8_lossy(&out.stderr);
@@ -6607,6 +6607,50 @@ fn every_reasoner_counts_a_repeated_member_once() {
     }
 }
 
+/// whelk reads `p value i` as `p some {i}`, a one-of as the union of its named
+/// members, each a one-of alone, and `p max 0 C` as `not (p some C)`; it reads
+/// no disjoint union. So `:A` falls under `:B`, `:D` and `:H` under `:C`, and
+/// `:X` stays out of `:U`; and `:K` and `:C`, each with a `p` its maximum
+/// forbids, are empty, where `:L`'s `p` has another filler. As ROBOT 1.9.11
+/// reasons with whelk over `whelk-expressions` and `whelk-max-zero`.
+#[test]
+fn whelk_reads_class_expressions_as_it_does() {
+    let out = tmp("whelk-expressions.ofn");
+    let run = bin()
+        .args(["reason", "-r", "whelk", "-i"])
+        .arg(robot_fixture("whelk-expressions.ofn"))
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("whelk-expressions.whelk.robot.ofn"));
+    let _ = std::fs::remove_file(&out);
+
+    let out = tmp("whelk-max-zero.ofn");
+    let run = bin()
+        .args(["reason", "-r", "whelk", "-i"])
+        .arg(robot_fixture("whelk-max-zero.ofn"))
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let logged: Vec<&str> = stdout
+        .lines()
+        .filter_map(|l| l.split_once(" ERROR org.obolibrary.robot.ReasonerHelper - ").map(|(_, m)| m))
+        .collect();
+    assert_eq!(run.status.code(), Some(1), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        logged,
+        [
+            "There are 2 unsatisfiable classes in the ontology.",
+            "    unsatisfiable: http://example.org/whelk-max-zero#K",
+            "    unsatisfiable: http://example.org/whelk-max-zero#C",
+        ]
+    );
+}
+
 /// A disjointness of one class is that class's disjointness from
 /// `owl:Thing`, so the class is empty, and so is every class below it. Every
 /// reasoner reports both, as ROBOT 1.9.11 logs them for
@@ -6637,6 +6681,44 @@ fn a_disjointness_of_one_class_empties_it() {
             ],
             "{r}"
         );
+    }
+}
+
+/// HermiT's reasoner factory reads past a datatype outside the OWL 2 datatype
+/// map, so `reason` and `reduce` do under `hermit` and `jfact`. Wrapped for
+/// expression materialization HermiT refuses it, with its own message, where
+/// JFact still reads past it. As ROBOT 1.9.11 runs them over
+/// `unsupported-datatype`, whose `xsd:date` is both a literal and a data range.
+#[test]
+fn only_materialize_under_hermit_refuses_a_datatype_outside_the_owl_2_map() {
+    let src = robot_fixture("unsupported-datatype.ofn");
+    let refusal = "HermiT supports all and only the datatypes of the OWL 2 datatype map, see \n\
+                   http://www.w3.org/TR/owl2-syntax/#Datatype_Maps. \n\
+                   The datatype 'http://www.w3.org/2001/XMLSchema#date' is not part of the OWL 2 datatype map and \n\
+                   no custom datatype definition is given; \n\
+                   therefore, HermiT cannot handle this datatype.";
+    for (command, r, expected) in [
+        ("reason", "hermit", Some("unsupported-datatype.reason.robot.ofn")),
+        ("reason", "jfact", Some("unsupported-datatype.reason.robot.ofn")),
+        ("reduce", "hermit", Some("unsupported-datatype.robot.ofn")),
+        ("reduce", "jfact", Some("unsupported-datatype.robot.ofn")),
+        ("materialize", "jfact", Some("unsupported-datatype.robot.ofn")),
+        ("materialize", "hermit", None),
+    ] {
+        let out = tmp(&format!("unsupported-datatype.{command}.{r}.ofn"));
+        let run = bin().args([command, "-r", r, "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        match expected {
+            Some(expected) => {
+                assert!(run.status.success(), "{command} {r}: {stderr}");
+                assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text(expected), "{command} {r}");
+            }
+            None => {
+                assert_eq!(run.status.code(), Some(1), "{command} {r}: {stderr}");
+                assert!(stderr.contains(refusal), "{command} {r}: {stderr}");
+            }
+        }
+        let _ = std::fs::remove_file(&out);
     }
 }
 
@@ -8232,6 +8314,467 @@ fn explain_writes_the_markdown_report() {
 - root (http://x.org/root)
 - po (http://x.org/po)
 ");
+}
+
+/// A class unsatisfiable through a nominal and a same- or different-individual
+/// axiom gets its justification: the module the search runs over holds every
+/// same- and different-individual axiom naming an individual of its signature.
+/// ROBOT 1.9.11 explains all nine classes of `explain-individuals.ofn`.
+#[test]
+fn explain_justifies_an_unsatisfiability_that_needs_same_or_different_individuals() {
+    let run = bin()
+        .args(["explain", "-r", "hermit", "-i"])
+        .arg(robot_fixture("explain-individuals.ofn"))
+        .args(["-M", "unsatisfiability", "-u", "all"])
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let report = String::from_utf8_lossy(&run.stdout);
+    for n in 1..=9 {
+        let line = format!(
+            "1 justification(s) for http://example.org/explain-individuals#A{n} ⊑ http://www.w3.org/2002/07/owl#Nothing:"
+        );
+        assert!(report.contains(&line), "A{n}:\n{report}");
+    }
+}
+
+/// Asking elk, emr, hermit or jfact for the unsatisfiable classes of an
+/// ontology it finds inconsistent is an error, "Inconsistent ontology"; whelk
+/// answers with what it derived, and the told hierarchy finds no unsatisfiable
+/// class. As ROBOT 1.9.11 runs `explain -M unsatisfiability -u all` over
+/// `explain-inconsistent.ofn`.
+#[test]
+fn explain_refuses_unsatisfiability_where_the_reasoner_finds_the_ontology_inconsistent() {
+    for (r, refuses) in
+        [("elk", true), ("emr", true), ("hermit", true), ("jfact", true), ("whelk", false), ("structural", false)]
+    {
+        let md = tmp(&format!("explain-inconsistent.{r}.md"));
+        let _ = std::fs::remove_file(&md);
+        let run = bin()
+            .args(["explain", "-r", r, "-i"])
+            .arg(robot_fixture("explain-inconsistent.ofn"))
+            .args(["-M", "unsatisfiability", "-u", "all", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        if refuses {
+            assert_eq!(run.status.code(), Some(1), "{r}: {stderr}");
+            assert!(stderr.contains("Inconsistent ontology"), "{r}: {stderr}");
+            assert!(!md.exists(), "{r}");
+        } else {
+            assert!(run.status.success(), "{r}: {stderr}");
+            assert!(md.exists(), "{r}");
+        }
+        if r == "structural" {
+            assert_eq!(std::fs::read_to_string(&md).unwrap(), "No explanations found.");
+        }
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+
+/// The markdown report writes data restrictions, data ranges, literals, and the
+/// data property, property-set and individual axioms in Manchester syntax, and
+/// orders explanations, their axioms and the impact list by the hashes and the
+/// order of those expressions. The expected reports are ROBOT 1.9.11's for the
+/// same commands.
+#[test]
+fn explain_writes_data_expressions_and_individual_axioms_in_the_markdown_report() {
+    for name in ["explain-data", "explain-data-facets", "explain-literals", "explain-individuals"] {
+        let md = tmp(&format!("{name}.md"));
+        let run = bin()
+            .args(["explain", "-r", "hermit", "-i"])
+            .arg(robot_fixture(&format!("{name}.ofn")))
+            .args(["-M", "unsatisfiability", "-u", "all", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{name}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), fixture_text(&format!("{name}.robot.md")), "{name}");
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+/// A justification axiom that is the entailment itself stands at the root of
+/// its explanation, so the tree under the root leaves it out; the axiom impact
+/// summary still counts it. As ROBOT 1.9.11 writes the report for an asserted
+/// subsumption and, under whelk, for a class asserted unsatisfiable.
+#[test]
+fn explain_leaves_the_entailment_itself_out_of_its_explanation_tree() {
+    for r in ["elk", "hermit"] {
+        let md = tmp(&format!("explain-asserted.{r}.md"));
+        let run = bin()
+            .args(["explain", "-r", r, "-i"])
+            .arg(robot_fixture("explain-asserted.ofn"))
+            .args(["--prefix", "ex: http://example.org/explain-asserted#", "--axiom", "ex:A SubClassOf ex:B"])
+            .args(["-m", "2", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{r}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), fixture_text("explain-asserted.robot.md"), "{r}");
+        let _ = std::fs::remove_file(&md);
+    }
+    let md = tmp("explain-inconsistent.whelk-tree.md");
+    let run = bin()
+        .args(["explain", "-r", "whelk", "-i"])
+        .arg(robot_fixture("explain-inconsistent.ofn"))
+        .args(["-M", "unsatisfiability", "-u", "all", "--explanation"])
+        .arg(&md)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), fixture_text("explain-inconsistent.whelk.robot.md"));
+    let _ = std::fs::remove_file(&md);
+}
+
+/// `--axiom` reads its axiom as ROBOT reads it. A class goes by the short form
+/// of its IRI and by each label it has, and `X_1`, one class's short form and
+/// another's label, is the name of the class later in the order a hash set of
+/// the ontology's entities iterates in; a name may be quoted with `'` or `"`,
+/// and a CURIE of the built-in context or a bare IRI names its class too. The
+/// keyword takes any case and its colon, a class may stand in parentheses, and
+/// `#` starts a comment. An axiom the ontology states without annotations is
+/// its own justification, a tautology and an axiom of an inconsistent
+/// ontology among them; one the ontology does not entail, or about a class it
+/// does not have, has no explanation. A class with no NCName at the end of its
+/// IRI is written by what follows its last `/`, or by the whole IRI in angle
+/// brackets. The expected reports are ROBOT 1.9.11's.
+#[test]
+fn explain_reads_the_axiom_as_robot_reads_it() {
+    let none = "No explanations found.";
+    for (i, (fixture, axiom, expected)) in [
+        ("explain-names.ofn", "X_1 SubClassOf X_4", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "X_3 SubClassOf X_4", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "'X_1' SubClassOf X_4", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "X_1 subclassof X_4", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "X_1 SUBCLASSOF: X_4", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "(X_1) SubClassOf X_4", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "X_1 SubClassOf ((X_4))", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "X_1 SubClassOf X_4 # comment", "explain-names.X_3-X_4.robot.md"),
+        ("explain-names.ofn", "'alpha one' SubClassOf beta", "explain-names.X_1-X_2.robot.md"),
+        ("explain-names.ofn", "\"alpha one\" SubClassOf beta", "explain-names.X_1-X_2.robot.md"),
+        ("explain-names.ofn", "' alpha one ' SubClassOf beta", "explain-names.X_1-X_2.robot.md"),
+        ("explain-names.ofn", "obo:X_1 SubClassOf obo:X_4", "explain-names.X_1-X_4.robot.md"),
+        ("explain-names.ofn", "'alpha one' SubClassOf 'X_4'", "explain-names.X_1-X_4.robot.md"),
+        ("explain-names.ofn", "http://purl.obolibrary.org/obo/X_1 SubClassOf X_4", "explain-names.X_1-X_4.robot.md"),
+        ("materialize-reasoners.reason-structural.robot.ofn", "'A' SubClassOf 'Thing'", "explain-stated.A-Thing.robot.md"),
+        ("reduce-inconsistent.ofn", "'A' SubClassOf 'B'", "explain-stated.inconsistent-A-B.robot.md"),
+        ("explain-names.ofn", "X_2 SubClassOf X_1", none),
+        ("explain-names.ofn", "obo:X_99 SubClassOf X_4", none),
+        ("explain-names.ofn", "GO SubClassOf X_4", none),
+        ("explain-short-forms.ofn", "'a#1' SubClassOf 'd#'", "explain-short-forms.a1-d.robot.md"),
+        ("explain-short-forms.ofn", "<http://example.org/b/> SubClassOf eff", "explain-short-forms.b-f.robot.md"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let md = tmp(&format!("explain-axiom-{i}.md"));
+        let out = bin()
+            .args(["explain", "-i"])
+            .arg(robot_fixture(fixture))
+            .args(["--axiom", axiom, "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{axiom}: {}", String::from_utf8_lossy(&out.stderr));
+        let want = if expected == none { none.to_string() } else { fixture_text(expected) };
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), want, "{axiom}");
+        let _ = std::fs::remove_file(&md);
+    }
+    // Text that names no class where one is wanted, or goes on after the
+    // superclass, is no axiom.
+    for (i, axiom) in [
+        "<http://purl.obolibrary.org/obo/X_1> SubClassOf X_4",
+        "alpha SubClassOf beta",
+        "X_1SubClassOf X_4",
+        "X_1 SubClassOf X_99",
+        "X_1 SubClassOf <abc",
+        "X_1 SubClassOf X_4 garbage",
+        "'alpha one' SubClassOf beta)",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let md = tmp(&format!("explain-axiom-refused-{i}.md"));
+        let out = bin()
+            .args(["explain", "-i"])
+            .arg(robot_fixture("explain-names.ofn"))
+            .args(["--axiom", axiom, "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{axiom} was read");
+        assert!(!md.exists(), "{axiom} wrote a report");
+    }
+}
+
+/// `-M inconsistency` explains `owl:Thing ⊑ owl:Nothing` when the reasoner
+/// finds the ontology inconsistent, with a justification drawn from all of its
+/// logical axioms: here through property sets, negative assertions, sameness
+/// and difference of individuals, a data range and an anonymous individual,
+/// which the report writes by its node ID. The expected reports are ROBOT
+/// 1.9.11's for the same commands.
+#[test]
+fn explain_justifies_the_inconsistency_of_an_ontology() {
+    for (name, ext) in [
+        ("nary", "ofn"),
+        ("negdata", "ofn"),
+        ("negobj", "ofn"),
+        ("objnary", "ofn"),
+        ("range", "ofn"),
+        ("same", "ofn"),
+        ("same2", "ofn"),
+        ("anon", "owl"),
+    ] {
+        let md = tmp(&format!("explain-inc-{name}.md"));
+        let run = bin()
+            .args(["explain", "-r", "hermit", "-i"])
+            .arg(robot_fixture(&format!("explain-inc-{name}.{ext}")))
+            .args(["-M", "inconsistency", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{name}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            fixture_text(&format!("explain-inc-{name}.robot.md")),
+            "{name}"
+        );
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+/// Under whelk every unsatisfiable class is justified, the classes made
+/// unsatisfiable through an existential restriction among them, and the same
+/// report comes out of every run. The expected report is ROBOT 1.9.11's.
+#[test]
+fn explain_justifies_every_unsatisfiable_class_under_whelk() {
+    for run in 0..5 {
+        let md = tmp(&format!("explain-unsat-graph-whelk-{run}.md"));
+        let out = bin()
+            .args(["explain", "-r", "whelk", "-i"])
+            .arg(robot_fixture("explain-unsat-graph.ofn"))
+            .args(["-M", "unsatisfiability", "-u", "all", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            fixture_text("explain-unsat-graph.whelk.robot.md"),
+            "run {run}"
+        );
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+/// `owl:Thing` is justified unsatisfiable through axioms none of which is
+/// about it: the search takes in the axioms that refer to the entailment's
+/// own classes, here an unqualified cardinality whose filler is `owl:Thing`,
+/// and grows from them to a reflexive property's range. The expected report
+/// is ROBOT 1.9.11's.
+#[test]
+fn explain_justifies_an_unsatisfiable_owl_thing() {
+    let md = tmp("explain-unsat-top.whelk.md");
+    let out = bin()
+        .args(["explain", "-r", "whelk", "-i"])
+        .arg(robot_fixture("explain-unsat-top.ofn"))
+        .args(["-M", "unsatisfiability", "-u", "all", "--explanation"])
+        .arg(&md)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), fixture_text("explain-unsat-top.whelk.robot.md"));
+    let _ = std::fs::remove_file(&md);
+}
+
+/// `explain -M unsatisfiability` explains the classes `--unsatisfiable`
+/// selects as ROBOT selects them: `root`, the classes no other unsatisfiable
+/// class's told definition explains, those of a cycle of dependencies among
+/// them; `most_general`, those with no unsatisfiable told superclass;
+/// `random:2`, the first two by IRI; and, without the option, none. The
+/// expected reports are ROBOT 1.9.11's.
+#[test]
+fn explain_selects_the_unsatisfiable_classes_robot_selects() {
+    for (fixture, reasoner, selector, expected) in [
+        ("explain-unsat-graph2.ofn", "hermit", Some("root"), "explain-unsat-graph2.hermit-root.robot.md"),
+        ("explain-unsat-graph2.ofn", "hermit", Some("random:2"), "explain-unsat-graph2.hermit-random2.robot.md"),
+        ("explain-unsat-graph2.ofn", "elk", Some("most_general"), "explain-unsat-graph2.elk-most_general.robot.md"),
+        ("explain-unsat-cycle.ofn", "hermit", Some("root"), "explain-unsat-cycle.hermit-root.robot.md"),
+        ("explain-unsat-graph2.ofn", "hermit", None, ""),
+        ("explain-unsat-incons.ofn", "elk", None, ""),
+    ] {
+        let md = tmp(&format!("{fixture}.{reasoner}.{}.md", selector.unwrap_or("none").replace(':', "_")));
+        let mut cmd = bin();
+        cmd.args(["explain", "-r", reasoner, "-i"]).arg(robot_fixture(fixture)).args(["-M", "unsatisfiability"]);
+        if let Some(s) = selector {
+            cmd.args(["-u", s]);
+        }
+        let out = cmd.arg("--explanation").arg(&md).output().unwrap();
+        assert!(out.status.success(), "{fixture} {reasoner} {selector:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let want = if expected.is_empty() { "No explanations found.".to_string() } else { fixture_text(expected) };
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), want, "{fixture} {reasoner} {selector:?}");
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+/// `--unsatisfiable list` explains nothing and writes each unsatisfiable
+/// class's CURIE in the built-in OBO context, or its IRI where no prefix
+/// fits, sorted, a line each. The expected list is ROBOT 1.9.11's.
+#[test]
+fn explain_lists_the_unsatisfiable_classes_as_curies() {
+    let txt = tmp("explain-unsat-graph2.list.txt");
+    let out = bin()
+        .args(["explain", "-r", "hermit", "-i"])
+        .arg(robot_fixture("explain-unsat-graph2.ofn"))
+        .args(["-M", "unsatisfiability", "-u", "list", "--explanation"])
+        .arg(&txt)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&txt).unwrap(), fixture_text("explain-unsat-graph2.hermit-list.robot.txt"));
+    let _ = std::fs::remove_file(&txt);
+}
+
+/// Where `--unsatisfiable` cannot be followed the command fails, as ROBOT's
+/// does: `most_general` over a class told to be below owl:Nothing, whose
+/// climb through its superclasses never ends; `all` over an ontology the
+/// reasoner finds inconsistent; and a value that is no keyword, no
+/// `random:` with an integer, and no class.
+#[test]
+fn explain_fails_where_the_unsatisfiable_selection_cannot_be_made() {
+    for (fixture, reasoner, selector, message) in [
+        ("explain-unsat-graph.ofn", "hermit", "most_general", "never ends"),
+        ("explain-unsat-incons.ofn", "elk", "all", "Inconsistent ontology"),
+        ("explain-unsat-graph2.ofn", "hermit", "ALL", "ILLEGAL UNSATISFIABLE ARGUMENT ERROR: ALL."),
+        ("explain-unsat-graph2.ofn", "hermit", "random:x", "ILLEGAL UNSATISFIABLE ARGUMENT ERROR: random:x."),
+    ] {
+        let md = tmp(&format!("explain-unsat-fails.{reasoner}.md"));
+        let out = bin()
+            .args(["explain", "-r", reasoner, "-i"])
+            .arg(robot_fixture(fixture))
+            .args(["-M", "unsatisfiability", "-u", selector, "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{fixture} {selector} succeeded");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(message), "{fixture} {selector}: {err}");
+        assert!(!md.exists(), "{fixture} {selector} wrote a report");
+    }
+}
+
+/// An axiom annotated with an anonymous individual hashes that individual by
+/// its node ID, and the hash places the axiom in the search for a
+/// justification. The expected reports are ROBOT 1.9.11's, for the functional
+/// and the RDF/XML document, whose node IDs differ.
+#[test]
+fn explain_places_axioms_annotated_with_anonymous_individuals_by_their_node_ids() {
+    for ext in ["ofn", "owl"] {
+        for reasoner in ["elk", "hermit"] {
+            let md = tmp(&format!("rdf-nested-anonymous.{ext}.{reasoner}.md"));
+            let run = bin()
+                .args(["explain", "-r", reasoner, "-i"])
+                .arg(robot_fixture(&format!("rdf-nested-anonymous.{ext}")))
+                .args(["-M", "inconsistency", "--explanation"])
+                .arg(&md)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "{ext} {reasoner}: {}", String::from_utf8_lossy(&run.stderr));
+            assert_eq!(
+                std::fs::read_to_string(&md).unwrap(),
+                fixture_text(&format!("rdf-nested-anonymous.{ext}.{reasoner}.robot.md")),
+                "{ext} {reasoner}"
+            );
+            let _ = std::fs::remove_file(&md);
+        }
+    }
+}
+
+/// The markdown report writes a disjoint union, a key and a SWRL rule as
+/// ROBOT's renderer does: the union's members and the key's property lists
+/// sorted, the key's object and data properties run together, and the rule's
+/// atoms in the order it lists them, a complex class atom in parentheses. The
+/// expected reports are ROBOT 1.9.11's; the key's place in its explanation
+/// follows the key's hash, which leaves its annotations out.
+#[test]
+fn explain_writes_disjoint_unions_keys_and_rules_in_the_markdown_report() {
+    for name in ["union", "key", "rule"] {
+        let md = tmp(&format!("explain-inc-{name}.md"));
+        let run = bin()
+            .args(["explain", "-r", "hermit", "-i"])
+            .arg(robot_fixture(&format!("explain-inc-{name}.ofn")))
+            .args(["-M", "inconsistency", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{name}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            fixture_text(&format!("explain-inc-{name}.robot.md")),
+            "{name}"
+        );
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+/// Further justifications of an inconsistency come from the hitting-set tree,
+/// whose order of branches, reuse of justifications and order of the search's
+/// axioms decide which ones `--max` admits and how each is written. The
+/// expected reports are ROBOT 1.9.11's, identical over at least six runs each;
+/// in `explain-inc-reuse` (a generated probe) which justification a branch
+/// reuses decides the report.
+#[test]
+fn explain_finds_further_justifications_of_an_inconsistency() {
+    for (name, m) in [
+        ("explain-inc-multi", "1"),
+        ("explain-inc-multi", "2"),
+        ("explain-inc-multi", "3"),
+        ("explain-inc-multi", "10"),
+        ("explain-inc-reuse", "10"),
+    ] {
+        let md = tmp(&format!("{name}.m{m}.md"));
+        let run = bin()
+            .args(["explain", "-r", "hermit", "-i"])
+            .arg(robot_fixture(&format!("{name}.ofn")))
+            .args(["-M", "inconsistency", "-m", m, "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{name} -m {m}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            fixture_text(&format!("{name}.m{m}.robot.md")),
+            "{name} -m {m}"
+        );
+        let _ = std::fs::remove_file(&md);
+    }
+}
+
+/// An ontology the reasoner finds consistent has no inconsistency to explain,
+/// and the structural reasoner finds every ontology consistent.
+#[test]
+fn explain_finds_nothing_to_explain_in_a_consistent_ontology() {
+    for (r, input) in [
+        ("hermit", "explain-inc-consistent.ofn"),
+        ("elk", "explain-inc-consistent.ofn"),
+        ("whelk", "explain-inc-consistent.ofn"),
+        ("structural", "explain-inc-multi.ofn"),
+    ] {
+        let md = tmp(&format!("explain-inc-none.{r}.md"));
+        let run = bin()
+            .args(["explain", "-r", r, "-i"])
+            .arg(robot_fixture(input))
+            .args(["-M", "inconsistency", "--explanation"])
+            .arg(&md)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{r}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), "No explanations found.", "{r}");
+        let _ = std::fs::remove_file(&md);
+    }
 }
 
 

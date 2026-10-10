@@ -18,7 +18,7 @@ pub mod entail;
 pub mod whelk;
 pub mod whelk_order;
 
-pub use dl::DlReasoner;
+pub use dl::{Datatypes, DlReasoner};
 pub use el::Reasoner;
 pub use entail::{entails, instances, is_instance, types};
 pub use whelk::WhelkClassification;

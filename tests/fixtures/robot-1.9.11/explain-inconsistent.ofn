@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/explain-inconsistent#>)
+Ontology(<http://example.org/explain-inconsistent>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(NamedIndividual(:i))
+ClassAssertion(owl:Nothing :i)
+SubClassOf(:A :B)
+SubClassOf(:A owl:Nothing)
+)

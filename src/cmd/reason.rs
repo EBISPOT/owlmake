@@ -19,7 +19,7 @@ use horned_owl::model::{
 };
 
 use crate::model::Model;
-use crate::reason::Reasoner;
+use crate::reason::{Datatypes, Reasoner};
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
@@ -229,11 +229,54 @@ impl ReasonerKind {
         }
     }
 
+    /// What the reasoner does with a datatype outside the OWL 2 datatype map.
+    /// HermiT refuses one when it is wrapped for expression materialization, and
+    /// reads past it everywhere else, as its reasoner factory does; JFact always
+    /// reads past it. The other reasoners read no datatypes.
+    pub(crate) fn datatypes(self, materializing: bool) -> Datatypes {
+        if materializing && self == ReasonerKind::Hermit {
+            Datatypes::Strict
+        } else {
+            Datatypes::Lenient
+        }
+    }
+
     /// Whether classification runs on the built-in EL engine, which can take
     /// ownership of the model and free it before saturating.
     pub(crate) fn is_builtin_el(self) -> bool {
         matches!(self, ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr)
     }
+
+    /// Whether asking this reasoner for the unsatisfiable classes of an
+    /// ontology it finds inconsistent is an error: it is for every reasoner but
+    /// whelk and the told hierarchy, which answer with what they derived.
+    pub(crate) fn refuses_inconsistent_ontology(self) -> bool {
+        !matches!(self, ReasonerKind::Whelk | ReasonerKind::Structural)
+    }
+
+    /// Whether the reasoner reads the whole ontology as it is made, before it
+    /// is asked anything, and so can refuse one then: hermit checks its
+    /// property restrictions and datatypes, and whelk classifies.
+    pub(crate) fn reads_ontology_when_made(self) -> bool {
+        matches!(self, ReasonerKind::Hermit | ReasonerKind::Whelk)
+    }
+}
+
+/// Whether `kind` finds `model` consistent, and the named classes it finds
+/// unsatisfiable.
+pub(crate) fn coherence(model: &Model, kind: ReasonerKind) -> Result<(bool, Vec<String>)> {
+    let cls = classify(
+        model,
+        kind,
+        false,
+        false,
+        false,
+        false,
+        &HashSet::new(),
+        PropertyCheck::None,
+        kind.datatypes(false),
+    )?;
+    Ok((cls.consistent, cls.unsat))
 }
 
 /// How a reasoner finds the object properties that are unsatisfiable — those
@@ -655,7 +698,8 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             want_property_assertion,
             &assertion_properties,
             check,
-        )
+            kind.datatypes(false),
+        )?
     };
     let Classification {
         consistent,
@@ -1065,13 +1109,15 @@ fn classify(
     need_property_assertions: bool,
     assertion_properties: &HashSet<String>,
     check: PropertyCheck,
-) -> Classification {
-    match kind {
+    datatypes: Datatypes,
+) -> Result<Classification> {
+    Ok(match kind {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so `hermit`/
         // `jfact`/`whelk` all work in the browser too (see src/reason/mod.rs).
         ReasonerKind::Hermit | ReasonerKind::JFact => {
             status!("reason: using hermit-rs, the HermiT OWL 2 DL reasoner ('{kind:?}')");
-            let r = crate::reason::DlReasoner::classify(model);
+            let r = crate::reason::DlReasoner::classify_with(model, datatypes);
+            r.try_classify().map_err(anyhow::Error::msg)?;
             let direct = r.direct_subsumptions();
             let all = if need_all { r.all_subsumptions() } else { Vec::new() };
             // The ABox queries need a consistent ontology; `reason_with` fails
@@ -1183,7 +1229,7 @@ fn classify(
                 unsat_properties,
             }
         }
-    }
+    })
 }
 
 /// The unsatisfiable object properties of an EL classification under `check`:
@@ -1426,14 +1472,21 @@ pub(crate) fn told_parents(model: &Model) -> HashMap<&str, Vec<&str>> {
 /// parents; under any other reasoner the superclasses with none of the class's
 /// other superclasses strictly below them. `whelk` takes one class of each
 /// such node, the first its walk over the class's subsumers reaches.
-/// `owl:Thing` and `owl:Nothing` are no superclass.
-pub(crate) fn direct_superclass_nodes(model: &Model, kind: ReasonerKind) -> Vec<(String, String)> {
+/// `owl:Thing` and `owl:Nothing` are no superclass. `datatypes` is what the
+/// reasoner does with a datatype outside the OWL 2 datatype map.
+pub(crate) fn direct_superclass_nodes(
+    model: &Model,
+    kind: ReasonerKind,
+    datatypes: Datatypes,
+) -> Result<Vec<(String, String)>> {
     match kind {
-        ReasonerKind::Structural => return classify_structural(model, false, false).direct,
-        ReasonerKind::Whelk => return crate::reason::WhelkClassification::classify(model).direct_subsumptions(),
+        ReasonerKind::Structural => return Ok(classify_structural(model, false, false).direct),
+        ReasonerKind::Whelk => {
+            return Ok(crate::reason::WhelkClassification::classify(model).direct_subsumptions())
+        }
         _ => {}
     }
-    let all = classify(model, kind, true, false, false, false, &HashSet::new(), PropertyCheck::None).all;
+    let all = classify(model, kind, true, false, false, false, &HashSet::new(), PropertyCheck::None, datatypes)?.all;
     let mut supers: HashMap<&str, HashSet<&str>> = HashMap::new();
     for (a, b) in &all {
         if a != b && ![a, b].iter().any(|c| *c == OWL_THING || *c == OWL_NOTHING) {
@@ -1453,7 +1506,7 @@ pub(crate) fn direct_superclass_nodes(model: &Model, kind: ReasonerKind) -> Vec<
         }
     }
     out.sort();
-    out
+    Ok(out)
 }
 
 /// What a classification says about an ontology's coherence, for [`validate`].
@@ -1525,9 +1578,20 @@ pub(crate) fn validate(v: &Validation) -> Result<()> {
 
 /// Classify `model` with `kind` and [`validate`] the result, for a command that
 /// reasons only to check the ontology first. `materializing` selects the
-/// property check of a reasoner wrapped for expression materialization.
+/// property check and the datatypes of a reasoner wrapped for expression
+/// materialization.
 pub(crate) fn validate_model(model: &Model, kind: ReasonerKind, materializing: bool) -> Result<()> {
-    let cls = classify(model, kind, false, false, false, false, &HashSet::new(), kind.property_check(materializing));
+    let cls = classify(
+        model,
+        kind,
+        false,
+        false,
+        false,
+        false,
+        &HashSet::new(),
+        kind.property_check(materializing),
+        kind.datatypes(materializing),
+    )?;
     let listed = unsatisfiable_in_node_order(kind, &cls.unsat, || crate::reason::elk_order::class_queue(&model.ont));
     validate(&Validation {
         consistent: cls.consistent,

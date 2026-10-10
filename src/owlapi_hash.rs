@@ -10,12 +10,11 @@
 //! - the hash codes (`equivalent_classes_hash` and the expression hashes under
 //!   it) — a prime-tagged polynomial over the axiom's components. Set-valued
 //!   components are stored SORTED and hashed as Java lists (seed 1, ordered),
-//!   except axiom annotation sets, which hash to 0 when empty, and the
-//!   individuals of a one-of, which hash as a set (the sum). IRIs hash as
-//!   the sum of the Java string hashes of their namespace and NCName-suffix
-//!   halves;
-//! - the component order (`owl_cmp`) — OWLAPI's `compareTo`: type index first,
-//!   then per-type field comparison, with IRIs compared namespace-then-suffix;
+//!   except that an empty one hashes to 0 and the individuals of a one-of
+//!   hash as a set (the sum). IRIs hash as the sum of the Java string hashes
+//!   of their namespace and NCName-suffix halves;
+//! - the component order (`owl_cmp`) — the natural order
+//!   ([`NaturalOrder`]), which sorts a set's members as OWLAPI stores them;
 //! - the bucket order (`hashset_order`) — Java's HashMap spread
 //!   (`h ^ (h >>> 16)`) masked by the table capacity that results from
 //!   inserting `n` elements into a default-sized table. Entries in the SAME
@@ -26,9 +25,11 @@
 use std::cmp::Ordering;
 
 use horned_owl::model::{
-    Annotation, AnnotationValue, ClassExpression as CE, Individual, Literal,
-    ObjectPropertyExpression as OPE, RcStr,
+    Annotation, AnnotationValue, ClassExpression as CE, DataRange as DR, FacetRestriction, Individual, Literal,
+    ObjectPropertyExpression as OPE, PropertyExpression, RcStr,
 };
+
+use crate::io::natural_order::NaturalOrder;
 
 const MULT: i32 = 31;
 
@@ -46,7 +47,13 @@ const P_OBJ_HAS_SELF: i32 = 3433;
 const P_OBJ_SOME_VALUES: i32 = 3517;
 const P_OBJ_UNION: i32 = 3581;
 const P_OBJ_HAS_VALUE: i32 = 3659;
+const P_DATA_COMPLEMENT: i32 = 3733;
+const P_DATA_ONE_OF: i32 = 3823;
 const P_DATATYPE: i32 = 3911;
+const P_DATATYPE_RESTRICTION: i32 = 4001;
+const P_FACET_RESTRICTION: i32 = 4421;
+const P_DATA_INTERSECTION: i32 = 5861;
+const P_DATA_UNION: i32 = 5953;
 const P_OBJECT_PROPERTY: i32 = 4153;
 const P_OBJ_INVERSE: i32 = 4241;
 const P_NAMED_INDIVIDUAL: i32 = 4327;
@@ -57,25 +64,6 @@ const P_ANNOTATION_PROPERTY: i32 = 6067;
 const P_ANNOTATION_PROPERTY_ENTITY: i32 = P_ANNOTATION_PROPERTY;
 const P_ANNOTATION: i32 = 6311;
 const P_ANNOTATION_ASSERTION: i32 = 739;
-
-// The type index OWLAPI's compareTo consults before any field comparison.
-fn type_index(ce: &CE<RcStr>) -> i32 {
-    match ce {
-        CE::Class(_) => 1001,
-        CE::ObjectIntersectionOf(_) => 3001,
-        CE::ObjectUnionOf(_) => 3002,
-        CE::ObjectComplementOf(_) => 3003,
-        CE::ObjectOneOf(_) => 3004,
-        CE::ObjectSomeValuesFrom { .. } => 3005,
-        CE::ObjectAllValuesFrom { .. } => 3006,
-        CE::ObjectHasValue { .. } => 3007,
-        CE::ObjectMinCardinality { .. } => 3008,
-        CE::ObjectExactCardinality { .. } => 3009,
-        CE::ObjectMaxCardinality { .. } => 3010,
-        CE::ObjectHasSelf(_) => 3011,
-        _ => 3999,
-    }
-}
 
 /// Java `String.hashCode()` — over UTF-16 code units, wrapping i32.
 pub fn java_string_hash(s: &str) -> i32 {
@@ -125,6 +113,19 @@ pub(crate) fn iri_split(iri: &str) -> (&str, &str) {
     }
 }
 
+/// OWLAPI `IRI.getShortForm()`: the NCName suffix; without one, what follows
+/// the last `/` when something does; else the whole IRI in angle brackets.
+pub(crate) fn iri_short_form(iri: &str) -> String {
+    let (ns, rem) = iri_split(iri);
+    if !rem.is_empty() {
+        return rem.to_string();
+    }
+    match ns.rfind('/') {
+        Some(i) if i + 1 < ns.len() => ns[i + 1..].to_string(),
+        _ => format!("<{iri}>"),
+    }
+}
+
 /// OWLAPI `IRI.hashCode()`: the namespace and remainder halves are hashed as
 /// Java strings and SUMMED (not concatenated — the split point matters).
 pub fn iri_hash(iri: &str) -> i32 {
@@ -139,104 +140,11 @@ pub fn iri_cmp(a: &str, b: &str) -> Ordering {
     na.cmp(nb).then_with(|| ra.cmp(rb))
 }
 
-fn ope_cmp(a: &OPE<RcStr>, b: &OPE<RcStr>) -> Ordering {
-    let idx = |o: &OPE<RcStr>| match o {
-        OPE::ObjectProperty(_) => 1002,
-        OPE::InverseObjectProperty(_) => 1003,
-    };
-    idx(a).cmp(&idx(b)).then_with(|| match (a, b) {
-        (OPE::ObjectProperty(x), OPE::ObjectProperty(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
-        (OPE::InverseObjectProperty(x), OPE::InverseObjectProperty(y)) => {
-            iri_cmp(x.0.as_ref(), y.0.as_ref())
-        }
-        _ => Ordering::Equal,
-    })
-}
-
-fn ind_cmp(a: &Individual<RcStr>, b: &Individual<RcStr>) -> Ordering {
-    match (a, b) {
-        (Individual::Named(x), Individual::Named(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
-        (Individual::Named(_), Individual::Anonymous(_)) => Ordering::Less,
-        (Individual::Anonymous(_), Individual::Named(_)) => Ordering::Greater,
-        (Individual::Anonymous(x), Individual::Anonymous(y)) => x.0.as_ref().cmp(y.0.as_ref()),
-    }
-}
-
-/// The distinct members of a set-valued component, in OWLAPI order — how the
-/// axiom/expression stores them.
-fn sorted_distinct<'a>(v: &'a [CE<RcStr>]) -> Vec<&'a CE<RcStr>> {
-    let mut out: Vec<&CE<RcStr>> = Vec::with_capacity(v.len());
-    for c in v {
-        if !out.iter().any(|x| **x == *c) {
-            out.push(c);
-        }
-    }
-    out.sort_by(|a, b| owl_cmp(a, b));
-    out
-}
-
-/// OWLAPI `OWLObject.compareTo` over class expressions: type index, then the
-/// per-type field comparison.
+/// The order a document's class expressions take in a set: the natural
+/// order of a document that keeps its untyped literals untyped. It decides
+/// the order a set's members are stored, and so hashed, in.
 pub fn owl_cmp(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
-    let d = type_index(a).cmp(&type_index(b));
-    if d != Ordering::Equal {
-        return d;
-    }
-    match (a, b) {
-        (CE::Class(x), CE::Class(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
-        (
-            CE::ObjectSomeValuesFrom { ope: pa, bce: fa },
-            CE::ObjectSomeValuesFrom { ope: pb, bce: fb },
-        )
-        | (
-            CE::ObjectAllValuesFrom { ope: pa, bce: fa },
-            CE::ObjectAllValuesFrom { ope: pb, bce: fb },
-        ) => ope_cmp(pa, pb).then_with(|| owl_cmp(fa, fb)),
-        (CE::ObjectIntersectionOf(va), CE::ObjectIntersectionOf(vb))
-        | (CE::ObjectUnionOf(va), CE::ObjectUnionOf(vb)) => {
-            // compareSets: element-wise over the sorted sets, then size.
-            let sa = sorted_distinct(va);
-            let sb = sorted_distinct(vb);
-            for (x, y) in sa.iter().zip(sb.iter()) {
-                let d = owl_cmp(x, y);
-                if d != Ordering::Equal {
-                    return d;
-                }
-            }
-            sa.len().cmp(&sb.len())
-        }
-        (CE::ObjectComplementOf(x), CE::ObjectComplementOf(y)) => owl_cmp(x, y),
-        (CE::ObjectHasSelf(x), CE::ObjectHasSelf(y)) => ope_cmp(x, y),
-        (CE::ObjectHasValue { ope: pa, i: ia }, CE::ObjectHasValue { ope: pb, i: ib }) => {
-            ope_cmp(pa, pb).then_with(|| ind_cmp(ia, ib))
-        }
-        (
-            CE::ObjectMinCardinality { n: na, ope: pa, bce: fa },
-            CE::ObjectMinCardinality { n: nb, ope: pb, bce: fb },
-        )
-        | (
-            CE::ObjectMaxCardinality { n: na, ope: pa, bce: fa },
-            CE::ObjectMaxCardinality { n: nb, ope: pb, bce: fb },
-        )
-        | (
-            CE::ObjectExactCardinality { n: na, ope: pa, bce: fa },
-            CE::ObjectExactCardinality { n: nb, ope: pb, bce: fb },
-        ) => ope_cmp(pa, pb).then_with(|| na.cmp(nb)).then_with(|| owl_cmp(fa, fb)),
-        (CE::ObjectOneOf(va), CE::ObjectOneOf(vb)) => {
-            let mut sa: Vec<&Individual<RcStr>> = va.iter().collect();
-            let mut sb: Vec<&Individual<RcStr>> = vb.iter().collect();
-            sa.sort_by(|x, y| ind_cmp(x, y));
-            sb.sort_by(|x, y| ind_cmp(x, y));
-            for (x, y) in sa.iter().zip(sb.iter()) {
-                let d = ind_cmp(x, y);
-                if d != Ordering::Equal {
-                    return d;
-                }
-            }
-            sa.len().cmp(&sb.len())
-        }
-        _ => Ordering::Equal,
-    }
+    NaturalOrder::default().ce(a, b)
 }
 
 fn tag(prime: i32, parts: &[i32]) -> i32 {
@@ -275,10 +183,9 @@ fn ind_hash(i: &Individual<RcStr>) -> i32 {
 }
 
 /// The hash of a set of class expressions as OWLAPI stores one: the list hash
-/// of its distinct members in `owl_cmp` order.
+/// of its distinct members in `owl_cmp` order, or 0 when it has none.
 pub fn ce_set_hash(v: &[CE<RcStr>]) -> i32 {
-    let hs: Vec<i32> = sorted_distinct(v).iter().map(|c| ce_hash(c)).collect();
-    list_hash(&hs)
+    sorted_list_hash(v, ce_hash, owl_cmp)
 }
 
 pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
@@ -307,9 +214,10 @@ pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
         // The individuals are a set, not a sorted list, so they hash as one: the
         // sum of the distinct members' hashes.
         CE::ObjectOneOf(v) => {
+            let order = NaturalOrder::default();
             let mut inds: Vec<&Individual<RcStr>> = v.iter().collect();
-            inds.sort_by(|x, y| ind_cmp(x, y));
-            inds.dedup_by(|x, y| ind_cmp(x, y) == Ordering::Equal);
+            inds.sort_by(|x, y| order.individual(x, y));
+            inds.dedup_by(|x, y| order.individual(x, y) == Ordering::Equal);
             let sum = inds.iter().map(|i| ind_hash(i)).fold(0i32, |acc, h| acc.wrapping_add(h));
             tag(P_OBJ_ONE_OF, &[sum])
         }
@@ -392,7 +300,7 @@ fn annotation_value_hash(av: &AnnotationValue<RcStr>) -> i32 {
     match av {
         AnnotationValue::IRI(iri) => iri_hash(iri.as_ref()),
         AnnotationValue::Literal(l) => literal_hash(l),
-        AnnotationValue::AnonymousIndividual(_) => 0,
+        AnnotationValue::AnonymousIndividual(a) => java_string_hash(&crate::io::entities::node_id(a.0.as_ref())),
     }
 }
 
@@ -405,20 +313,13 @@ pub fn annotation_assertion_hash(
     value: &AnnotationValue<RcStr>,
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
 ) -> i32 {
-    let ann_hash = if anns.is_empty() {
-        0
-    } else {
-        let mut sorted: Vec<&Annotation<RcStr>> = anns.iter().collect();
-        sorted.sort_by(|a, b| annotation_cmp(a, b));
-        list_hash(&sorted.iter().map(|a| annotation_hash(a)).collect::<Vec<i32>>())
-    };
     tag(
         P_ANNOTATION_ASSERTION,
         &[
             iri_hash(subject),
             tag(P_ANNOTATION_PROPERTY_ENTITY, &[iri_hash(property)]),
             annotation_value_hash(value),
-            ann_hash,
+            axiom_annotations_hash(anns),
         ],
     )
 }
@@ -433,38 +334,15 @@ pub fn annotation_hash(a: &Annotation<RcStr>) -> i32 {
     )
 }
 
-fn annotation_cmp(a: &Annotation<RcStr>, b: &Annotation<RcStr>) -> Ordering {
-    iri_cmp(a.ap.0.as_ref(), b.ap.0.as_ref()).then_with(|| {
-        let kind = |v: &AnnotationValue<RcStr>| match v {
-            AnnotationValue::IRI(_) => 0,
-            AnnotationValue::AnonymousIndividual(_) => 1,
-            AnnotationValue::Literal(_) => 2,
-        };
-        kind(&a.av).cmp(&kind(&b.av)).then_with(|| match (&a.av, &b.av) {
-            (AnnotationValue::IRI(x), AnnotationValue::IRI(y)) => {
-                iri_cmp(x.as_ref(), y.as_ref())
-            }
-            (AnnotationValue::Literal(x), AnnotationValue::Literal(y)) => {
-                let t = |l: &Literal<RcStr>| match l {
-                    Literal::Simple { literal }
-                    | Literal::Language { literal, .. }
-                    | Literal::Datatype { literal, .. } => literal.clone(),
-                };
-                t(x).cmp(&t(y))
-            }
-            _ => Ordering::Equal,
-        })
-    })
-}
-
 /// The hash of an axiom's annotation set: 0 when it has none, else the list
-/// hash of its annotations in OWLAPI order.
-fn axiom_annotations_hash(anns: &std::collections::BTreeSet<Annotation<RcStr>>) -> i32 {
+/// hash of its annotations sorted by property and then value, a literal value
+/// by datatype, lexical form and language.
+pub(crate) fn axiom_annotations_hash(anns: &std::collections::BTreeSet<Annotation<RcStr>>) -> i32 {
     if anns.is_empty() {
         return 0;
     }
-    let mut sorted: Vec<&Annotation<RcStr>> = anns.iter().collect();
-    sorted.sort_by(|a, b| annotation_cmp(a, b));
+    let order = NaturalOrder::default();
+    let sorted = order.sorted_annotations(anns);
     list_hash(&sorted.iter().map(|a| annotation_hash(a)).collect::<Vec<i32>>())
 }
 
@@ -476,15 +354,41 @@ fn datatype_hash(iri: &str) -> i32 {
     tag(P_DATATYPE, &[iri_hash(iri)])
 }
 
-fn data_range_hash(dr: &horned_owl::model::DataRange<RcStr>) -> i32 {
+/// A data range's hash. Its operands, values and facet restrictions are sets,
+/// stored in the natural order.
+fn data_range_hash(dr: &DR<RcStr>) -> i32 {
+    let order = NaturalOrder::default();
     match dr {
-        horned_owl::model::DataRange::Datatype(d) => datatype_hash(d.0.as_ref()),
-        _ => 0,
+        DR::Datatype(d) => datatype_hash(d.0.as_ref()),
+        DR::DataComplementOf(r) => tag(P_DATA_COMPLEMENT, &[data_range_hash(r)]),
+        DR::DataOneOf(v) => tag(P_DATA_ONE_OF, &[sorted_list_hash(v, literal_hash, |x, y| order.literal(x, y))]),
+        DR::DataIntersectionOf(v) => {
+            tag(P_DATA_INTERSECTION, &[sorted_list_hash(v, data_range_hash, |x, y| order.dr(x, y))])
+        }
+        DR::DataUnionOf(v) => tag(P_DATA_UNION, &[sorted_list_hash(v, data_range_hash, |x, y| order.dr(x, y))]),
+        DR::DatatypeRestriction(d, fs) => tag(
+            P_DATATYPE_RESTRICTION,
+            &[
+                datatype_hash(d.0.as_ref()),
+                sorted_list_hash(fs, facet_restriction_hash, |x, y| order.facet_restriction(x, y)),
+            ],
+        ),
     }
 }
 
-/// The hashes of a set's members, distinct and in OWLAPI order, as a list hash.
+/// A facet restriction's hash, over its facet and its value. OWLAPI hashes the
+/// facet by object identity, which no document determines; the facet's
+/// position among the facets stands in for it.
+fn facet_restriction_hash(fr: &FacetRestriction<RcStr>) -> i32 {
+    tag(P_FACET_RESTRICTION, &[i32::from(NaturalOrder::facet_index(&fr.f)), literal_hash(&fr.l)])
+}
+
+/// The hash of a set OWLAPI stores sorted: the list hash of its distinct
+/// members' hashes in `cmp` order, or 0 when it has none.
 fn sorted_list_hash<T>(items: &[T], hash: impl Fn(&T) -> i32, cmp: impl Fn(&T, &T) -> Ordering) -> i32 {
+    if items.is_empty() {
+        return 0;
+    }
     let mut refs: Vec<&T> = items.iter().collect();
     refs.sort_by(|a, b| cmp(a, b));
     refs.dedup_by(|a, b| cmp(a, b) == Ordering::Equal);
@@ -534,9 +438,10 @@ pub fn axiom_hash(
 ) -> Option<i32> {
     use horned_owl::model::{Component as C, SubObjectPropertyExpression as SOPE};
     let a = axiom_annotations_hash(anns);
-    let ces = |v: &[CE<RcStr>]| list_hash(&sorted_distinct(v).iter().map(|c| ce_hash(c)).collect::<Vec<i32>>());
-    let opes = |v: &[OPE<RcStr>]| sorted_list_hash(v, ope_hash, |x, y| ope_cmp(x, y));
-    let inds = |v: &[Individual<RcStr>]| sorted_list_hash(v, ind_hash, |x, y| ind_cmp(x, y));
+    let order = NaturalOrder::default();
+    let ces = ce_set_hash;
+    let opes = |v: &[OPE<RcStr>]| sorted_list_hash(v, ope_hash, |x, y| order.ope(x, y));
+    let inds = |v: &[Individual<RcStr>]| sorted_list_hash(v, ind_hash, |x, y| order.individual(x, y));
     let dps = |v: &[horned_owl::model::DataProperty<RcStr>]| {
         sorted_list_hash(v, data_property_hash, |x, y| iri_cmp(x.0.as_ref(), y.0.as_ref()))
     };
@@ -603,26 +508,27 @@ pub fn axiom_hash(
             };
             tag(4591, &[atoms(&r.body), atoms(&r.head)])
         }
+        // A key and a datatype definition hash without their annotations.
+        C::HasKey(x) => {
+            let pe_hash = |pe: &PropertyExpression<RcStr>| match pe {
+                PropertyExpression::ObjectPropertyExpression(o) => ope_hash(o),
+                PropertyExpression::DataProperty(d) => data_property_hash(d),
+                PropertyExpression::AnnotationProperty(ap) => tag(P_ANNOTATION_PROPERTY, &[iri_hash(ap.0.as_ref())]),
+            };
+            tag(5527, &[ce_hash(&x.ce), sorted_list_hash(&x.vpe, pe_hash, |p, q| order.property_expression(p, q))])
+        }
+        C::DatatypeDefinition(x) => tag(6373, &[datatype_hash(x.kind.0.as_ref()), data_range_hash(&x.range)]),
         _ => return None,
     })
 }
 
 /// `OWLEquivalentClassesAxiom.hashCode()`: the prime tag over the sorted
-/// distinct member list hash and the annotation hash (0 when unannotated,
-/// sorted list hash otherwise).
+/// distinct member list hash and the annotation hash.
 pub fn equivalent_classes_hash(
     members: &[CE<RcStr>],
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
 ) -> i32 {
-    let ann_hash = if anns.is_empty() {
-        0
-    } else {
-        let mut sorted: Vec<&Annotation<RcStr>> = anns.iter().collect();
-        sorted.sort_by(|a, b| annotation_cmp(a, b));
-        let hs: Vec<i32> = sorted.iter().map(|a| annotation_hash(a)).collect();
-        list_hash(&hs)
-    };
-    tag(P_EQUIVALENT_CLASSES, &[ce_set_hash(members), ann_hash])
+    tag(P_EQUIVALENT_CLASSES, &[ce_set_hash(members), axiom_annotations_hash(anns)])
 }
 
 /// The hash of a named individual.
