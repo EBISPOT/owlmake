@@ -62,6 +62,8 @@ pub mod io;
 pub mod java_number;
 pub mod model;
 pub mod odk;
+// The ontology annotations an ontology holds of those it is given.
+pub mod owlapi_annotations;
 // OWLAPI-compatible content hashes and set iteration order. Pure std +
 // object model, so it builds everywhere the model does, wasm included.
 pub mod owlapi_hash;

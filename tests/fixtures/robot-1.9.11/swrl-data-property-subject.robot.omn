@@ -1,0 +1,39 @@
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/o>
+
+
+
+Ontology: <http://example.org/o>
+
+
+Datatype: rdf:PlainLiteral
+
+    
+Datatype: xsd:string
+
+    
+DataProperty: <http://example.org/o#d>
+
+    
+Class: <http://example.org/o#A>
+
+    
+Class: <http://example.org/o#B>
+
+    
+Individual: <http://example.org/o#i>
+
+    
+Individual: <http://example.org/o#j>
+
+    
+Rule: 
+    <http://example.org/o#A>(?<http://example.org/o#x>), <http://example.org/o#d>(<http://example.org/o#i>, ?<http://example.org/o#y>) -> <http://example.org/o#B>(?<http://example.org/o#x>)
+
+Rule: 
+    <http://example.org/o#d>(<http://example.org/o#i>, "v"), <http://example.org/o#d>(?<http://example.org/o#x>, "w") -> <http://example.org/o#d>(<http://example.org/o#j>, ?<http://example.org/o#x>)
+

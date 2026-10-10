@@ -32,7 +32,30 @@ pub(crate) enum HeldLabel<'m> {
     Iri(&'m str),
 }
 
+impl HeldLabel<'_> {
+    /// The label as a label provider shows it: a literal's text, or the short
+    /// form of an IRI.
+    pub(crate) fn short_form(&self) -> String {
+        match self {
+            HeldLabel::Literal(text) => text.to_string(),
+            HeldLabel::Iri(iri) => crate::owlapi_hash::iri_short_form(iri),
+        }
+    }
+}
+
 /// The label of every entity of `model` that has one (see [`HeldLabel`]).
+///
+/// An entity's labels are taken in the iteration order of its own set of
+/// annotation assertions: by the axioms' hashes, not by document order and not
+/// by the values. That set is sized by how many annotation assertions the
+/// entity carries, and two of its members in one bucket stand in the order the
+/// ontology's set of every annotation assertion holds them. `oboInOwl:hasDbXref`
+/// carries both "database_cross_reference" and "has cross-reference", and the
+/// order decides which one names it in every artefact.
+///
+/// Two labels in one bucket at both levels stand in the order the document
+/// added them, which it does not record; the lexically smaller is taken first,
+/// so the pick is the same from one run to the next.
 pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
     use horned_owl::model::{AnnotationSubject, AnnotationValue, Component};
     const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
@@ -41,20 +64,34 @@ pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
     let mut candidates: HashMap<&str, Vec<(i32, &AnnotationValue<RcStr>)>> = HashMap::new();
     for ac in model.ont.iter() {
         if let Component::AnnotationAssertion(aa) = &ac.component {
+            assertions += 1;
             if let AnnotationSubject::IRI(s) = &aa.subject {
-                assertions += 1;
                 *per_subject.entry(s.as_ref()).or_default() += 1;
                 if aa.ann.ap.0.as_ref() == RDFS_LABEL {
                     candidates.entry(s.as_ref()).or_default().push((
-                        crate::owlapi_hash::annotation_assertion_hash(s.as_ref(), RDFS_LABEL, &aa.ann.av, &ac.ann),
+                        crate::owlapi_hash::annotation_assertion_hash(
+                            s.as_ref(),
+                            RDFS_LABEL,
+                            &aa.ann.av,
+                            &ac.ann,
+                            model.natural_order(),
+                        ),
                         &aa.ann.av,
                     ));
                 }
             }
         }
     }
+    let text = |av: &AnnotationValue<RcStr>| -> String {
+        match av {
+            AnnotationValue::Literal(l) => l.literal().to_string(),
+            AnnotationValue::IRI(iri) => iri.to_string(),
+            AnnotationValue::AnonymousIndividual(a) => a.0.to_string(),
+        }
+    };
     let mut labels: HashMap<&str, HeldLabel> = HashMap::new();
-    for (subject, cands) in &candidates {
+    for (subject, mut cands) in candidates {
+        cands.sort_by_key(|c| text(c.1));
         let ordered: Vec<usize> = if cands.len() == 1 {
             vec![0]
         } else {
@@ -73,7 +110,7 @@ pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
             }
         }
         if let Some(f) = found {
-            labels.insert(*subject, f);
+            labels.insert(subject, f);
         }
     }
     labels

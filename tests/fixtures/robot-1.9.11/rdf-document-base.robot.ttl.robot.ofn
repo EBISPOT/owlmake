@@ -1,0 +1,36 @@
+Prefix(:=<{fixtures}/%7Bfixtures%7D/%7Bfixtures%7D/rdf-document-base.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<{fixtures}/%7Bfixtures%7D/%7Bfixtures%7D/rdf-document-base.owl>
+
+Declaration(Class(<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#A>))
+Declaration(Class(<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#B>))
+Declaration(ObjectProperty(<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#p>))
+Declaration(NamedIndividual(<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#i>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#A> (<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#A>)
+
+AnnotationAssertion(rdfs:seeAlso <{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#A> <{fixtures}/%7Bfixtures%7D/%7Bfixtures%7D/other.owl#C>)
+SubClassOf(<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#A> <{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#B>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#i> (<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#i>)
+
+ClassAssertion(<{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#A> <{fixtures}/%7Bfixtures%7D/rdf-document-base.owl#i>)
+
+
+)

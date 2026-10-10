@@ -337,13 +337,12 @@ pub fn annotate_with(
             Component::OntologyID(id) => Some(id.clone()),
             _ => None,
         });
-        let mut id = existing.unwrap_or(OntologyID { iri: None, viri: None });
-        if let Some(iri) = &opts.ontology_iri {
-            id.iri = Some(model.build.iri(iri.as_str()));
-        }
-        if let Some(viri) = &opts.version_iri {
-            id.viri = Some(model.build.iri(viri.as_str()));
-        }
+        let existing = existing.unwrap_or(OntologyID { iri: None, viri: None });
+        let id = crate::model::ontology_id(
+            &model.build,
+            opts.ontology_iri.as_deref().or(existing.iri.as_deref()),
+            opts.version_iri.as_deref().or(existing.viri.as_deref()),
+        )?;
         let old: Vec<_> = model
             .ont
             .iter()
@@ -434,18 +433,15 @@ fn annotation_property(
     Ok(model.build.annotation_property(iri(model, prop, "property")?.as_str()))
 }
 
-/// Add an ontology annotation. Its property is not declared: a written document
-/// declares the properties the ontology uses and does not declare.
+/// Add an ontology annotation, as the ontology adds one to those it holds. Its
+/// property is not declared: a written document declares the properties the
+/// ontology uses and does not declare.
 fn add_ontology_annotation(
     model: &mut crate::model::Model,
     ap: AnnotationProperty<crate::model::Str>,
     av: AnnotationValue<crate::model::Str>,
 ) {
-    model.ont.insert(Component::OntologyAnnotation(horned_owl::model::OntologyAnnotation(Annotation {
-        ann: BTreeSet::new(),
-        ap,
-        av,
-    })));
+    crate::owlapi_annotations::add(&mut model.ont, [Annotation { ann: BTreeSet::new(), ap, av }]);
 }
 
 /// Whether `ac` is an axiom of the ontology's own: not its name, a header

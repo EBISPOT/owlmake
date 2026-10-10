@@ -538,7 +538,7 @@ impl ArcConv {
             },
             ho::Atom::DataPropertyAtom { pred, args } => ho::Atom::DataPropertyAtom {
                 pred: self.data_property(pred),
-                args: (self.darg(&args.0), self.darg(&args.1)),
+                args: (self.iarg(&args.0), self.darg(&args.1)),
             },
             ho::Atom::DataRangeAtom { pred, arg } => ho::Atom::DataRangeAtom {
                 pred: self.data_range(pred),

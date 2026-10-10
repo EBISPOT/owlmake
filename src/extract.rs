@@ -585,7 +585,7 @@ fn post_process(
             ont.insert(ac);
         }
         ont.insert(Component::OntologyID(OntologyID {
-            iri: Some(build.iri(iri.as_str())),
+            iri: crate::model::ontology_iri_as_made(&build, iri),
             viri: None,
         }));
         let carried = std::mem::replace(&mut module, Model::new());

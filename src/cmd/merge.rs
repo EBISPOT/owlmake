@@ -717,13 +717,16 @@ pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
         merged.ont.iter().any(|c| matches!(c.component, Component::OntologyID(_)));
     if !primary_has_identity {
         for component in other.ont.iter() {
-            if matches!(
-                component.component,
-                Component::OntologyID(_) | Component::DocIRI(_) | Component::OntologyAnnotation(_)
-            ) {
+            if matches!(component.component, Component::OntologyID(_) | Component::DocIRI(_)) {
                 merged.ont.insert(component.clone());
             }
         }
+    }
+    // The other's ontology annotations are added as the ontology adds
+    // annotations, in the order the other's readers see them: with its header,
+    // and otherwise under --include-annotations.
+    if !primary_has_identity || opts.include_annotations {
+        crate::owlapi_annotations::add(&mut merged.ont, crate::owlapi_annotations::held_by(&other.ont));
     }
 
     for component in other.ont.iter() {
@@ -733,13 +736,8 @@ pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
             // Another ontology's imports are its own: a merge keeps the
             // primary's alone, or none once the closure is collapsed.
             Component::Import(_) => continue,
-            // Secondary ontology annotations: keep iff --include-annotations.
-            Component::OntologyAnnotation(_) => {
-                if opts.include_annotations {
-                    merged.ont.insert(component.clone());
-                }
-                continue;
-            }
+            // Secondary ontology annotations are added above.
+            Component::OntologyAnnotation(_) => continue,
             _ => {
                 if present.holds(merged, component) {
                     continue;

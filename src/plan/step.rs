@@ -219,11 +219,17 @@ pub enum Op {
         /// skipped. Without it such a row fails the step.
         force: bool,
     },
-    /// `rename` — rewrite entity IRIs from a `old<TAB>new` (or prefix) mapping.
+    /// `rename` — give entities new IRIs, from a mappings table, `--mapping`
+    /// pairs and a prefix-mappings table.
     Rename {
         mappings: Option<String>,
+        /// The `--mapping OLD NEW` pairs, in recipe order.
+        mapping: Vec<(String, String)>,
         prefix_mappings: Option<String>,
         allow_missing: bool,
+        /// `--allow-duplicates true`: two rows of the mappings table may give
+        /// the same new IRI.
+        allow_duplicates: bool,
     },
     /// `extract` — extract a module for a seed term set.
     Extract {

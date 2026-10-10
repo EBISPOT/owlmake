@@ -215,7 +215,7 @@ impl Signature<'_> {
             }
             Atom::DataPropertyAtom { pred, args } => {
                 self.entity(Kind::DataProperty, &pred.0);
-                self.dargument(&args.0);
+                self.iargument(&args.0);
                 self.dargument(&args.1);
             }
             Atom::DataRangeAtom { pred, arg } => {

@@ -1297,7 +1297,7 @@ fn build_anon_doc<'m>(
                     }
                     continue;
                 }
-                let pairs = crate::io::genid::individual_pair_list(members, &ac.ann, same);
+                let pairs = crate::io::genid::individual_pair_list(members, &ac.ann, same, document_order());
                 let q = qname(pred, prefixes);
                 for (i, (a, b)) in pairs.iter().enumerate() {
                     match a {
@@ -1447,6 +1447,12 @@ fn end_object<W: Write>(w: &mut W) -> Result<()> {
 /// — see [`crate::model::Model::owlapi_456`].
 pub(crate) fn inline_anon() -> bool {
     INLINE_ANON.with(|c| c.get())
+}
+
+/// The natural order of the document being written — see
+/// [`crate::model::Model::plain_literals_typed`].
+fn document_order() -> crate::io::natural_order::NaturalOrder {
+    crate::io::natural_order::NaturalOrder::new(PLAIN_TYPED.with(|c| c.get()))
 }
 
 /// The datatype IRI an untyped literal keys as in this document — see
@@ -1931,6 +1937,10 @@ pub fn write_header_and_ontology<W: Write>(
         ontology.push_str(&format!("        <owl:imports rdf:resource=\"{}\"/>\n", esc_attr(im)));
     }
     ont_anns.sort_by(|a, b| ann_key(&a.0, &a.1).cmp(&ann_key(&b.0, &b.1)));
+    // A literal typed `xsd:string` is the untyped literal of its text, so two
+    // annotations that differ only there make one statement, written once.
+    let mut stated = HashSet::new();
+    ont_anns.retain(|(p, av)| stated.insert((p.clone(), untyped_string(av))));
     for (p, av) in &ont_anns {
         ontology.push_str(&render_ann(p, av, prefixes));
     }
@@ -1941,6 +1951,16 @@ pub fn write_header_and_ontology<W: Write>(
 
     let _ = RDFS_COMMENT;
     Ok(ont_iri)
+}
+
+/// `av`, with a literal typed `xsd:string` as the untyped literal of its text.
+fn untyped_string(av: &AnnotationValue<RcStr>) -> AnnotationValue<RcStr> {
+    match av {
+        AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri }) if datatype_iri.as_ref() == XSD_STRING => {
+            AnnotationValue::Literal(Literal::Simple { literal: literal.clone() })
+        }
+        av => av.clone(),
+    }
 }
 
 /// Emit a section banner (`// Annotation properties`, …), with the exact leading
@@ -7378,7 +7398,7 @@ fn swrl_darg_list(args: &[horned_owl::model::DArgument<RcStr>], indent: usize) -
 
 /// Render one SWRL atom's `rdf:Description` body at `indent` spaces.
 fn swrl_atom(atom: &horned_owl::model::Atom<RcStr>, indent: usize) -> String {
-    use horned_owl::model::{Atom, ClassExpression as CE, DArgument, ObjectPropertyExpression as OPE};
+    use horned_owl::model::{Atom, ClassExpression as CE, ObjectPropertyExpression as OPE};
     let pad = " ".repeat(indent);
     let inner = " ".repeat(indent + 4);
     let mut s = format!("{pad}<rdf:Description>\n");
@@ -7427,16 +7447,10 @@ fn swrl_atom(atom: &horned_owl::model::Atom<RcStr>, indent: usize) -> String {
             ty("IndividualPropertyAtom", &body, &mut s);
         }
         Atom::DataPropertyAtom { pred, args } => {
-            let arg1 = match &args.0 {
-                DArgument::Variable(v) => v.0.as_ref().to_string(),
-                DArgument::Literal(l) => l.literal().clone(),
-            };
             let body = format!(
-                "{inner}<swrl:propertyPredicate rdf:resource=\"{}\"/>\n\
-                 {inner}<swrl:argument1 rdf:resource=\"{}\"/>\n\
-                 {}",
+                "{inner}<swrl:propertyPredicate rdf:resource=\"{}\"/>\n{}{}",
                 esc_attr(pred.0.as_ref()),
-                esc_attr(&arg1),
+                swrl_iarg_slot("swrl:argument1", &args.0, indent + 4),
                 swrl_darg_slot("swrl:argument2", &args.1, indent + 4)
             );
             ty("DatavaluedPropertyAtom", &body, &mut s);
@@ -7526,7 +7540,7 @@ fn swrl_vars_of(atom: &horned_owl::model::Atom<RcStr>, out: &mut Vec<String>) {
             iarg(&args.1, out);
         }
         Atom::DataPropertyAtom { args, .. } => {
-            darg(&args.0, out);
+            iarg(&args.0, out);
             darg(&args.1, out);
         }
         Atom::SameIndividualAtom(a, b) | Atom::DifferentIndividualsAtom(a, b) => {
@@ -7588,7 +7602,7 @@ fn swrl_atom_key(atom: &horned_owl::model::Atom<RcStr>) -> (u32, String, Vec<(u3
             (idx, p, vec![ikey(&args.0), ikey(&args.1)])
         }
         Atom::DataPropertyAtom { pred, args } => {
-            (idx, pred.0.as_ref().to_string(), vec![dkey(&args.0), dkey(&args.1)])
+            (idx, pred.0.as_ref().to_string(), vec![ikey(&args.0), dkey(&args.1)])
         }
         Atom::SameIndividualAtom(a, b) | Atom::DifferentIndividualsAtom(a, b) => {
             (idx, String::new(), vec![ikey(a), ikey(b)])

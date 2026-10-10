@@ -303,7 +303,7 @@ fn merge_one(
         .iter()
         .map(|ac| {
             let Component::EquivalentClasses(eqc) = &ac.component else { unreachable!() };
-            crate::owlapi_hash::equivalent_classes_hash(&eqc.0, &ac.ann)
+            crate::owlapi_hash::equivalent_classes_hash(&eqc.0, &ac.ann, model.natural_order())
         })
         .collect();
     // The set the axioms are read from holds EVERY EquivalentClasses axiom;
@@ -317,7 +317,7 @@ fn merge_one(
     for i in crate::owlapi_hash::hashset_order_of(&hashes, total_eq) {
         let Component::EquivalentClasses(eqc) = &qualifying[i].component else { unreachable!() };
         let mut members: Vec<&CE<Str>> = eqc.0.iter().collect();
-        members.sort_by(|a, b| crate::owlapi_hash::owl_cmp(a, b));
+        members.sort_by(|a, b| model.natural_order().ce(a, b));
         let sig = class_iris_ce_list(&eqc.0);
         for c in &sig {
             if !tx_set.contains(c) {
@@ -329,7 +329,7 @@ fn merge_one(
                 }
                 if let CE::ObjectIntersectionOf(operands) = x {
                     let mut ops: Vec<&CE<Str>> = operands.iter().collect();
-                    ops.sort_by(|a, b| crate::owlapi_hash::owl_cmp(a, b));
+                    ops.sort_by(|a, b| model.natural_order().ce(a, b));
                     for n in ops {
                         if let CE::Class(nc) = n {
                             ec_map.insert(c.clone(), nc.0.as_ref().to_string());

@@ -127,7 +127,7 @@ pub fn step(
         &args.term_options(),
     )?;
     if let Some(iri) = &args.ontology_iri {
-        set_ontology_iri(&mut kept, iri);
+        set_ontology_iri(&mut kept, iri)?;
     }
     crate::cmd::maybe_save(&mut kept, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(kept))
@@ -336,8 +336,8 @@ fn span_kept(
     bridges.into_iter().filter(|b| objects::in_namespace(b, internal, external, base)).collect()
 }
 
-/// Name the ontology `iri`, taken as written (`--ontology-iri`).
-fn set_ontology_iri(model: &mut Model, iri: &str) {
+/// Name the ontology `iri` (`--ontology-iri`), keeping its version IRI.
+fn set_ontology_iri(model: &mut Model, iri: &str) -> Result<()> {
     let mut existing: Option<OntologyID<_>> = None;
     for ac in model.ont.iter() {
         if let Component::OntologyID(id) = &ac.component {
@@ -345,8 +345,8 @@ fn set_ontology_iri(model: &mut Model, iri: &str) {
             break;
         }
     }
-    let mut id = existing.unwrap_or(OntologyID { iri: None, viri: None });
-    id.iri = Some(model.build.iri(iri));
+    let viri = existing.and_then(|id| id.viri);
+    let id = crate::model::ontology_id(&model.build, Some(iri), viri.as_deref())?;
     let kept: Vec<_> = model
         .ont
         .iter()
@@ -359,4 +359,5 @@ fn set_ontology_iri(model: &mut Model, iri: &str) {
     }
     ont.insert(Component::OntologyID(id));
     model.ont = ont;
+    Ok(())
 }

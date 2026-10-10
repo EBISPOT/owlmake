@@ -1143,10 +1143,16 @@ pub enum StepSpec {
     Rename {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mappings: Option<String>,
+        /// Pairs given one by one, after the table's.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        mapping: Vec<RenameSpec>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prefix_mappings: Option<String>,
         #[serde(default)]
         allow_missing: bool,
+        /// Two rows of the mappings table may give the same new IRI.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_duplicates: bool,
     },
     /// Extract a module for a seed term set.
     Extract {
@@ -1457,6 +1463,14 @@ pub enum StepSpec {
 pub struct AnnotationSpec {
     pub property: String,
     pub value: String,
+}
+
+/// An old IRI and the new IRI it is renamed to.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenameSpec {
+    pub old: String,
+    pub new: String,
 }
 
 /// An annotation property and a value with its language tag.
@@ -2144,10 +2158,12 @@ impl StepSpec {
                 merge: *merge,
                 force: *force,
             },
-            Op::Rename { mappings, prefix_mappings, allow_missing } => StepSpec::Rename {
+            Op::Rename { mappings, mapping, prefix_mappings, allow_missing, allow_duplicates } => StepSpec::Rename {
                 mappings: mappings.clone(),
+                mapping: mapping.iter().map(|(old, new)| RenameSpec { old: old.clone(), new: new.clone() }).collect(),
                 prefix_mappings: prefix_mappings.clone(),
                 allow_missing: *allow_missing,
+                allow_duplicates: *allow_duplicates,
             },
             Op::RoundTrip { path } => StepSpec::RoundTrip { output: path.clone() },
             Op::Extract {
@@ -2422,8 +2438,14 @@ impl StepSpec {
             StepSpec::Template { templates, merge, force } => {
                 Step::Op(Op::Template { templates, merge, force })
             }
-            StepSpec::Rename { mappings, prefix_mappings, allow_missing } => {
-                Step::Op(Op::Rename { mappings, prefix_mappings, allow_missing })
+            StepSpec::Rename { mappings, mapping, prefix_mappings, allow_missing, allow_duplicates } => {
+                Step::Op(Op::Rename {
+                    mappings,
+                    mapping: mapping.into_iter().map(|m| (m.old, m.new)).collect(),
+                    prefix_mappings,
+                    allow_missing,
+                    allow_duplicates,
+                })
             }
             StepSpec::RoundTrip { output } => Step::Op(Op::RoundTrip { path: output }),
             StepSpec::Extract {
@@ -2934,7 +2956,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.14";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.15";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3955,7 +3977,12 @@ mod format_floor_tests {
         // `annotate_derived_from`. A 0.4.13 build ignores them and would write
         // the merge without the inputs' annotations and provenance the plan
         // asks for, so the floor moves to 0.4.14.
-        const PLAN_SCHEMA_DIGEST: &str = "b9f8ea2bd72850fa";
+        //
+        // A rename step carries the recipe's `--mapping` pairs and
+        // `allow_duplicates`. A 0.4.14 build ignores them and would rename fewer
+        // entities than the plan says, or refuse a table the plan allows, so the
+        // floor moves to 0.4.15.
+        const PLAN_SCHEMA_DIGEST: &str = "9fef500bd6d990c6";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,

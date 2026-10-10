@@ -29,6 +29,7 @@ use horned_owl::model::{
     ObjectPropertyExpression as OPE, RcStr, SubClassOf, SubObjectPropertyExpression as SOPE,
 };
 
+use crate::io::natural_order::NaturalOrder;
 use crate::sig::kind;
 
 type Ax = AnnotatedComponent<RcStr>;
@@ -167,11 +168,11 @@ fn is_abox(c: &Component<RcStr>) -> bool {
 
 /// The members of a disjointness axiom in their stored order, which decides
 /// which member's definition admits the axiom to the expansion.
-fn first_disjoint_member(c: &Component<RcStr>) -> Option<&CE<RcStr>> {
+fn first_disjoint_member(c: &Component<RcStr>, order: NaturalOrder) -> Option<&CE<RcStr>> {
     match c {
         Component::DisjointClasses(d) => {
             let mut members: Vec<&CE<RcStr>> = d.0.iter().collect();
-            members.sort_by(|a, b| crate::owlapi_hash::owl_cmp(a, b));
+            members.sort_by(|a, b| order.ce(a, b));
             members.first().copied()
         }
         _ => None,
@@ -385,11 +386,12 @@ pub(crate) fn inconsistency_justifications(
     limit: usize,
     imported: &dyn Fn(&Ax) -> bool,
     entails: &dyn Fn(&[&Ax]) -> bool,
+    order: NaturalOrder,
 ) -> Vec<Vec<Ax>> {
     let working: Vec<&Ax> = axioms.iter().filter(|ac| crate::cmd::select::is_logical(&ac.component)).collect();
     let n = working.len();
     let hashes: Vec<i32> =
-        working.iter().map(|ac| crate::owlapi_hash::axiom_hash(&ac.component, &ac.ann).unwrap_or(0)).collect();
+        working.iter().map(|ac| crate::owlapi_hash::axiom_hash(&ac.component, &ac.ann, order).unwrap_or(0)).collect();
     let index: HashMap<*const Ax, usize> = working.iter().enumerate().map(|(i, ac)| (*ac as *const Ax, i)).collect();
 
     // The order the set made with room for the root's axioms iterates in is
@@ -496,6 +498,7 @@ pub(crate) fn justification(
     sub: &str,
     sup: &str,
     entails: &dyn Fn(&[&Ax]) -> bool,
+    order: NaturalOrder,
 ) -> Option<Vec<Ax>> {
     let working: Vec<&Ax> = axioms.iter().filter(|ac| crate::cmd::select::is_logical(&ac.component)).collect();
     let b = Build::new();
@@ -520,7 +523,7 @@ pub(crate) fn justification(
     let ix = Index::new(&module);
 
     // 2. Expansion.
-    let expanded = expand(&module, &ix, sub, sup, entails)?;
+    let expanded = expand(&module, &ix, sub, sup, entails, order)?;
 
     // 3. The order the expansion is contracted in: the table it was copied
     // into, then the larger table it was copied out of, which first held the
@@ -536,7 +539,7 @@ pub(crate) fn justification(
     members.push(&naming);
     let outer = crate::owlapi_hash::java_hashset_capacity(module.len() + 1);
     let inner = copy_capacity(members.len());
-    let hash = |ac: &Ax| crate::owlapi_hash::axiom_hash(&ac.component, &ac.ann).unwrap_or(0);
+    let hash = |ac: &Ax| crate::owlapi_hash::axiom_hash(&ac.component, &ac.ann, order).unwrap_or(0);
     let mut keyed: Vec<(usize, usize, i32, &Ax)> =
         members.iter().map(|ac| (bucket(hash(ac), inner), bucket(hash(ac), outer), hash(ac), *ac)).collect();
     keyed.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
@@ -555,6 +558,7 @@ fn expand(
     sub: &str,
     sup: &str,
     entails: &dyn Fn(&[&Ax]) -> bool,
+    order: NaturalOrder,
 ) -> Option<Vec<usize>> {
     let check = |set: &HashSet<usize>| -> bool {
         let axioms: Vec<&Ax> = set.iter().map(|&i| module[i]).collect();
@@ -577,7 +581,7 @@ fn expand(
         size = expansion.len();
         let mut combined = expansion.clone();
         for &d in &disjoints {
-            let admitted = match first_disjoint_member(&module[d].component) {
+            let admitted = match first_disjoint_member(&module[d].component, order) {
                 Some(CE::Class(c)) => expansion_sig.contains(&(kind::CLASS, c.0.to_string())),
                 Some(_) => true,
                 None => false,

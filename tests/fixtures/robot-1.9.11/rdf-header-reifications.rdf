@@ -1,0 +1,76 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/header-reifications#"
+     xml:base="http://example.org/header-reifications"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:obo="http://purl.obolibrary.org/obo/"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/header-reifications">
+        <rdfs:comment>c</rdfs:comment>
+        <obo:IAO_0000115 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">d</obo:IAO_0000115>
+        <rdfs:seeAlso rdf:resource="http://example.org/see"/>
+    </owl:Ontology>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>c</owl:annotatedTarget>
+        <rdfs:label>block a</rdfs:label>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#string">c</owl:annotatedTarget>
+        <rdfs:label>block b</rdfs:label>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>c</owl:annotatedTarget>
+        <rdfs:label>node c</rdfs:label>
+    </owl:Annotation>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget>c</owl:annotatedTarget>
+        <rdfs:label>block d</rdfs:label>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#string">c</owl:annotatedTarget>
+        <rdfs:label>node e</rdfs:label>
+    </owl:Annotation>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://purl.obolibrary.org/obo/IAO_0000115"/>
+        <owl:annotatedTarget>d</owl:annotatedTarget>
+        <rdfs:label>on the definition</rdfs:label>
+    </owl:Annotation>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#seeAlso"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/see"/>
+        <rdfs:label>on the IRI</rdfs:label>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#versionInfo"/>
+        <owl:annotatedTarget>1.0</owl:annotatedTarget>
+        <rdfs:label>on the unstated version</rdfs:label>
+    </owl:Axiom>
+    <owl:Class rdf:about="http://example.org/header-reifications#A">
+        <rdfs:label>alpha</rdfs:label>
+    </owl:Class>
+    <owl:Axiom rdf:nodeID="label">
+        <owl:annotatedSource rdf:resource="http://example.org/header-reifications#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>alpha</owl:annotatedTarget>
+        <rdfs:comment>on the label</rdfs:comment>
+    </owl:Axiom>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="label"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#string">on the label</owl:annotatedTarget>
+        <rdfs:label>nested</rdfs:label>
+    </owl:Annotation>
+</rdf:RDF>

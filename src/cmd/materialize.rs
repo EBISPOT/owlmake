@@ -181,7 +181,7 @@ fn assert_existentials(
     named_subs.retain(|(c, d)| defined.contains(c) && known.contains(d));
     if kind.is_builtin_el() {
         let listed = crate::cmd::reason::unsatisfiable_in_node_order(ReasonerKind::Elk, &unsat, || {
-            crate::reason::elk_order::class_queue(&model.ont)
+            crate::reason::elk_order::class_queue(&model.ont, model.natural_order())
         });
         let told = crate::cmd::reason::told_unsatisfiable_properties(&model);
         crate::cmd::reason::validate(&crate::cmd::reason::Validation {

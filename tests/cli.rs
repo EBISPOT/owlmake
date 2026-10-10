@@ -3929,6 +3929,20 @@ fn export_keeps_tied_rows_in_the_entity_sets_order() {
     assert_eq!(export_text("export-terms.ofn", "export-terms.ties.tsv", &args), fixture_text("export-terms.ties.tsv"));
 }
 
+/// A Turtle document types its untyped literals `xsd:string`, and so sorts an
+/// axiom's annotations by that datatype: `"q"` after `"7"^^xsd:integer`, where
+/// a document that keeps them untyped puts it first. The hash of `:A`'s label
+/// `v`, annotated with both, decides which of `:A`'s two labels is its label.
+/// As ROBOT 1.9.11 writes `export-typed-label-annotations.robot.tsv`.
+#[test]
+fn export_picks_a_label_by_the_documents_literal_order() {
+    let args = ["--header", "ID|LABEL"];
+    assert_eq!(
+        export_text("export-typed-label-annotations.ttl", "export-typed-label-annotations.tsv", &args),
+        fixture_text("export-typed-label-annotations.robot.tsv")
+    );
+}
+
 /// `--sort` names several columns, `^` reverses one, and the last named orders
 /// the rows while the earlier ones break its ties; an empty value sorts last,
 /// or first in reverse. As ROBOT 1.9.11 writes `export-terms.sort.tsv`.
@@ -4338,6 +4352,60 @@ fn anonymous_individuals_in_annotations_of_annotations_are_written_as_robot_writ
     }
 }
 
+/// A Turtle document's anonymous individuals are numbered in the order the
+/// reader translates them, which follows the names its blank nodes take and
+/// the order the parse states the statements in: the statement naming a
+/// `[ … ]` object before the statements inside it. As ROBOT 1.9.11 converts
+/// `rdf-anonymous-individuals`, `rdf-nested-anonymous` and
+/// `rdf-nested-annotations` from Turtle to functional syntax with the blank
+/// nodes named as owlmake names them (`scripts/gen_robot_turtle_fixture.sh`).
+#[test]
+fn a_turtle_documents_anonymous_individuals_are_numbered_as_the_reader_translates_them() {
+    for stem in ["rdf-anonymous-individuals", "rdf-nested-anonymous", "rdf-nested-annotations"] {
+        assert_eq!(
+            convert_fixture(&format!("{stem}.ttl"), &format!("{stem}.ttl.ofn"), &[]),
+            fixture_text(&format!("{stem}.ttl.robot.ofn")),
+            "{stem}"
+        );
+    }
+}
+
+/// A statement a document makes twice is one statement: the reification of a
+/// property assertion between anonymous individuals annotates the one
+/// assertion, which is not kept again unannotated. As ROBOT 1.9.11 converts
+/// `rdf-repeated-statement` from RDF/XML and from Turtle (the latter with the
+/// blank nodes named as owlmake names them) to functional syntax.
+#[test]
+fn a_statement_made_twice_is_one_statement() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture(&format!("rdf-repeated-statement.{ext}"), &format!("rdf-repeated-statement.{ext}.ofn"), &[]),
+            fixture_text(&format!("rdf-repeated-statement.{ext}.robot.ofn")),
+            "{ext}"
+        );
+    }
+}
+
+/// A relative reference in a Turtle document has each character an IRI may
+/// not hold percent-encoded before it resolves: `{fixtures}` against the
+/// document's own IRI is `…/%7Bfixtures%7D`, and against a base that already
+/// holds it, twice over. As ROBOT 1.9.11 converts ROBOT's own Turtle of
+/// `rdf-document-base` and `ttl-document-base`, whose IRIs carry the
+/// `{fixtures}` placeholder, to functional syntax; the recorded outputs name
+/// the fixture directory `{fixtures}`.
+#[test]
+fn a_relative_reference_has_its_refused_characters_encoded() {
+    let fixtures = format!("file:{}/", robot_fixture("").display().to_string().trim_end_matches('/'));
+    for stem in ["rdf-document-base", "ttl-document-base"] {
+        assert_eq!(
+            convert_fixture(&format!("{stem}.robot.ttl"), &format!("{stem}.robot.ttl.ofn"), &[])
+                .replace(&fixtures, "{fixtures}/"),
+            fixture_text(&format!("{stem}.robot.ttl.robot.ofn")),
+            "{stem}"
+        );
+    }
+}
+
 /// A document read from RDF/XML or Turtle writes its anonymous individuals
 /// from the model, as ROBOT 1.9.11 writes the document it reads: one typed
 /// `owl:Thing` and a class, as the value of an entity's annotation, of an
@@ -4381,6 +4449,95 @@ fn an_rdfxml_documents_anonymous_individuals_are_named_as_robot_reads_them() {
             "{ext}"
         );
     }
+}
+
+/// An annotation of the ontology takes the annotations of the first node that
+/// names it, in the order the reader reads them: an `owl:Annotation` node, or an
+/// `owl:Axiom` block naming the ontology as its source, with a literal typed
+/// `xsd:string` naming the untyped one. The other nodes are not read. An
+/// annotation whose value is an IRI is read bare, and so is one only a block
+/// states. The ontology is then given a bare copy of each later statement of
+/// the first property the reader reaches, as stated, and of each block with a
+/// literal target, as the block states it, and it holds of them what it holds
+/// of what it is given: a copy typed `xsd:string` stays beside an untyped
+/// annotation it follows, and the RDF writers state the two once. An
+/// annotation of an axiom's annotation is matched the same way. As ROBOT
+/// 1.9.11 reads `rdf-header-reifications`, `rdf-header-typed-reifications`
+/// and `turtle-header-reifications`, in every format it writes.
+#[test]
+fn reifications_of_ontology_annotations_are_read_as_robot_reads_them() {
+    for name in ["rdf-header-reifications", "rdf-header-typed-reifications"] {
+        for ext in ["ofn", "owl", "ttl", "owx", "omn", "obo", "json"] {
+            assert_eq!(
+                convert_fixture(&format!("{name}.rdf"), &format!("{name}.{ext}"), &[]),
+                fixture_text(&format!("{name}.robot.{ext}")),
+                "{name}.{ext}"
+            );
+        }
+    }
+    for ext in ["ofn", "owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("turtle-header-reifications.ttl", &format!("turtle-header-reifications.{ext}"), &[]),
+            fixture_text(&format!("turtle-header-reifications.robot.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// Of two annotations of the ontology with one property and one value, it
+/// holds the first it is given, whatever annotations each carries; but an
+/// untyped literal and the literal of its text typed `xsd:string` are two
+/// values when the typed one is given after the untyped one. A reader gives
+/// the ontology its header's annotations in document order, an OBO header's
+/// tag by tag as a hash set of its tags iterates them, and `annotate` and
+/// `merge --include-annotations` give it theirs after those it holds. As ROBOT
+/// 1.9.11 reads `ontology-annotation-duplicates` in functional syntax, OWL/XML
+/// and Manchester syntax and `obo-header-duplicates`, annotates the first and
+/// merges `merge-annotations-1` and `-2`.
+#[test]
+fn an_ontology_holds_the_annotations_robot_holds_of_those_it_is_given() {
+    for ext in ["ofn", "owx", "omn"] {
+        assert_eq!(
+            convert_fixture(
+                &format!("ontology-annotation-duplicates.{ext}"),
+                &format!("ontology-annotation-duplicates-{ext}.ofn"),
+                &[]
+            ),
+            fixture_text(&format!("ontology-annotation-duplicates.{ext}.robot.ofn")),
+            "{ext}"
+        );
+    }
+    assert_eq!(
+        convert_fixture("obo-header-duplicates.obo", "obo-header-duplicates.ofn", &[]),
+        fixture_text("obo-header-duplicates.robot.ofn")
+    );
+
+    let annotated = tmp("ontology-annotation-duplicates-annotated.ofn");
+    let run = bin()
+        .args(["annotate", "-i"])
+        .arg(robot_fixture("ontology-annotation-duplicates.ofn"))
+        .args(["--annotation", "rdfs:comment", "h", "--annotation", "rdfs:comment", "e", "-o"])
+        .arg(&annotated)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&annotated).unwrap(),
+        fixture_text("ontology-annotation-duplicates.annotated.robot.ofn")
+    );
+
+    let merged = tmp("merge-annotations.ofn");
+    let run = bin()
+        .args(["merge", "-i"])
+        .arg(robot_fixture("merge-annotations-1.ofn"))
+        .arg("-i")
+        .arg(robot_fixture("merge-annotations-2.ofn"))
+        .args(["--include-annotations", "true", "-o"])
+        .arg(&merged)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&merged).unwrap(), fixture_text("merge-annotations.robot.ofn"));
 }
 
 /// A document in the vocabulary of OWL 1.1 is read in OWL 2's (`owl11:onClass`
@@ -4907,6 +5064,38 @@ fn an_assertion_about_an_individual_a_rule_names_is_stated_in_the_rule() {
     }
 }
 
+/// A data-property atom's subject is an individual argument: a variable or a
+/// named individual. Rules naming an individual there are read and written in
+/// every format, ROBOT 1.9.11's RDF/XML, Turtle, OWL/XML and Manchester
+/// renderings of them read back to its functional syntax, and HermiT binds the
+/// individual when it applies the rule, as ROBOT 1.9.11 does.
+#[test]
+fn a_data_property_atom_takes_an_individual_as_its_subject() {
+    let name = "swrl-data-property-subject";
+    for ext in ["ofn", "owl", "ttl", "owx", "omn", "obo", "json"] {
+        assert_eq!(
+            convert_fixture(&format!("{name}.ofn"), &format!("{name}.{ext}"), &[]),
+            fixture_text(&format!("{name}.robot.{ext}")),
+            "{ext}"
+        );
+    }
+    for ext in ["owl", "ttl", "owx", "omn"] {
+        let src = format!("{name}.robot.{ext}");
+        assert_eq!(convert_fixture(&src, &format!("{src}.ofn"), &[]), fixture_text(&format!("{src}.robot.ofn")), "{src}");
+    }
+    let out = tmp(&format!("{name}-reason.ofn"));
+    let run = bin()
+        .args(["reason", "--reasoner", "hermit", "--axiom-generators", "SubClass ClassAssertion", "-i"])
+        .arg(robot_fixture(&format!("{name}-reason.ofn")))
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text(&format!("{name}-reason.hermit.robot.ofn")));
+    let _ = std::fs::remove_file(&out);
+}
+
 /// An OBO document carries every axiom it has no tag for in its `owl-axioms:`
 /// clause, as ROBOT 1.9.11 writes it: keys, data property axioms, datatype
 /// definitions, and a disjointness of object properties with an inverse member.
@@ -4995,10 +5184,15 @@ fn obo_owl_axioms_write_data_restrictions() {
 /// `om convert` a fixture to OBO as ROBOT 1.9.11, under ODK 1.6.1, writes it —
 /// with no [Instance] frames; the text written.
 fn convert_fixture_to_obo_as_robot(src: &str) -> String {
+    convert_fixture_to_obo_as_robot_with(src, &[])
+}
+
+fn convert_fixture_to_obo_as_robot_with(src: &str, args: &[&str]) -> String {
     let path = tmp(&format!("{src}.as-robot.obo"));
     let run = bin()
         .args(["__emulate-robot-version=1.9.11", "__emulate-odk-version=1.6.1", "convert", "-i"])
         .arg(robot_fixture(src))
+        .args(args)
         .arg("-o")
         .arg(&path)
         .output()
@@ -5094,6 +5288,189 @@ fn obo_refuses_what_robot_refuses() {
             .unwrap();
         let stderr = String::from_utf8_lossy(&run.stderr);
         assert!(!run.status.success() && stderr.contains(says), "{src}: {stderr}");
+        let _ = std::fs::remove_file(&out);
+    }
+}
+
+/// Each OBO clause read as ROBOT 1.9.11 reads it. An unquoted value — a name, a
+/// comment, a created_by, a [Term]'s subset, a custom tag, a header tag — runs
+/// to the first `!` or `{` no backslash escapes, with its escapes resolved and
+/// its trailing white space dropped, and the qualifier blocks after it annotate
+/// the assertion. A qualifier key or a custom tag names its property through the
+/// OBO vocabulary or the oboInOwl namespace, `owl:`, `rdf:`, `rdfs:` and `xsd:`
+/// names their vocabulary, a deprecated `<scope>_synonym:` is a synonym, and an
+/// alt_id of a [Typedef] is a deprecated property. Written back as OBO, every
+/// such clause keeps its qualifiers and escapes as ROBOT writes them, owl-axioms
+/// included.
+#[test]
+fn obo_clauses_are_read_and_written_as_robot_does() {
+    assert_eq!(
+        convert_fixture("obo-unquoted-clauses.obo", "obo-unquoted-clauses.ofn", &[]),
+        fixture_text("obo-unquoted-clauses.robot.ofn")
+    );
+    assert_eq!(
+        convert_fixture_to_obo_as_robot("obo-unquoted-clauses.obo"),
+        fixture_text("obo-unquoted-clauses.robot.obo")
+    );
+    assert_eq!(
+        convert_fixture_to_obo_as_robot("obo-unquoted-values.ofn"),
+        fixture_text("obo-unquoted-values.robot.obo")
+    );
+    assert_eq!(
+        convert_fixture("obo-unquoted-values.robot.obo", "obo-unquoted-values.back.ofn", &[]),
+        fixture_text("obo-unquoted-values.robot.obo.robot.ofn")
+    );
+}
+
+/// An OBO clause ROBOT 1.9.11 cannot read fails the read: text after a value's
+/// qualifier blocks, a block with no `key=`, a third block on a [Term] line or
+/// a second on a header line, a line ending in a backslash, a tag with no value,
+/// a qualifier key, custom tag or subset holding a space, and an owl-axioms
+/// value that is not an ontology in functional syntax.
+#[test]
+fn obo_clauses_robot_cannot_read_are_refused() {
+    for (clauses, says) in [
+        ("[Term]\nid: Q:1\nname: e {comment=\"x\"} extra", "expected the end of the line"),
+        ("[Term]\nid: Q:1\nname: g {}", "missing '='"),
+        ("[Term]\nid: Q:1\nname: a {comment=\"x\"} {source=\"y\"} {seeAlso=\"z\"}", "expected the end of the line"),
+        ("[Term]\nid: Q:1\nname: abc\\", "a backslash ends the line"),
+        ("[Term]\nid: Q:1\ncomment:", "expected a value"),
+        ("[Term]\nid: Q:1\ndef: \"d\" [] {comment = \"x\"}", "spaces not allowed: 'comment '"),
+        ("[Term]\nid: Q:1\nsubset: s1 s2", "spaces not allowed: 's1 s2'"),
+        ("[Term]\nid: Q:1\nfoo bar: x", "spaces not allowed: 'foo bar'"),
+        ("[Term]\nid: Q:1\nnamespace: ns1 extra", "expected the end of the line"),
+        ("remark: r1 {comment=\"a\"} {comment=\"b\"}", "expected the end of the line"),
+        (
+            "owl-axioms: Ontology(\\nAnnotationAssertion(<http://www.w3.org/2000/01/rdf-schema#comment> \
+             <http://x/a> \\\"hi! there\\\")\\n)",
+            "owl-axioms",
+        ),
+    ] {
+        let src = tmp("unreadable-clause.obo");
+        std::fs::write(&src, format!("format-version: 1.2\nontology: q\n\n{clauses}\n")).unwrap();
+        let out = tmp("unreadable-clause.ofn");
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success() && stderr.contains(says), "{clauses}: {stderr}");
+        assert!(!out.exists(), "{clauses}");
+        let _ = std::fs::remove_file(&src);
+    }
+}
+
+/// A relation clause's qualifiers make the class expression ROBOT 1.9.11 makes
+/// of it — an exact, minimum or maximum cardinality, `only not` for none, the
+/// intersection of a minimum and a maximum or of `some` and `only`, a value
+/// restriction for a class-level relation — and `gci_relation`/`gci_filler`
+/// make the subject of an is_a, relationship, disjoint_from or equivalent_to. A
+/// metadata-tag [Typedef] is an annotation property every clause of which but
+/// is_a is an annotation. A header date is read leniently, in the Julian
+/// calendar before 15 October 1582, and written back normalised; the first
+/// date of a header is the ontology's, one that does not read is not written,
+/// several are written in the order of their sort text and two of one instant
+/// once. A property whose tag a frame clause spells is written as that tag.
+#[test]
+fn obo_relations_metadata_tags_and_dates_are_read_and_written_as_robot_does() {
+    for name in ["obo-relation-qualifiers", "obo-metadata-tags", "obo-header-date", "obo-header-dates"] {
+        assert_eq!(
+            convert_fixture(&format!("{name}.obo"), &format!("{name}.ofn"), &[]),
+            fixture_text(&format!("{name}.robot.ofn")),
+            "{name} to functional syntax"
+        );
+        assert_eq!(
+            convert_fixture_to_obo_as_robot(&format!("{name}.obo")),
+            fixture_text(&format!("{name}.robot.obo")),
+            "{name} to OBO"
+        );
+    }
+    for name in ["obo-tag-properties", "obo-date-annotation-1", "obo-date-annotation-2"] {
+        assert_eq!(
+            convert_fixture_to_obo_as_robot(&format!("{name}.ofn")),
+            fixture_text(&format!("{name}.robot.obo")),
+            "{name} to OBO"
+        );
+    }
+    assert_eq!(
+        convert_fixture_to_obo_as_robot_with("obo-date-annotation-3.ofn", &["--check", "false"]),
+        fixture_text("obo-date-annotation-3.robot.obo"),
+        "obo-date-annotation-3 to OBO"
+    );
+}
+
+/// A cardinality that is not an integer, a gci_relation with no gci_filler and
+/// a header date not of the form dd:MM:yyyy HH:mm, first or not, fail the read,
+/// as they fail ROBOT 1.9.11's; a metadata tag with a single intersection_of
+/// and a header with two dates or two saved-by values are not written as OBO,
+/// while two dates of one instant are one.
+#[test]
+fn obo_relations_and_dates_robot_cannot_read_are_refused() {
+    for (clauses, says) in [
+        ("[Term]\nid: Q:1\nrelationship: R:1 Q:2 {cardinality=\"two\"}", "not an integer"),
+        ("[Term]\nid: Q:1\nrelationship: R:1 Q:2 {gci_relation=\"R:1\"}", "no gci_filler"),
+        ("date: 2021-03-05", "header date"),
+        ("date: 05:03:2021", "header date"),
+        ("date: 01:02:2020 10:00\ndate: 2021-03-05", "header date"),
+    ] {
+        let src = tmp("unreadable-relation.obo");
+        std::fs::write(&src, format!("format-version: 1.2\nontology: q\n\n{clauses}\n")).unwrap();
+        let out = tmp("unreadable-relation.ofn");
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success() && stderr.contains(says), "{clauses}: {stderr}");
+        assert!(!out.exists(), "{clauses}");
+        let _ = std::fs::remove_file(&src);
+    }
+    let src = tmp("single-intersection.obo");
+    std::fs::write(
+        &src,
+        "format-version: 1.2\nontology: q\n\n[Typedef]\nid: R:1\nis_metadata_tag: true\nintersection_of: R:2\n",
+    )
+    .unwrap();
+    let out = tmp("single-intersection.obo.out.obo");
+    let run = bin()
+        .args(["__emulate-robot-version=1.9.11", "__emulate-odk-version=1.6.1", "convert", "-i"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success() && stderr.contains("single intersection_of"), "{stderr}");
+    let _ = std::fs::remove_file(&src);
+    for (annotations, refused) in [
+        (r#"Annotation(oboInOwl:date "01:01:2020 10:00") Annotation(oboInOwl:date "00:01:2020 10:00")"#, Some("date")),
+        (r#"Annotation(oboInOwl:saved-by "a") Annotation(oboInOwl:saved-by "b")"#, Some("saved-by")),
+        (r#"Annotation(oboInOwl:date "01:01:2020 10:00") Annotation(oboInOwl:date "31:12:2019 34:00")"#, None),
+    ] {
+        let src = tmp("two-header-values.ofn");
+        std::fs::write(
+            &src,
+            format!(
+                "Prefix(oboInOwl:=<http://www.geneontology.org/formats/oboInOwl#>)\n\
+                 Ontology(<http://purl.obolibrary.org/obo/q.owl>\n{annotations}\n)\n"
+            ),
+        )
+        .unwrap();
+        let out = tmp("two-header-values.obo");
+        let run = bin()
+            .args(["__emulate-robot-version=1.9.11", "__emulate-odk-version=1.6.1", "convert", "-i"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        match refused {
+            Some(tag) => assert!(
+                !run.status.success() && stderr.contains(&format!("multiple {tag} tags not allowed")),
+                "{annotations}: {stderr}"
+            ),
+            None => {
+                assert!(run.status.success(), "{annotations}: {stderr}");
+                let text = std::fs::read_to_string(&out).unwrap();
+                assert_eq!(text.matches("\ndate: ").count(), 1, "{annotations}: {text}");
+            }
+        }
+        let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&out);
     }
 }
@@ -5318,6 +5695,160 @@ fn banners_and_obo_comments_take_the_labels_robot_takes() {
     }
 }
 
+/// An entity whose `rdfs:label` is an IRI is named by that IRI's short form:
+/// what follows its namespace, else what follows its last `/`, else the IRI in
+/// angle brackets. A literal label names it before any IRI does. As ROBOT
+/// 1.9.11 names the entities of `iri-labels` in a functional-syntax banner, in
+/// `explain`'s report and in a markdown `diff`; only the diff's `Loaded from`
+/// lines, which name where each side was read, are not compared.
+#[test]
+fn an_iri_label_names_an_entity_by_its_short_form() {
+    assert_eq!(convert_fixture("iri-labels.ofn", "iri-labels.ofn", &[]), fixture_text("iri-labels.robot.ofn"));
+
+    let md = tmp("iri-labels.explain.md");
+    let run = bin()
+        .args(["explain", "-i"])
+        .arg(robot_fixture("iri-labels.ofn"))
+        .args(["-M", "unsatisfiability", "-u", "all", "--explanation"])
+        .arg(&md)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), fixture_text("iri-labels.robot.md"));
+    let _ = std::fs::remove_file(&md);
+
+    let out = tmp("iri-labels.diff.md");
+    let run = bin()
+        .args(["diff", "--left"])
+        .arg(robot_fixture("iri-labels.ofn"))
+        .arg("--right")
+        .arg(robot_fixture("iri-labels-right.ofn"))
+        .args(["-f", "markdown", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let comparable = |text: String| -> String {
+        text.lines().filter(|l| !l.starts_with("- Loaded from: ")).map(|l| format!("{l}\n")).collect()
+    };
+    assert_eq!(
+        comparable(std::fs::read_to_string(&out).unwrap()),
+        comparable(fixture_text("iri-labels.diff.robot.md"))
+    );
+    let _ = std::fs::remove_file(&out);
+}
+
+/// A plain diff writes each axiom as OWL API's `toString()` does, and a pretty
+/// one as its functional renderer does, naming every entity by its short form,
+/// an OBO id as a CURIE, in angle brackets, then its label: `--labels` asks for
+/// the pretty report, and `--label-langs-priority` picks each label by its
+/// language. A side compares its own axioms and imports, and draws labels from
+/// the ontologies it imports. An unnamed ontology's ID is numbered as the
+/// documents read before it, and its own syntax, number it. A literal compares
+/// and is written as its side's syntax reads it. As ROBOT 1.9.11 diffs
+/// `diff-render`, `diff-imports`, `diff-unnamed` and Turtle fixtures against
+/// `diff-render-left`, `diff-unnamed` against `diff-imports`, and
+/// `custom-prefixes` in Turtle against OBO.
+#[test]
+fn diff_writes_each_report_as_robot_does() {
+    let between = |left: &str, right: &str, args: &[&str], expected: &str| {
+        let out = tmp(&format!("{expected}.txt"));
+        let run = bin()
+            .args(["diff", "--left"])
+            .arg(robot_fixture(left))
+            .arg("--right")
+            .arg(robot_fixture(right))
+            .args(args)
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{expected}: {}", String::from_utf8_lossy(&run.stderr));
+        let comparable = |text: String| -> String {
+            text.lines().filter(|l| !l.starts_with("- Loaded from: ")).map(|l| format!("{l}\n")).collect()
+        };
+        assert_eq!(
+            comparable(std::fs::read_to_string(&out).unwrap()),
+            comparable(fixture_text(expected)),
+            "{expected}"
+        );
+        let _ = std::fs::remove_file(&out);
+    };
+    let run = |right: &str, args: &[&str], expected: &str| between("diff-render-left.ofn", right, args, expected);
+    run("diff-render.ofn", &[], "diff-render.plain.robot.txt");
+    run("diff-render.ofn", &["-f", "pretty"], "diff-render.pretty.robot.txt");
+    run("diff-render.ofn", &["--labels", "true"], "diff-render.pretty.robot.txt");
+    run("diff-render.ofn", &["-f", "pretty", "--label-langs-priority", "en,none"], "diff-render.langs.robot.txt");
+    let catalog = robot_fixture("diff-imports-catalog.xml");
+    let catalog = catalog.to_str().unwrap();
+    run("diff-imports.ofn", &["--right-catalog", catalog], "diff-imports.plain.robot.txt");
+    run("diff-imports.ofn", &["--right-catalog", catalog, "-f", "pretty"], "diff-imports.pretty.robot.txt");
+    run("diff-imports.ofn", &["--right-catalog", catalog, "-f", "markdown"], "diff-imports.robot.md");
+    // The plain report writes a cardinality's `owl:Thing` or `rdfs:Literal`
+    // filler, an annotation property's range in full, a one-member set axiom
+    // and a one-operand union as they stand; the pretty one names the entities
+    // a declaration's annotation names by their entity types, and writes no
+    // one-member set axiom.
+    run("diff-styles.ofn", &[], "diff-styles.plain.robot.txt");
+    run("diff-styles.ofn", &["-f", "pretty"], "diff-styles.pretty.robot.txt");
+    run("rdf-connective-members.owl", &[], "rdf-connective-members.diff.plain.robot.txt");
+    // An unnamed ontology is numbered by the ontology IDs reading both sides
+    // mints, the left side first.
+    between("diff-unnamed.ofn", "diff-render-left.ofn", &[], "diff-unnamed-left.robot.txt");
+    between("diff-unnamed.omn", "diff-render-left.ofn", &[], "diff-unnamed-left-omn.robot.txt");
+    between(
+        "diff-imports.ofn",
+        "diff-unnamed.owl",
+        &["--left-catalog", catalog],
+        "diff-unnamed-right.robot.txt",
+    );
+    between("diff-render-left.ofn", "diff-unnamed.omn", &["-f", "pretty"], "diff-unnamed-right-omn.robot.txt");
+    // A literal typed `xsd:string` equals the untyped literal; each side
+    // states its literals as its syntax reads them, Turtle and OBO typing an
+    // untyped one, and orders an axiom's annotations by those types.
+    between("custom-prefixes.ttl", "custom-prefixes.obo", &[], "custom-prefixes.diff.robot.txt");
+    between("diff-render-left.ofn", "custom-prefixes.ttl", &[], "custom-prefixes.diff.plain.robot.txt");
+    between("diff-render-left.ofn", "custom-prefixes.ttl", &["-f", "pretty"], "custom-prefixes.diff.pretty.robot.txt");
+    between(
+        "diff-render-left.ofn",
+        "export-typed-label-annotations.ttl",
+        &["-f", "pretty"],
+        "export-typed-label-annotations.diff.pretty.robot.txt",
+    );
+    // The markdown report lists each change in its subject's frame, in
+    // Manchester syntax with each entity linked by its label: an inverse
+    // property, an anonymous individual and a datatype definition's data range
+    // are subjects of their own, an anonymous class's axioms are GCIs. Frames
+    // sort by their headers, tied ones in the order the report's frame map
+    // iterates in; an object's annotations nest under it in the order a hash
+    // set of them iterates in.
+    run("diff-render.ofn", &["-f", "markdown"], "diff-render.robot.md");
+    run("diff-markdown.ofn", &["-f", "markdown"], "diff-markdown.robot.md");
+    run("diff-markdown-axioms.ofn", &["-f", "markdown"], "diff-markdown-axioms.robot.md");
+    between("diff-markdown.ofn", "diff-render-left.ofn", &["-f", "markdown"], "diff-markdown-removed.robot.md");
+    run("annotated-terms.omn.ofn", &["-f", "markdown"], "annotated-terms.diff.robot.md");
+    run("diff-headless-rule.ofn", &[], "diff-headless-rule.plain.robot.txt");
+}
+
+/// A rule with an empty head has no subject, so the markdown report has no
+/// frame to list it in: the command fails and writes no report.
+#[test]
+fn diff_markdown_refuses_a_rule_with_an_empty_head() {
+    let out = tmp("diff-headless-rule.md");
+    let run = bin()
+        .args(["diff", "--left"])
+        .arg(robot_fixture("diff-render-left.ofn"))
+        .arg("--right")
+        .arg(robot_fixture("diff-headless-rule.ofn"))
+        .args(["-f", "markdown", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(!run.status.success());
+    assert!(String::from_utf8_lossy(&run.stderr).contains("a rule with an empty head"));
+    assert!(!out.exists());
+}
+
 /// `filter`'s bridges join the result whatever axiom types `--axioms` names:
 /// a selected class keeps its path to its nearest selected superclass, through
 /// classes dropped or directly, and a property likewise. Under `internal` or
@@ -5509,6 +6040,29 @@ fn an_inverse_pair_stated_either_way_is_one_axiom() {
     }
 }
 
+/// A `file:` IRI given as an input names a file, which is read where any
+/// other IRI would be fetched: `file:/abs`, `file:///abs` and a relative
+/// `file:rel` alike. As ROBOT 1.9.11 converts `rdf-inverse-pairs` from
+/// `--input-iri` and diffs `diff-unnamed` from `--left-iri`.
+#[test]
+fn a_file_iri_input_is_read_from_its_file() {
+    let source = robot_fixture("rdf-inverse-pairs.rdf");
+    for iri in [format!("file:{}", source.display()), format!("file://{}", source.display())] {
+        let path = tmp("file-iri-input.ofn");
+        let run = bin().args(["convert", "--input-iri", &iri, "-o"]).arg(&path).output().unwrap();
+        assert!(run.status.success(), "{iri}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fixture_text("rdf-inverse-pairs.robot.ofn"), "{iri}");
+        let _ = std::fs::remove_file(&path);
+    }
+    let run = bin()
+        .current_dir(robot_fixture(""))
+        .args(["diff", "--left-iri", "file:diff-unnamed.ofn", "--right", "diff-render-left.ofn"])
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), fixture_text("diff-unnamed-left.robot.txt"));
+}
+
 /// A same-individuals pair is written with the member whose frame it stands in
 /// first; a pair of anonymous individuals stands in none and is written turned
 /// round. A different-individuals pair is written in order. As ROBOT 1.9.11
@@ -5538,6 +6092,114 @@ fn a_documents_relative_iris_resolve_against_its_own_iri() {
                 "{src} as {ext}"
             );
         }
+    }
+}
+
+/// A full IRI is every character up to the next `>`. Functional syntax reads a
+/// relative one, a prefix declaration's among them, after the default prefix
+/// bound before it, as `rdf-document-base` and `ttl-document-base` show once
+/// written with the `{fixtures}` placeholder. Manchester syntax reads one with
+/// no colon as a local name of the default prefix, angle brackets and all,
+/// takes the header's IRIs, a prefix's and an annotation value as written, and
+/// names a rule variable `?n` `urn:swrl:var#n`. An ontology or version IRI that
+/// is still relative is made absolute by prefixing `urn:absolute:`, with an
+/// error logged, in every reader and in `annotate`, `filter`, `extract` and
+/// `template`; one that labels a blank node names no IRI. As ROBOT 1.9.11 reads
+/// and writes them.
+#[test]
+fn relative_iris_are_read_as_robot_reads_them() {
+    let run = |args: &[&str], out: &str| {
+        let path = tmp(out);
+        let mut cmd = bin();
+        for arg in args {
+            match arg.strip_prefix('@') {
+                Some(fixture) => cmd.arg(robot_fixture(fixture)),
+                None => cmd.arg(arg),
+            };
+        }
+        let output = cmd.arg("-o").arg(&path).output().unwrap();
+        let written = std::fs::read_to_string(&path).ok();
+        let _ = std::fs::remove_file(&path);
+        (output, written)
+    };
+    let cases: &[(&[&str], &str, &[&str])] = &[
+        (&["convert", "-i", "@relative-iris.ofn"], "relative-iris.robot.ofn", &[]),
+        (&["convert", "-i", "@relative-ontology-iri.ofn"], "relative-ontology-iri.robot.ofn", &["rel/o.owl", "rel/v.owl"]),
+        (&["convert", "-i", "@relative-ontology-iri.owx"], "relative-ontology-iri.owx.robot.ofn", &["rel/o.owl", "rel/v.owl"]),
+        (&["convert", "-i", "@relative-iris.omn"], "relative-iris.omn.robot.ofn", &["rel/o.owl", "rel/v.owl"]),
+        (
+            &["convert", "-i", "@rdf-document-base.robot.ofn"],
+            "rdf-document-base.robot.ofn.robot.ofn",
+            &["{fixtures}/rdf-document-base.owl#{fixtures}/rdf-document-base.owl"],
+        ),
+        (
+            &["convert", "-i", "@ttl-document-base.robot.ofn"],
+            "ttl-document-base.robot.ofn.robot.ofn",
+            &["{fixtures}/ttl-document-base.ttl#{fixtures}/ttl-document-base.ttl"],
+        ),
+        (
+            &["annotate", "-i", "@ontology-iri-options.ofn", "--ontology-iri", "rel/o.owl", "--version-iri", "rel/v.owl"],
+            "ontology-iri-options.annotate.robot.ofn",
+            &["rel/o.owl", "rel/v.owl"],
+        ),
+        (
+            &["annotate", "-i", "@ontology-iri-options.ofn", "--version-iri", "rel/v.owl"],
+            "ontology-iri-options.annotate-version.robot.ofn",
+            &["rel/v.owl"],
+        ),
+        (
+            &["filter", "-i", "@ontology-iri-options.ofn", "--term", "http://example.org/ontology-iri-options#A", "--ontology-iri", "rel/o.owl"],
+            "ontology-iri-options.filter.robot.ofn",
+            &["rel/o.owl"],
+        ),
+        (
+            &["extract", "-i", "@ontology-iri-options.ofn", "--method", "STAR", "--term", "http://example.org/ontology-iri-options#A", "--output-iri", "rel/o.owl"],
+            "ontology-iri-options.extract.robot.ofn",
+            &["rel/o.owl"],
+        ),
+        (
+            &["template", "--template", "@ontology-iri-options.tsv", "--ontology-iri", "rel/o.owl", "--version-iri", "rel/v.owl"],
+            "ontology-iri-options.template.robot.ofn",
+            &["rel/o.owl", "rel/v.owl"],
+        ),
+        (
+            &["annotate", "-i", "@ontology-iri-options.ofn", "--ontology-iri", "_:genid1"],
+            "ontology-iri-options.annotate-genid.robot.ofn",
+            &[],
+        ),
+        (&["convert", "-i", "@ontology-iri-genid.ofn"], "ontology-iri-genid.robot.ofn", &[]),
+    ];
+    for (args, expected, relative) in cases {
+        let (output, written) = run(args, &format!("relative-iris-{expected}"));
+        assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(written.as_deref(), Some(fixture_text(expected).as_str()), "{args:?}");
+        let logged: Vec<String> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|l| l.split_once(" ERROR org.semanticweb.owlapi.model.OWLOntologyID - ").map(|(_, m)| m.to_string()))
+            .collect();
+        let expected_log: Vec<String> = relative
+            .iter()
+            .map(|iri| {
+                format!("Ontology IRIs must be absolute; IRI {iri} is relative and will be made absolute by prefixing urn:absolute: to it")
+            })
+            .collect();
+        assert_eq!(logged, expected_log, "{args:?}");
+    }
+    // A version IRI with no ontology IRI is refused, and nothing is written.
+    for args in [
+        &["annotate", "-i", "@ontology-iri-options.ofn", "--ontology-iri", "_:genid1", "--version-iri", "http://example.org/v.owl"][..],
+        &["convert", "-i", "@ontology-iri-genid-version.ofn"],
+        &["annotate", "-i", "@ontology-iri-anonymous.ofn", "--version-iri", "http://example.org/v.owl"],
+    ] {
+        let (output, written) = run(args, "relative-iris-refused.ofn");
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("If the ontology IRI is null then it is not possible to specify a version IRI"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(written, None, "{args:?}");
     }
 }
 
@@ -6604,6 +7266,41 @@ fn every_reasoner_counts_a_repeated_member_once() {
             assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text(expected), "{src} {r}");
             let _ = std::fs::remove_file(&out);
         }
+    }
+}
+
+/// A class and an individual that share an IRI are two things to every
+/// reasoner: the individual `:P` is a `:B`, which makes `:D ≡ {:P}` a `:B` and
+/// leaves the class `:P` under `:E` alone; and the class `:P` being empty
+/// leaves the ontology consistent, with `:P` its one unsatisfiable class. As
+/// ROBOT 1.9.11 reasons over `el-punning` and `el-punning-unsat`.
+#[test]
+fn a_class_and_an_individual_sharing_an_iri_are_reasoned_apart() {
+    for r in ["elk", "hermit", "jfact", "whelk"] {
+        let out = tmp(&format!("el-punning.{r}.ofn"));
+        let run = bin().args(["reason", "-r", r, "-i"]).arg(robot_fixture("el-punning.ofn")).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{r}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("el-punning.robot.ofn"), "{r}");
+        let _ = std::fs::remove_file(&out);
+    }
+    for r in ["elk", "hermit", "whelk"] {
+        let out = tmp(&format!("el-punning-unsat.{r}.ofn"));
+        let run =
+            bin().args(["reason", "-r", r, "-i"]).arg(robot_fixture("el-punning-unsat.ofn")).arg("-o").arg(&out).output().unwrap();
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        let logged: Vec<&str> = stdout
+            .lines()
+            .filter_map(|l| l.split_once(" ERROR org.obolibrary.robot.ReasonerHelper - ").map(|(_, m)| m))
+            .collect();
+        assert_eq!(run.status.code(), Some(1), "{r}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            logged,
+            [
+                "There are 1 unsatisfiable classes in the ontology.",
+                "    unsatisfiable: http://example.org/el-punning-unsat#P",
+            ],
+            "{r}"
+        );
     }
 }
 
@@ -7685,6 +8382,37 @@ fn a_rename_keeps_each_ontology_annotation_on_the_ontology() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// A rename gives an entity its new IRI in every axiom that names it, every
+/// annotation assertion about it and every ontology annotation, wherever the IRI
+/// stands there; an axiom that holds the IRI only as an annotation value keeps
+/// it. A row's label replaces the renamed entity's labels, the ontology
+/// annotations keep their own annotations, and the anonymous individuals keep
+/// the names the read gave them. As ROBOT 1.9.11 renames `rename-entities.ofn`
+/// from a table and a `--mapping` pair, and `obo-header-annotations.ofn`.
+#[test]
+fn a_rename_rewrites_what_names_the_entity_and_keeps_the_rest() {
+    for (src, mappings, pairs, expected) in [
+        (
+            "rename-entities.ofn",
+            "rename-entities.mappings.tsv",
+            &["http://example.org/rename-entities#B", "http://example.org/rename-entities#Y"][..],
+            "rename-entities.robot.ofn",
+        ),
+        ("obo-header-annotations.ofn", "rename-obo-header.mappings.tsv", &[][..], "rename-obo-header.robot.ofn"),
+    ] {
+        let out = tmp(&format!("renamed-{expected}"));
+        let mut cmd = bin();
+        cmd.args(["rename", "-i"]).arg(robot_fixture(src)).arg("--mappings").arg(robot_fixture(mappings));
+        if !pairs.is_empty() {
+            cmd.arg("--mapping").args(pairs);
+        }
+        let run = cmd.arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{src}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text(expected), "{src}");
+        let _ = std::fs::remove_file(&out);
+    }
+}
+
 /// `owltools … --run-reasoner -u` lists, after the unsatisfiable count, every
 /// direct superclass the reasoner infers that no `SubClassOf` asserts, and every
 /// named equivalence — each class as its id and quoted label, or its id twice
@@ -8375,13 +9103,13 @@ fn explain_refuses_unsatisfiability_where_the_reasoner_finds_the_ontology_incons
 
 
 /// The markdown report writes data restrictions, data ranges, literals, and the
-/// data property, property-set and individual axioms in Manchester syntax, and
-/// orders explanations, their axioms and the impact list by the hashes and the
-/// order of those expressions. The expected reports are ROBOT 1.9.11's for the
-/// same commands.
+/// data property, property-set and individual axioms in Manchester syntax, a
+/// self restriction with a space after `Self`, and orders explanations, their
+/// axioms and the impact list by the hashes and the order of those
+/// expressions. The expected reports are ROBOT 1.9.11's for the same commands.
 #[test]
 fn explain_writes_data_expressions_and_individual_axioms_in_the_markdown_report() {
-    for name in ["explain-data", "explain-data-facets", "explain-literals", "explain-individuals"] {
+    for name in ["explain-data", "explain-data-facets", "explain-literals", "explain-individuals", "explain-self"] {
         let md = tmp(&format!("{name}.md"));
         let run = bin()
             .args(["explain", "-r", "hermit", "-i"])

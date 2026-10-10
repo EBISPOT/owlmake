@@ -4918,7 +4918,7 @@ fn run_artefact(
                 &model.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&model).1.as_deref()),
-                &crate::cmd::rdfs_labels(&model),
+                &crate::cmd::doc_labels(&model),
             );
             crate::io::set_anon_counter(mark);
         }
@@ -5031,7 +5031,7 @@ fn run_artefact(
                 &m.banner_docs,
                 root_iri.as_deref(),
                 write_version.as_deref().or(model_ontology_id(&m).1.as_deref()),
-                &crate::cmd::rdfs_labels(&m),
+                &crate::cmd::doc_labels(&m),
             );
             crate::io::set_anon_counter(mark);
         }
@@ -6827,16 +6827,16 @@ fn run_op(
             };
             cmd::template::step(Some(model), &targs)?.unwrap_or_else(crate::model::Model::new)
         }
-        Op::Rename { mappings, prefix_mappings, allow_missing } => {
+        Op::Rename { mappings, mapping, prefix_mappings, allow_missing, allow_duplicates } => {
             let rp = |s: &String| repo.dir.join(s);
             let rargs = cmd::rename::Args {
                 input: None,
                 output: None,
                 format: None,
-                mapping: vec![],
+                mapping: mapping.iter().flat_map(|(old, new)| [old.clone(), new.clone()]).collect(),
                 mappings: mappings.as_ref().map(rp),
                 allow_missing_entities: Some(*allow_missing),
-                allow_duplicates: None,
+                allow_duplicates: Some(*allow_duplicates),
                 prefix_mappings: prefix_mappings.as_ref().map(rp),
                 common: Default::default(),
             };
@@ -7430,7 +7430,7 @@ fn resolve_import(iri: &str, dir: &Path, catalog: &BTreeMap<String, PathBuf>) ->
             "`owl:imports <{iri}>` maps to {} in the catalog, which does not exist",
             p.display()
         ),
-        None => match crate::cmd::file_iri_path(iri) {
+        None => match crate::io::file_iri_path(iri) {
             Some(p) if p.exists() => Ok(p),
             Some(p) => bail!("`owl:imports <{iri}>` names {}, which does not exist", p.display()),
             None => fetch_import_iri(iri, dir).with_context(|| {

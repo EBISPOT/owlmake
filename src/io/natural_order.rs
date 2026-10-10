@@ -418,7 +418,7 @@ impl NaturalOrder {
                 .then_with(|| self.iarg(&aa.1, &ab.1)),
             (Atom::DataPropertyAtom { pred: pa, args: aa }, Atom::DataPropertyAtom { pred: pb, args: ab }) => {
                 iri_cmp(pa.0.as_ref(), pb.0.as_ref())
-                    .then_with(|| self.darg(&aa.0, &ab.0))
+                    .then_with(|| self.iarg(&aa.0, &ab.0))
                     .then_with(|| self.darg(&aa.1, &ab.1))
             }
             (Atom::BuiltInAtom { pred: pa, args: aa }, Atom::BuiltInAtom { pred: pb, args: ab }) => {

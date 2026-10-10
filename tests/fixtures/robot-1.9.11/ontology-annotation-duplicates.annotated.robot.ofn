@@ -1,0 +1,23 @@
+Prefix(:=<http://example.org/o#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/o>
+Annotation(rdfs:comment "c")
+Annotation(rdfs:comment "e")
+Annotation(rdfs:comment "f"@en)
+Annotation(rdfs:comment "d")
+Annotation(Annotation(rdfs:label "x") rdfs:comment "e")
+Annotation(Annotation(rdfs:label "y") rdfs:comment "g")
+Annotation(rdfs:comment "h")
+Annotation(rdfs:seeAlso <http://example.org/a>)
+
+Declaration(Class(<http://example.org/A>))
+
+
+
+)

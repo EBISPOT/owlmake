@@ -1,0 +1,16 @@
+2 axioms in left ontology but not in right ontology:
+- Declaration(Class(<http://example.org/diff-render#Z>))
+- OntologyID(OntologyIRI(<http://example.org/diff-render>) VersionIRI(<http://example.org/diff-render/v1>))
+
+11 axioms in right ontology but not in left ontology:
++ AnnotationAssertion(<rdfs:label> <GO:0000002> "GO:0000002")
++ AnnotationAssertion(<rdfs:label> <http://example.org/diff-imports#B>[line one\nline two] "line one\nline two")
++ Declaration(Class(<GO:0000001>[obo:GO_0000001]))
++ Declaration(Class(<GO:0000002>))
++ Declaration(Class(<http://example.org/diff-imports#A>[import label of A]))
++ Declaration(Class(<http://example.org/diff-imports#B>[line one\nline two]))
++ Import(<http://example.org/diff-imports-child>)
++ OntologyID(OntologyIRI(<http://example.org/diff-imports>) VersionIRI(<null>))
++ SubClassOf(<GO:0000001>[obo:GO_0000001] <UBERON:0000001>[imported label])
++ SubClassOf(<GO:0000002> <http://example.org/diff-imports#B>[line one\nline two])
++ SubClassOf(<http://example.org/diff-imports#A>[import label of A] <http://example.org/diff-imports-child#L>[from the import])

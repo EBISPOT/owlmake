@@ -3,7 +3,8 @@
 //! [`parse`] turns the document into statements in the order it completes
 //! them, naming each blank node as it is made, and [`order`] follows the
 //! reader's translation of those statements to tell which name each
-//! anonymous individual takes.
+//! anonymous individual takes. [`Statements`] records both, for this parse
+//! and for the Turtle reader's.
 
 pub(crate) mod order;
 pub(crate) mod parse;
@@ -36,116 +37,181 @@ pub(crate) struct Read {
     pub prefixes: Vec<(String, String)>,
 }
 
+#[derive(PartialEq, Eq, Hash)]
 enum Object {
     Node(Term),
     Literal { value: String, lang: Option<String>, datatype: Option<Term> },
 }
 
+/// A document's statements as the parse makes them, and the order the reader
+/// translates them in.
+pub(crate) struct Statements {
+    order: order::Order,
+    statements: Vec<(Term, Term, Object)>,
+    /// The subject, predicate and text of every untyped literal statement
+    /// and every one typed `xsd:string`, which are one literal: of the two,
+    /// the subject's statement is the one the document makes first.
+    strings: std::collections::HashSet<(Term, Term, String)>,
+    typed_strings: std::collections::HashSet<usize>,
+    /// Each literal statement, by the subject, predicate and literal the
+    /// reader files it under, with its index.
+    literals: std::collections::HashMap<(Term, Term, u32), usize>,
+    prefixes: Vec<(String, String)>,
+    trace: bool,
+}
+
+impl Statements {
+    /// No statements yet, the anonymous individuals to be numbered from
+    /// `first_id`. With `trace`, print each statement to stderr as the parse
+    /// makes it — `T s p o` for a node object, `L s p "v" @lang ^^datatype`
+    /// for a literal — and each anonymous individual as it is named,
+    /// `MINT _:genid<n> for node`.
+    pub(crate) fn new(first_id: u64, trace: bool) -> Statements {
+        Statements {
+            order: order::Order::new(first_id, trace),
+            statements: Vec::new(),
+            strings: Default::default(),
+            typed_strings: Default::default(),
+            literals: Default::default(),
+            prefixes: Vec::new(),
+            trace,
+        }
+    }
+
+    /// The document read: its statements, each once where the document first
+    /// makes it, each anonymous individual labelled with the name it takes.
+    pub(crate) fn finish(mut self) -> Read {
+        // The reader holds a document's statements as a set: a statement made
+        // twice is one statement.
+        let mut seen = std::collections::HashSet::with_capacity(self.statements.len());
+        let mut kept = vec![false; self.statements.len()];
+        for (i, statement) in self.statements.iter().enumerate() {
+            kept[i] = seen.insert(statement);
+        }
+        drop(seen);
+        let mut position = 0;
+        let mut positions = vec![None; kept.len()];
+        let mut typed_strings = std::collections::HashSet::with_capacity(self.typed_strings.len());
+        for (i, &keep) in kept.iter().enumerate() {
+            if keep {
+                if self.typed_strings.contains(&i) {
+                    typed_strings.insert(position);
+                }
+                positions[i] = Some(position);
+                position += 1;
+            }
+        }
+        let mut keep = kept.into_iter();
+        self.statements.retain(|_| keep.next().unwrap_or(true));
+        self.typed_strings = typed_strings;
+        let names = self.order.end();
+        let order = &self.order;
+        let label = |t: Term| -> String {
+            let name = order.name(t);
+            match names.individuals.get(name) {
+                Some(n) => format!("genid{n}"),
+                None => name.strip_prefix("_:").unwrap_or(name).to_string(),
+            }
+        };
+        let node = |t: Term| -> NamedOrBlankNode {
+            let name = order.name(t);
+            if name.starts_with("_:") {
+                BlankNode::new_unchecked(label(t)).into()
+            } else {
+                NamedNode::new_unchecked(name).into()
+            }
+        };
+        let statements = self
+            .statements
+            .iter()
+            .map(|(s, p, o)| {
+                let object: oxigraph::model::Term = match o {
+                    Object::Node(o) => node(*o).into(),
+                    Object::Literal { value, lang, datatype } => match (datatype, lang) {
+                        (Some(d), _) => {
+                            Literal::new_typed_literal(value.clone(), NamedNode::new_unchecked(order.name(*d))).into()
+                        }
+                        (None, Some(l)) => Literal::new_language_tagged_literal_unchecked(value.clone(), l.clone()).into(),
+                        (None, None) => Literal::new_simple_literal(value.clone()).into(),
+                    },
+                };
+                Triple::new(node(*s), NamedNode::new_unchecked(order.name(*p)), object)
+            })
+            .collect();
+        let unlabel = |nodes: &[String]| -> Vec<String> {
+            nodes.iter().map(|n| n.strip_prefix("_:").unwrap_or(n).to_string()).collect()
+        };
+        let header_copies = names
+            .header_copies
+            .iter()
+            .filter_map(|copy| match copy {
+                order::HeaderCopy::Statement(s, p, l) => self
+                    .literals
+                    .get(&(*s, *p, *l))
+                    .and_then(|&i| positions[i])
+                    .map(horned_owl::io::rdf::reader::HeaderCopy::Statement),
+                order::HeaderCopy::Block(b) => Some(horned_owl::io::rdf::reader::HeaderCopy::Block(
+                    b.strip_prefix("_:").unwrap_or(b).to_string(),
+                )),
+            })
+            .collect();
+        let order = horned_owl::io::rdf::reader::StatementOrder {
+            axiom_nodes: unlabel(&names.axiom_nodes),
+            annotation_nodes: unlabel(&names.annotation_nodes),
+            typed_strings: self.typed_strings,
+            header_copies,
+        };
+        Read { statements, order, next: names.next, prefixes: self.prefixes }
+    }
+}
+
+impl parse::Sink for Statements {
+    fn next_id(&mut self) -> u64 {
+        self.order.next_id()
+    }
+    fn resource(&mut self, s: &str, p: &str, o: &str) -> Result<()> {
+        if self.trace {
+            eprintln!("T {s} {p} {o}");
+        }
+        let (st, pt, ot) = (self.order.term(s), self.order.term(p), self.order.term(o));
+        let (pt, ot) = (self.order.synonym(pt), self.order.synonym(ot));
+        self.statements.push((st, pt, Object::Node(ot)));
+        self.order.resource(s, p, o);
+        Ok(())
+    }
+    fn literal(&mut self, s: &str, p: &str, v: &str, lang: Option<&str>, dt: Option<&str>) -> Result<()> {
+        if self.trace {
+            eprintln!("{}", literal_line(s, p, v, lang, dt));
+        }
+        let (st, pt) = (self.order.term(s), self.order.term(p));
+        let pt = self.order.synonym(pt);
+        let datatype = dt.map(|d| self.order.term(d));
+        let tag = lang.filter(|l| !l.is_empty()).map(str::to_ascii_lowercase);
+        let typed = dt == Some(XSD_STRING);
+        let string = typed || (dt.is_none() && tag.is_none());
+        let filed = self.order.literal(s, p, v, lang, dt);
+        if !string || self.strings.insert((st, pt, v.to_string())) {
+            if typed {
+                self.typed_strings.insert(self.statements.len());
+            }
+            self.literals.entry(filed).or_insert(self.statements.len());
+            self.statements.push((st, pt, Object::Literal { value: v.to_string(), lang: tag, datatype }));
+        }
+        Ok(())
+    }
+    fn prefix(&mut self, name: &str, namespace: &str) {
+        self.prefixes.push((name.to_string(), namespace.to_string()));
+    }
+}
+
 /// Read an RDF/XML document, numbering its blank nodes and anonymous
 /// individuals from `first_id`, its relative IRIs resolved against `base`, the
-/// document's own IRI, where it states no `xml:base`. With `trace`, print each
-/// statement to stderr as the parse makes it — `T s p o` for a node object,
-/// `L s p "v" @lang ^^datatype` for a literal — and each anonymous
-/// individual as it is named, `MINT _:genid<n> for node`.
+/// document's own IRI, where it states no `xml:base`. With `trace`, print what
+/// [`Statements::new`] describes.
 pub(crate) fn read(bytes: &[u8], first_id: u64, trace: bool, base: Option<String>) -> Result<Read> {
-    struct Record {
-        order: order::Order,
-        statements: Vec<(Term, Term, Object)>,
-        /// The subject, predicate and text of every untyped literal statement
-        /// and every one typed `xsd:string`, which are one literal: of the two,
-        /// the subject's statement is the one the document makes first.
-        strings: std::collections::HashSet<(Term, Term, String)>,
-        typed_strings: std::collections::HashSet<usize>,
-        prefixes: Vec<(String, String)>,
-        trace: bool,
-    }
-    impl parse::Sink for Record {
-        fn next_id(&mut self) -> u64 {
-            self.order.next_id()
-        }
-        fn resource(&mut self, s: &str, p: &str, o: &str) -> Result<()> {
-            if self.trace {
-                eprintln!("T {s} {p} {o}");
-            }
-            let (st, pt, ot) = (self.order.term(s), self.order.term(p), self.order.term(o));
-            let (pt, ot) = (self.order.synonym(pt), self.order.synonym(ot));
-            self.statements.push((st, pt, Object::Node(ot)));
-            self.order.resource(s, p, o);
-            Ok(())
-        }
-        fn literal(&mut self, s: &str, p: &str, v: &str, lang: Option<&str>, dt: Option<&str>) -> Result<()> {
-            if self.trace {
-                eprintln!("{}", literal_line(s, p, v, lang, dt));
-            }
-            let (st, pt) = (self.order.term(s), self.order.term(p));
-            let pt = self.order.synonym(pt);
-            let datatype = dt.map(|d| self.order.term(d));
-            let tag = lang.filter(|l| !l.is_empty()).map(str::to_ascii_lowercase);
-            let typed = dt == Some(XSD_STRING);
-            let string = typed || (dt.is_none() && tag.is_none());
-            if !string || self.strings.insert((st, pt, v.to_string())) {
-                if typed {
-                    self.typed_strings.insert(self.statements.len());
-                }
-                self.statements.push((st, pt, Object::Literal { value: v.to_string(), lang: tag, datatype }));
-            }
-            self.order.literal(s, p, v, lang, dt);
-            Ok(())
-        }
-        fn prefix(&mut self, name: &str, namespace: &str) {
-            self.prefixes.push((name.to_string(), namespace.to_string()));
-        }
-    }
-    let mut record = Record {
-        order: order::Order::new(first_id, trace),
-        statements: Vec::new(),
-        strings: Default::default(),
-        typed_strings: Default::default(),
-        prefixes: Vec::new(),
-        trace,
-    };
-    parse::Parser::new(&mut record, base).parse(bytes)?;
-    let names = record.order.end();
-    let order = &record.order;
-    let label = |t: Term| -> String {
-        let name = order.name(t);
-        match names.individuals.get(name) {
-            Some(n) => format!("genid{n}"),
-            None => name.strip_prefix("_:").unwrap_or(name).to_string(),
-        }
-    };
-    let node = |t: Term| -> NamedOrBlankNode {
-        let name = order.name(t);
-        if name.starts_with("_:") {
-            BlankNode::new_unchecked(label(t)).into()
-        } else {
-            NamedNode::new_unchecked(name).into()
-        }
-    };
-    let statements = record
-        .statements
-        .iter()
-        .map(|(s, p, o)| {
-            let object: oxigraph::model::Term = match o {
-                Object::Node(o) => node(*o).into(),
-                Object::Literal { value, lang, datatype } => match (datatype, lang) {
-                    (Some(d), _) => Literal::new_typed_literal(value.clone(), NamedNode::new_unchecked(order.name(*d))).into(),
-                    (None, Some(l)) => Literal::new_language_tagged_literal_unchecked(value.clone(), l.clone()).into(),
-                    (None, None) => Literal::new_simple_literal(value.clone()).into(),
-                },
-            };
-            Triple::new(node(*s), NamedNode::new_unchecked(order.name(*p)), object)
-        })
-        .collect();
-    let unlabel = |nodes: &[String]| -> Vec<String> {
-        nodes.iter().map(|n| n.strip_prefix("_:").unwrap_or(n).to_string()).collect()
-    };
-    let order = horned_owl::io::rdf::reader::StatementOrder {
-        axiom_nodes: unlabel(&names.axiom_nodes),
-        annotation_nodes: unlabel(&names.annotation_nodes),
-        typed_strings: record.typed_strings,
-    };
-    Ok(Read { statements, order, next: names.next, prefixes: record.prefixes })
+    let mut statements = Statements::new(first_id, trace);
+    parse::Parser::new(&mut statements, base).parse(bytes)?;
+    Ok(statements.finish())
 }
 
 fn literal_line(s: &str, p: &str, v: &str, lang: Option<&str>, dt: Option<&str>) -> String {

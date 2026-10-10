@@ -558,6 +558,26 @@ pub(crate) fn render_component_line(ac: &AnnotatedComponent<RcStr>) -> String {
     ac.as_functional_with_prefixes(&crate::io::ofn_prefix_block(&Default::default(), None)).to_string()
 }
 
+/// One component in the functional writer's simple style, on one line: its
+/// set-valued operands in canonical order, and every IRI in full but those of
+/// the five built-in namespaces, which are CURIEs.
+pub(crate) fn render_component_simple(ac: &AnnotatedComponent<RcStr>) -> String {
+    render_component_styled(ac, horned_owl::io::ofn::writer::Style::Simple)
+}
+
+/// One component as the functional writer writes it outside any frame, every
+/// entity, and every IRI it names as an object, written by `names`.
+pub(crate) fn render_component_named(ac: &AnnotatedComponent<RcStr>, names: &dyn Fn(&str) -> String) -> String {
+    render_component_styled(ac, horned_owl::io::ofn::writer::Style::Named(names))
+}
+
+fn render_component_styled(ac: &AnnotatedComponent<RcStr>, style: horned_owl::io::ofn::writer::Style<'_>) -> String {
+    use horned_owl::io::ofn::writer::AsFunctional;
+    let component = crate::io::canonical_component(&ac.component).unwrap_or_else(|| ac.component.clone());
+    let ac = AnnotatedComponent { component, ann: ac.ann.clone() };
+    ac.as_functional_styled(&crate::io::ofn_prefix_block(&Default::default(), None), style).to_string()
+}
+
 /// The functional-syntax document the `owl-axioms:` clause carries: the
 /// untranslatable axioms as an ontology of their own, with no IRI, each entity
 /// they name declared, and the five built-in prefixes, as the functional

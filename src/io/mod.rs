@@ -243,16 +243,27 @@ fn read_ontology_bytes(path: &Path) -> Result<Vec<u8>> {
 
 pub fn load(path: &Path) -> Result<Model> {
     let bytes = read_ontology_bytes(path)?;
-    let fmt = match Format::from_path(path) {
-        Ok(f) => disambiguate(f, &bytes),
-        Err(_) => sniff(&bytes)
-            .with_context(|| format!("cannot determine ontology format of {}", path.display()))?,
-    };
+    let fmt = document_format(path, &bytes)?;
     IN_PATH.with(|c| *c.borrow_mut() = Some(path.to_path_buf()));
     let r = parse_bytes(bytes, fmt, &display_name(path))
         .with_context(|| format!("parsing {}", path.display()));
     IN_PATH.with(|c| *c.borrow_mut() = None);
     r
+}
+
+/// The format [`load`] reads the document at `path` in.
+pub(crate) fn format_of(path: &Path) -> Result<Format> {
+    document_format(path, &read_ontology_bytes(path)?)
+}
+
+/// The format of a document read from `path` as `bytes`: its extension's,
+/// unless its leading bytes settle another, or theirs when the extension names
+/// none.
+fn document_format(path: &Path, bytes: &[u8]) -> Result<Format> {
+    match Format::from_path(path) {
+        Ok(f) => Ok(disambiguate(f, bytes)),
+        Err(_) => sniff(bytes).with_context(|| format!("cannot determine ontology format of {}", path.display())),
+    }
 }
 
 /// A short label for a path used in progress lines — the file name alone (the
@@ -344,9 +355,33 @@ pub fn load_with(path: &Path, format: Option<&str>) -> Result<Model> {
     }
 }
 
+/// The path a `file:` IRI names — `file:///abs/path`, `file:/abs/path`,
+/// `file://localhost/abs/path` or `file:rel/path`, percent-escapes decoded —
+/// whether or not it exists. None for an IRI of any other scheme, or of
+/// another host.
+pub(crate) fn file_iri_path(iri: &str) -> Option<std::path::PathBuf> {
+    let rest = iri.strip_prefix("file:")?;
+    let path = match rest.strip_prefix("//") {
+        Some(authority) => {
+            let slash = authority.find('/')?;
+            let host = &authority[..slash];
+            if !(host.is_empty() || host.eq_ignore_ascii_case("localhost")) {
+                return None;
+            }
+            &authority[slash..]
+        }
+        None => rest,
+    };
+    Some(std::path::PathBuf::from(crate::build::percent_decode(path)))
+}
+
 /// Load an ontology directly from an IRI (`--input-iri`), optionally forcing the
-/// parser format. The document is fetched over HTTP(S).
+/// parser format. A `file:` IRI is read from the file it names; any other
+/// document is fetched over HTTP(S).
 pub fn load_iri(iri: &str, format: Option<&str>) -> Result<Model> {
+    if let Some(path) = file_iri_path(iri) {
+        return load_with(&path, format).with_context(|| format!("loading {iri}"));
+    }
     let bytes = http_get(iri).with_context(|| format!("fetching {iri}"))?;
     let fmt = match format {
         Some(name) => Format::from_name(name)?,
@@ -955,6 +990,10 @@ thread_local! {
     /// each other, and targets built beside each other on other threads do not
     /// change what this one mints.
     static ANON_COUNTER: std::cell::Cell<u64> = const { std::cell::Cell::new(2_147_483_648) };
+    /// The number the next unlabelled blank node of a Turtle or N-Triples
+    /// document takes: such nodes are numbered from 1 across every document
+    /// the span reads.
+    static UNLABELLED_NODES: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
 }
 
 /// Reserve `n` consecutive blank-node ids and return the first.
@@ -995,6 +1034,18 @@ pub fn reset_anon_counter() {
         eprintln!("[anon] reset from {}", anon_counter());
     }
     ANON_COUNTER.with(|c| c.set(2_147_483_648));
+    UNLABELLED_NODES.with(|c| c.set(1));
+}
+
+/// The number the next unlabelled blank node of a Turtle or N-Triples
+/// document takes.
+pub(crate) fn unlabelled_nodes() -> u64 {
+    UNLABELLED_NODES.with(|c| c.get())
+}
+
+/// Carry the unlabelled-node count forward to where a parse left it.
+pub(crate) fn set_unlabelled_nodes(n: u64) {
+    UNLABELLED_NODES.with(|c| c.set(n));
 }
 
 /// The byte spans of the `_:label` node ids a functional-syntax document states,
@@ -1090,66 +1141,6 @@ pub(crate) fn remint_anon_labels(text: &str) -> (std::borrow::Cow<'_, str>, Vec<
     (std::borrow::Cow::Owned(out), labels)
 }
 
-/// The anonymous individuals of `ont`, by the number their `genid` id carries,
-/// or `None` when one carries another kind of id.
-pub(crate) fn numbered_individuals(ont: &Onto) -> Option<Vec<(u64, String)>> {
-    use horned_owl::model::{AnonymousIndividual, RcStr};
-    use horned_owl::visitor::immutable::{Visit, Walk};
-
-    struct Ids(std::collections::BTreeSet<String>);
-    impl Visit<RcStr> for Ids {
-        fn visit_anonymous_individual(&mut self, a: &AnonymousIndividual<RcStr>) {
-            self.0.insert(a.0.to_string());
-        }
-    }
-    let mut walk = Walk::new(Ids(std::collections::BTreeSet::new()));
-    for ac in ont.iter() {
-        walk.annotated_component(ac);
-    }
-    let mut ids: Vec<(u64, String)> = Vec::new();
-    for label in walk.into_visit().0 {
-        let n: u64 = label.strip_prefix("genid")?.parse().ok()?;
-        ids.push((n, label));
-    }
-    ids.sort();
-    Some(ids)
-}
-
-/// Number the anonymous individuals `ids` (from [`numbered_individuals`])
-/// `genid<first>` onwards, one id each, in the order of the numbers they carry,
-/// and return the id after the last.
-pub(crate) fn renumber_individuals(ont: &mut Onto, ids: Vec<(u64, String)>, first: u64) -> u64 {
-    use horned_owl::model::{AnonymousIndividual, MutableOntology, RcStr};
-    use horned_owl::visitor::mutable::{VisitMut, WalkMut};
-
-    let next = first + ids.len() as u64;
-    let renamed: std::collections::HashMap<String, RcStr> = ids
-        .into_iter()
-        .enumerate()
-        .filter(|(k, (n, _))| *n != first + *k as u64)
-        .map(|(k, (_, label))| (label, RcStr::from(format!("genid{}", first + k as u64))))
-        .collect();
-    if renamed.is_empty() {
-        return next;
-    }
-    struct Rename(std::collections::HashMap<String, RcStr>);
-    impl VisitMut<RcStr> for Rename {
-        fn visit_anonymous_individual(&mut self, a: &mut AnonymousIndividual<RcStr>) {
-            if let Some(to) = self.0.get(&*a.0) {
-                a.0 = to.clone();
-            }
-        }
-    }
-    let mut rename = WalkMut::new(Rename(renamed));
-    let mut out: Onto = horned_owl::ontology::set::SetOntology::new();
-    for mut ac in std::mem::take(ont) {
-        rename.annotated_component(&mut ac);
-        out.insert(ac);
-    }
-    *ont = out;
-    next
-}
-
 /// An `owl:versionIRI` statement about the ontology is its version IRI wherever
 /// the document makes it. The parse takes one stated before the ontology's
 /// `rdf:type owl:Ontology` for an ontology annotation, and declares
@@ -1198,9 +1189,26 @@ fn version_iri_statement(ont: &mut Onto) {
 /// Load an ontology of the given format from any buffered reader.
 pub fn load_from<R: BufRead>(reader: R, fmt: Format) -> Result<Model> {
     let mut model = guard_parse(fmt, move || load_from_raw(reader, fmt))?;
+    ontology_id_as_made(&mut model)?;
     literals_as_made(&mut model.ont);
     canonicalize_rules(&mut model);
     Ok(model)
+}
+
+/// The ontology's ID as [`crate::model::ontology_id`] makes it from the IRIs the
+/// document states.
+fn ontology_id_as_made(model: &mut Model) -> Result<()> {
+    use horned_owl::model::{AnnotatedComponent, Component, MutableOntology};
+    let Some(stated) = model.ont.iter().find(|ac| matches!(ac.component, Component::OntologyID(_))).cloned() else {
+        return Ok(());
+    };
+    let Component::OntologyID(id) = &stated.component else { unreachable!() };
+    let made = crate::model::ontology_id(&model.build, id.iri.as_deref(), id.viri.as_deref())?;
+    if made != *id {
+        model.ont.remove(&stated);
+        model.ont.insert(AnnotatedComponent { component: Component::OntologyID(made), ann: stated.ann });
+    }
+    Ok(())
 }
 
 /// Read back a document written from a model, whose literals are made already
@@ -1313,6 +1321,31 @@ fn canonicalize_rules(model: &mut Model) {
     }
 }
 
+/// The model a document's statements translate to, its anonymous individuals
+/// named as [`rdfxml::Statements`] named them; the run's counter goes on after
+/// them. `syntax` names the document's syntax in an error.
+pub(crate) fn model_from_statements(read: rdfxml::Read, syntax: &str) -> Result<Model> {
+    let b = horned_owl::model::Build::new_rc();
+    let mut rdf_cfg = ParserConfiguration::new(&b);
+    rdf_cfg.lax = !run_options().strict;
+    rdf_cfg.hold_ontology_annotations = Some(crate::owlapi_annotations::hold);
+    let (rdfo, _): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
+        horned_owl::io::rdf::reader::read_statements(read.statements, rdf_cfg, &read.order)
+            .map_err(|e| anyhow::anyhow!("{syntax} parse error: {e}"))?;
+    // Move components out of the parser's Rc set rather than deep-cloning
+    // every one (the naive From<ConcreteRDFOntology>).
+    let mut ont: Onto = rdfo.into_set_ontology_fast();
+    set_anon_counter(read.next);
+    version_iri_statement(&mut ont);
+    let mut model = Model::from_parts(ont, crate::model::default_prefixes());
+    // An RDF document states blank-node identity, whether or not it happens to
+    // share any node. Recording the CAPABILITY separately from the observed
+    // sharing is what stops a module with no shared node being treated like an
+    // OBO source and falling back to structural equality.
+    model.rdf_blank_node_identity = true;
+    Ok(model)
+}
+
 fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
     // Read RDF in lax mode: an undeclared property used in a restriction
     // (`someValuesFrom`/`allValuesFrom`/`hasValue`) is taken as an object property,
@@ -1325,6 +1358,7 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
     let lax = !run_options().strict;
     let mut cfg = ParserConfiguration::default();
     cfg.lax = lax;
+    cfg.hold_ontology_annotations = Some(crate::owlapi_annotations::hold);
     match fmt {
         Format::RdfXml => {
             let mut buf = Vec::new();
@@ -1346,33 +1380,16 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // written with — `_:genid2147483648` onwards — and two documents
             // merged in one step keep their nodes apart. The counter comes back
             // out where the reading left it.
-            let trace = std::env::var_os("OM_RDFXML_TRACE").is_some();
+            let trace = std::env::var_os("OM_RDF_TRACE").is_some();
             let read = rdfxml::read(&buf, anon_counter(), trace, document_iri())?;
             let rdf_prefixes = rdfxml_prefixes(&read.prefixes);
             let idspaces = rdfxml_idspaces(&rdf_prefixes);
-            let b = horned_owl::model::Build::new_rc();
-            let mut rdf_cfg = ParserConfiguration::new(&b);
-            rdf_cfg.lax = lax;
-            let (rdfo, _): (horned_owl::io::rdf::reader::ConcreteRcRDFOntology, _) =
-                horned_owl::io::rdf::reader::read_statements(read.statements, rdf_cfg, &read.order)
-                    .map_err(|e| anyhow::anyhow!("RDF/XML parse error: {e}"))?;
-            // Move components out of the parser's Rc set rather than deep-cloning
-            // every one (the naive From<ConcreteRDFOntology>).
-            let mut ont: Onto = rdfo.into_set_ontology_fast();
-            set_anon_counter(read.next);
-            version_iri_statement(&mut ont);
-            let mut model = Model::from_parts(ont, crate::model::default_prefixes());
+            let mut model = model_from_statements(read, "RDF/XML")?;
             model.idspaces = idspaces;
             model.rdf_prefixes = rdf_prefixes;
             model.owl_genid_refs = owl_genid_refs;
             model.owl_label_order = owl_label_order;
             model.owl_shared_owners = owl_shared_owners;
-            // An RDF/XML document states blank-node identity, whether or not it
-            // happens to share any node. Recording the CAPABILITY separately from
-            // the observed sharing is what stops a module with no shared node
-            // being treated like an OBO source and falling back to structural
-            // equality.
-            model.rdf_blank_node_identity = true;
             model.cross_shared = scan_cross_owner_shared(&buf);
             Ok(model)
         }
@@ -1491,7 +1508,6 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
                 };
             let original_text = text.clone();
             let text = format!("{}{}", standard_prefix_prelude(&text), text);
-            let text = resolve_relative_iris(&text);
             // Node ids are re-minted before the parse, not after: every position a
             // label can occupy — an assertion's subject, an annotation's value, a
             // `SameIndividual` operand — is rewritten at once, and the parsed model
@@ -1513,7 +1529,14 @@ fn load_from_raw<R: BufRead>(mut reader: R, fmt: Format) -> Result<Model> {
             // CURIE map, declaring 43 prefixes where the document needs 22 —
             // including ones HPO never mentions.
             model.rdf_prefixes = if rdf_prefixes.is_empty() {
+                // Each declaration binds its name to the IRI the reader bound it to.
                 document_ofn_prefixes(&original_text)
+                    .into_iter()
+                    .map(|(name, iri)| {
+                        let bound = model.prefixes.mappings().find(|(n, _)| **n == name).map(|(_, i)| i.clone());
+                        (name, bound.unwrap_or(iri))
+                    })
+                    .collect()
             } else {
                 rdf_prefixes
             };
@@ -2057,10 +2080,12 @@ fn write_to_with<W: Write>(
             // identity the document is written with.
             let labels = if !model.banner_docs.is_empty() {
                 let (iri, version) = crate::build::model_ontology_id(model);
-                let own = crate::cmd::rdfs_labels(model);
+                let own = crate::cmd::doc_labels(model);
                 crate::cmd::fold_banner_docs(&model.banner_docs, iri.as_deref(), version.as_deref(), &own)
-            } else {
+            } else if !model.banner_labels.is_empty() {
                 model.banner_labels.clone()
+            } else {
+                crate::cmd::rdfs_labels(model)
             };
             if let Ok(dbg) = std::env::var("OM_BANNER_DEBUG") {
                 eprintln!(
@@ -2172,66 +2197,6 @@ fn document_ofn_prefixes(text: &str) -> Vec<(String, String)> {
         }
     }
     out
-}
-
-/// Resolve a functional document's RELATIVE IRIs against its default prefix.
-///
-/// `<pattern.yaml>` inside `<…>` is a relative reference, and its base is the
-/// document's `Prefix(:=<…>)` binding — concatenated, not merged as a path, so a
-/// non-hierarchical base such as `urn:unnamed:ontology#ont1` yields
-/// `urn:unnamed:ontology#ont1pattern.yaml`.
-///
-/// A DOSDP prototype carries one per template that declares no `pattern_iri`, so
-/// without this `pattern.owl` cannot be read at all — including by the very build
-/// that just wrote it. With no default prefix bound there is no base, and the
-/// reference is left alone for the parser to reject.
-///
-/// String literals are skipped: `"a <b> c"` is text, not an IRI.
-fn resolve_relative_iris(text: &str) -> std::borrow::Cow<'_, str> {
-    let declared = document_ofn_prefixes(text);
-    let Some(base) = declared.iter().find(|(name, _)| name.is_empty()).map(|(_, iri)| iri.as_str()) else {
-        return text.into();
-    };
-    let (bytes, mut out, mut last, mut in_string, mut escaped) =
-        (text.as_bytes(), String::new(), 0usize, false, false);
-    let mut i = 0usize;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if in_string {
-            match c {
-                _ if escaped => escaped = false,
-                b'\\' => escaped = true,
-                b'"' => in_string = false,
-                _ => {}
-            }
-            i += 1;
-            continue;
-        }
-        match c {
-            b'"' => in_string = true,
-            b'<' => {
-                // Up to the closing `>`; another `<` first means this was not an
-                // IRI at all, and the scan simply carries on from the next byte.
-                if let Some(end) = bytes[i + 1..].iter().position(|&b| b == b'>' || b == b'<') {
-                    if bytes[i + 1 + end] == b'>' {
-                        if !text[i + 1..i + 1 + end].contains(':') {
-                            out.push_str(&text[last..=i]);
-                            out.push_str(base);
-                            last = i + 1;
-                        }
-                        i += end + 1;
-                    }
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    if out.is_empty() {
-        return text.into();
-    }
-    out.push_str(&text[last..]);
-    out.into()
 }
 
 /// `Prefix(...)` declarations for the standard namespaces (`rdf`, `rdfs`, `xsd`,

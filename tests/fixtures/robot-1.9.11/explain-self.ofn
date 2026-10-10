@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/explain-self#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/explain-self>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(ObjectProperty(:p))
+AnnotationAssertion(rdfs:label :A "self-related")
+SubClassOf(:A ObjectHasSelf(:p))
+SubClassOf(ObjectHasSelf(:p) :B)
+DisjointClasses(:A :B)
+)

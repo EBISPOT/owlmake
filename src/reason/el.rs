@@ -906,9 +906,9 @@ struct Builder {
     top_roles: HashSet<RId>,
     /// Roles asserted reflexive.
     reflexive: Vec<RId>,
-    /// Ids that name a genuine class (used in class position), as opposed to
-    /// ids interned only to stand for an individual (a nominal).
-    seen_as_class: HashSet<CId>,
+    /// The nominal `{a}` of each named individual, by IRI. A class with the
+    /// same IRI is another concept (see [`Builder::individual_concept`]).
+    individual_to_cid: HashMap<String, CId>,
     /// Ids that stand for individuals (nominals).
     individuals: HashSet<CId>,
     /// Hash-consing of complex class expressions to their concept-name id, so
@@ -953,7 +953,7 @@ impl Builder {
             eff_range: HashMap::default(),
             top_roles: HashSet::default(),
             reflexive: Vec::new(),
-            seen_as_class: HashSet::default(),
+            individual_to_cid: HashMap::default(),
             individuals: HashSet::default(),
             expr_memo: HashMap::default(),
             ignored: 0,
@@ -962,22 +962,21 @@ impl Builder {
         }
     }
 
-    /// Intern an IRI to a concept-name id (no class/individual tagging).
-    fn intern_entity(&mut self, iri: &str) -> CId {
-        if let Some(&id) = self.iri_to_cid.get(iri) {
-            return id;
-        }
+    /// A new concept-name id named by `iri`.
+    fn named_concept(&mut self, iri: &str) -> CId {
         let id = self.class_iri.len() as CId;
         self.class_iri.push(Some(iri.to_string()));
         self.kind.push(0);
-        self.iri_to_cid.insert(iri.to_string(), id);
         id
     }
 
-    /// Intern an IRI used as a genuine class.
+    /// Intern a class IRI to its concept-name id.
     fn intern_class(&mut self, iri: &str) -> CId {
-        let id = self.intern_entity(iri);
-        self.seen_as_class.insert(id);
+        if let Some(&id) = self.iri_to_cid.get(iri) {
+            return id;
+        }
+        let id = self.named_concept(iri);
+        self.iri_to_cid.insert(iri.to_string(), id);
         id
     }
 
@@ -1510,13 +1509,18 @@ impl Builder {
         acc
     }
 
-    /// Treat a named individual as a singleton nominal concept name. The id is
+    /// The nominal `{a}` of a named individual: a concept name of its own,
     /// tagged as an individual so it does not surface as a class in the
-    /// taxonomy.
+    /// taxonomy. A class with the same IRI is a different concept, so the
+    /// individual's types are not that class's superclasses.
     fn individual_concept(&mut self, i: &Individual<RcStr>) -> Option<CId> {
         match i {
             Individual::Named(n) => {
-                let id = self.intern_entity(n.0.as_ref());
+                if let Some(&id) = self.individual_to_cid.get(n.0.as_ref()) {
+                    return Some(id);
+                }
+                let id = self.named_concept(n.0.as_ref());
+                self.individual_to_cid.insert(n.0.to_string(), id);
                 self.individuals.insert(id);
                 Some(id)
             }
@@ -1852,7 +1856,7 @@ impl Builder {
         }
 
         let named: Vec<CId> = (0..n_classes as CId)
-            .filter(|&c| self.class_iri[c as usize].is_some() && self.seen_as_class.contains(&c))
+            .filter(|&c| self.class_iri[c as usize].is_some() && !self.individuals.contains(&c))
             .collect();
         let mut individuals: Vec<CId> = self.individuals.iter().copied().collect();
         individuals.sort_unstable();

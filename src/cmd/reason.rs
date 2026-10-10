@@ -645,7 +645,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // names them, which is read off the model; a model released before
     // saturation has its queue taken while it is still in hand.
     let released_queue = if free_model && kind.is_builtin_el() {
-        Some(crate::reason::elk_order::class_queue(&model.ont))
+        Some(crate::reason::elk_order::class_queue(&model.ont, model.natural_order()))
     } else {
         None
     };
@@ -717,7 +717,10 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
 
     let listed = unsatisfiable_in_node_order(kind, &unsat, || match released_queue {
         Some(q) => q,
-        None => crate::reason::elk_order::class_queue(&model.as_ref().expect("model kept").ont),
+        None => {
+            let model = model.as_ref().expect("model kept");
+            crate::reason::elk_order::class_queue(&model.ont, model.natural_order())
+        }
     });
     validate(&Validation {
         consistent,
@@ -1592,7 +1595,7 @@ pub(crate) fn validate_model(model: &Model, kind: ReasonerKind, materializing: b
         kind.property_check(materializing),
         kind.datatypes(materializing),
     )?;
-    let listed = unsatisfiable_in_node_order(kind, &cls.unsat, || crate::reason::elk_order::class_queue(&model.ont));
+    let listed = unsatisfiable_in_node_order(kind, &cls.unsat, || crate::reason::elk_order::class_queue(&model.ont, model.natural_order()));
     validate(&Validation {
         consistent: cls.consistent,
         unsatisfiable: &listed,
@@ -2104,4 +2107,16 @@ pub(crate) fn log_stamp() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "0000-00-00 00:00:00,000".to_string())
+}
+
+/// A warning on the console, in the log's line format, from `logger`.
+pub(crate) fn log_warn(logger: &str, msg: &str) {
+    let stamp = log_stamp();
+    crate::build::console_line(&format!("{stamp} WARN  {logger} - {msg}"));
+}
+
+/// An error on the console, in the log's line format, from `logger`.
+pub(crate) fn log_error(logger: &str, msg: &str) {
+    let stamp = log_stamp();
+    crate::build::console_line(&format!("{stamp} ERROR {logger} - {msg}"));
 }

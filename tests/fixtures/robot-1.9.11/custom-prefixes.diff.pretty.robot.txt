@@ -1,0 +1,9 @@
+2 axioms in left ontology but not in right ontology:
+- Declaration(Class(<http://example.org/diff-render#Z>))
+- OntologyID(OntologyIRI(<http://example.org/diff-render>) VersionIRI(<http://example.org/diff-render/v1>))
+
+4 axioms in right ontology but not in left ontology:
++ AnnotationAssertion(<rdfs:label> <EX:0000001>[thing one] "thing one")
++ AnnotationAssertion(<rdfs:seeAlso> <EX:0000001>[thing one] <http://example.org/foo/x>)
++ Declaration(Class(<EX:0000001>[thing one]))
++ OntologyID(OntologyIRI(<http://purl.obolibrary.org/obo/ex.owl>) VersionIRI(<null>))

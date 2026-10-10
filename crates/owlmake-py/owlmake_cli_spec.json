@@ -1,6 +1,6 @@
 {
   "program": "owlmake",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "about": "Self-contained OWL/OBO ontology build and QC toolkit",
   "commands": [
     {
@@ -6763,7 +6763,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Catalog for resolving the left ontology's imports. Accepted for compatibility"
+          "help": "Catalog for resolving the left ontology's imports"
         },
         {
           "id": "right_catalog",
@@ -6782,7 +6782,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Catalog for resolving the right ontology's imports. Accepted for compatibility"
+          "help": "Catalog for resolving the right ontology's imports"
         },
         {
           "id": "output",
@@ -6829,6 +6829,25 @@
           "help": "Diff output format: plain (default), pretty, or markdown. (html is accepted but rendered as markdown.)"
         },
         {
+          "id": "label_langs_priority",
+          "longs": [
+            "label-langs-priority"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "LABEL_LANGS_PRIORITY"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Comma-separated language tags, in priority order, for choosing the label a `pretty` report names an entity by (e.g. `en-GB,en,none`); `none` stands for a label with no language tag and `*` for any"
+        },
+        {
           "id": "input",
           "longs": [
             "input"
@@ -6866,7 +6885,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Append rdfs:label after entity IRIs in the report (`true` or `yes` in any case)"
+          "help": "Write the report in the `pretty` format, which names entities by their labels, where the `plain` format would be written (`true` or `yes` in any case)"
         },
         {
           "id": "input_iri",
@@ -14751,7 +14770,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "A TSV file of `old<TAB>new` mappings"
+          "help": "A table of `old`, `new` and optional `label` columns under a header row: TSV for a `.tsv` or `.txt` file, CSV for a `.csv` one"
         },
         {
           "id": "allow_missing_entities",
@@ -14799,7 +14818,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Allow two or more terms to be renamed to the same full IRI (default false). `<bool>`"
+          "help": "Allow two or more rows of the `--mappings` table to give the same new IRI (default false). `<bool>`"
         },
         {
           "id": "prefix_mappings",
@@ -14820,7 +14839,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "A TSV file of `oldNamespace<TAB>newNamespace` mappings; every IRI starting with an old namespace has that prefix rewritten to the new one"
+          "help": "A table of `old base`, `new base` columns under a header row: every entity whose IRI starts with an old base gets the IRI with each occurrence of that base replaced by the new one"
         },
         {
           "id": "input_iri",

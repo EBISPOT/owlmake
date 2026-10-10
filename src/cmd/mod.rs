@@ -268,23 +268,41 @@ pub(crate) fn read_imports_closure(
     input: Option<&Path>,
     common: &CommonArgs,
 ) -> Result<()> {
-    use horned_owl::model::MutableOntology;
-
     if model.imports_closure.is_some() {
         return Ok(());
     }
-    let mut imports_only = Model::new();
+    read_imports(model, input, None, common).map(|_| ())
+}
+
+/// Read the imports closure of `model`, a document loaded without its imports,
+/// where `catalog` resolves each import, else the command's own catalog, else
+/// the catalog beside `input`, and record its entities on `model` (see
+/// [`read_imports_closure`]). Returns the closure's ontologies merged, with a
+/// banner document for each, or `None` when `model` imports nothing. An import
+/// that resolves nowhere fails.
+pub(crate) fn read_imports(
+    model: &mut Model,
+    input: Option<&Path>,
+    catalog: Option<&Path>,
+    common: &CommonArgs,
+) -> Result<Option<Model>> {
+    use horned_owl::model::MutableOntology;
+
+    let mut imports = Model::new();
     for ac in model.ont.iter() {
         if matches!(ac.component, horned_owl::model::Component::Import(_)) {
-            imports_only.ont.insert(ac.clone());
+            imports.ont.insert(ac.clone());
         }
     }
-    if imports_only.ont.iter().next().is_none() {
-        return Ok(());
+    if imports.ont.iter().next().is_none() {
+        return Ok(None);
     }
-    common.apply_catalog(&mut imports_only, input)?;
-    model.imports_closure = imports_only.imports_closure;
-    Ok(())
+    match catalog {
+        Some(catalog) => merge_import_closure(&mut imports, catalog, input)?,
+        None => common.apply_catalog(&mut imports, input)?,
+    }
+    model.imports_closure = imports.imports_closure.clone();
+    Ok(Some(imports))
 }
 
 /// Like [`take_or_load`] but WITHOUT merging the `owl:imports` closure.
@@ -622,7 +640,7 @@ pub(crate) fn command_import_rule<'a>(
 ) -> impl Fn(&str) -> Result<Option<std::path::PathBuf>> + 'a {
     move |iri| {
         Ok(catalog_resolve(map, iri)
-            .or_else(|| file_iri_path(iri))
+            .or_else(|| io::file_iri_path(iri))
             .or_else(|| default_local(iri, base)))
     }
 }
@@ -790,101 +808,69 @@ pub(crate) fn fold_import_labels(model: &mut Model) {
     }
 }
 
-/// Every `entity IRI → rdfs:label` the model asserts, for the functional-syntax
-/// banner comments.
+/// Every `entity IRI → label` the model asserts, as a functional write's banner
+/// and a report name the entity by: the label
+/// [`held_labels`](crate::io::entities::held_labels) picks, a literal's text or
+/// an IRI value's short form.
 ///
-/// An entity may carry several labels, and which one it is named by is decided
-/// by the iteration order of its own annotation-assertion set — by the axioms'
-/// hashes, that is, not by document order and not by the values. `oboInOwl:hasDbXref`
-/// carries both "database_cross_reference" and "has cross-reference", and picking
-/// the wrong one is a one-line difference in every artefact that banners it.
-///
-/// Deciding it by anything else is not merely wrong but UNSTABLE: an arbitrary
-/// tie-break follows the model's insertion history, so a change with nothing to
-/// do with labels can silently flip a previously-identical artefact either way.
-///
-/// The set is the SUBJECT's own, and its table is sized by how many annotation
-/// assertions that subject carries — measured: giving `hasDbXref` twenty further
-/// annotations, touching neither label, moves the table from 16 slots to 32 and
-/// changes which label wins.
-///
-/// Where two labels land in the SAME slot this cannot settle it, and neither can
-/// anything else, because there is no stable answer to match. Two runs of the
-/// reference over one unchanged tree, minutes apart, write
-/// `imports/merged_import.owl` with `database_cross_reference` and then with
-/// `has cross-reference`, the two 41 MB documents otherwise byte-identical. Both
-/// values have been seen twice. A Java bucket holds its members in insertion
-/// order, and the pipeline does not add its axioms in a fixed one.
-///
-/// So this is reference non-determinism, measured, and belongs beside a SELECT
-/// whose row order differs between runs. owlmake is deterministic here and
-/// always writes the same value; whether that value matches is a coin toss per
-/// run, and no amount of reproducing insertion order would change that.
+/// Where two labels land in the same slot of the entity's set, no order can
+/// settle which one names it, because the reference has no stable answer to
+/// match. Two runs of the reference over one unchanged tree, minutes apart,
+/// write `imports/merged_import.owl` with `database_cross_reference` and then
+/// with `has cross-reference`, the two 41 MB documents otherwise
+/// byte-identical, and both values have been seen twice: a Java bucket holds
+/// its members in insertion order, and the pipeline does not add its axioms in
+/// a fixed one. owlmake always writes the same value.
 pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, String> {
-    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component, Literal};
+    crate::io::entities::held_labels(model).into_iter().map(|(s, l)| (s.to_string(), l.short_form())).collect()
+}
 
-    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-    // Candidate labels per subject, each with the hash of the axiom carrying it,
-    // and the size of the set that axiom lives in.
-    let mut cands: std::collections::HashMap<String, Vec<(i32, String)>> = Default::default();
-    let mut subject_ann_count: std::collections::HashMap<String, usize> = Default::default();
-    let mut assertions = 0usize;
-    for ac in model.ont.iter() {
-        let Component::AnnotationAssertion(aa) = &ac.component else { continue };
-        assertions += 1;
-        let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
-        let subj = subj.as_ref().to_string();
-        *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
-        if aa.ann.ap.0.as_ref() != RDFS_LABEL {
-            continue;
-        }
-        let AnnotationValue::Literal(lit) = &aa.ann.av else { continue };
-        let text = match lit {
-            Literal::Simple { literal }
-            | Literal::Language { literal, .. }
-            | Literal::Datatype { literal, .. } => literal.clone(),
-        };
-        let h = crate::owlapi_hash::annotation_assertion_hash(
-            &subj,
-            aa.ann.ap.0.as_ref(),
-            &aa.ann.av,
-            &ac.ann,
-        );
-        cands.entry(subj).or_default().push((h, text));
-    }
-    cands
+/// Every `entity IRI → label` the model asserts, with the label's kind, as a
+/// document among several gives it (see [`fold_labels`]).
+pub(crate) fn doc_labels(model: &Model) -> std::collections::HashMap<String, crate::model::DocLabel> {
+    use crate::io::entities::HeldLabel;
+    use crate::model::DocLabel;
+    crate::io::entities::held_labels(model)
         .into_iter()
-        .map(|(subj, mut c)| {
-            // Two candidates that fall in one bucket at both levels stand in
-            // the order the document holds them, which the document does not
-            // record; the lexically smaller comes first, so the pick is the
-            // same from one run to the next.
-            c.sort_by(|a, b| a.1.cmp(&b.1));
-            let text = if c.len() == 1 {
-                c[0].1.clone()
-            } else {
-                let hashes: Vec<i32> = c.iter().map(|(h, _)| *h).collect();
-                let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
-                if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == subj) {
-                    eprintln!("[labels] {subj} subject_total={total} assertions={assertions} cands={:?}", c);
-                }
-                c[crate::owlapi_hash::subject_assertion_order(&hashes, total, assertions)[0]].1.clone()
+        .map(|(s, l)| {
+            let label = match l {
+                HeldLabel::Literal(text) => DocLabel::Literal(text.to_string()),
+                HeldLabel::Iri(iri) => DocLabel::Iri(iri.to_string()),
             };
-            (subj, text)
+            (s.to_string(), label)
         })
         .collect()
+}
+
+/// The labels several documents give, in the order they are consulted: an
+/// entity takes the first literal label any of them gives it, and failing one,
+/// the last IRI.
+pub(crate) fn fold_labels<'d>(
+    docs: impl IntoIterator<Item = &'d std::collections::HashMap<String, crate::model::DocLabel>>,
+) -> std::collections::HashMap<String, crate::model::DocLabel> {
+    use crate::model::DocLabel;
+    let mut out: std::collections::HashMap<String, DocLabel> = std::collections::HashMap::new();
+    for labels in docs {
+        for (subj, label) in labels {
+            let taken = matches!(out.get(subj), Some(DocLabel::Literal(_)));
+            if !taken {
+                out.insert(subj.clone(), label.clone());
+            }
+        }
+    }
+    out
 }
 
 /// The banner-label document for `model` as it stands.
 pub(crate) fn banner_doc_of(model: &Model, root: bool) -> crate::model::BannerDoc {
     let (iri, version) = crate::build::model_ontology_id(model);
-    crate::model::BannerDoc { iri, version, labels: std::sync::Arc::new(rdfs_labels(model)), root }
+    crate::model::BannerDoc { iri, version, labels: std::sync::Arc::new(doc_labels(model)), root }
 }
 
 /// The label a functional write banners each entity with, over every loaded
 /// document: the documents stand in the order a set of them is iterated in,
-/// keyed on each one's identity, and the first document with a label for an
-/// entity supplies it. The document being written is the root, under the
+/// keyed on each one's identity, and [`fold_labels`] settles each entity's
+/// label over them. The document being written is the root, under the
 /// identity it is written with (`root_iri`/`root_version`), and its labels are
 /// the ones it carries as written (`root_labels`): an entity's set of
 /// annotation assertions is sized by what the entity holds when the write
@@ -894,7 +880,7 @@ pub(crate) fn fold_banner_docs(
     docs: &[crate::model::BannerDoc],
     root_iri: Option<&str>,
     root_version: Option<&str>,
-    root_labels: &std::collections::HashMap<String, String>,
+    root_labels: &std::collections::HashMap<String, crate::model::DocLabel>,
 ) -> std::collections::HashMap<String, String> {
     let root_id = (root_iri.map(str::to_string), root_version.map(str::to_string));
     let mut seen: std::collections::HashSet<(Option<String>, Option<String>)> = Default::default();
@@ -906,21 +892,10 @@ pub(crate) fn fold_banner_docs(
         .collect();
     let mut hashes: Vec<i32> = vec![crate::owlapi_hash::ontology_id_hash(root_iri, root_version)];
     hashes.extend(others.iter().map(|d| crate::owlapi_hash::ontology_id_hash(d.iri.as_deref(), d.version.as_deref())));
-    let mut out = std::collections::HashMap::new();
-    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
-        let labels: &std::collections::HashMap<String, String> =
-            if i == 0 { root_labels } else { &others[i - 1].labels };
-        if std::env::var("OM_BANNER_DEBUG").is_ok() {
-            eprintln!("[banner] doc#{i} id-hash={} labels={} root={}", hashes[i], labels.len(), i == 0);
-        }
-        for (subj, label) in labels.iter() {
-            if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == *subj) && !out.contains_key(subj) {
-                eprintln!("[banner] {subj} ← doc#{i}: {label}");
-            }
-            out.entry(subj.clone()).or_insert_with(|| label.clone());
-        }
-    }
-    out
+    let ordered = crate::owlapi_hash::ontology_set_order(&hashes)
+        .into_iter()
+        .map(|i| if i == 0 { root_labels } else { &*others[i - 1].labels });
+    fold_labels(ordered).into_iter().map(|(subj, label)| (subj, label.short_form())).collect()
 }
 
 /// Resolve the `owl:imports` closure with no catalog named on the command line.
@@ -1116,25 +1091,6 @@ pub(crate) fn catalog_resolve(
         .map(|(_, p)| std::path::PathBuf::from(p))
 }
 
-/// The path a `file:` IRI names — `file:///abs/path`, `file:/abs/path` or
-/// `file://localhost/abs/path`, percent-escapes decoded — whether or not it
-/// exists. None for an IRI of any other scheme, or of another host.
-pub(crate) fn file_iri_path(iri: &str) -> Option<std::path::PathBuf> {
-    let rest = iri.strip_prefix("file:")?;
-    let path = match rest.strip_prefix("//") {
-        Some(authority) => {
-            let slash = authority.find('/')?;
-            let host = &authority[..slash];
-            if !(host.is_empty() || host.eq_ignore_ascii_case("localhost")) {
-                return None;
-            }
-            &authority[slash..]
-        }
-        None => rest,
-    };
-    Some(std::path::PathBuf::from(crate::build::percent_decode(path)))
-}
-
 /// Fallback for an import with no catalog entry: a sibling file named after the
 /// IRI's last path/fragment segment, if it exists next to the catalog/input.
 fn default_local(iri: &str, dir: &Path) -> Option<std::path::PathBuf> {
@@ -1159,6 +1115,7 @@ pub mod annotate;
 pub mod explain_axiom;
 pub mod explain_blackbox;
 pub mod explain_markdown;
+pub(crate) mod manchester_markdown;
 pub mod explain_unsat;
 pub mod babelon;
 pub mod babelon_tsv;

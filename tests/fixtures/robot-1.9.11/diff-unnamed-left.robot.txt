@@ -1,0 +1,7 @@
+2 axioms in left ontology but not in right ontology:
+- Declaration(Class(<http://example.org/diff-unnamed#U>))
+- OntologyID(Anonymous-3)
+
+2 axioms in right ontology but not in left ontology:
++ Declaration(Class(<http://example.org/diff-render#Z>))
++ OntologyID(OntologyIRI(<http://example.org/diff-render>) VersionIRI(<http://example.org/diff-render/v1>))

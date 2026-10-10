@@ -1,0 +1,47 @@
+Prefix(:=<http://example.org/iri-labels#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/iri-labels>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:E))
+Declaration(Class(:F))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (Alpha)
+
+AnnotationAssertion(rdfs:label :A :Alpha)
+SubClassOf(:A :B)
+DisjointClasses(:A :C)
+
+# Class: :B (123)
+
+AnnotationAssertion(rdfs:label :B <http://example.org/path/123>)
+SubClassOf(:B :C)
+
+# Class: :C (gamma)
+
+AnnotationAssertion(rdfs:label :C <http://example.org/gamma-iri>)
+AnnotationAssertion(rdfs:label :C "gamma")
+
+# Class: :E (<http://example.org/>)
+
+AnnotationAssertion(rdfs:label :E <http://example.org/>)
+
+# Class: :F (x-label)
+
+AnnotationAssertion(rdfs:label :F <urn:x-label>)
+
+
+)

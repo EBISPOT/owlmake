@@ -1,0 +1,6 @@
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Ontology: <http://example.org/o>
+Annotations: rdfs:comment "c", Annotations: rdfs:label "x" rdfs:comment "c"
+Annotations: Annotations: rdfs:label "y" rdfs:comment "d"
+Annotations: rdfs:comment "d"^^xsd:string

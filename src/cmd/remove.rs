@@ -441,7 +441,7 @@ pub(crate) fn span_gaps(
             .into_iter()
             .enumerate()
             .map(|(ins, it)| {
-                let h = crate::owlapi_hash::ce_hash(&it.0);
+                let h = crate::owlapi_hash::ce_hash(&it.0, model.natural_order());
                 let spread = (h ^ ((h as u32) >> 16) as i32) as usize;
                 (spread & (cap - 1), ins, it)
             })

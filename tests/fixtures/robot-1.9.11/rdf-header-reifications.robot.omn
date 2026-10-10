@@ -1,0 +1,58 @@
+Prefix: obo: <http://purl.obolibrary.org/obo/>
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/header-reifications>
+
+
+
+Ontology: <http://example.org/header-reifications>
+
+
+Annotations: 
+    
+    Annotations: rdfs:label "on the definition"
+                
+                obo:IAO_0000115 "d",
+    
+    Annotations: rdfs:label "block b"
+                
+                rdfs:comment "c",
+    rdfs:comment "c",
+    rdfs:seeAlso <http://example.org/see>,
+    owl:versionInfo "1.0"
+
+AnnotationProperty: obo:IAO_0000115
+
+    
+AnnotationProperty: owl:versionInfo
+
+    
+AnnotationProperty: rdfs:comment
+
+    
+AnnotationProperty: rdfs:label
+
+    
+AnnotationProperty: rdfs:seeAlso
+
+    
+Datatype: rdf:PlainLiteral
+
+    
+Datatype: xsd:string
+
+    
+Class: <http://example.org/header-reifications#A>
+
+    Annotations: 
+        
+            Annotations: 
+                         Annotations: rdfs:label "nested"
+                                     
+                                     rdfs:comment "on the label"
+        rdfs:label "alpha"
+    
+    

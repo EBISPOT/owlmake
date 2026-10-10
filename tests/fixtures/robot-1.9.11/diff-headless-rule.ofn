@@ -1,0 +1,5 @@
+Prefix(:=<http://example.org/eh#>)
+Ontology(<http://example.org/eh>
+Declaration(Class(:A))
+DLSafeRule(Body(ClassAtom(:A Variable(:x))) Head())
+)

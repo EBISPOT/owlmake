@@ -1402,11 +1402,16 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> (Step, Vec<bool
         }
         "rename" => Step::Op(Op::Rename {
             mappings: val2("--mappings", "-m"),
+            mapping: take(&["--mapping"])
+                .into_iter()
+                .filter_map(|v| match v.as_slice() {
+                    [old, new] => Some((old.clone(), new.clone())),
+                    _ => None,
+                })
+                .collect(),
             prefix_mappings: val2("--prefix-mappings", "-r"),
-            allow_missing: {
-                switch("--allow-duplicates", false, false);
-                switch("--allow-missing-entities", true, false).unwrap_or(false)
-            },
+            allow_missing: switch("--allow-missing-entities", true, false).unwrap_or(false),
+            allow_duplicates: switch("--allow-duplicates", true, false).unwrap_or(false),
         }),
         "extract" => Step::Op(Op::Extract {
             method: val2("--method", "-m").unwrap_or_else(|| "BOT".into()),

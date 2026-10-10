@@ -1,0 +1,42 @@
+Prefix(:=<urn:absolute:rel/o.owl#>)
+Prefix(dc:=<http://purl.org/dc/elements/1.1/>)
+Prefix(ex:=<rel/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:absolute:rel/o.owl>
+<urn:absolute:rel/v.owl>
+
+Declaration(Class(<a/b:c>))
+Declaration(Class(<http://example.org/relative-iris#A>))
+Declaration(Class(<http://example.org/relative-iris#B>))
+Declaration(Class(<http://example.org/relative-iris#<{y}>>))
+Declaration(Class(<http://example.org/{x}>))
+Declaration(Class(ex:D))
+Declaration(AnnotationProperty(dc:title))
+Declaration(AnnotationProperty(rdfs:seeAlso))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/relative-iris#A> (<http://example.org/relative-iris#A>)
+
+AnnotationAssertion(rdfs:seeAlso <http://example.org/relative-iris#A> <a.owl#C>)
+AnnotationAssertion(rdfs:seeAlso <http://example.org/relative-iris#A> <http://example.org/{z}>)
+
+# Class: ex:D (ex:D)
+
+AnnotationAssertion(dc:title ex:D "d")
+
+
+DLSafeRule(Body(ClassAtom(<http://example.org/relative-iris#A> Variable(<w>)))Head(ClassAtom(<http://example.org/relative-iris#B> Variable(<w>))))
+DLSafeRule(Body(ClassAtom(<http://example.org/relative-iris#A> Variable(<urn:swrl:var#x>)))Head(ClassAtom(<http://example.org/relative-iris#B> Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(<http://example.org/relative-iris#A> Variable(<urn:swrl:var#y>)))Head(ClassAtom(<http://example.org/relative-iris#B> Variable(<urn:swrl:var#y>))))
+DLSafeRule(Body(ClassAtom(<http://example.org/relative-iris#A> Variable(<urn:swrl:var#ex:v>)))Head(ClassAtom(<http://example.org/relative-iris#B> Variable(<urn:swrl:var#ex:v>))))
+)

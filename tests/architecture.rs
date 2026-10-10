@@ -80,9 +80,9 @@ fn no_new_environment_variables_decide_output() {
         "OM_BANNER_DEBUG",
         // genid/reification tracing
         "OM_ANON_DEBUG",
-        // Prints each statement the RDF/XML reader makes, in the order it
-        // makes them, to stderr; what the reader builds is unchanged.
-        "OM_RDFXML_TRACE",
+        // Prints each statement the RDF/XML and Turtle readers make, in the order they
+        // make them, to stderr; what the readers build is unchanged.
+        "OM_RDF_TRACE",
         "OM_GENID_DEBUG",
         "OM_GENID_DUPLOG",
         "OM_GENID_ENTITYSTART",

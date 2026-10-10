@@ -261,7 +261,7 @@ pub fn step(
     // What the markdown report needs of the examined ontology: the label each
     // entity is shown with, and which ontology each axiom comes from.
     let md_labels = if args.explanation.is_some() { crate::cmd::rdfs_labels(&model) } else { Default::default() };
-    let order = crate::io::natural_order::NaturalOrder::new(model.plain_literals_typed);
+    let order = model.natural_order();
     // The root ontology's own logical axioms, which an inconsistency search's
     // set of axioms is made with room for.
     let root_logical = model
@@ -656,15 +656,18 @@ fn explain_one(
             match goal {
                 // A subsumption the ontology states is its own justification.
                 Goal::Subsumption(..) if stated.is_some() => stated.into_iter().map(|ac| vec![ac.clone()]).collect(),
-                Goal::Subsumption(sub, sup) => crate::cmd::explain_blackbox::justification(&axioms, sub, sup, &entails)
-                    .map(|j| vec![j])
-                    .unwrap_or_default(),
+                Goal::Subsumption(sub, sup) => {
+                    crate::cmd::explain_blackbox::justification(&axioms, sub, sup, &entails, module.natural_order())
+                        .map(|j| vec![j])
+                        .unwrap_or_default()
+                }
                 Goal::Inconsistency(root_logical, imported) => crate::cmd::explain_blackbox::inconsistency_justifications(
                     &axioms,
                     root_logical,
                     max,
                     &|ac| imported.contains(ac),
                     &entails,
+                    module.natural_order(),
                 ),
             }
         } else {

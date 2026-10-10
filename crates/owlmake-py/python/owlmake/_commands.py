@@ -1601,7 +1601,7 @@ def _chain_rewrite_def(self, *, input: Optional[StrOrPath] = None, output: Optio
 Chain.rewrite_def = _chain_rewrite_def
 
 
-def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, label_langs_priority: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Compare two ontologies and report differences
 
     Flags:
@@ -1609,12 +1609,13 @@ def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None,
     right: (--right / -r) Right ontology file
     left_iri: (--left-iri / -L) Load the left ontology from an IRI instead of a file
     right_iri: (--right-iri / -R) Load the right ontology from an IRI instead of a file
-    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports. Accepted for compatibility
-    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports. Accepted for compatibility
+    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports
+    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports
     output: (--output / -o) Output file for the diff report (defaults to stdout)
     format: (--format / -f) Diff output format: plain (default), pretty, or markdown. (html is accepted but rendered as markdown.)
+    label_langs_priority: (--label-langs-priority) Comma-separated language tags, in priority order, for choosing the label a `pretty` report names an entity by (e.g. `en-GB,en,none`); `none` stands for a label with no language tag and `*` for any
     input: (--input / -i) The ontology to diff as the LEFT side when `--left`/`--left-iri` is absent. `diff` is chainable — `om merge -i a.owl diff --right b.owl` compares the merged ontology against `b.owl` — so the piped or `--input` ontology stands in for the left. Accepted and unused when `--left` is given, which is how a release diff invokes it
-    labels: (--labels) Append rdfs:label after entity IRIs in the report (`true` or `yes` in any case)
+    labels: (--labels) Write the report in the `pretty` format, which names entities by their labels, where the `plain` format would be written (`true` or `yes` in any case)
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -1636,6 +1637,7 @@ def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None,
         "right_catalog": right_catalog,
         "output": output,
         "format": format,
+        "label_langs_priority": label_langs_priority,
         "input": input,
         "labels": labels,
         "input_iri": input_iri,
@@ -1652,7 +1654,7 @@ def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None,
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, label_langs_priority: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Compare two ontologies and report differences
 
     Flags:
@@ -1660,12 +1662,13 @@ def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOr
     right: (--right / -r) Right ontology file
     left_iri: (--left-iri / -L) Load the left ontology from an IRI instead of a file
     right_iri: (--right-iri / -R) Load the right ontology from an IRI instead of a file
-    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports. Accepted for compatibility
-    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports. Accepted for compatibility
+    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports
+    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports
     output: (--output / -o) Output file for the diff report (defaults to stdout)
     format: (--format / -f) Diff output format: plain (default), pretty, or markdown. (html is accepted but rendered as markdown.)
+    label_langs_priority: (--label-langs-priority) Comma-separated language tags, in priority order, for choosing the label a `pretty` report names an entity by (e.g. `en-GB,en,none`); `none` stands for a label with no language tag and `*` for any
     input: (--input / -i) The ontology to diff as the LEFT side when `--left`/`--left-iri` is absent. `diff` is chainable — `om merge -i a.owl diff --right b.owl` compares the merged ontology against `b.owl` — so the piped or `--input` ontology stands in for the left. Accepted and unused when `--left` is given, which is how a release diff invokes it
-    labels: (--labels) Append rdfs:label after entity IRIs in the report (`true` or `yes` in any case)
+    labels: (--labels) Write the report in the `pretty` format, which names entities by their labels, where the `plain` format would be written (`true` or `yes` in any case)
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -1687,6 +1690,7 @@ def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOr
         "right_catalog": right_catalog,
         "output": output,
         "format": format,
+        "label_langs_priority": label_langs_priority,
         "input": input,
         "labels": labels,
         "input_iri": input_iri,
@@ -3613,10 +3617,10 @@ def rename(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     output: (--output / -o)
     format: (--format / -f)
     mapping: (--mapping) A single OLD NEW IRI/CURIE mapping. Repeatable
-    mappings: (--mappings / -m) A TSV file of `old<TAB>new` mappings
+    mappings: (--mappings / -m) A table of `old`, `new` and optional `label` columns under a header row: TSV for a `.tsv` or `.txt` file, CSV for a `.csv` one
     allow_missing_entities: (--allow-missing-entities / -M) Allow mappings for entities that do not appear in the ontology (default false). `<bool>`
-    allow_duplicates: (--allow-duplicates / -d) Allow two or more terms to be renamed to the same full IRI (default false). `<bool>`
-    prefix_mappings: (--prefix-mappings / -r) A TSV file of `oldNamespace<TAB>newNamespace` mappings; every IRI starting with an old namespace has that prefix rewritten to the new one
+    allow_duplicates: (--allow-duplicates / -d) Allow two or more rows of the `--mappings` table to give the same new IRI (default false). `<bool>`
+    prefix_mappings: (--prefix-mappings / -r) A table of `old base`, `new base` columns under a header row: every entity whose IRI starts with an old base gets the IRI with each occurrence of that base replaced by the new one
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -3660,10 +3664,10 @@ def _chain_rename(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     output: (--output / -o)
     format: (--format / -f)
     mapping: (--mapping) A single OLD NEW IRI/CURIE mapping. Repeatable
-    mappings: (--mappings / -m) A TSV file of `old<TAB>new` mappings
+    mappings: (--mappings / -m) A table of `old`, `new` and optional `label` columns under a header row: TSV for a `.tsv` or `.txt` file, CSV for a `.csv` one
     allow_missing_entities: (--allow-missing-entities / -M) Allow mappings for entities that do not appear in the ontology (default false). `<bool>`
-    allow_duplicates: (--allow-duplicates / -d) Allow two or more terms to be renamed to the same full IRI (default false). `<bool>`
-    prefix_mappings: (--prefix-mappings / -r) A TSV file of `oldNamespace<TAB>newNamespace` mappings; every IRI starting with an old namespace has that prefix rewritten to the new one
+    allow_duplicates: (--allow-duplicates / -d) Allow two or more rows of the `--mappings` table to give the same new IRI (default false). `<bool>`
+    prefix_mappings: (--prefix-mappings / -r) A table of `old base`, `new base` columns under a header row: every entity whose IRI starts with an old base gets the IRI with each occurrence of that base replaced by the new one
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs

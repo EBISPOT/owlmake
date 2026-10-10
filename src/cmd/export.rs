@@ -584,7 +584,7 @@ fn string_set_order(values: Vec<String>) -> Vec<String> {
 
 impl<'m> Ctx<'m> {
     fn new(model: &'m Model) -> Result<Ctx<'m>> {
-        let order = NaturalOrder::new(model.plain_literals_typed);
+        let order = model.natural_order();
         // CURIEs are written and read with the command line's context.
         let terms = model.context.entries();
         let mut curies = terms.clone();
@@ -605,7 +605,7 @@ impl<'m> Ctx<'m> {
                     root_label_count += 1;
                     if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(l)) = (&aa.subject, &aa.ann.av) {
                         let subject: &str = s.as_ref();
-                        let h = annotation_assertion_hash(subject, RDFS_LABEL, &aa.ann.av, &ac.ann);
+                        let h = annotation_assertion_hash(subject, RDFS_LABEL, &aa.ann.av, &ac.ann, order);
                         root_labels.push((h, l.literal().as_str(), subject));
                     }
                 }
@@ -1105,7 +1105,7 @@ impl<'m> Ctx<'m> {
         for ce in expressions {
             let ce: &'a CE<RcStr> = ce;
             let (mut display, mut sort) = (Vec::new(), Vec::new());
-            for conjunct in conjuncts(ce) {
+            for conjunct in conjuncts(ce, self.order) {
                 let Some((f, n)) = filler(conjunct) else { continue };
                 let anonymous = f.is_anonymous();
                 if !((anonymous && col.anonymous) || (!anonymous && col.named)) {
@@ -1351,9 +1351,9 @@ impl<'a> ObjectRef<'a> {
 }
 
 /// The conjuncts of an expression: an intersection's operands, nested
-/// intersections flattened, in the order a set of them is held; anything else
-/// alone.
-fn conjuncts(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
+/// intersections flattened, in the order a set of them is held, each hashed in
+/// the document's natural order; anything else alone.
+fn conjuncts(ce: &CE<RcStr>, order: NaturalOrder) -> Vec<&CE<RcStr>> {
     fn gather<'a>(ce: &'a CE<RcStr>, out: &mut Vec<&'a CE<RcStr>>) {
         match ce {
             CE::ObjectIntersectionOf(ops) => {
@@ -1372,7 +1372,7 @@ fn conjuncts(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
     gather(ce, &mut out);
     let cap = java_hashset_capacity(out.len()) as u32;
     out.sort_by_key(|c| {
-        let h = crate::owlapi_hash::ce_hash(c) as u32;
+        let h = crate::owlapi_hash::ce_hash(c, order) as u32;
         (h ^ (h >> 16)) & (cap - 1)
     });
     out

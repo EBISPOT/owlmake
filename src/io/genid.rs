@@ -542,6 +542,9 @@ pub struct Genids {
     pub anon_reif: HashMap<u64, Vec<u64>>,
     /// Whether any axiom names an anonymous individual.
     anon_present: bool,
+    /// The natural order of the document's objects, in which the axioms whose
+    /// hashes order the pairs of a sameness store their sets.
+    order: crate::io::natural_order::NaturalOrder,
     /// The graph being numbered: an entity's IRI, [`HEADER_GRAPH`],
     /// [`ANON_GRAPH`] and an individual, [`GENERAL_GRAPH`] and an axiom's
     /// identity, or [`RULES_GRAPH`].
@@ -1377,6 +1380,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         span_shared: model.span_shared.clone(),
         cross_shared: model.cross_shared.clone(),
         shared_occurrences: model.shared_occurrences.clone(),
+        order: model.natural_order(),
         subtree_debug: std::env::var("OM_SUBTREE_DEBUG").is_ok(),
         span_pending: None,
         debug_lo,
@@ -2188,7 +2192,7 @@ impl Genids {
                             let pair = Component::EquivalentDataProperties(horned_owl::model::EquivalentDataProperties(
                                 vec![w[0].clone(), w[1].clone()],
                             ));
-                            crate::owlapi_hash::axiom_hash(&pair, &ac.ann).unwrap_or(0)
+                            crate::owlapi_hash::axiom_hash(&pair, &ac.ann, self.order).unwrap_or(0)
                         })
                         .collect();
                     let mut first = None;
@@ -2725,7 +2729,7 @@ impl Genids {
         consecutive: bool,
         pred: &str,
     ) {
-        let pairs = individual_pair_list(members, anns, consecutive);
+        let pairs = individual_pair_list(members, anns, consecutive, self.order);
         let mut first = None;
         for (a, b) in pairs {
             self.translate_individual(a);
@@ -2796,7 +2800,7 @@ impl Genids {
                 iarg(self, &args.0);
                 iarg(self, &args.1);
             }
-            Atom::DataPropertyAtom { .. } => {}
+            Atom::DataPropertyAtom { args, .. } => iarg(self, &args.0),
             Atom::BuiltInAtom { args, .. } => {
                 // `swrl:arguments` is an RDF list, one cell per argument.
                 for a in args.iter().rev() {
@@ -3598,11 +3602,13 @@ pub(crate) fn reached_individuals(c: &Component<RcStr>) -> Vec<String> {
 /// The statements a sameness (`consecutive`) or a difference of `members` is
 /// written as: the consecutive pairs of its members in order, or, for a
 /// difference, its two members; a sameness of three or more takes its pairs in
-/// the order of a hash set of them.
+/// the order of a hash set of them, each pair an axiom of the document whose
+/// natural order is `order`.
 pub(crate) fn individual_pair_list<'a>(
     members: &'a [Individual<RcStr>],
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
     consecutive: bool,
+    order: crate::io::natural_order::NaturalOrder,
 ) -> Vec<(&'a Individual<RcStr>, &'a Individual<RcStr>)> {
     let mut sorted: Vec<&Individual<RcStr>> = members.iter().collect();
     sorted.sort_by(|a, b| cmp_individual(a, b));
@@ -3617,7 +3623,7 @@ pub(crate) fn individual_pair_list<'a>(
             .iter()
             .map(|(a, b)| {
                 let pair = Component::SameIndividual(horned_owl::model::SameIndividual(vec![(*a).clone(), (*b).clone()]));
-                crate::owlapi_hash::axiom_hash(&pair, anns).unwrap_or(0)
+                crate::owlapi_hash::axiom_hash(&pair, anns, order).unwrap_or(0)
             })
             .collect();
         let order = crate::owlapi_hash::hashset_order(&hashes);

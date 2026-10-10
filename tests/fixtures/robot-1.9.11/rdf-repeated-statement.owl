@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/repeat#"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <owl:Ontology rdf:about="http://example.org/repeat"/>
+    <owl:ObjectProperty rdf:about="http://example.org/repeat#p"/>
+    <owl:DatatypeProperty rdf:about="http://example.org/repeat#d"/>
+    <owl:AnnotationProperty rdf:about="http://example.org/repeat#note"/>
+    <owl:Class rdf:about="http://example.org/repeat#A"/>
+    <A rdf:nodeID="a"/>
+    <A rdf:nodeID="b"/>
+    <rdf:Description rdf:nodeID="a">
+        <p rdf:nodeID="b"/>
+        <d rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1</d>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="a"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/repeat#p"/>
+        <owl:annotatedTarget rdf:nodeID="b"/>
+        <note>related</note>
+    </owl:Axiom>
+    <rdf:Description rdf:nodeID="a">
+        <p rdf:nodeID="b"/>
+        <d rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1</d>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:nodeID="a"/>
+        <owl:annotatedProperty rdf:resource="http://example.org/repeat#d"/>
+        <owl:annotatedTarget rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">1</owl:annotatedTarget>
+        <note>valued</note>
+    </owl:Axiom>
+</rdf:RDF>

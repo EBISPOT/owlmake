@@ -30,10 +30,30 @@ pub type CmOnto = ComponentMappedOntology<RcStr, RcAnnotatedComponent>;
 pub struct BannerDoc {
     pub iri: Option<String>,
     pub version: Option<String>,
-    pub labels: std::sync::Arc<std::collections::HashMap<String, String>>,
+    pub labels: std::sync::Arc<std::collections::HashMap<String, DocLabel>>,
     /// The document that opened the pipeline, whose identity is the one it
     /// carries when written.
     pub root: bool,
+}
+
+/// The label a document gives an entity (see [`crate::io::entities::HeldLabel`]):
+/// a literal's text, or an IRI value, which names the entity until a literal
+/// does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DocLabel {
+    Literal(String),
+    Iri(String),
+}
+
+impl DocLabel {
+    /// The label as a label provider shows it: a literal's text, or the short
+    /// form of an IRI.
+    pub fn short_form(&self) -> String {
+        match self {
+            DocLabel::Literal(text) => text.clone(),
+            DocLabel::Iri(iri) => crate::owlapi_hash::iri_short_form(iri),
+        }
+    }
 }
 
 /// An import of the closure inlined into a model: its IRI, the document it was
@@ -398,6 +418,12 @@ pub struct Model {
 }
 
 impl Model {
+    /// The natural order of this document's objects, in which its sets are
+    /// stored: how its untyped literals key is [`Model::plain_literals_typed`].
+    pub fn natural_order(&self) -> crate::io::natural_order::NaturalOrder {
+        crate::io::natural_order::NaturalOrder::new(self.plain_literals_typed)
+    }
+
     pub fn new() -> Self {
         Model {
             ont: SetOntology::new(),
@@ -666,6 +692,44 @@ pub fn asserts_deprecated(av: &horned_owl::model::AnnotationValue<Str>) -> bool 
             if literal == "true"
                 && datatype_iri.as_ref() == "http://www.w3.org/2001/XMLSchema#boolean"
     )
+}
+
+/// An ontology or version IRI as an ontology's ID holds it. One that is not
+/// absolute is made so by prefixing `urn:absolute:`, and logged as an error;
+/// one that labels a blank node, `_:` with `genid` somewhere after it, names no
+/// IRI.
+pub(crate) fn ontology_iri_as_made(build: &Build<RcStr>, iri: &str) -> Option<horned_owl::model::IRI<RcStr>> {
+    if iri.starts_with("_:") && iri.contains("genid") {
+        return None;
+    }
+    if horned_owl::model::is_absolute_iri(iri) {
+        return Some(build.iri(iri));
+    }
+    crate::cmd::reason::log_error(
+        "org.semanticweb.owlapi.model.OWLOntologyID",
+        &format!(
+            "Ontology IRIs must be absolute; IRI {iri} is relative and will be made absolute by prefixing urn:absolute: to it"
+        ),
+    );
+    Some(build.iri(format!("urn:absolute:{iri}")))
+}
+
+/// The ID of an ontology with the given IRI and version IRI, each as
+/// [`ontology_iri_as_made`] makes it. A version IRI with no ontology IRI is
+/// refused.
+pub(crate) fn ontology_id(
+    build: &Build<RcStr>,
+    iri: Option<&str>,
+    viri: Option<&str>,
+) -> anyhow::Result<horned_owl::model::OntologyID<RcStr>> {
+    let id = horned_owl::model::OntologyID {
+        iri: iri.and_then(|iri| ontology_iri_as_made(build, iri)),
+        viri: viri.and_then(|viri| ontology_iri_as_made(build, viri)),
+    };
+    if id.iri.is_none() && id.viri.is_some() {
+        anyhow::bail!("If the ontology IRI is null then it is not possible to specify a version IRI");
+    }
+    Ok(id)
 }
 
 /// A literal as an ontology holds it once made: `l` itself, or what

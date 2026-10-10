@@ -13,8 +13,11 @@
 //!   except that an empty one hashes to 0 and the individuals of a one-of
 //!   hash as a set (the sum). IRIs hash as the sum of the Java string hashes
 //!   of their namespace and NCName-suffix halves;
-//! - the component order (`owl_cmp`) — the natural order
-//!   ([`NaturalOrder`]), which sorts a set's members as OWLAPI stores them;
+//! - the component order — the natural order ([`NaturalOrder`]) of the
+//!   document the object comes from, which sorts a set's members as OWLAPI
+//!   stores them; where a document types its untyped literals `xsd:string`,
+//!   its literals, and the annotations and class expressions holding them,
+//!   sort differently;
 //! - the bucket order (`hashset_order`) — Java's HashMap spread
 //!   (`h ^ (h >>> 16)`) masked by the table capacity that results from
 //!   inserting `n` elements into a default-sized table. Entries in the SAME
@@ -140,13 +143,6 @@ pub fn iri_cmp(a: &str, b: &str) -> Ordering {
     na.cmp(nb).then_with(|| ra.cmp(rb))
 }
 
-/// The order a document's class expressions take in a set: the natural
-/// order of a document that keeps its untyped literals untyped. It decides
-/// the order a set's members are stored, and so hashed, in.
-pub fn owl_cmp(a: &CE<RcStr>, b: &CE<RcStr>) -> Ordering {
-    NaturalOrder::default().ce(a, b)
-}
-
 fn tag(prime: i32, parts: &[i32]) -> i32 {
     let mut h = prime;
     for p in parts {
@@ -175,7 +171,7 @@ pub fn ope_hash(ope: &OPE<RcStr>) -> i32 {
 
 /// An individual's hash. A named one is tagged like any other entity; an
 /// anonymous one is the string hash of its node id (`_:genid…`), untagged.
-fn ind_hash(i: &Individual<RcStr>) -> i32 {
+pub(crate) fn individual_hash(i: &Individual<RcStr>) -> i32 {
     match i {
         Individual::Named(n) => tag(P_NAMED_INDIVIDUAL, &[iri_hash(n.0.as_ref())]),
         Individual::Anonymous(a) => java_string_hash(&crate::io::entities::node_id(a.0.as_ref())),
@@ -183,55 +179,57 @@ fn ind_hash(i: &Individual<RcStr>) -> i32 {
 }
 
 /// The hash of a set of class expressions as OWLAPI stores one: the list hash
-/// of its distinct members in `owl_cmp` order, or 0 when it has none.
-pub fn ce_set_hash(v: &[CE<RcStr>]) -> i32 {
-    sorted_list_hash(v, ce_hash, owl_cmp)
+/// of its distinct members in the document's natural order, or 0 when it has
+/// none.
+pub fn ce_set_hash(v: &[CE<RcStr>], order: NaturalOrder) -> i32 {
+    sorted_list_hash(v, |ce| ce_hash(ce, order), |a, b| order.ce(a, b))
 }
 
-pub fn ce_hash(ce: &CE<RcStr>) -> i32 {
+/// A class expression's hash. Its operands and the literals under it are sets,
+/// stored in `order`, the natural order of the document it comes from.
+pub fn ce_hash(ce: &CE<RcStr>, order: NaturalOrder) -> i32 {
     match ce {
         CE::Class(c) => tag(P_CLASS, &[iri_hash(c.0.as_ref())]),
         CE::ObjectSomeValuesFrom { ope, bce } => {
-            tag(P_OBJ_SOME_VALUES, &[ope_hash(ope), ce_hash(bce)])
+            tag(P_OBJ_SOME_VALUES, &[ope_hash(ope), ce_hash(bce, order)])
         }
         CE::ObjectAllValuesFrom { ope, bce } => {
-            tag(P_OBJ_ALL_VALUES, &[ope_hash(ope), ce_hash(bce)])
+            tag(P_OBJ_ALL_VALUES, &[ope_hash(ope), ce_hash(bce, order)])
         }
-        CE::ObjectIntersectionOf(v) => tag(P_OBJ_INTERSECTION, &[ce_set_hash(v)]),
-        CE::ObjectUnionOf(v) => tag(P_OBJ_UNION, &[ce_set_hash(v)]),
-        CE::ObjectComplementOf(b) => tag(P_OBJ_COMPLEMENT, &[ce_hash(b)]),
+        CE::ObjectIntersectionOf(v) => tag(P_OBJ_INTERSECTION, &[ce_set_hash(v, order)]),
+        CE::ObjectUnionOf(v) => tag(P_OBJ_UNION, &[ce_set_hash(v, order)]),
+        CE::ObjectComplementOf(b) => tag(P_OBJ_COMPLEMENT, &[ce_hash(b, order)]),
         CE::ObjectExactCardinality { n, ope, bce } => {
-            tag(P_OBJ_EXACT_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce)])
+            tag(P_OBJ_EXACT_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce, order)])
         }
         CE::ObjectMinCardinality { n, ope, bce } => {
-            tag(P_OBJ_MIN_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce)])
+            tag(P_OBJ_MIN_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce, order)])
         }
         CE::ObjectMaxCardinality { n, ope, bce } => {
-            tag(P_OBJ_MAX_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce)])
+            tag(P_OBJ_MAX_CARD, &[ope_hash(ope), *n as i32, ce_hash(bce, order)])
         }
-        CE::ObjectHasValue { ope, i } => tag(P_OBJ_HAS_VALUE, &[ope_hash(ope), ind_hash(i)]),
+        CE::ObjectHasValue { ope, i } => tag(P_OBJ_HAS_VALUE, &[ope_hash(ope), individual_hash(i)]),
         CE::ObjectHasSelf(ope) => tag(P_OBJ_HAS_SELF, &[ope_hash(ope)]),
         // The individuals are a set, not a sorted list, so they hash as one: the
         // sum of the distinct members' hashes.
         CE::ObjectOneOf(v) => {
-            let order = NaturalOrder::default();
             let mut inds: Vec<&Individual<RcStr>> = v.iter().collect();
             inds.sort_by(|x, y| order.individual(x, y));
             inds.dedup_by(|x, y| order.individual(x, y) == Ordering::Equal);
-            let sum = inds.iter().map(|i| ind_hash(i)).fold(0i32, |acc, h| acc.wrapping_add(h));
+            let sum = inds.iter().map(|i| individual_hash(i)).fold(0i32, |acc, h| acc.wrapping_add(h));
             tag(P_OBJ_ONE_OF, &[sum])
         }
-        CE::DataSomeValuesFrom { dp, dr } => tag(2689, &[data_property_hash(dp), data_range_hash(dr)]),
-        CE::DataAllValuesFrom { dp, dr } => tag(2371, &[data_property_hash(dp), data_range_hash(dr)]),
+        CE::DataSomeValuesFrom { dp, dr } => tag(2689, &[data_property_hash(dp), data_range_hash(dr, order)]),
+        CE::DataAllValuesFrom { dp, dr } => tag(2371, &[data_property_hash(dp), data_range_hash(dr, order)]),
         CE::DataHasValue { dp, l } => tag(2749, &[data_property_hash(dp), literal_hash(l)]),
         CE::DataExactCardinality { n, dp, dr } => {
-            tag(2437, &[data_property_hash(dp), *n as i32, data_range_hash(dr)])
+            tag(2437, &[data_property_hash(dp), *n as i32, data_range_hash(dr, order)])
         }
         CE::DataMaxCardinality { n, dp, dr } => {
-            tag(2539, &[data_property_hash(dp), *n as i32, data_range_hash(dr)])
+            tag(2539, &[data_property_hash(dp), *n as i32, data_range_hash(dr, order)])
         }
         CE::DataMinCardinality { n, dp, dr } => {
-            tag(2621, &[data_property_hash(dp), *n as i32, data_range_hash(dr)])
+            tag(2621, &[data_property_hash(dp), *n as i32, data_range_hash(dr, order)])
         }
     }
 }
@@ -271,28 +269,28 @@ pub(crate) fn literal_payload_hash(text: &str, datatype: &str) -> i32 {
 /// a plain/xsd:string/langString literal normalizes its datatype to
 /// `rdf:PlainLiteral` and the payload is [`literal_payload_hash`].
 fn literal_hash(lit: &Literal<RcStr>) -> i32 {
+    match lit {
+        Literal::Simple { literal } => literal_parts_hash(literal, None, None),
+        Literal::Language { literal, lang } => literal_parts_hash(literal, None, Some(lang)),
+        Literal::Datatype { literal, datatype_iri } => literal_parts_hash(literal, Some(datatype_iri.as_ref()), None),
+    }
+}
+
+/// [`literal_hash`] of the literal of `text` typed `datatype`, untyped where
+/// that is `None`, and tagged `lang` where that is given.
+pub(crate) fn literal_parts_hash(text: &str, datatype: Option<&str>, lang: Option<&str>) -> i32 {
     const PLAIN: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
-    let (text, dt): (&str, &str) = match lit {
-        Literal::Simple { literal } => (literal, PLAIN),
-        Literal::Language { literal, .. } => (literal, PLAIN),
-        Literal::Datatype { literal, datatype_iri } => {
-            let d = datatype_iri.as_ref();
-            if d == "http://www.w3.org/2001/XMLSchema#string" || d == PLAIN {
-                (literal, PLAIN)
-            } else {
-                (literal, d)
-            }
-        }
+    let dt = match datatype {
+        Some(d) if d != "http://www.w3.org/2001/XMLSchema#string" => d,
+        _ => PLAIN,
     };
     let dt_hash = tag(P_DATATYPE, &[iri_hash(dt)]);
     let payload = literal_payload_hash(text, dt);
     let h = (277i32.wrapping_mul(37).wrapping_add(dt_hash)).wrapping_mul(37).wrapping_add(payload);
     // A language tag is folded in after the payload.
-    match lit {
-        Literal::Language { lang, .. } => {
-            h.wrapping_mul(37).wrapping_add(java_string_hash(lang.as_ref()))
-        }
-        _ => h,
+    match lang {
+        Some(lang) => h.wrapping_mul(37).wrapping_add(java_string_hash(lang)),
+        None => h,
     }
 }
 
@@ -312,6 +310,7 @@ pub fn annotation_assertion_hash(
     property: &str,
     value: &AnnotationValue<RcStr>,
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
+    order: NaturalOrder,
 ) -> i32 {
     tag(
         P_ANNOTATION_ASSERTION,
@@ -319,7 +318,7 @@ pub fn annotation_assertion_hash(
             iri_hash(subject),
             tag(P_ANNOTATION_PROPERTY_ENTITY, &[iri_hash(property)]),
             annotation_value_hash(value),
-            axiom_annotations_hash(anns),
+            axiom_annotations_hash(anns, order),
         ],
     )
 }
@@ -336,12 +335,12 @@ pub fn annotation_hash(a: &Annotation<RcStr>) -> i32 {
 
 /// The hash of an axiom's annotation set: 0 when it has none, else the list
 /// hash of its annotations sorted by property and then value, a literal value
-/// by datatype, lexical form and language.
-pub(crate) fn axiom_annotations_hash(anns: &std::collections::BTreeSet<Annotation<RcStr>>) -> i32 {
+/// by datatype, lexical form and language — the datatype an untyped literal
+/// keys as being the document's (`order`).
+pub(crate) fn axiom_annotations_hash(anns: &std::collections::BTreeSet<Annotation<RcStr>>, order: NaturalOrder) -> i32 {
     if anns.is_empty() {
         return 0;
     }
-    let order = NaturalOrder::default();
     let sorted = order.sorted_annotations(anns);
     list_hash(&sorted.iter().map(|a| annotation_hash(a)).collect::<Vec<i32>>())
 }
@@ -355,17 +354,15 @@ fn datatype_hash(iri: &str) -> i32 {
 }
 
 /// A data range's hash. Its operands, values and facet restrictions are sets,
-/// stored in the natural order.
-fn data_range_hash(dr: &DR<RcStr>) -> i32 {
-    let order = NaturalOrder::default();
+/// stored in `order`, the natural order of the document it comes from.
+pub(crate) fn data_range_hash(dr: &DR<RcStr>, order: NaturalOrder) -> i32 {
+    let hash = |r: &DR<RcStr>| data_range_hash(r, order);
     match dr {
         DR::Datatype(d) => datatype_hash(d.0.as_ref()),
-        DR::DataComplementOf(r) => tag(P_DATA_COMPLEMENT, &[data_range_hash(r)]),
+        DR::DataComplementOf(r) => tag(P_DATA_COMPLEMENT, &[hash(r)]),
         DR::DataOneOf(v) => tag(P_DATA_ONE_OF, &[sorted_list_hash(v, literal_hash, |x, y| order.literal(x, y))]),
-        DR::DataIntersectionOf(v) => {
-            tag(P_DATA_INTERSECTION, &[sorted_list_hash(v, data_range_hash, |x, y| order.dr(x, y))])
-        }
-        DR::DataUnionOf(v) => tag(P_DATA_UNION, &[sorted_list_hash(v, data_range_hash, |x, y| order.dr(x, y))]),
+        DR::DataIntersectionOf(v) => tag(P_DATA_INTERSECTION, &[sorted_list_hash(v, hash, |x, y| order.dr(x, y))]),
+        DR::DataUnionOf(v) => tag(P_DATA_UNION, &[sorted_list_hash(v, hash, |x, y| order.dr(x, y))]),
         DR::DatatypeRestriction(d, fs) => tag(
             P_DATATYPE_RESTRICTION,
             &[
@@ -397,7 +394,7 @@ fn sorted_list_hash<T>(items: &[T], hash: impl Fn(&T) -> i32, cmp: impl Fn(&T, &
 
 fn swrl_iarg_hash(a: &horned_owl::model::IArgument<RcStr>) -> i32 {
     match a {
-        horned_owl::model::IArgument::Individual(i) => tag(5189, &[ind_hash(i)]),
+        horned_owl::model::IArgument::Individual(i) => tag(5189, &[individual_hash(i)]),
         horned_owl::model::IArgument::Variable(v) => tag(5099, &[iri_hash(v.0.as_ref())]),
     }
 }
@@ -409,16 +406,17 @@ fn swrl_darg_hash(a: &horned_owl::model::DArgument<RcStr>) -> i32 {
     }
 }
 
-fn swrl_atom_hash(atom: &horned_owl::model::Atom<RcStr>) -> i32 {
+/// `SWRLAtom.hashCode()`.
+pub(crate) fn swrl_atom_hash(atom: &horned_owl::model::Atom<RcStr>, order: NaturalOrder) -> i32 {
     use horned_owl::model::Atom;
     match atom {
-        Atom::ClassAtom { pred, arg } => tag(4663, &[swrl_iarg_hash(arg), ce_hash(pred)]),
-        Atom::DataRangeAtom { pred, arg } => tag(4759, &[swrl_darg_hash(arg), data_range_hash(pred)]),
+        Atom::ClassAtom { pred, arg } => tag(4663, &[swrl_iarg_hash(arg), ce_hash(pred, order)]),
+        Atom::DataRangeAtom { pred, arg } => tag(4759, &[swrl_darg_hash(arg), data_range_hash(pred, order)]),
         Atom::ObjectPropertyAtom { pred, args } => {
             tag(4861, &[swrl_iarg_hash(&args.0), swrl_iarg_hash(&args.1), ope_hash(pred)])
         }
         Atom::DataPropertyAtom { pred, args } => {
-            tag(4943, &[swrl_darg_hash(&args.0), swrl_darg_hash(&args.1), data_property_hash(pred)])
+            tag(4943, &[swrl_iarg_hash(&args.0), swrl_darg_hash(&args.1), data_property_hash(pred)])
         }
         Atom::BuiltInAtom { pred, args } => tag(
             5009,
@@ -430,18 +428,21 @@ fn swrl_atom_hash(atom: &horned_owl::model::Atom<RcStr>) -> i32 {
 }
 
 /// `OWLAxiom.hashCode()` for a logical axiom or a declaration: the axiom
-/// kind's prime tag over its components and its annotation set. `None` for a
-/// component that is neither.
+/// kind's prime tag over its components and its annotation set, the sets among
+/// them stored in `order`, the natural order of the document the axiom comes
+/// from. `None` for a component that is neither.
 pub fn axiom_hash(
     c: &horned_owl::model::Component<RcStr>,
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
+    order: NaturalOrder,
 ) -> Option<i32> {
     use horned_owl::model::{Component as C, SubObjectPropertyExpression as SOPE};
-    let a = axiom_annotations_hash(anns);
-    let order = NaturalOrder::default();
-    let ces = ce_set_hash;
+    let a = axiom_annotations_hash(anns, order);
+    let ce_hash = |ce: &CE<RcStr>| ce_hash(ce, order);
+    let data_range_hash = |dr: &DR<RcStr>| data_range_hash(dr, order);
+    let ces = |v: &[CE<RcStr>]| ce_set_hash(v, order);
     let opes = |v: &[OPE<RcStr>]| sorted_list_hash(v, ope_hash, |x, y| order.ope(x, y));
-    let inds = |v: &[Individual<RcStr>]| sorted_list_hash(v, ind_hash, |x, y| order.individual(x, y));
+    let inds = |v: &[Individual<RcStr>]| sorted_list_hash(v, individual_hash, |x, y| order.individual(x, y));
     let dps = |v: &[horned_owl::model::DataProperty<RcStr>]| {
         sorted_list_hash(v, data_property_hash, |x, y| iri_cmp(x.0.as_ref(), y.0.as_ref()))
     };
@@ -490,21 +491,21 @@ pub fn axiom_hash(
         C::FunctionalDataProperty(x) => tag(1019, &[data_property_hash(&x.0), a]),
         C::SameIndividual(x) => tag(1993, &[inds(&x.0), a]),
         C::DifferentIndividuals(x) => tag(419, &[inds(&x.0), a]),
-        C::ClassAssertion(x) => tag(73, &[ind_hash(&x.i), ce_hash(&x.ce), a]),
-        C::ObjectPropertyAssertion(x) => tag(1523, &[ind_hash(&x.from), ope_hash(&x.ope), ind_hash(&x.to), a]),
+        C::ClassAssertion(x) => tag(73, &[individual_hash(&x.i), ce_hash(&x.ce), a]),
+        C::ObjectPropertyAssertion(x) => tag(1523, &[individual_hash(&x.from), ope_hash(&x.ope), individual_hash(&x.to), a]),
         C::NegativeObjectPropertyAssertion(x) => {
-            tag(1453, &[ind_hash(&x.from), ope_hash(&x.ope), ind_hash(&x.to), a])
+            tag(1453, &[individual_hash(&x.from), ope_hash(&x.ope), individual_hash(&x.to), a])
         }
         C::DataPropertyAssertion(x) => {
-            tag(127, &[ind_hash(&x.from), data_property_hash(&x.dp), literal_hash(&x.to), a])
+            tag(127, &[individual_hash(&x.from), data_property_hash(&x.dp), literal_hash(&x.to), a])
         }
         C::NegativeDataPropertyAssertion(x) => {
-            tag(1381, &[ind_hash(&x.from), data_property_hash(&x.dp), literal_hash(&x.to), a])
+            tag(1381, &[individual_hash(&x.from), data_property_hash(&x.dp), literal_hash(&x.to), a])
         }
         C::Rule(r) => {
             // A rule's body and head are insertion-ordered sets, hashed as sets.
             let atoms = |v: &[horned_owl::model::Atom<RcStr>]| {
-                v.iter().map(swrl_atom_hash).fold(0i32, |acc, h| acc.wrapping_add(h))
+                v.iter().map(|atom| swrl_atom_hash(atom, order)).fold(0i32, |acc, h| acc.wrapping_add(h))
             };
             tag(4591, &[atoms(&r.body), atoms(&r.head)])
         }
@@ -527,8 +528,9 @@ pub fn axiom_hash(
 pub fn equivalent_classes_hash(
     members: &[CE<RcStr>],
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
+    order: NaturalOrder,
 ) -> i32 {
-    tag(P_EQUIVALENT_CLASSES, &[ce_set_hash(members), axiom_annotations_hash(anns)])
+    tag(P_EQUIVALENT_CLASSES, &[ce_set_hash(members, order), axiom_annotations_hash(anns, order)])
 }
 
 /// The hash of a named individual.
@@ -764,29 +766,31 @@ mod tests {
 
     /// Every logical axiom kind and declaration hashes exactly as OWLAPI 4.5.29
     /// hashes it: the fixture's expected values are `OWLAxiom.hashCode()` as
-    /// printed by OWLAPI over the same document.
+    /// printed by OWLAPI over the same document. The Turtle copy holds the same
+    /// axioms with its untyped literals typed `xsd:string`, which changes the
+    /// order its annotation sets and literal sets are hashed in.
     #[test]
     fn axiom_hashes_are_owlapis() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/owlapi-hash");
-        let model = crate::io::load(&dir.join("axioms.ofn")).unwrap();
-        let mut ours: Vec<(i32, String)> = model
-            .ont
-            .iter()
-            .filter_map(|ac| axiom_hash(&ac.component, &ac.ann).map(|h| (h, format!("{:?}", ac.component))))
-            .collect();
-        ours.sort();
-        let want: Vec<i32> = std::fs::read_to_string(dir.join("axioms.java-hashes"))
-            .unwrap()
-            .lines()
-            .map(|l| l.trim().parse().unwrap())
-            .collect();
-        let missing: Vec<&i32> = want.iter().filter(|h| !ours.iter().any(|(o, _)| o == *h)).collect();
-        let extra: Vec<&(i32, String)> = ours.iter().filter(|(o, _)| !want.contains(o)).collect();
-        assert!(
-            missing.is_empty() && extra.is_empty() && ours.len() == want.len(),
-            "OWLAPI hashes with no match: {missing:?}\nours with no match:\n{}",
-            extra.iter().map(|(h, d)| format!("  {h}  {}", &d[..d.len().min(160)])).collect::<Vec<_>>().join("\n")
-        );
+        for (doc, hashes) in [("axioms.ofn", "axioms.java-hashes"), ("axioms.ttl", "axioms.ttl.java-hashes")] {
+            let model = crate::io::load(&dir.join(doc)).unwrap();
+            let order = model.natural_order();
+            let mut ours: Vec<(i32, String)> = model
+                .ont
+                .iter()
+                .filter_map(|ac| axiom_hash(&ac.component, &ac.ann, order).map(|h| (h, format!("{:?}", ac.component))))
+                .collect();
+            ours.sort();
+            let want: Vec<i32> =
+                std::fs::read_to_string(dir.join(hashes)).unwrap().lines().map(|l| l.trim().parse().unwrap()).collect();
+            let missing: Vec<&i32> = want.iter().filter(|h| !ours.iter().any(|(o, _)| o == *h)).collect();
+            let extra: Vec<&(i32, String)> = ours.iter().filter(|(o, _)| !want.contains(o)).collect();
+            assert!(
+                missing.is_empty() && extra.is_empty() && ours.len() == want.len(),
+                "{doc}: OWLAPI hashes with no match: {missing:?}\nours with no match:\n{}",
+                extra.iter().map(|(h, d)| format!("  {h}  {}", &d[..d.len().min(160)])).collect::<Vec<_>>().join("\n")
+            );
+        }
     }
 
     use super::*;
@@ -833,14 +837,14 @@ mod tests {
         };
         // Component ground truth.
         assert_eq!(iri_hash("http://purl.obolibrary.org/obo/CL_0002438"), -267643151);
-        assert_eq!(ce_hash(&cls("CL_0002438")), -267572068);
-        assert_eq!(ce_hash(&some("RO_0002162", "NCBITaxon_10090")), 1527442063);
+        assert_eq!(ce_hash(&cls("CL_0002438"), NaturalOrder::default()), -267572068);
+        assert_eq!(ce_hash(&some("RO_0002162", "NCBITaxon_10090"), NaturalOrder::default()), 1527442063);
         assert_eq!(
             ce_hash(&CE::ObjectIntersectionOf(vec![
                 cls("CL_0000824"),
                 some("RO_0002104", "PR_000002977"),
                 some("RO_0002162", "NCBITaxon_10090")
-            ])),
+            ]), NaturalOrder::default()),
             1075431256
         );
         let anns = std::collections::BTreeSet::new();
@@ -872,10 +876,10 @@ mod tests {
             ),
         ];
         for (members, want) in &cases {
-            assert_eq!(equivalent_classes_hash(members, &anns), *want);
+            assert_eq!(equivalent_classes_hash(members, &anns, NaturalOrder::default()), *want);
         }
         // The runtime-observed iteration skeleton: buckets 0,1,2,2,9 (cap 16).
-        let hashes: Vec<i32> = cases.iter().map(|(m, _)| equivalent_classes_hash(m, &anns)).collect();
+        let hashes: Vec<i32> = cases.iter().map(|(m, _)| equivalent_classes_hash(m, &anns, NaturalOrder::default())).collect();
         let order = hashset_order(&hashes);
         assert_eq!(order[0], 2, "CL_4030101 first (bucket 0)");
         assert_eq!(order[1], 0, "CL_0002438 second (bucket 1)");
@@ -891,15 +895,15 @@ mod tests {
         let p = || OPE::ObjectProperty(b.object_property(format!("{t}p")));
         let named = |n: &str| Individual::Named(b.named_individual(format!("{t}{n}")));
         let value = |i: Individual<RcStr>| CE::ObjectHasValue { ope: p(), i };
-        assert_eq!(ce_hash(&value(named("a1"))), 2015939837);
-        assert_eq!(ce_hash(&value(named("a23"))), 2016031599);
+        assert_eq!(ce_hash(&value(named("a1")), NaturalOrder::default()), 2015939837);
+        assert_eq!(ce_hash(&value(named("a23")), NaturalOrder::default()), 2016031599);
         // A one-of's individuals hash as a set: the order they are given in and
         // a repeated member change nothing.
-        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a1"), named("a2")])), -1216281020);
-        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a2"), named("a1"), named("a2")])), -1216281020);
+        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a1"), named("a2")]), NaturalOrder::default()), -1216281020);
+        assert_eq!(ce_hash(&CE::ObjectOneOf(vec![named("a2"), named("a1"), named("a2")]), NaturalOrder::default()), -1216281020);
         // An anonymous individual hashes as its node id, however the id is spelled.
         let anon = |id: &str| Individual::Anonymous(horned_owl::model::AnonymousIndividual(RcStr::from(id)));
-        assert_eq!(ce_hash(&value(anon("_:genid2147483648"))), 575983105);
-        assert_eq!(ce_hash(&value(anon("genid2147483648"))), 575983105);
+        assert_eq!(ce_hash(&value(anon("_:genid2147483648")), NaturalOrder::default()), 575983105);
+        assert_eq!(ce_hash(&value(anon("genid2147483648")), NaturalOrder::default()), 575983105);
     }
 }

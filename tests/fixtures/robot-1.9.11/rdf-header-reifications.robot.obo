@@ -1,0 +1,12 @@
+format-version: 1.2
+remark: c {name="block b"}
+remark: c
+ontology: http://example.org/header-reifications
+property_value: owl:versionInfo "1.0" xsd:string
+property_value: seeAlso http://example.org/see
+def: d {name="on the definition"}
+
+[Term]
+id: A
+name: alpha {comment="on the label"}
+

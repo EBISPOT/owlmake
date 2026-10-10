@@ -479,7 +479,7 @@ impl<W: Write> Renderer<'_, W> {
             Atom::DataPropertyAtom { pred, args } => {
                 self.xml.start("DataPropertyAtom")?;
                 self.entity("DataProperty", pred.0.as_ref())?;
-                self.darg(&args.0)?;
+                self.iarg(&args.0)?;
                 self.darg(&args.1)?;
             }
             Atom::BuiltInAtom { pred, args } => {
@@ -719,7 +719,7 @@ fn entity_element(kind: Kind) -> &'static str {
 /// Write `model` as OWL/XML, declaring `prefixes` (name → namespace, the default
 /// prefix as the empty name) in the order given.
 pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -> Result<()> {
-    let order = NaturalOrder::new(model.plain_literals_typed);
+    let order = model.natural_order();
     let (iri, viri) = model
         .ont
         .iter()

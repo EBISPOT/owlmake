@@ -1,0 +1,24 @@
+Prefix(:=<http://example.org/repeat#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/repeat>
+
+Declaration(Class(:A))
+Declaration(ObjectProperty(:p))
+Declaration(DataProperty(:d))
+Declaration(AnnotationProperty(:note))
+
+
+
+
+
+ClassAssertion(:A _:genid2147483648)
+ClassAssertion(:A _:genid2147483649)
+ObjectPropertyAssertion(Annotation(:note "related") :p _:genid2147483648 _:genid2147483649)
+DataPropertyAssertion(Annotation(:note "valued") :d _:genid2147483648 "1"^^xsd:integer)
+)
