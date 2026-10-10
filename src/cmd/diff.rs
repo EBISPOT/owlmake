@@ -67,19 +67,30 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
 /// Load one side of the diff from either a file (`--left`/`--right`) or an IRI
 /// (`--left-iri`/`--right-iri`). Exactly one of the two must be given.
+///
+/// A side its own catalog option (`--left-catalog`/`--right-catalog`) names has
+/// its closure merged through that catalog by the caller. Any other side is read
+/// with its imports closure through the catalog beside it, so an import that
+/// resolves nowhere fails the load.
 fn load_side(
     path: Option<&std::path::Path>,
     iri: Option<&str>,
     which: &str,
+    catalog: Option<&std::path::Path>,
+    common: &crate::cmd::CommonArgs,
 ) -> anyhow::Result<crate::model::Model> {
-    match (path, iri) {
-        (Some(p), None) => io::load(p),
-        (None, Some(i)) => io::load_iri(i, None),
+    let mut model = match (path, iri) {
+        (Some(p), None) => io::load(p)?,
+        (None, Some(i)) => io::load_iri(i, None)?,
         (Some(_), Some(_)) => {
             anyhow::bail!("diff: provide only one of --{which} or --{which}-iri")
         }
         (None, None) => anyhow::bail!("diff: --{which} or --{which}-iri is required"),
+    };
+    if catalog.is_none() {
+        crate::cmd::read_imports_closure(&mut model, path, common)?;
     }
+    Ok(model)
 }
 
 /// The document IRI reported as `Loaded from:`. For a file it is `file:` plus
@@ -153,13 +164,27 @@ pub fn step(
         // whatever follows it, and `step` returns `piped` unchanged below.
         match (&piped, &args.input) {
             (Some(m), _) => m.clone(),
-            (None, Some(p)) => io::load(p)?,
-            (None, None) => load_side(None, None, "left")?,
+            (None, Some(p)) => {
+                load_side(Some(p), None, "left", args.left_catalog.as_deref(), &args.common)?
+            }
+            (None, None) => load_side(None, None, "left", None, &args.common)?,
         }
     } else {
-        load_side(args.left.as_deref(), args.left_iri.as_deref(), "left")?
+        load_side(
+            args.left.as_deref(),
+            args.left_iri.as_deref(),
+            "left",
+            args.left_catalog.as_deref(),
+            &args.common,
+        )?
     };
-    let mut right = load_side(args.right.as_deref(), args.right_iri.as_deref(), "right")?;
+    let mut right = load_side(
+        args.right.as_deref(),
+        args.right_iri.as_deref(),
+        "right",
+        args.right_catalog.as_deref(),
+        &args.common,
+    )?;
 
     // --left-catalog / --right-catalog: resolve each side's import closure through
     // its catalog before comparing, so the diff is over the loaded closures.

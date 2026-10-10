@@ -336,12 +336,27 @@ fn axiom_type_index(c: &Component<RcStr>) -> i32 {
     }
 }
 
+/// A declaration's entity, keyed as entities order: by the entity's type index
+/// (Class 1001, ObjectProperty 1002, DataProperty 1004, NamedIndividual 1005,
+/// AnnotationProperty 1006, Datatype 4001), then by IRI.
+fn declared_entity(c: &Component<RcStr>) -> Option<(i32, &str)> {
+    match c {
+        Component::DeclareClass(d) => Some((1001, d.0 .0.as_ref())),
+        Component::DeclareObjectProperty(d) => Some((1002, d.0 .0.as_ref())),
+        Component::DeclareDataProperty(d) => Some((1004, d.0 .0.as_ref())),
+        Component::DeclareNamedIndividual(d) => Some((1005, d.0 .0.as_ref())),
+        Component::DeclareAnnotationProperty(d) => Some((1006, d.0 .0.as_ref())),
+        Component::DeclareDatatype(d) => Some((4001, d.0 .0.as_ref())),
+        _ => None,
+    }
+}
+
 /// Orders axioms by the axiom-type rank, then by the axiom's own fields.
 ///
-/// Types with no comparison arm of their own — the declarations, and everything
-/// the 99 catch-all collects — compare equal to each other, so this is a
-/// preorder, not a total order. Ties keep the order they arrived in, which only a
-/// stable sort preserves.
+/// Types with no comparison arm of their own — everything the 99 catch-all
+/// collects — compare equal to each other, so this is a preorder, not a total
+/// order. Ties keep the order they arrived in, which only a stable sort
+/// preserves.
 pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Ordering {
     let ti = axiom_type_index(a).cmp(&axiom_type_index(b));
     if ti != Ordering::Equal {
@@ -362,25 +377,27 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::SubObjectPropertyOf(x), Component::SubObjectPropertyOf(y)) => {
             cmp_sope(&x.sub, &y.sub).then_with(|| cmp_ope(&x.sup, &y.sup))
         }
+        // A property assertion orders by its subject, then its property, then
+        // its object.
         (Component::ObjectPropertyAssertion(x), Component::ObjectPropertyAssertion(y)) => {
-            cmp_ope(&x.ope, &y.ope)
-                .then_with(|| cmp_individual(&x.from, &y.from))
+            cmp_individual(&x.from, &y.from)
+                .then_with(|| cmp_ope(&x.ope, &y.ope))
                 .then_with(|| cmp_individual(&x.to, &y.to))
         }
         (
             Component::NegativeObjectPropertyAssertion(x),
             Component::NegativeObjectPropertyAssertion(y),
-        ) => cmp_ope(&x.ope, &y.ope)
-            .then_with(|| cmp_individual(&x.from, &y.from))
+        ) => cmp_individual(&x.from, &y.from)
+            .then_with(|| cmp_ope(&x.ope, &y.ope))
             .then_with(|| cmp_individual(&x.to, &y.to)),
-        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref())
-            .then_with(|| cmp_individual(&x.from, &y.from))
+        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => cmp_individual(&x.from, &y.from)
+            .then_with(|| iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref()))
             .then_with(|| cmp_literal(&x.to, &y.to)),
         (
             Component::NegativeDataPropertyAssertion(x),
             Component::NegativeDataPropertyAssertion(y),
-        ) => iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref())
-            .then_with(|| cmp_individual(&x.from, &y.from))
+        ) => cmp_individual(&x.from, &y.from)
+            .then_with(|| iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref()))
             .then_with(|| cmp_literal(&x.to, &y.to)),
         (Component::ClassAssertion(x), Component::ClassAssertion(y)) => {
             cmp_individual(&x.i, &y.i).then_with(|| cmp_ce(&x.ce, &y.ce))
@@ -462,7 +479,10 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::FunctionalDataProperty(x), Component::FunctionalDataProperty(y)) => {
             iri_cmp(x.0 .0.as_ref(), y.0 .0.as_ref())
         }
-        _ => Ordering::Equal,
+        _ => match (declared_entity(a), declared_entity(b)) {
+            (Some((ta, ia)), Some((tb, ib))) => ta.cmp(&tb).then_with(|| iri_cmp(ia, ib)),
+            _ => Ordering::Equal,
+        },
     }
 }
 

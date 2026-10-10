@@ -1,0 +1,29 @@
+format-version: 1.2
+idspace: e http://example.org/ext/ 
+idspace: i http://example.org/int/ 
+ontology: http://example.org/probe.owl
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/ext/B>))\nDeclaration(Class(<http://example.org/ext/D>))\nDeclaration(Class(<http://example.org/int/A>))\nDeclaration(ObjectProperty(<http://example.org/ext/q>))\nDeclaration(ObjectProperty(<http://example.org/ext/r>))\nDeclaration(ObjectProperty(<http://example.org/int/p>))\nDeclaration(DataProperty(<http://example.org/ext/d2>))\nDeclaration(DataProperty(<http://example.org/int/d>))\nDeclaration(NamedIndividual(<http://example.org/ext/x>))\nDeclaration(NamedIndividual(<http://example.org/int/y>))\nDeclaration(AnnotationProperty(<http://example.org/int/ap>))\n############################\n#   Annotation Properties\n############################\n\n# Annotation Property: <http://example.org/int/ap> (<http://example.org/int/ap>)\n\nSubAnnotationPropertyOf(<http://example.org/int/ap> rdfs:comment)\n\n\n############################\n#   Object Properties\n############################\n\n# Object Property: <http://example.org/ext/q> (<http://example.org/ext/q>)\n\nDisjointObjectProperties(<http://example.org/ext/q> ObjectInverseOf(<http://example.org/int/p>))\n\n\n############################\n#   Data Properties\n############################\n\n# Data Property: <http://example.org/ext/d2> (<http://example.org/ext/d2>)\n\nSubDataPropertyOf(<http://example.org/ext/d2> <http://example.org/int/d>)\nDataPropertyDomain(<http://example.org/ext/d2> <http://example.org/int/A>)\n\n# Data Property: <http://example.org/int/d> (<http://example.org/int/d>)\n\nFunctionalDataProperty(<http://example.org/int/d>)\nDataPropertyRange(<http://example.org/int/d> xsd:string)\n\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/ext/B> (<http://example.org/ext/B>)\n\nEquivalentClasses(<http://example.org/ext/B> ObjectSomeValuesFrom(<http://example.org/int/p> <http://example.org/int/A>))\nDisjointClasses(<http://example.org/ext/B> ObjectSomeValuesFrom(<http://example.org/int/p> <http://example.org/int/A>))\n\n# Class: <http://example.org/int/A> (<http://example.org/int/A>)\n\nEquivalentClasses(<http://example.org/int/A> ObjectSomeValuesFrom(<http://example.org/ext/q> <http://example.org/ext/B>))\n\n\n############################\n#   Named Individuals\n############################\n\n# Individual: <http://example.org/ext/x> (<http://example.org/ext/x>)\n\nObjectPropertyAssertion(<http://example.org/int/p> <http://example.org/ext/x> <http://example.org/int/y>)\nDataPropertyAssertion(<http://example.org/int/d> <http://example.org/ext/x> \"v\")\n\n# Individual: <http://example.org/int/y> (<http://example.org/int/y>)\n\nObjectPropertyAssertion(<http://example.org/ext/q> <http://example.org/int/y> <http://example.org/ext/x>)\nNegativeObjectPropertyAssertion(<http://example.org/int/p> <http://example.org/int/y> <http://example.org/int/y>)\n\n\nSubClassOf(ObjectSomeValuesFrom(<http://example.org/ext/q> <http://example.org/ext/D>) <http://example.org/int/A>)\nSubClassOf(ObjectSomeValuesFrom(<http://example.org/ext/q> <http://example.org/int/A>) <http://example.org/ext/B>)\nDataPropertyAssertion(<http://example.org/int/d> _:genid2147483648 \"w\")\nSubObjectPropertyOf(ObjectInverseOf(<http://example.org/ext/q>) <http://example.org/int/p>)\nSubObjectPropertyOf(ObjectInverseOf(<http://example.org/int/p>) <http://example.org/ext/r>)\nFunctionalObjectProperty(ObjectInverseOf(<http://example.org/int/p>))\nHasKey(<http://example.org/int/A> () (<http://example.org/int/d>))\n)
+
+[Term]
+id: e:B
+is_a: i:A ! a
+disjoint_from: e:D
+property_value: i:ap "b" xsd:string
+
+[Term]
+id: i:A
+name: a
+
+[Term]
+id: i:C
+is_a: e:B {comment="kept whole"}
+
+[Typedef]
+id: e:q
+is_symmetric: true
+inverse_of: i:p
+
+[Typedef]
+id: e:r
+holds_over_chain: e:q i:p
+

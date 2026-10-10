@@ -50,7 +50,8 @@ pub fn entails(premise: &Model, conclusion: &Model) -> bool {
     let build = Build::new_rc();
     let mut fresh = Fresh { build: &build, n: 0 };
     for ac in conclusion.ont.iter() {
-        let obls = match obligations(&build, &mut fresh, &ac.component) {
+        let owl = crate::reason::as_owl_axiom(&ac.component);
+        let obls = match obligations(&build, &mut fresh, owl.as_ref().unwrap_or(&ac.component)) {
             Some(o) => o,
             None => return false, // out-of-fragment conclusion axiom; cannot prove
         };

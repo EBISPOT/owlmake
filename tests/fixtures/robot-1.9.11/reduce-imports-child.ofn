@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/reduce-imports#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/reduce-imports-child.owl>
+Declaration(Class(:C))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
+SubClassOf(:C :Y)
+SubClassOf(:Y :X)
+SubClassOf(:X :Z)
+)

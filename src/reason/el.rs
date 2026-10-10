@@ -259,7 +259,8 @@ impl Reasoner {
         // identical regardless of order (the parallel engine already processes in
         // nondeterministic order). Sorting millions of components structurally is
         // very slow (≈90 s on phenio), so do it ONLY in WHELK mode.
-        let mut comps: Vec<&AnnotatedComponent<RcStr>> = model.ont.iter().collect();
+        let ont = crate::reason::owl_axioms(model);
+        let mut comps: Vec<&AnnotatedComponent<RcStr>> = ont.iter().collect();
         if WHELK_MODE.with(|m| m.get()) {
             comps.sort();
         }
@@ -1136,12 +1137,19 @@ impl Builder {
                 // DisjointUnion(D; C1..Cn): the Ci are pairwise disjoint and each
                 // Ci ⊑ D. (The D ⊑ C1 ⊔ ... ⊔ Cn direction is not EL and is
                 // omitted; it is not needed for the EL-entailed subsumptions.)
+                // With a single Ci that direction is D ⊑ C1, and with none it
+                // is D ⊑ ⊥; both are EL and are kept.
                 let d = self.intern_class(ax.0 .0.as_ref());
                 self.add_disjoint(&ax.1);
                 for member in &ax.1 {
                     if let Some(c) = self.flatten(member) {
                         self.nfs.push(Nf::Sub(c, d));
                     }
+                }
+                match ax.1.as_slice() {
+                    [] => self.nfs.push(Nf::Sub(d, BOT)),
+                    [only] => self.normalize_sup(d, only),
+                    _ => {}
                 }
             }
             Component::ObjectPropertyDomain(ax) => {

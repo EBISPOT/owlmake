@@ -1,23 +1,42 @@
-//! `reduce` — remove redundant SubClassOf axioms (those entailed transitively
-//! by the remaining axioms).
+//! `reduce` — remove the `SubClassOf` axioms of the root ontology that the
+//! rest of its class hierarchy makes redundant, as the named reasoner
+//! classifies it.
 //!
-//! An asserted `A SubClassOf B` (both named) is redundant when the reasoner
-//! still entails it after the axiom is removed — i.e. there is an inferred path
-//! `A ⊑ C ⊑ B` through some other class C. We compute this from the inferred
-//! direct-subsumption hierarchy: any asserted named subsumption that is not a
-//! direct edge is redundant.
+//! Over every class expression (the default), each anonymous expression of a
+//! root `SubClassOf` is stood for by a class of its own, equivalent to it. The
+//! reasoner classifies the import closure's `SubClassOf` axioms and object
+//! property characteristics, its sub-property axioms and property chains with
+//! `--include-subproperties`, and those equivalences — nothing else. An axiom
+//! `C ⊑ X` is redundant when another asserted superclass of `C` lies strictly
+//! below `X`; for an anonymous `C`, also when a superclass of `C` that is the
+//! subclass of a root `SubClassOf` itself does.
+//!
+//! Between named classes only (`--named-classes-only`), the reasoner
+//! classifies the whole import closure. An axiom `A ⊑ B` is kept when, walking
+//! down from the top node, `A` is among the classes of a node directly below a
+//! node `B` belongs to.
+//!
+//! An inconsistent ontology loses nothing.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use anyhow::Result;
 use clap::Args as ClapArgs;
 use horned_owl::model::{
-    ClassExpression as CE, Component, MutableOntology, ObjectPropertyExpression as OPE,
+    AnnotatedComponent, Build, ClassExpression as CE, Component, MutableOntology,
+    ObjectPropertyExpression as OPE, RcStr, SubClassOf,
 };
+use horned_owl::ontology::set::SetOntology;
 
+use crate::cmd::reason::ReasonerKind;
 use crate::model::Model;
-use crate::reason::Reasoner;
+use crate::reason::{DlReasoner, Reasoner, WhelkClassification};
+
+const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -27,27 +46,27 @@ pub struct Args {
     pub output: Option<PathBuf>,
     #[arg(short, long)]
     pub format: Option<String>,
-    /// Reasoner to use. Reduction runs on the built-in EL reasoner.
+    /// Reasoner the hierarchy is classified with: `elk`, `hermit`, `jfact`,
+    /// `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with
+    /// union-elimination).
     #[arg(short = 'r', long, default_value = "elk")]
     pub reasoner: String,
     /// Preserve redundant axioms that carry annotations (`true` or `yes` in
     /// any case; default false).
     #[arg(short = 'p', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub preserve_annotated_axioms: Option<bool>,
-    /// Take subproperties into account over existential restrictions (`true`
-    /// or `yes` in any case; default false). A bare `reduce`, as OBA's build runs it, therefore does
-    /// NOT eliminate existentials entailed only via sub-property or
-    /// property-chain reasoning. Pass `--include-subproperties true` for the more
-    /// aggressive reduction.
+    /// Classify the sub-property axioms and property chains too (`true` or
+    /// `yes` in any case; default false), so that an existential restriction
+    /// entailed through them is redundant.
     #[arg(short = 's', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub include_subproperties: Option<bool>,
-    /// Only reduce named `A ⊑ B` subclass axioms (`true` or `yes` in any case;
-    /// default false).
+    /// Reduce only the axioms between named classes, over the classification
+    /// of the whole ontology (`true` or `yes` in any case; default false).
     #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub named_classes_only: Option<bool>,
-    /// Use exact entailment-based reduction (drop an axiom iff the ontology minus
-    /// it still entails it), via ⊥-module localization. Slower on huge ontologies
-    /// than the default structural reduction, and exact rather than heuristic.
+    /// Reduce by entailment instead: drop an axiom iff the ontology minus it
+    /// still entails it, as the built-in EL reasoner decides over ⊥-modules.
+    /// Slower on huge ontologies.
     #[arg(long, num_args = 1, default_missing_value = "true")]
     pub exact: Option<bool>,
     #[command(flatten)]
@@ -59,394 +78,835 @@ pub fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
-/// Set the EL engine up for reducing under `kind`: `owlmake` turns on
-/// union-elimination; every other reasoner reduces with the plain EL engine,
-/// with a note where it is not an EL reasoner. Set before classifying.
-pub fn use_reasoner(kind: crate::cmd::reason::ReasonerKind) {
-    use crate::cmd::reason::ReasonerKind;
-    crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
-    match kind {
-        ReasonerKind::Owlmake => status!("reduce: using the built-in EL reasoner with union-elimination"),
-        ReasonerKind::Hermit | ReasonerKind::JFact | ReasonerKind::Whelk => status!(
-            "note: reduce runs on the built-in EL reasoner; '{}' is not available for it",
-            format!("{kind:?}").to_lowercase()
-        ),
-        _ => {}
-    }
-}
-
 pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> Result<Option<crate::model::Model>> {
     // A reasoner name that is no reasoner fails before anything is loaded.
-    let kind = crate::cmd::reason::ReasonerKind::parse_without_emr(&args.reasoner)?;
+    let kind = ReasonerKind::parse_without_emr(&args.reasoner)?;
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
-    use_reasoner(kind);
-    let preserve = args.preserve_annotated_axioms.unwrap_or(false);
-    let named_only = args.named_classes_only.unwrap_or(false);
-    // `--include-subproperties` defaults to false, so existentials entailed only
-    // via sub-property or property-chain reasoning are KEPT unless the flag is
-    // explicitly set.
-    let subprops = args.include_subproperties.unwrap_or(false);
+    let opts = ReduceOptions {
+        reasoner: kind,
+        preserve_annotated: args.preserve_annotated_axioms.unwrap_or(false),
+        named_classes_only: args.named_classes_only.unwrap_or(false),
+        include_subproperties: args.include_subproperties.unwrap_or(false),
+    };
     let mut reduced = if args.exact.unwrap_or(false) {
-        reduce_exact(&model, preserve, named_only, subprops)
+        crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
+        reduce_exact(&model, opts.preserve_annotated, opts.named_classes_only, opts.include_subproperties)
     } else {
-        reduce_with_opts(&model, preserve, named_only, subprops)
+        reduce_with_options(&model, &opts)
     };
     crate::cmd::maybe_save(&mut reduced, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(reduced))
 }
 
-/// Remove redundant SubClassOf axioms from `model`:
-///  * named ⊑ named that are not direct edges (transitive reduction), and
-///  * `C ⊑ ∃R.F` (named filler) that are entailed by another existential
-///    superclass of `C` or one of its ancestors — i.e. some `C' ⊒ C` asserts
-///    `C' ⊑ ∃R'.F'` with `R' ⊑ R` and `F' ⊑ F` (what
-///    `--include-subproperties true` licenses over existential restrictions).
-pub fn reduce(model: &Model) -> Model {
-    reduce_with(model, false, false)
-}
-
-/// Options for [`reduce_with_options`] — the named-struct form of the boolean
-/// flags accepted by [`reduce_with`]/[`reduce_with_opts`]. Every option defaults
-/// to false, the conservative reduction.
-#[derive(Clone, Debug, Default)]
+/// How [`reduce_with_options`] reduces: the reasoner that classifies, and
+/// which axioms take part.
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ReduceOptions {
-    /// Keep redundant axioms that carry axiom annotations
+    /// The reasoner the hierarchy is classified with (`--reasoner`).
+    pub reasoner: ReasonerKind,
+    /// Keep a redundant axiom that carries annotations
     /// (`--preserve-annotated-axioms`).
     pub preserve_annotated: bool,
-    /// Reduce only named `A ⊑ B` subclass axioms (`--named-classes-only`).
+    /// Reduce only the axioms between named classes
+    /// (`--named-classes-only`).
     pub named_classes_only: bool,
-    /// Let a sub-role `R' ⊑ R` dominate an existential
+    /// Classify the sub-property axioms and property chains too
     /// (`--include-subproperties`).
     pub include_subproperties: bool,
 }
 
-/// Transitive reduction with [`ReduceOptions`] — the recommended form (the
-/// boolean [`reduce_with`]/[`reduce_with_opts`] remain for convenience).
+impl Default for ReduceOptions {
+    fn default() -> Self {
+        ReduceOptions {
+            reasoner: ReasonerKind::Elk,
+            preserve_annotated: false,
+            named_classes_only: false,
+            include_subproperties: false,
+        }
+    }
+}
+
+/// Remove the redundant `SubClassOf` axioms of `model`'s root ontology, as
+/// `elk` finds them over every class expression.
+pub fn reduce(model: &Model) -> Model {
+    reduce_with_options(model, &ReduceOptions::default())
+}
+
+/// Remove the redundant `SubClassOf` axioms of `model`'s root ontology, as
+/// `opts` asks.
 pub fn reduce_with_options(model: &Model, opts: &ReduceOptions) -> Model {
-    reduce_with_opts(
-        model,
-        opts.preserve_annotated,
-        opts.named_classes_only,
-        opts.include_subproperties,
-    )
+    crate::reason::el::set_whelk_mode(opts.reasoner == ReasonerKind::Owlmake);
+    let redundant = if opts.named_classes_only {
+        redundant_between_named_classes(model, opts)
+    } else {
+        redundant_over_expressions(model, opts)
+    };
+    let mut out = SetClone::new(model);
+    out.retain(|ac| !redundant.contains(ac));
+    let mut result = out.into_model();
+    result.carry_meta_from(model);
+    result
 }
 
-/// Like [`reduce`], but `preserve_annotated` keeps redundant axioms that carry
-/// axiom annotations (`--preserve-annotated-axioms true`), and
-/// `named_classes_only` reduces only named `A ⊑ B` subclass axioms, leaving
-/// existential/complex superclass axioms untouched (`--named-classes-only`).
-pub fn reduce_with(model: &Model, preserve_annotated: bool, named_classes_only: bool) -> Model {
-    reduce_with_opts(model, preserve_annotated, named_classes_only, false)
+/// The root ontology's `SubClassOf` axioms: the model's own, not those an
+/// import lent it.
+fn root_subclass_axioms(model: &Model) -> Vec<(&AnnotatedComponent<RcStr>, &SubClassOf<RcStr>)> {
+    model
+        .ont
+        .iter()
+        .filter(|ac| !model.imported_components.contains(*ac))
+        .filter_map(|ac| match &ac.component {
+            Component::SubClassOf(sc) => Some((ac, sc)),
+            _ => None,
+        })
+        .collect()
 }
 
-/// Like [`reduce_with`] but with explicit `include_subproperties`
-/// (`--include-subproperties`, default false): when false, a `C ⊑ ∃R.F` is only
-/// dominated by another existential with the *same* role R (plus filler
-/// subsumption); when true, a sub-role `R' ⊑ R` also dominates. Property *chains*
-/// (transitivity etc.) are applied regardless — they are not subproperties.
-pub fn reduce_with_opts(
-    model: &Model,
-    preserve_annotated: bool,
-    named_classes_only: bool,
-    include_subproperties: bool,
-) -> Model {
-    use horned_owl::model::{Build, RcStr};
-    use horned_owl::ontology::set::SetOntology;
-    use horned_owl::model::MutableOntology;
+/// The class standing for `ce`: itself when it is a named class, otherwise a
+/// class of its own, equivalent to it, one for each distinct expression.
+fn stand_in<'m>(
+    ce: &'m CE<RcStr>,
+    names: &mut HashMap<&'m CE<RcStr>, String>,
+    equivalences: &mut Vec<Component<RcStr>>,
+    build: &Build<RcStr>,
+) -> String {
+    if let CE::Class(c) = ce {
+        return c.0.to_string();
+    }
+    if let Some(name) = names.get(ce) {
+        return name.clone();
+    }
+    let name = format!("urn:owlmake:reduce#{}", names.len());
+    equivalences.push(Component::EquivalentClasses(horned_owl::model::EquivalentClasses(vec![
+        CE::Class(build.class(name.clone())),
+        ce.clone(),
+    ])));
+    names.insert(ce, name.clone());
+    name
+}
 
-    // === How redundancy is decided ============================================
-    //
-    // Redundancy of an asserted `C ⊑ X` is decided purely within the SubClassOf
-    // graph: `C ⊑ X` is redundant iff `C` has *another asserted* superclass `Y`
-    // whose strict superclasses include `X`. The reasoner runs over a
-    // **sub-ontology** that contains only `SubClassOf` axioms + object-property
-    // *characteristic* axioms (transitivity, …) and — *only* with
-    // `--include-subproperties` — `SubObjectPropertyOf`/`SubPropertyChainOf`. So
-    // reduction proceeds via transitivity but NOT via property chains or the role
-    // hierarchy unless asked. Anonymous class expressions on either side of a
-    // `SubClassOf` are mapped to fresh named temp classes via
-    // `EquivalentClasses(temp, expr)` so the reasoner can place them.
-    //
-    // One pass over that sub-ontology, not a battery of bespoke structural
-    // chain/transitivity/GCI rules: those would apply the property chains a
-    // reasoner over the *full* model entails, over-removing existentials on
-    // chain-heavy ontologies (OBA `develops_from`/`part_of`). owlmake's reasoner
-    // is chain- and range-aware, so the chain-free sub-ontology built here is what
-    // keeps those existentials asserted.
-
+/// The redundant `SubClassOf` axioms of the root over every class expression.
+fn redundant_over_expressions(model: &Model, opts: &ReduceOptions) -> HashSet<AnnotatedComponent<RcStr>> {
     let build = Build::new_rc();
-    // Distinct class-expression (Debug-keyed) → the named/temp class IRI standing
-    // for it in the reduce reasoner. Named classes map to their own IRI; anonymous
-    // expressions get a fresh `urn:owlmake-reduce-temp-N` class with a temp
-    // `EquivalentClasses`.
-    let mut expr_to_iri: HashMap<String, String> = HashMap::new();
-    let mut temps: Vec<(String, CE<RcStr>)> = Vec::new();
-    let mut tmpn: usize = 0;
-    fn map_ce(
-        ce: &CE<RcStr>,
-        expr_to_iri: &mut HashMap<String, String>,
-        temps: &mut Vec<(String, CE<RcStr>)>,
-        tmpn: &mut usize,
-    ) -> String {
-        if let CE::Class(c) = ce {
-            return c.0.to_string();
-        }
-        let k = format!("{ce:?}");
-        if let Some(iri) = expr_to_iri.get(&k) {
-            return iri.clone();
-        }
-        let iri = format!("urn:owlmake-reduce-temp-{tmpn}");
-        *tmpn += 1;
-        expr_to_iri.insert(k, iri.clone());
-        temps.push((iri.clone(), ce.clone()));
-        iri
+    let mut names: HashMap<&CE<RcStr>, String> = HashMap::new();
+    let mut equivalences: Vec<Component<RcStr>> = Vec::new();
+    // Each root axiom as (axiom, subclass, superclass, whether the subclass is
+    // anonymous), and the superclasses the root asserts of each subclass.
+    let mut tested: Vec<(&AnnotatedComponent<RcStr>, String, String, bool)> = Vec::new();
+    let mut asserted: HashMap<String, HashSet<String>> = HashMap::new();
+    for (ac, sc) in root_subclass_axioms(model) {
+        let sub = stand_in(&sc.sub, &mut names, &mut equivalences, &build);
+        let sup = stand_in(&sc.sup, &mut names, &mut equivalences, &build);
+        asserted.entry(sub.clone()).or_default().insert(sup.clone());
+        tested.push((ac, sub, sup, !matches!(sc.sub, CE::Class(_))));
     }
-    // Read-only key lookup for the removal pass (every SubClassOf expr was mapped).
-    let key_of = |ce: &CE<RcStr>, expr_to_iri: &HashMap<String, String>| -> Option<String> {
-        match ce {
-            CE::Class(c) => Some(c.0.to_string()),
-            _ => expr_to_iri.get(&format!("{ce:?}")).cloned(),
-        }
-    };
-
-    // Asserted named equivalence pairs. A `SubClassOf(C, X)` between two classes
-    // that are asserted equivalent is entailed by that `EquivalentClasses` axiom,
-    // so it is dropped and only the equivalence kept (the mutual-subclass form is
-    // never emitted). Crucially the equivalence is preserved independently, so
-    // removing the subclass axiom loses nothing. These mutual-subclass edges are
-    // also kept OUT of the reduce reasoner and the asserted-superclass map below,
-    // so they cannot collapse a class onto its equivalent partner and spuriously
-    // dominate that partner's other (e.g. existential) superclasses.
-    let mut equiv_pairs: HashSet<(String, String)> = HashSet::new();
-    for ac in model.ont.iter() {
-        if let Component::EquivalentClasses(eq) = &ac.component {
-            let named: Vec<String> = eq
-                .0
-                .iter()
-                .filter_map(|c| match c {
-                    CE::Class(k) => Some(k.0.to_string()),
-                    _ => None,
-                })
-                .collect();
-            for i in 0..named.len() {
-                for j in 0..named.len() {
-                    if i != j {
-                        equiv_pairs.insert((named[i].clone(), named[j].clone()));
-                    }
-                }
-            }
-        }
-    }
-    let is_equiv_pair = |sc: &horned_owl::model::SubClassOf<RcStr>| -> bool {
-        matches!(
-            (&sc.sub, &sc.sup),
-            (CE::Class(a), CE::Class(b))
-                if equiv_pairs.contains(&(a.0.to_string(), b.0.to_string()))
-        )
-    };
-
-    // Asserted superclasses per (mapped) subject, over all `SubClassOf` axioms
-    // (excluding mutual-subclass edges between asserted-equivalent classes).
-    let mut asserted_supers: HashMap<String, HashSet<String>> = HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if named_classes_only
-                && !matches!((&sc.sub, &sc.sup), (CE::Class(_), CE::Class(_)))
-            {
-                continue;
-            }
-            if is_equiv_pair(sc) {
-                continue;
-            }
-            let sk = map_ce(&sc.sub, &mut expr_to_iri, &mut temps, &mut tmpn);
-            let pk = map_ce(&sc.sup, &mut expr_to_iri, &mut temps, &mut tmpn);
-            asserted_supers.entry(sk).or_default().insert(pk);
-        }
-    }
-
-    // Build the reduce sub-ontology: SubClassOf + property characteristics always;
-    // SubObjectPropertyOf / chains only with --include-subproperties; plus the temp
-    // equivalences. Deliberately excludes the ontology's own EquivalentClasses,
-    // DisjointClasses, domains and ranges, so redundancy is decided from the
-    // subsumption graph alone.
     let mut ont: SetOntology<RcStr> = SetOntology::new();
     for ac in model.ont.iter() {
-        let keep = match &ac.component {
-            Component::SubClassOf(sc) => !is_equiv_pair(sc),
-            Component::TransitiveObjectProperty(_)
+        let classified = match &ac.component {
+            Component::SubClassOf(_)
+            | Component::TransitiveObjectProperty(_)
             | Component::ReflexiveObjectProperty(_)
             | Component::IrreflexiveObjectProperty(_)
             | Component::SymmetricObjectProperty(_)
             | Component::AsymmetricObjectProperty(_)
             | Component::FunctionalObjectProperty(_)
             | Component::InverseFunctionalObjectProperty(_) => true,
-            Component::SubObjectPropertyOf(_) => include_subproperties,
+            Component::SubObjectPropertyOf(_) => opts.include_subproperties,
             _ => false,
         };
-        if keep {
+        if classified {
             ont.insert(ac.clone());
         }
     }
-    for (iri, ce) in &temps {
-        let temp = CE::Class(build.class(iri.as_str()));
-        ont.insert(Component::EquivalentClasses(horned_owl::model::EquivalentClasses(vec![
-            temp,
-            ce.clone(),
-        ])));
+    for eq in equivalences {
+        ont.insert(eq);
     }
-    let rr = Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes));
-    let reasoner = Reasoner::classify(&rr);
+    let classified =
+        Classification::of(&Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes)), opts.reasoner);
+    if !classified.consistent() {
+        status!("reduce: the ontology is inconsistent; no axiom is removed");
+        return HashSet::new();
+    }
+    let mut redundant = HashSet::new();
+    for (ac, sub, sup, anonymous) in tested {
+        if opts.preserve_annotated && !ac.ann.is_empty() {
+            continue;
+        }
+        let mut is_redundant = asserted[&sub].iter().any(|y| classified.above(y, &sup));
+        if !is_redundant && anonymous {
+            is_redundant =
+                asserted.keys().any(|between| classified.above(&sub, between) && classified.above(between, &sup));
+        }
+        if is_redundant {
+            redundant.insert(ac.clone());
+        }
+    }
+    redundant
+}
 
-    // `X` is a *strict* superclass of `Y`: `Y ⊑ X` and not `X ⊑ Y` (so equivalents
-    // are excluded).
-    let strict = |y: &str, x: &str| reasoner.is_subsumed(y, x) && !reasoner.is_subsumed(x, y);
+/// The redundant `SubClassOf` axioms of the root between named classes: every
+/// one but those the walk down the taxonomy finds directly below their
+/// superclass.
+fn redundant_between_named_classes(model: &Model, opts: &ReduceOptions) -> HashSet<AnnotatedComponent<RcStr>> {
+    // superclass → subclass → the root axioms stating it.
+    let mut assertions: HashMap<&str, HashMap<&str, Vec<&AnnotatedComponent<RcStr>>>> = HashMap::new();
+    for (ac, sc) in root_subclass_axioms(model) {
+        if let (CE::Class(a), CE::Class(b)) = (&sc.sub, &sc.sup) {
+            assertions.entry(b.0.as_ref()).or_default().entry(a.0.as_ref()).or_default().push(ac);
+        }
+    }
+    let taxonomy = Taxonomy::of(model, opts.reasoner);
+    if !taxonomy.consistent() {
+        status!("reduce: the ontology is inconsistent; no axiom is removed");
+        return HashSet::new();
+    }
+    let mut kept: HashSet<&AnnotatedComponent<RcStr>> = HashSet::new();
+    let mut seen: HashSet<Vec<String>> = HashSet::new();
+    let mut pending = vec![taxonomy.top_node()];
+    while let Some(node) = pending.pop() {
+        let mut key = node.clone();
+        key.sort();
+        if !seen.insert(key) {
+            continue;
+        }
+        let below = taxonomy.sub_nodes(&node);
+        for sup in &node {
+            let Some(subs) = assertions.get(sup.as_str()) else { continue };
+            for sub in below.iter().flatten() {
+                if let Some(axioms) = subs.get(sub.as_str()) {
+                    kept.extend(axioms.iter().copied());
+                }
+            }
+        }
+        pending.extend(below);
+    }
+    assertions
+        .values()
+        .flat_map(|subs| subs.values())
+        .flatten()
+        .filter(|ac| !kept.contains(*ac) && !(opts.preserve_annotated && !ac.ann.is_empty()))
+        .map(|ac| (*ac).clone())
+        .collect()
+}
 
-    // Degenerate self-referential definitions `C ≡ (C ⊓ D ⊓ …)` — where C itself
-    // is a conjunct of its own equivalent intersection — are logically just
-    // `C ⊑ D` (and `C ⊑ …`). The asserted/relaxed `C ⊑ D` is therefore redundant
-    // with the retained equivalence and is dropped. (This does NOT apply to a
-    // normal genus `X ≡ G ⊓ ∃r.D` where X is not among the conjuncts — there
-    // `X ⊑ G` is a real kept superclass.) Map C → the keys of its co-conjuncts.
-    let mut self_genus_supers: HashMap<String, HashSet<String>> = HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::EquivalentClasses(eq) = &ac.component {
-            for (i, m) in eq.0.iter().enumerate() {
-                let c = match m {
-                    CE::Class(k) => k.0.to_string(),
-                    _ => continue,
+/// `x` lies strictly above `y` in a taxonomy of nodes: a satisfiable class
+/// lies above an unsatisfiable one, a class equivalent to `owl:Thing` above
+/// every class that is not, and otherwise `x` subsumes `y` and not the
+/// reverse.
+fn node_above(
+    y: &str,
+    x: &str,
+    unsatisfiable: impl Fn(&str) -> bool,
+    top: impl Fn(&str) -> bool,
+    subsumes: impl Fn(&str, &str) -> bool,
+) -> bool {
+    if y == x {
+        return false;
+    }
+    let bottom = |c: &str| c == OWL_NOTHING || unsatisfiable(c);
+    if bottom(y) {
+        return !bottom(x);
+    }
+    if bottom(x) {
+        return false;
+    }
+    let top = |c: &str| c == OWL_THING || top(c);
+    if top(x) {
+        return !top(y);
+    }
+    if top(y) {
+        return false;
+    }
+    subsumes(y, x) && !subsumes(x, y)
+}
+
+/// A classification as the reduction over every class expression reads it:
+/// whether the ontology is consistent, and which classes lie strictly above a
+/// class.
+enum Classification {
+    /// The built-in EL engine, asked directly.
+    El { reasoner: Reasoner, unsatisfiable: HashSet<String> },
+    /// A DL taxonomy.
+    Dl {
+        consistent: bool,
+        unsatisfiable: HashSet<String>,
+        top: HashSet<String>,
+        supers: HashMap<String, HashSet<String>>,
+    },
+    /// The whelk closure: a class lies above another where the closure records
+    /// it and not the reverse, `owl:Thing` above every class not equivalent to
+    /// it, and nothing above an unsatisfiable class but what the closure
+    /// records.
+    Whelk(Box<WhelkClassification>),
+    /// The told hierarchy.
+    Told(Told),
+}
+
+impl Classification {
+    fn of(model: &Model, kind: ReasonerKind) -> Classification {
+        match kind {
+            ReasonerKind::Hermit | ReasonerKind::JFact => {
+                let reasoner = DlReasoner::classify(model);
+                let consistent = reasoner.is_consistent();
+                if !consistent {
+                    return Classification::Dl {
+                        consistent,
+                        unsatisfiable: HashSet::new(),
+                        top: HashSet::new(),
+                        supers: HashMap::new(),
+                    };
+                }
+                let mut supers: HashMap<String, HashSet<String>> = HashMap::new();
+                for (a, b) in reasoner.all_subsumptions() {
+                    supers.entry(a).or_default().insert(b);
+                }
+                Classification::Dl {
+                    consistent,
+                    unsatisfiable: reasoner.unsatisfiable().into_iter().collect(),
+                    top: reasoner.top_equivalents().into_iter().collect(),
+                    supers,
+                }
+            }
+            ReasonerKind::Whelk => Classification::Whelk(Box::new(WhelkClassification::classify(model))),
+            ReasonerKind::Structural => Classification::Told(Told::of(model)),
+            ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr => {
+                let reasoner = Reasoner::classify(model);
+                let unsatisfiable = reasoner.unsatisfiable().into_iter().collect();
+                Classification::El { reasoner, unsatisfiable }
+            }
+        }
+    }
+
+    fn consistent(&self) -> bool {
+        match self {
+            Classification::El { reasoner, .. } => reasoner.is_consistent(),
+            Classification::Dl { consistent, .. } => *consistent,
+            Classification::Whelk(w) => w.is_consistent(),
+            Classification::Told(_) => true,
+        }
+    }
+
+    /// Whether `x` lies strictly above `y`.
+    fn above(&self, y: &str, x: &str) -> bool {
+        match self {
+            Classification::El { reasoner, unsatisfiable } => node_above(
+                y,
+                x,
+                |c| unsatisfiable.contains(c),
+                |c| reasoner.is_subsumed(OWL_THING, c),
+                |a, b| reasoner.is_subsumed(a, b),
+            ),
+            Classification::Dl { unsatisfiable, top, supers, .. } => node_above(
+                y,
+                x,
+                |c| unsatisfiable.contains(c),
+                |c| top.contains(c),
+                |a, b| supers.get(a).is_some_and(|s| s.contains(b)),
+            ),
+            Classification::Whelk(w) => {
+                y != x && (x == OWL_THING || w.subsumes(y, x)) && !w.subsumes(x, y)
+            }
+            Classification::Told(t) => t.above(y, x),
+        }
+    }
+}
+
+/// A taxonomy of nodes of equivalent classes. The top node's classes are
+/// `owl:Thing` and those equivalent to it; the bottom node's, `owl:Nothing`
+/// and the unsatisfiable classes. The bottom node lies directly below every
+/// node nothing else lies below.
+struct Nodes {
+    consistent: bool,
+    top: Vec<String>,
+    bottom: Vec<String>,
+    /// The classes of each satisfiable class's node.
+    node: HashMap<String, Vec<String>>,
+    /// The satisfiable classes directly below each class.
+    children: HashMap<String, Vec<String>>,
+    /// The satisfiable classes directly below the top node.
+    roots: Vec<String>,
+}
+
+impl Nodes {
+    /// A taxonomy from what a reasoner gives: the satisfiable classes other
+    /// than those of the top node, the top node's, the unsatisfiable ones,
+    /// the pairs of equivalent classes, and each class's direct superclasses.
+    fn new(
+        classes: Vec<String>,
+        top: Vec<String>,
+        unsatisfiable: Vec<String>,
+        equivalent: Vec<(String, String)>,
+        direct: Vec<(String, String)>,
+    ) -> Nodes {
+        let top_set: HashSet<&str> = top.iter().map(String::as_str).collect();
+        let mut node: HashMap<String, Vec<String>> =
+            classes.iter().map(|c| (c.clone(), vec![c.clone()])).collect();
+        for (a, b) in &equivalent {
+            if top_set.contains(a.as_str()) || top_set.contains(b.as_str()) {
+                continue;
+            }
+            for (x, y) in [(a, b), (b, a)] {
+                if let Some(members) = node.get_mut(x) {
+                    if !members.contains(y) {
+                        members.push(y.clone());
+                    }
+                }
+            }
+        }
+        for members in node.values_mut() {
+            members.sort();
+        }
+        let mut children: HashMap<String, Vec<String>> = HashMap::new();
+        let mut has_parent: HashSet<&str> = HashSet::new();
+        for (sub, sup) in &direct {
+            if top_set.contains(sup.as_str()) || node.get(sub).is_some_and(|m| m.contains(sup)) {
+                continue;
+            }
+            children.entry(sup.clone()).or_default().push(sub.clone());
+            has_parent.insert(sub.as_str());
+        }
+        let roots: Vec<String> =
+            classes.iter().filter(|c| !has_parent.contains(c.as_str())).cloned().collect();
+        let mut top_node = vec![OWL_THING.to_string()];
+        top_node.extend(top.into_iter().filter(|c| c != OWL_THING));
+        let mut bottom = vec![OWL_NOTHING.to_string()];
+        bottom.extend(unsatisfiable.into_iter().filter(|c| c != OWL_NOTHING));
+        Nodes { consistent: true, top: top_node, bottom, node, children, roots }
+    }
+
+    fn inconsistent() -> Nodes {
+        Nodes {
+            consistent: false,
+            top: vec![OWL_THING.to_string()],
+            bottom: vec![OWL_NOTHING.to_string()],
+            node: HashMap::new(),
+            children: HashMap::new(),
+            roots: Vec::new(),
+        }
+    }
+
+    fn sub_nodes(&self, of: &[String]) -> Vec<Vec<String>> {
+        if of.iter().any(|c| c == OWL_NOTHING) {
+            return Vec::new();
+        }
+        let below: Vec<&String> = if of.iter().any(|c| c == OWL_THING) {
+            self.roots.iter().collect()
+        } else {
+            of.iter().flat_map(|c| self.children.get(c).into_iter().flatten()).collect()
+        };
+        let mut out: Vec<Vec<String>> = Vec::new();
+        for c in below {
+            let members = self.node.get(c).cloned().unwrap_or_else(|| vec![c.clone()]);
+            if !out.contains(&members) {
+                out.push(members);
+            }
+        }
+        if out.is_empty() {
+            out.push(self.bottom.clone());
+        }
+        out
+    }
+}
+
+/// A classification as the reduction between named classes walks it: the top
+/// node, and the nodes directly below a node.
+enum Taxonomy {
+    Nodes(Nodes),
+    /// The walk from the top reaches the bottom node and nothing else: below
+    /// every node lies the bottom node alone.
+    BottomOnly(Nodes),
+    /// The whelk closure, whose nodes are single classes.
+    Whelk(Box<WhelkClassification>),
+    Told(Told),
+}
+
+impl Taxonomy {
+    fn of(model: &Model, kind: ReasonerKind) -> Taxonomy {
+        let classes = || -> Vec<String> {
+            let mut out: Vec<String> = model
+                .ont
+                .iter()
+                .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+                .filter(|(k, iri)| *k == crate::sig::kind::CLASS && iri != OWL_THING && iri != OWL_NOTHING)
+                .map(|(_, iri)| iri)
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        };
+        match kind {
+            ReasonerKind::Hermit | ReasonerKind::JFact => {
+                let reasoner = DlReasoner::classify(model);
+                let nodes = if reasoner.is_consistent() {
+                    let unsatisfiable = reasoner.unsatisfiable();
+                    let top = reasoner.top_equivalents();
+                    let classes = classes()
+                        .into_iter()
+                        .filter(|c| !unsatisfiable.contains(c) && !top.contains(c))
+                        .collect();
+                    Nodes::new(
+                        classes,
+                        top,
+                        unsatisfiable,
+                        reasoner.equivalent_class_pairs(),
+                        reasoner.direct_subsumptions(),
+                    )
+                } else {
+                    Nodes::inconsistent()
                 };
-                for (j, other) in eq.0.iter().enumerate() {
-                    if i == j {
-                        continue;
-                    }
-                    if let CE::ObjectIntersectionOf(parts) = other {
-                        let c_is_conjunct = parts
-                            .iter()
-                            .any(|p| matches!(p, CE::Class(k) if k.0.as_ref() == c));
-                        if !c_is_conjunct {
-                            continue;
-                        }
-                        for p in parts {
-                            if let Some(pk) = key_of(p, &expr_to_iri) {
-                                if pk != c {
-                                    self_genus_supers.entry(c.clone()).or_default().insert(pk);
-                                }
-                            }
-                        }
-                    }
+                if kind == ReasonerKind::JFact {
+                    Taxonomy::BottomOnly(nodes)
+                } else {
+                    Taxonomy::Nodes(nodes)
                 }
+            }
+            ReasonerKind::Whelk => Taxonomy::Whelk(Box::new(WhelkClassification::classify(model))),
+            ReasonerKind::Structural => Taxonomy::Told(Told::of(model)),
+            ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr => {
+                let reasoner = Reasoner::classify(model);
+                if !reasoner.is_consistent() {
+                    return Taxonomy::Nodes(Nodes::inconsistent());
+                }
+                let (top, classes): (Vec<String>, Vec<String>) = reasoner
+                    .satisfiable_named_classes()
+                    .into_iter()
+                    .partition(|c| reasoner.is_subsumed(OWL_THING, c));
+                Taxonomy::Nodes(Nodes::new(
+                    classes,
+                    top,
+                    reasoner.unsatisfiable(),
+                    reasoner.equivalent_class_pairs(),
+                    reasoner.direct_subsumptions(),
+                ))
             }
         }
     }
 
-    // Self-referential genus collapse (the default). When `relax` has emitted the
-    // degenerate self-loop `C ⊑ C` (from `C ≡ C ⊓ X`), that loop serves as a
-    // transitive-reduction "via" for *every* other superclass of C — so C's entire
-    // named/existential parent set is dropped and only the `C ⊑ C` kept. Any class
-    // carrying an asserted self loop is collapsed this way.
-    // (`--clean-self-genus` on `relax` suppresses the loop, so this set is empty
-    // there and C's real parents are kept by the `self_genus_supers` rule.)
-    let mut self_loop_classes: HashSet<String> = HashSet::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (CE::Class(a), CE::Class(b)) = (&sc.sub, &sc.sup) {
-                if a.0 == b.0 {
-                    self_loop_classes.insert(a.0.to_string());
-                }
-            }
+    fn consistent(&self) -> bool {
+        match self {
+            Taxonomy::Nodes(n) | Taxonomy::BottomOnly(n) => n.consistent,
+            Taxonomy::Whelk(w) => w.is_consistent(),
+            Taxonomy::Told(_) => true,
         }
     }
 
-    // Decide redundancy. Keyed by (subject-iri, super-iri) using the same mapping,
-    // so the removal pass can recompute the key without the temp table.
-    let mut redundant: HashSet<(String, String)> = HashSet::new();
-    for ac in model.ont.iter() {
-        let sc = match &ac.component {
-            Component::SubClassOf(sc) => sc,
-            _ => continue,
+    fn top_node(&self) -> Vec<String> {
+        match self {
+            Taxonomy::Nodes(n) | Taxonomy::BottomOnly(n) => n.top.clone(),
+            Taxonomy::Whelk(w) => w.top_node(),
+            Taxonomy::Told(t) => t.top.to_vec(),
+        }
+    }
+
+    /// The nodes directly below `node`, each as its classes.
+    fn sub_nodes(&self, node: &[String]) -> Vec<Vec<String>> {
+        match self {
+            Taxonomy::Nodes(n) => n.sub_nodes(node),
+            Taxonomy::BottomOnly(n) => vec![n.bottom.clone()],
+            Taxonomy::Whelk(w) => {
+                w.direct_subclasses(representative(node)).into_iter().map(|c| vec![c]).collect()
+            }
+            Taxonomy::Told(t) => t.sub_nodes(node),
+        }
+    }
+}
+
+/// The class a node of the whelk closure is asked for its subclasses by: the
+/// first of its classes in a hash set that starts with four buckets and
+/// doubles past three quarters full, holding them in the order the node lists
+/// them. A node of the closure below the top is a single class.
+fn representative(node: &[String]) -> &str {
+    let mut buckets = 4usize;
+    while node.len() > buckets * 3 / 4 {
+        buckets *= 2;
+    }
+    let bucket = |c: &str| {
+        let h = crate::owlapi_hash::class_hash(c) as u32;
+        ((h ^ (h >> 16)) as usize) & (buckets - 1)
+    };
+    node.iter()
+        .enumerate()
+        .min_by_key(|(i, c)| (bucket(c), *i))
+        .map(|(_, c)| c.as_str())
+        .unwrap_or(OWL_THING)
+}
+
+/// The told class hierarchy. A class's parents are the classes [the
+/// structural reasoner](crate::cmd::reason) is told it is a subclass of; the
+/// classes of a told cycle make one node, any other class a node of its own.
+/// The top node holds `owl:Thing`, the bottom node `owl:Nothing`.
+struct Told {
+    parents: HashMap<String, Vec<String>>,
+    children: HashMap<String, Vec<String>>,
+    /// The node of each class in a told cycle.
+    cycle: HashMap<String, Rc<Vec<String>>>,
+    top: Rc<Vec<String>>,
+    bottom: Rc<Vec<String>>,
+    /// The classes directly below the top node: those told no parent but
+    /// `owl:Thing`'s node, and each cycle told none outside itself.
+    below_top: HashSet<String>,
+    /// The classes directly above the bottom node: those told no child but
+    /// `owl:Nothing`'s node, and each cycle told none outside itself.
+    above_bottom: HashSet<String>,
+    signature: Vec<String>,
+    /// Each node's ancestors, as they are asked for.
+    ancestors: RefCell<HashMap<String, Rc<HashSet<String>>>>,
+}
+
+impl Told {
+    fn of(model: &Model) -> Told {
+        let mut parents: HashMap<String, Vec<String>> = HashMap::new();
+        for (c, ps) in crate::cmd::reason::told_parents(model) {
+            let entry = parents.entry(c.to_string()).or_default();
+            for p in ps {
+                if !entry.iter().any(|e| e == p) {
+                    entry.push(p.to_string());
+                }
+            }
+        }
+        let mut signature: Vec<String> = model
+            .ont
+            .iter()
+            .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+            .filter(|(k, _)| *k == crate::sig::kind::CLASS)
+            .map(|(_, iri)| iri)
+            .chain([OWL_THING.to_string(), OWL_NOTHING.to_string()])
+            .collect();
+        signature.sort();
+        signature.dedup();
+        let mut children: HashMap<String, Vec<String>> = HashMap::new();
+        for (c, ps) in &parents {
+            for p in ps {
+                children.entry(p.clone()).or_default().push(c.clone());
+            }
+        }
+        let mut cycle: HashMap<String, Rc<Vec<String>>> = HashMap::new();
+        for scc in strongly_connected(&signature, &parents) {
+            if scc.len() > 1 {
+                let scc = Rc::new(scc);
+                for c in scc.iter() {
+                    cycle.insert(c.clone(), scc.clone());
+                }
+            }
+        }
+        let node = |c: &str| -> Rc<Vec<String>> {
+            cycle.get(c).cloned().unwrap_or_else(|| Rc::new(vec![c.to_string()]))
         };
-        if named_classes_only && !matches!((&sc.sub, &sc.sup), (CE::Class(_), CE::Class(_))) {
-            continue;
+        let top = node(OWL_THING);
+        let bottom = node(OWL_NOTHING);
+        let no_parents: Vec<String> = Vec::new();
+        let mut below_top: HashSet<String> = HashSet::new();
+        let mut above_bottom: HashSet<String> = HashSet::new();
+        for c in &signature {
+            let ps = parents.get(c).unwrap_or(&no_parents);
+            if ps.is_empty() || ps.iter().any(|p| p == OWL_THING) {
+                below_top.insert(c.clone());
+            }
+            let cs = children.get(c).unwrap_or(&no_parents);
+            if cs.is_empty() || cs.iter().any(|k| k == OWL_NOTHING) {
+                above_bottom.insert(c.clone());
+            }
         }
-        let (sk, pk) = match (key_of(&sc.sub, &expr_to_iri), key_of(&sc.sup, &expr_to_iri)) {
-            (Some(a), Some(b)) => (a, b),
-            _ => continue,
-        };
-        if redundant.contains(&(sk.clone(), pk.clone())) {
-            continue;
+        let mut cycles: Vec<&Rc<Vec<String>>> = cycle.values().collect();
+        cycles.sort();
+        cycles.dedup();
+        for scc in cycles {
+            if scc.iter().any(|c| c == OWL_THING || c == OWL_NOTHING) {
+                continue;
+            }
+            let outside = |links: &HashMap<String, Vec<String>>, end: &Rc<Vec<String>>| {
+                scc.iter().any(|c| {
+                    links.get(c).into_iter().flatten().any(|l| !scc.contains(l) && !end.contains(l))
+                })
+            };
+            if !outside(&parents, &top) {
+                below_top.extend(scc.iter().cloned());
+            }
+            if !outside(&children, &bottom) {
+                above_bottom.extend(scc.iter().cloned());
+            }
         }
-        // Never drop the self-loop itself; collapse every *other* superclass of a
-        // self-looped class (the self-referential-genus rule above).
-        if sk == pk {
-            continue;
-        }
-        if self_loop_classes.contains(&sk) {
-            redundant.insert((sk, pk));
-            continue;
-        }
-        let sub_is_anon = !matches!(sc.sub, CE::Class(_));
-        // A subclass axiom between two asserted-equivalent named classes is
-        // entailed by the (retained) EquivalentClasses axiom — redundant.
-        if equiv_pairs.contains(&(sk.clone(), pk.clone())) {
-            redundant.insert((sk, pk));
-            continue;
-        }
-        // Entailed by a degenerate self-referential equivalence `C ≡ C ⊓ X`.
-        if self_genus_supers.get(&sk).is_some_and(|s| s.contains(&pk)) {
-            redundant.insert((sk, pk));
-            continue;
-        }
-        // Main rule: another asserted *strict* superclass Y of C (C ⊏ Y, so Y is
-        // not equivalent to C) with X a strict super of Y. Requiring `strict(C,Y)`
-        // — not merely that Y is asserted — excludes equivalent classes as
-        // transitive-reduction intermediates: when the only "via" is a class
-        // equivalent to C (a mutual-subclass cycle), C ⊑ X is a real direct
-        // superclass and must be kept, not dropped.
-        let mut is_red = asserted_supers
-            .get(&sk)
-            .is_some_and(|sups| sups.iter().any(|y| *y != pk && strict(&sk, y) && strict(y, &pk)));
-        // GCI special case: anonymous subject. Any strict super `ip` of the subject
-        // that is itself an asserted-sub class and has `X` as a strict super.
-        if !is_red && sub_is_anon {
-            is_red = asserted_supers
-                .keys()
-                .any(|ip| *ip != sk && strict(&sk, ip) && strict(ip, &pk));
-        }
-        if is_red {
-            redundant.insert((sk, pk));
+        below_top.retain(|c| !top.contains(c));
+        above_bottom.retain(|c| !bottom.contains(c));
+        Told {
+            parents,
+            children,
+            cycle,
+            top,
+            bottom,
+            below_top,
+            above_bottom,
+            signature,
+            ancestors: RefCell::new(HashMap::new()),
         }
     }
 
-    // Removal pass: drop redundant SubClassOf axioms (respecting
-    // --preserve-annotated-axioms and --named-classes-only).
-    let mut out = SetClone::new(model);
-    out.retain(|ac| {
-        if preserve_annotated && !ac.ann.is_empty() {
-            return true;
+    fn node(&self, c: &str) -> Rc<Vec<String>> {
+        self.cycle.get(c).cloned().unwrap_or_else(|| Rc::new(vec![c.to_string()]))
+    }
+
+    /// The classes of the nodes above `c`'s, as the told parents reach them:
+    /// the walk goes no higher than the top node, and from the bottom node it
+    /// reaches every class.
+    fn ancestors_of(&self, c: &str) -> Rc<HashSet<String>> {
+        let start = self.node(c);
+        if start.iter().any(|m| self.top.contains(m)) {
+            return Rc::new(HashSet::new());
         }
-        match &ac.component {
-            Component::SubClassOf(ax) => {
-                if named_classes_only
-                    && !matches!((&ax.sub, &ax.sup), (CE::Class(_), CE::Class(_)))
-                {
-                    return true;
+        if let Some(found) = self.ancestors.borrow().get(&start[0]) {
+            return found.clone();
+        }
+        let mut out: HashSet<String> = HashSet::new();
+        let mut pending: Vec<String> = start.to_vec();
+        let mut walked: HashSet<String> = HashSet::new();
+        while let Some(x) = pending.pop() {
+            if !walked.insert(x.clone()) {
+                continue;
+            }
+            if self.top.contains(&x) {
+                continue;
+            }
+            if self.bottom.contains(&x) {
+                out.extend(self.signature.iter().filter(|s| !self.bottom.contains(s)).cloned());
+                continue;
+            }
+            for p in self.parents.get(&x).into_iter().flatten() {
+                if start.contains(p) {
+                    continue;
                 }
-                match (key_of(&ax.sub, &expr_to_iri), key_of(&ax.sup, &expr_to_iri)) {
-                    (Some(sk), Some(pk)) => !redundant.contains(&(sk, pk)),
-                    _ => true,
+                for m in self.node(p).iter() {
+                    out.insert(m.clone());
+                    pending.push(m.clone());
                 }
             }
-            _ => true,
         }
-    });
-    let mut result = out.into_model();
-    result.carry_meta_from(model);
-    result
+        out.retain(|m| !start.contains(m));
+        let out = Rc::new(out);
+        self.ancestors.borrow_mut().insert(start[0].clone(), out.clone());
+        out
+    }
+
+    /// Whether `x` lies strictly above `y`: every node lies above the bottom
+    /// node, the top node above every other, and otherwise `x` is among the
+    /// classes `y`'s told parents reach.
+    fn above(&self, y: &str, x: &str) -> bool {
+        if y == x {
+            return false;
+        }
+        if self.bottom.iter().any(|c| c == y) {
+            return !self.bottom.iter().any(|c| c == x);
+        }
+        let in_top = |c: &str| self.top.iter().any(|t| t == c);
+        if in_top(x) {
+            return !in_top(y);
+        }
+        self.ancestors_of(y).contains(x)
+    }
+
+    /// The nodes directly below `node`: those of its classes' told children,
+    /// with the classes directly below the top node under the top node, and
+    /// the bottom node under a node with a class directly above it.
+    fn sub_nodes(&self, node: &[String]) -> Vec<Vec<String>> {
+        if node.iter().any(|c| self.bottom.contains(c)) {
+            return Vec::new();
+        }
+        let mut below: Vec<&String> = node
+            .iter()
+            .flat_map(|c| self.children.get(c).into_iter().flatten())
+            .filter(|k| !node.contains(k))
+            .collect();
+        if node.iter().any(|c| self.top.contains(c)) {
+            let mut extra: Vec<&String> = self.below_top.iter().collect();
+            extra.sort();
+            below.extend(extra);
+        }
+        let mut out: Vec<Vec<String>> = Vec::new();
+        if node.iter().any(|c| self.above_bottom.contains(c)) {
+            out.push(self.bottom.to_vec());
+        }
+        for c in below {
+            let members = self.node(c).to_vec();
+            if !out.contains(&members) {
+                out.push(members);
+            }
+        }
+        out
+    }
+}
+
+/// The strongly connected components of the graph `edges` makes over
+/// `nodes`, each sorted.
+fn strongly_connected(nodes: &[String], edges: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+    struct State<'a> {
+        index: HashMap<&'a str, usize>,
+        low: HashMap<&'a str, usize>,
+        on_stack: HashSet<&'a str>,
+        stack: Vec<&'a str>,
+        next: usize,
+        out: Vec<Vec<String>>,
+    }
+    let none: Vec<String> = Vec::new();
+    let mut st = State {
+        index: HashMap::new(),
+        low: HashMap::new(),
+        on_stack: HashSet::new(),
+        stack: Vec::new(),
+        next: 0,
+        out: Vec::new(),
+    };
+    for root in nodes {
+        if st.index.contains_key(root.as_str()) {
+            continue;
+        }
+        // An explicit stack of (node, next edge to follow).
+        let mut work: Vec<(&str, usize)> = vec![(root.as_str(), 0)];
+        while let Some(&mut (v, ref mut i)) = work.last_mut() {
+            if *i == 0 && !st.index.contains_key(v) {
+                st.index.insert(v, st.next);
+                st.low.insert(v, st.next);
+                st.next += 1;
+                st.stack.push(v);
+                st.on_stack.insert(v);
+            }
+            let out_edges = edges.get(v).unwrap_or(&none);
+            if *i < out_edges.len() {
+                let w = out_edges[*i].as_str();
+                *i += 1;
+                if !st.index.contains_key(w) {
+                    work.push((w, 0));
+                } else if st.on_stack.contains(w) {
+                    let lw = st.index[w];
+                    let lv = st.low[v];
+                    st.low.insert(v, lv.min(lw));
+                }
+                continue;
+            }
+            work.pop();
+            if let Some(&(parent, _)) = work.last() {
+                let lv = st.low[v];
+                let lp = st.low[parent];
+                st.low.insert(parent, lp.min(lv));
+            }
+            if st.low[v] == st.index[v] {
+                let mut scc: Vec<String> = Vec::new();
+                while let Some(w) = st.stack.pop() {
+                    st.on_stack.remove(w);
+                    scc.push(w.to_string());
+                    if w == v {
+                        break;
+                    }
+                }
+                scc.sort();
+                st.out.push(scc);
+            }
+        }
+    }
+    st.out
 }
 
 /// Exact reduction: an axiom is removed iff the ontology *minus that axiom*
@@ -457,7 +917,7 @@ pub fn reduce_with_opts(
 /// `O − α`, so the entailment check is exact without re-classifying all of `O`.
 ///
 /// This is `O(candidates × module-extraction)`; on very large ontologies it is
-/// slower than the structural [`reduce`], which is why it is opt-in (`--exact`).
+/// slower than [`reduce`], which is why it is opt-in (`--exact`).
 pub fn reduce_exact(
     model: &Model,
     preserve_annotated: bool,

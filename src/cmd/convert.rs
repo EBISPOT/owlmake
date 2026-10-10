@@ -49,9 +49,6 @@ pub fn step(
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
     let piped_input = piped.is_some();
-    let mut model = crate::cmd::take_or_load_no_imports(piped, args.input.as_deref(), &args.common)?;
-    args.common.apply(&mut model)?;
-
     // A conversion keeps the document's `owl:imports` as declarations rather than
     // folding the imported axioms in — but what the imported ontologies hold still
     // decides the output, because a class one of them has in its signature needs
@@ -59,11 +56,10 @@ pub fn step(
     // `taxslim.owl` and states nothing but disjointness over its taxa; every one
     // of them is written untyped, and materialising 106,000 `owl:Class` stubs for
     // them put 2.2 MB into `mirror/ncbitaxondisjoints.owl` that the document does
-    // not carry.
-    //
-    // Best-effort and only when this command owns the load: piped into a pipeline
-    // the closure is whatever the earlier steps established.
-    crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
+    // not carry. So the load reads the closure; piped into a pipeline, the
+    // closure is whatever the earlier steps established.
+    let mut model = crate::cmd::take_or_load_no_imports(piped, args.input.as_deref(), &args.common)?;
+    args.common.apply(&mut model)?;
 
     // `--check` (default true): run OBO document-structure checks when the
     // output is OBO, reporting issues to stderr. `--check false` skips them. The
@@ -110,7 +106,7 @@ pub fn step(
     // label its imported pattern module asserts. The closure is loaded for its
     // labels alone and discarded; only the root is serialised.
     if !piped_input && writes_functional(args) && has_imports(&model) {
-        model.banner_labels = crate::cmd::closure_labels(args.input.as_deref(), &args.common);
+        model.banner_labels = crate::cmd::closure_labels(args.input.as_deref(), &args.common)?;
     }
 
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;

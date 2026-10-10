@@ -31,10 +31,9 @@ pub struct Args {
     /// lines and `#` comments are ignored.
     #[arg(short = 'T', long = "term-file", value_name = "FILE")]
     pub term_file: Vec<PathBuf>,
-    /// Reasoner the ontology is checked with before anything is materialized:
-    /// `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake`. The
-    /// restrictions themselves are what the built-in EL reasoner infers, with
-    /// union-elimination under `owlmake`.
+    /// Reasoner the ontology is checked and classified with: `elk`, `hermit`,
+    /// `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner
+    /// with union-elimination).
     #[arg(short = 'r', long, default_value = "elk")]
     pub reasoner: String,
     /// Any value. Changes nothing: what materialize asserts is never annotated.
@@ -80,11 +79,12 @@ pub fn step(
 }
 
 /// Check `model` with `kind`, then, unless `create_new_ontology`, assert the
-/// existential restrictions entailed over `props` (all when empty). An
-/// inconsistent ontology fails, as does one with an unsatisfiable class or
-/// object property. With `create_new_ontology` the materialized axioms belong
-/// in an ontology of their own, which is not written: the input is returned
-/// as it was, once checked.
+/// direct superclass expressions `kind` infers over `props` (all the
+/// ontology's object properties when empty). An inconsistent ontology fails,
+/// as does one with an unsatisfiable class or object property. With
+/// `create_new_ontology` the materialized axioms belong in an ontology of
+/// their own, which is not written: the input is returned as it was, once
+/// checked.
 pub fn materialize_with(
     model: crate::model::Model,
     props: &HashSet<String>,
@@ -95,11 +95,6 @@ pub fn materialize_with(
     crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
     if kind == ReasonerKind::Owlmake {
         status!("materialize: using the built-in EL reasoner with union-elimination");
-    } else if !el {
-        status!(
-            "note: materialize checks the ontology with '{}'; the restrictions are what the built-in EL reasoner infers",
-            format!("{kind:?}").to_lowercase()
-        );
     }
     // The EL reasoner's check rides the classification that materializes.
     if create_new_ontology || !el {
@@ -108,7 +103,7 @@ pub fn materialize_with(
     if create_new_ontology {
         return Ok(model);
     }
-    assert_existentials(model, props, el)
+    assert_existentials(model, props, kind)
 }
 
 /// Read property terms from a file: one IRI/CURIE per line, read the same way
@@ -125,32 +120,50 @@ pub fn materialize(model: crate::model::Model, props: &HashSet<String>) -> Resul
     materialize_with(model, props, ReasonerKind::Elk, false)
 }
 
-/// Assert inferred existential restrictions over `props` (all when empty).
-/// With `check`, the classification that finds them first checks the
-/// ontology as `elk` wrapped for materialization does.
+/// Assert the direct superclass expressions `kind` infers over `props` (all
+/// the ontology's object properties when empty). Under an EL reasoner the
+/// classification that finds them first checks the ontology as `elk` wrapped
+/// for materialization does; any other has checked it already.
 fn assert_existentials(
     mut model: crate::model::Model,
     props: &HashSet<String>,
-    check: bool,
+    kind: ReasonerKind,
 ) -> Result<crate::model::Model> {
     // Directness is a question the CLASS HIERARCHY answers, so it is computed
-    // in a synthetic space: one fresh named class per (property, filler) pair,
+    // in a synthetic space: one named class per (property, filler) pair,
     // equivalent to the restriction it stands for, classified together with the
-    // ontology. A restriction with anything between it and the class — another
-    // materialized property's restriction included, or a named class — is not
-    // direct, and only direct superclasses are asserted. The named direct
-    // subsumptions come from the same augmented hierarchy.
+    // ontology and its imports. A restriction with anything between it and the
+    // class — another materialized property's restriction included, or a named
+    // class — is not direct, and only direct superclasses are asserted. The
+    // named direct subsumptions come from the same augmented hierarchy.
+    //
+    // The fillers are the classes the ontology's own axioms name, and with no
+    // property given the properties are the object properties they name. A
+    // class gains superclasses only where the ontology's own axioms define it:
+    // a `SubClassOf` it is the subclass of, or an equivalence, disjointness or
+    // disjoint union it is a member of.
     const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
     const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
     let mut classes: std::collections::BTreeSet<String> = Default::default();
     let mut all_props: std::collections::BTreeSet<String> = Default::default();
+    let mut defined: HashSet<String> = HashSet::new();
+    // A named superclass is a class of the ontology or its imports: a nominal
+    // the reasoner classifies as a class of its own is none.
+    let mut known: HashSet<String> = HashSet::new();
     for ac in model.ont.iter() {
+        let own = !model.imported_components.contains(ac);
         for (k, iri) in crate::sig::typed_signature(&ac.component) {
             if k == crate::sig::kind::CLASS {
-                classes.insert(iri);
-            } else if k == crate::sig::kind::OBJECT_PROPERTY {
+                if own {
+                    classes.insert(iri.clone());
+                }
+                known.insert(iri);
+            } else if k == crate::sig::kind::OBJECT_PROPERTY && own {
                 all_props.insert(iri);
             }
+        }
+        if own {
+            defined.extend(defined_classes(&ac.component));
         }
     }
     classes.remove(OWL_THING);
@@ -162,8 +175,11 @@ fn assert_existentials(
         v.sort();
         v
     };
-    let Existentials { relations, named_subs, unsat, consistent } = existential_relations(&model, &prop_list, &classes);
-    if check {
+    let Existentials { mut relations, mut named_subs, unsat, consistent } =
+        existential_relations(&model, &prop_list, &classes, kind);
+    relations.retain(|(c, _, _)| defined.contains(c));
+    named_subs.retain(|(c, d)| defined.contains(c) && known.contains(d));
+    if kind.is_builtin_el() {
         let listed = crate::cmd::reason::unsatisfiable_in_node_order(ReasonerKind::Elk, &unsat, || {
             crate::reason::elk_order::class_queue(&model.ont)
         });
@@ -288,30 +304,36 @@ pub(crate) struct Existentials {
     pub consistent: bool,
 }
 
-/// The DIRECT existential superclasses of every named class over `props`, as
-/// `(class, property, filler)`, with the direct named subsumptions, the named
-/// classes of the ontology that are unsatisfiable, and whether it is
-/// consistent.
+/// The DIRECT existential superclasses `kind` infers for every named class
+/// over `props`, as `(class, property, filler)`, with the direct named
+/// subsumptions, the named classes of the ontology that are unsatisfiable, and
+/// whether it is consistent. Only an EL reasoner reports the last two here;
+/// any other has checked the ontology before.
 ///
 /// Directness is a question the CLASS HIERARCHY answers, so it is computed in
-/// a synthetic space: one fresh named class per (property, filler) pair,
+/// a synthetic space: one named class per (property, filler) pair,
 /// equivalent to the restriction it stands for, classified together with the
 /// ontology. A restriction with anything between it and the class — another
 /// materialized property's restriction included, or a named class — is not
-/// direct.
+/// direct. Every class of a direct superclass's node counts, so a restriction
+/// equivalent to a named direct superclass is direct too — except under
+/// `whelk`, which takes one class of each node (see
+/// [`crate::cmd::reason::direct_superclass_nodes`]).
+///
+/// The class standing for `∃r.c` is `<c>__<r>`, with every `:` and `/` of `r`
+/// written `_`: under `whelk` its IRI decides where it falls in the walk that
+/// picks a node's class.
 pub(crate) fn existential_relations(
     model: &crate::model::Model,
     prop_list: &[String],
     classes: &std::collections::BTreeSet<String>,
+    kind: ReasonerKind,
 ) -> Existentials {
-    const AUX_NS: &str = "urn:owlmake:materialize#";
         let mut aux = model.clone();
         let mut aux_map: std::collections::HashMap<String, (String, String)> = Default::default();
-        let mut n = 0usize;
         for r in prop_list {
             for c in classes {
-                let iri = format!("{AUX_NS}{n}");
-                n += 1;
+                let iri = format!("{c}__{}", r.replace([':', '/'], "_"));
                 aux.ont.insert(Component::EquivalentClasses(
                     horned_owl::model::EquivalentClasses(vec![
                         CE::Class(aux.build.class(iri.clone())),
@@ -324,6 +346,25 @@ pub(crate) fn existential_relations(
                 aux_map.insert(iri, (r.clone(), c.clone()));
             }
         }
+        if !kind.is_builtin_el() {
+            let direct = crate::cmd::reason::direct_superclass_nodes(&aux, kind);
+            let mut relations: Vec<(String, String, String)> = Vec::new();
+            let mut named_subs: Vec<(String, String)> = Vec::new();
+            for (sub, sup) in direct {
+                if aux_map.contains_key(&sub) {
+                    continue;
+                }
+                match aux_map.get(&sup) {
+                    Some((r, d)) => relations.push((sub, r.clone(), d.clone())),
+                    None => named_subs.push((sub, sup)),
+                }
+            }
+            relations.sort();
+            relations.dedup();
+            named_subs.sort();
+            named_subs.dedup();
+            return Existentials { relations, named_subs, unsat: Vec::new(), consistent: true };
+        }
         let reasoner = Reasoner::classify(&aux);
         // The classes standing for restrictions say nothing of the ontology's
         // own: a restriction on an unsatisfiable filler is unsatisfiable with it.
@@ -331,7 +372,7 @@ pub(crate) fn existential_relations(
             .unsatisfiable()
             .into_iter()
             .map(|u| u.to_string())
-            .filter(|u| !u.starts_with(AUX_NS))
+            .filter(|u| !aux_map.contains_key(u))
             .collect();
         let direct = reasoner.direct_subsumptions();
         let mutual: std::collections::HashSet<(&str, &str)> =
@@ -339,7 +380,7 @@ pub(crate) fn existential_relations(
         let mut relations: Vec<(String, String, String)> = Vec::new();
         let mut named_subs: Vec<(String, String)> = Vec::new();
         for (sub, sup) in &direct {
-            if sub.starts_with(AUX_NS) {
+            if aux_map.contains_key(sub) {
                 continue;
             }
             match aux_map.get(sup) {
@@ -359,4 +400,25 @@ pub(crate) fn existential_relations(
         named_subs.sort();
         named_subs.dedup();
         Existentials { relations, named_subs, unsat, consistent: reasoner.is_consistent() }
+}
+
+/// The classes a class axiom defines: the subclass of a `SubClassOf` that is
+/// a named class, and the named members of an equivalence or a disjointness,
+/// or the class a disjoint union defines.
+fn defined_classes(c: &Component<horned_owl::model::RcStr>) -> Vec<String> {
+    let named = |ces: &[CE<horned_owl::model::RcStr>]| -> Vec<String> {
+        ces.iter()
+            .filter_map(|ce| match ce {
+                CE::Class(c) => Some(c.0.to_string()),
+                _ => None,
+            })
+            .collect()
+    };
+    match c {
+        Component::SubClassOf(SubClassOf { sub: CE::Class(c), .. }) => vec![c.0.to_string()],
+        Component::EquivalentClasses(eq) => named(&eq.0),
+        Component::DisjointClasses(dc) => named(&dc.0),
+        Component::DisjointUnion(du) => vec![du.0.0.to_string()],
+        _ => Vec::new(),
+    }
 }

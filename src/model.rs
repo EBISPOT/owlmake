@@ -67,18 +67,29 @@ pub struct ImportsClosure {
     pub signature: std::collections::HashSet<String>,
     /// The entities an imported ontology declares.
     pub declared: std::collections::HashSet<String>,
+    /// Where each ontology of the closure was read from, in the order they were
+    /// read — what a writer that renders every ontology of the closure on its
+    /// own reads them back from.
+    pub documents: Vec<ImportSource>,
 }
 
 impl ImportsClosure {
-    /// The closure whose ontologies are merged in `imported`.
+    /// The closure whose ontologies are merged in `imported`, read from where
+    /// `imported` records.
     pub fn of(imported: &Model) -> Self {
         let mut closure = ImportsClosure::default();
-        closure.add(imported);
+        closure.add_entities(imported);
+        closure.documents = imported.import_sources.clone();
         closure
     }
 
-    /// Add the entities of an imported ontology.
-    pub fn add(&mut self, imported: &Model) {
+    /// Add an imported ontology, read from `source`.
+    pub fn add(&mut self, source: ImportSource, imported: &Model) {
+        self.add_entities(imported);
+        self.documents.push(source);
+    }
+
+    fn add_entities(&mut self, imported: &Model) {
         use crate::io::entities::{closure_key, declared, signature};
         self.signature.extend(signature(imported).into_iter().map(|(kind, iri)| closure_key(kind, &iri)));
         self.declared.extend(declared(imported).into_iter().map(|(kind, iri)| closure_key(kind, &iri)));

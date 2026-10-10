@@ -635,6 +635,302 @@ fn a_planned_remove_reads_a_switch_where_the_command_does() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A planned merge attributes what it merges and keeps the inputs' ontology
+/// annotations as its step says, through each input's imports closure as the
+/// plan's catalog resolves it. The expected files are ROBOT 1.9.11's merge
+/// with the same options.
+#[test]
+fn a_planned_merge_attributes_what_it_merges() {
+    let root = workdir("merge-provenance");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["merge-prov-p.ofn", "merge-prov-i.ofn", "merge-prov-s.ofn", "merge-prov-j.ofn", "merge-prov-catalog.xml"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    let merge = |target: &str, options: &str| {
+        format!(
+            "  - target: {target}\n    input: merge-prov-p.ofn\n    needs: [merge-prov-p.ofn, merge-prov-s.ofn]\n    steps:\n\
+             \x20     - op: merge\n        inputs: [merge-prov-p.ofn, merge-prov-s.ofn]\n{options}"
+        )
+    };
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        format!(
+            "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+             use_builtin_rules: false\ncatalog_file: merge-prov-catalog.xml\ntargets:\n{}{}",
+            merge("defined-by.ofn", "        annotate_defined_by: true\n"),
+            merge("kept.ofn", "        collapse_import_closure: false\n        include_annotations: true\n"),
+        ),
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "defined-by.ofn", "kept.ofn"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for (target, robot) in [
+        ("defined-by.ofn", "merge-prov.defined-by.robot.ofn"),
+        ("kept.ofn", "merge-prov.keep-imports.annotations.robot.ofn"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(target)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{target}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A build reads an input's imports closure at every depth by one rule: the
+/// catalog the plan names, else the IRI itself — the file a `file:` IRI names.
+/// An import nested in an imported module is no exception: when it exists, its
+/// labels head the sections a functional write gives the entities it names, and
+/// when it resolves nowhere, the build fails, naming it.
+#[test]
+fn a_build_resolves_every_import_of_a_closure_or_fails() {
+    let root = workdir("closure-depth");
+    std::fs::write(
+        root.join("sub.ofn"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/sub>\n\
+         Declaration(Class(<http://example.org/sub#S>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/sub#S> \"from a nested import\")\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         \x20 <uri name=\"http://example.org/mid.owl\" uri=\"mid.ofn\"/>\n</catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("edit.ofn"),
+        "Ontology(<http://example.org/edit>\n\
+         Import(<http://example.org/mid.owl>)\n\
+         SubClassOf(<http://example.org/sub#S> <http://example.org/edit#A>)\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+         use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n\
+         \x20 - target: out.ofn\n    input: edit.ofn\n    needs: [edit.ofn]\n    steps:\n\
+         \x20     - op: convert\n",
+    )
+    .unwrap();
+    let mid = |import: &str| format!("Ontology(<http://example.org/mid.owl>\nImport(<{import}>)\n)\n");
+    let build = || {
+        std::process::Command::new(BIN)
+            .args(["make", "-B", "out.ofn"])
+            .current_dir(&root)
+            .output()
+            .expect("running om")
+    };
+    let sub = root.join("sub.ofn").canonicalize().unwrap();
+    std::fs::write(root.join("mid.ofn"), mid(&format!("file://{}", sub.display()))).unwrap();
+    let out = build();
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let written = std::fs::read_to_string(root.join("out.ofn")).unwrap();
+    assert!(written.contains("# Class: <http://example.org/sub#S> (from a nested import)"), "{written}");
+    let nowhere = "file:///nonexistent-owlmake-fixture/unresolvable-import.owl";
+    std::fs::write(root.join("mid.ofn"), mid(nowhere)).unwrap();
+    let out = build();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains(nowhere), "{stderr}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned conversion to OBO Graphs JSON writes a graph for each ontology of
+/// its input's imports closure, read through the catalog the plan names, at
+/// every depth. As ROBOT 1.9.11 converts the same three documents.
+#[test]
+fn a_planned_json_conversion_writes_a_graph_for_each_ontology_of_the_closure() {
+    let root = workdir("json-closure");
+    std::fs::write(
+        root.join("sub.ofn"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/sub>\n\
+         Declaration(Class(<http://example.org/sub#S>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/sub#S> \"from a nested import\")\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         \x20 <uri name=\"http://example.org/mid.owl\" uri=\"mid.ofn\"/>\n</catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("edit.ofn"),
+        "Ontology(<http://example.org/edit>\n\
+         Import(<http://example.org/mid.owl>)\n\
+         SubClassOf(<http://example.org/sub#S> <http://example.org/edit#A>)\n)\n",
+    )
+    .unwrap();
+    let sub = root.join("sub.ofn").canonicalize().unwrap();
+    std::fs::write(
+        root.join("mid.ofn"),
+        format!("Ontology(<http://example.org/mid.owl>\nImport(<file://{}>)\n)\n", sub.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+         use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n\
+         \x20 - target: out.json\n    input: edit.ofn\n    needs: [edit.ofn]\n    steps:\n\
+         \x20     - op: convert\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "out.json"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    let expected = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/robot-1.9.11/obographs-closure-build.robot.json");
+    assert_eq!(
+        std::fs::read_to_string(root.join("out.json")).unwrap(),
+        std::fs::read_to_string(expected).unwrap()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned `query --use-graphs` reads its input's imports as every step of a
+/// build does: through the catalog the plan names, else the IRI itself. A
+/// document in the repository that merely shares an import's name is a path
+/// the plan never names, and is not read.
+#[test]
+fn a_planned_union_query_reads_imports_through_the_plan_alone() {
+    let root = workdir("use-graphs-imports");
+    std::fs::write(
+        root.join("sibling.owl"),
+        "Ontology(<http://example.org/sibling>\nDeclaration(Class(<http://example.org/sibling#S>))\n)\n",
+    )
+    .unwrap();
+    let import = "urn:example:imports/sibling.owl";
+    std::fs::write(
+        root.join("edit.ofn"),
+        format!(
+            "Ontology(<http://example.org/edit>\nImport(<{import}>)\n\
+             Declaration(Class(<http://example.org/edit#A>))\n)\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n</catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("classes.rq"),
+        "SELECT ?c WHERE { ?c a <http://www.w3.org/2002/07/owl#Class> } ORDER BY ?c\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+         use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n\
+         \x20 - target: classes.csv\n    input: edit.ofn\n    needs: [edit.ofn, classes.rq]\n    steps:\n\
+         \x20     - op: query\n        use_graphs: true\n        selects:\n\
+         \x20         - {query: classes.rq, output: classes.csv}\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "classes.csv"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains(import), "{stderr}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned query reads its input with the input's imports closure, through
+/// the catalog the plan names, as ROBOT's query does: an entity the input names
+/// without declaring is typed unless an ontology it imports has it, and an
+/// import that resolves nowhere fails the step, naming it.
+#[test]
+fn a_planned_query_reads_its_input_with_its_imports_closure() {
+    let root = workdir("query-closure");
+    std::fs::write(
+        root.join("imp.ofn"),
+        "Prefix(:=<http://example.org/c#>)\nOntology(<http://example.org/imp.owl>\n\
+         Declaration(ObjectProperty(:bfo50))\nDeclaration(ObjectProperty(:bfo51))\n)\n",
+    )
+    .unwrap();
+    let edit = |extra: &str| {
+        format!(
+            "Prefix(:=<http://example.org/c#>)\nOntology(<http://example.org/edit>\n\
+             Import(<http://example.org/imp.owl>)\n{extra}Declaration(Class(:A))\nDeclaration(ObjectProperty(:p))\n\
+             SubObjectPropertyOf(ObjectPropertyChain(:bfo50 :bfo51) :p)\nSubClassOf(:A ObjectSomeValuesFrom(:q :A))\n)\n"
+        )
+    };
+    std::fs::write(root.join("edit.ofn"), edit("")).unwrap();
+    std::fs::write(
+        root.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         \x20   <uri name=\"http://example.org/imp.owl\" uri=\"imp.ofn\"/>\n</catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("properties.rq"),
+        "SELECT ?p WHERE { ?p a <http://www.w3.org/2002/07/owl#ObjectProperty> } ORDER BY ?p\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+         use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n\
+         \x20 - target: properties.csv\n    input: edit.ofn\n    needs: [edit.ofn, properties.rq]\n    steps:\n\
+         \x20     - op: query\n        selects:\n\
+         \x20         - {query: properties.rq, output: properties.csv}\n",
+    )
+    .unwrap();
+    let make = || {
+        std::process::Command::new(BIN)
+            .args(["make", "-B", "properties.csv"])
+            .current_dir(&root)
+            .output()
+            .expect("running om")
+    };
+    let out = make();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        std::fs::read_to_string(root.join("properties.csv")).unwrap(),
+        "p\r\nhttp://example.org/c#p\r\nhttp://example.org/c#q\r\n"
+    );
+    let import = "urn:example:imports/missing.owl";
+    std::fs::write(root.join("edit.ofn"), edit(&format!("Import(<{import}>)\n"))).unwrap();
+    let out = make();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains(import), "{stderr}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A `VAR=value` given to `om make` is in the environment of every command a
+/// plan's step spawns: the shell a shell step runs, and the owlmake command a
+/// step runs in its place.
+#[test]
+fn a_command_line_variable_reaches_every_command_a_step_spawns() {
+    let root = workdir("run-env");
+    let targets = "  - target: shell.txt\n    steps:\n\
+         \x20     - op: shell\n        command: \"echo robot_env=$ROBOT_ENV > shell.txt\"\n\
+         \x20 - target: jq.txt\n    steps:\n\
+         \x20     - op: shell\n        command: \"jq -n -r '$ENV.ROBOT_ENV' > jq.txt\"\n";
+    let (ok, err) =
+        make_own_plan(&root, targets, &["shell.txt", "jq.txt", "ROBOT_ENV=ROBOT_JAVA_ARGS=-Xmx6G"]);
+    assert!(ok, "the build failed:\n{err}");
+    let read = |f: &str| std::fs::read_to_string(root.join(f)).unwrap().trim().to_string();
+    assert_eq!(read("shell.txt"), "robot_env=ROBOT_JAVA_ARGS=-Xmx6G");
+    assert_eq!(read("jq.txt"), "ROBOT_JAVA_ARGS=-Xmx6G");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A plan's shell step runs its command line as one shell, so a `cd` in it
 /// reaches the commands after it.
 #[test]

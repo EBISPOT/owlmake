@@ -18,10 +18,19 @@ pub enum Op {
         inputs: Vec<String>,
         /// `--collapse-import-closure` (default true): merge the import
         /// closure in and drop the `owl:imports` declarations. When set to false
-        /// (MONDO's `filtered.owl`), the imports are kept as declarations and
-        /// their axioms are NOT merged — they remain a read-only reasoning closure
-        /// until a later collapsing merge.
+        /// the current ontology keeps its imports as declarations and their
+        /// axioms are NOT merged — they remain a read-only reasoning closure
+        /// until a later collapsing merge — and each input gives its own axioms.
         collapse_import_closure: Option<bool>,
+        /// `--include-annotations`: the inputs' ontology annotations join the
+        /// current ontology's.
+        include_annotations: bool,
+        /// `--annotate-defined-by`: each entity with no `rdfs:isDefinedBy` is
+        /// defined by the ontology that names it.
+        annotate_defined_by: bool,
+        /// `--annotate-derived-from`: each axiom says with `prov:wasDerivedFrom`
+        /// which ontology it came from.
+        annotate_derived_from: bool,
     },
     /// `unmerge` — remove a second ontology's axioms from the current one.
     Unmerge {
@@ -352,6 +361,19 @@ pub enum Op {
     MakeSubsetByProperties {
         properties: Vec<String>,
     },
+}
+
+impl Op {
+    /// A `merge` of `inputs` with every option at its default.
+    pub fn plain_merge(inputs: Vec<String>) -> Op {
+        Op::Merge {
+            inputs,
+            collapse_import_closure: None,
+            include_annotations: false,
+            annotate_defined_by: false,
+            annotate_derived_from: false,
+        }
+    }
 }
 
 /// What `remove` and `filter` select, and how each judges an axiom against
@@ -750,12 +772,24 @@ fn selection_label(s: &SelectionSpec) -> Vec<String> {
 
 fn op_label(op: &Op) -> String {
     match op {
-        Op::Merge { collapse_import_closure, .. } => {
-            if *collapse_import_closure == Some(false) {
-                "merge (keep imports)".into()
+        Op::Merge { collapse_import_closure, include_annotations, annotate_defined_by, annotate_derived_from, .. } => {
+            let mut label = if *collapse_import_closure == Some(false) {
+                "merge (keep imports".to_string()
             } else {
-                "merge (+resolve imports)".into()
+                "merge (+resolve imports".to_string()
+            };
+            for (on, what) in [
+                (*include_annotations, "+annotations"),
+                (*annotate_defined_by, "defined-by"),
+                (*annotate_derived_from, "derived-from"),
+            ] {
+                if on {
+                    label.push_str(", ");
+                    label.push_str(what);
+                }
             }
+            label.push(')');
+            label
         }
         Op::Unmerge { .. } => "unmerge".into(),
         Op::Reason {

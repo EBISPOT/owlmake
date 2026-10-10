@@ -20,9 +20,10 @@ pub struct Args {
     #[arg(short = 'i', long = "input", num_args = 1..)]
     pub inputs: Vec<PathBuf>,
 
-    /// Merge ontologies matching a filesystem wildcard pattern. Bound without a
-    /// short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only
-    /// the long form is exposed here. Repeatable.
+    /// Merge the ontologies whose file names match a wildcard pattern (`*` and
+    /// `?` in the file name). The first pattern given is the one read. Bound
+    /// without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`,
+    /// so only the long form is exposed here.
     #[arg(long = "inputs", value_name = "PATTERN")]
     pub input_globs: Vec<String>,
 
@@ -36,25 +37,26 @@ pub struct Args {
     #[arg(long)]
     pub format: Option<String>,
 
-    /// Keep secondary inputs' ontology-level annotations (`<bool>`, default false:
-    /// by default only the primary ontology's annotations survive).
+    /// Keep the other inputs' ontology annotations (`<bool>`, default false: by
+    /// default only the first ontology's annotations survive).
     #[arg(short = 'a', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub include_annotations: Option<bool>,
 
     /// Merge the imports closure (`<bool>`, default true). When true, each
-    /// input's `owl:imports` transitive closure is resolved (via `--catalog` or
-    /// as sibling files) and merged in, then the import declarations are dropped.
-    /// When false, imports are kept and their content is not merged.
+    /// input's `owl:imports` transitive closure is resolved (via `--catalog`, or
+    /// the catalog beside the input) and merged in, then the import declarations
+    /// are dropped. When false, the first ontology keeps its imports, every
+    /// input contributes its own axioms only, and the other inputs' imports go.
     #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub collapse_import_closure: Option<bool>,
 
-    /// Annotate each entity with rdfs:isDefinedBy = its source ontology IRI
-    /// (`<bool>`, default false).
+    /// Assert `rdfs:isDefinedBy` the ontology IRI of every entity an input or
+    /// one of its imports names that has none (`<bool>`, default false).
     #[arg(short = 'd', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub annotate_defined_by: Option<bool>,
 
-    /// Annotate merged axioms with prov:wasDerivedFrom = their source ontology
-    /// IRI (`<bool>`, default false).
+    /// Annotate every axiom with `prov:wasDerivedFrom` the version IRI (else the
+    /// ontology IRI) of the ontology it comes from (`<bool>`, default false).
     #[arg(short = 'f', long = "annotate-derived-from", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub annotate_derived_from: Option<bool>,
 
@@ -84,6 +86,18 @@ impl Default for MergeOptions {
     }
 }
 
+impl MergeOptions {
+    /// The options a plan's merge step states.
+    pub(crate) fn of(
+        include_annotations: bool,
+        collapse_import_closure: bool,
+        annotate_defined_by: bool,
+        annotate_derived_from: bool,
+    ) -> Self {
+        MergeOptions { include_annotations, collapse_import_closure, annotate_defined_by, annotate_derived_from }
+    }
+}
+
 impl Args {
     fn options(&self) -> MergeOptions {
         MergeOptions {
@@ -105,112 +119,70 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
     // `--strict`/`--xml-entities`/`-v` options into the I/O layer here.
     args.common.activate();
     // The inputs in the order they are read: every `--input` file, then every
-    // `-I/--input-iri`, then each file an `--inputs <glob>` pattern matches. The
+    // `-I/--input-iri`, then each file the first `--inputs` pattern matches. The
     // first is the primary ontology and the rest are merged into it.
-    let mut files: Vec<PathBuf> = args.inputs.clone();
-    let mut globbed: Vec<PathBuf> = Vec::new();
-    for pattern in &args.input_globs {
-        let matched = expand_glob(pattern)?;
-        if matched.is_empty() {
-            status!("merge: WARNING — pattern `{pattern}` matched no files");
-        }
-        globbed.extend(matched);
+    let mut sources: Vec<Source> = args.inputs.iter().cloned().map(Source::File).collect();
+    sources.extend(args.common.input_iri.iter().cloned().map(Source::Iri));
+    if let Some(pattern) = args.input_globs.first() {
+        sources.extend(expand_glob(pattern)?.into_iter().map(Source::File));
     }
     // Drop empty *stamp* inputs (e.g. UBERON's `tmp/bridges`, a `touch`ed marker
     // listed among a `merge`'s prerequisites): they carry no axioms, so merging
     // them is a no-op — but `io::load` would fail to determine a format.
-    files.retain(|p| !io::is_empty_ontology_file(p));
-    globbed.retain(|p| !io::is_empty_ontology_file(p));
-    let first_file: Option<PathBuf> = files.first().or(globbed.first()).cloned();
-    let mut sources: Vec<Source> = files.into_iter().map(Source::File).collect();
-    sources.extend(args.common.input_iri.iter().cloned().map(Source::Iri));
-    sources.extend(globbed.into_iter().map(Source::File));
+    sources.retain(|s| !matches!(s, Source::File(p) if io::is_empty_ontology_file(p)));
     let fmt = args.common.input_format.as_deref();
-    let catalog = match args.common.catalog.as_deref() {
+    let catalog = args.common.catalog.as_deref();
+    let iri_catalog = match catalog {
         Some(c) if !args.common.input_iri.is_empty() => crate::cmd::parse_catalog(c)
             .map_err(|e| e.context(format!("reading catalog {}", c.display())))?,
         _ => Default::default(),
     };
-
     let opts = args.options();
-    let (mut merged, rest): (Model, Vec<Source>) = match piped {
-        Some(m) => (m, sources),
+    let provenance = opts.annotate_defined_by || opts.annotate_derived_from;
+
+    // Every input is read, with its imports closure, before anything is merged.
+    let mut sources = sources.into_iter();
+    let (mut target, banners_lent) = match piped {
+        Some(m) => Input::piped(m, provenance, catalog)?,
         None => {
-            let mut it = sources.into_iter();
-            let Some(primary) = it.next() else {
-                anyhow::bail!(
-                    "merge requires at least one --input/--inputs, an --input-iri, or a piped ontology"
-                );
+            let Some(primary) = sources.next() else {
+                anyhow::bail!("MISSING INPUT ERROR at least one --input is required");
             };
-            (primary.load(fmt, &catalog)?, it.collect())
+            (primary.read(fmt, &iri_catalog, catalog)?, false)
         }
     };
-    args.common.apply(&mut merged)?;
+    let rest = sources.map(|s| s.read(fmt, &iri_catalog, catalog)).collect::<anyhow::Result<Vec<_>>>()?;
+    args.common.apply(&mut target.doc)?;
 
-    // Provenance for the primary ontology, when annotating defined-by/derived-from.
-    if opts.annotate_defined_by || opts.annotate_derived_from {
-        if let Some(src) = ontology_iri(&merged) {
-            let ents = declared_entities(&merged);
-            annotate_provenance(&mut merged, &src, &ents, &opts);
+    let has_imports = !target.imports.is_empty();
+    if opts.collapse_import_closure && has_imports && !banners_lent {
+        // The ontologies the first input's closure holds are documents a
+        // functional write's banners draw their labels from.
+        if target.doc.banner_docs.is_empty() {
+            target.doc.banner_docs.push(crate::cmd::banner_doc_of(&target.doc, true));
+        }
+        for imp in &target.imports {
+            target.doc.banner_docs.push(crate::cmd::banner_doc_of(&imp.doc, false));
         }
     }
-
-    // Collect every input's `owl:imports` so the whole closure (not just the
-    // primary's) is followed/preserved — `merge_into` strips imports per input.
-    let mut all_import_iris = Vec::new();
-    for ac in merged.ont.iter() {
-        if let Component::Import(imp) = &ac.component {
-            all_import_iris.push(imp.0.clone());
-        }
-    }
-    for source in &rest {
-        let other = source.load(fmt, &catalog)?;
-        for ac in other.ont.iter() {
-            if let Component::Import(imp) = &ac.component {
-                all_import_iris.push(imp.0.clone());
-            }
-        }
-        merge_into(&mut merged, &other, &opts);
-    }
-    // Re-introduce the imports (deduped by the axiom set) so the closure logic
-    // below sees secondary inputs' imports too.
-    {
-        use horned_owl::model::{Import, MutableOntology};
-        for iri in all_import_iris {
-            merged.ont.insert(Component::Import(Import(iri)));
-        }
-    }
-
-    // `--collapse-import-closure` (default true): follow each input's
-    // `owl:imports` transitive closure (resolved through `--catalog` if given,
-    // else as sibling files of the first input), merge that content in, then drop
-    // the import declarations for a single self-contained ontology. With
-    // `--collapse-import-closure false` the import declarations are kept untouched
-    // and their content is not merged.
+    let (mut merged, imports) = merge_inputs(target, rest, &opts)?;
     if opts.collapse_import_closure {
-        crate::cmd::resolve_imports_auto(
-            &mut merged,
-            args.common.catalog.as_deref(),
-            first_file.as_deref(),
-        )?;
-        // Drop any imports that could not be resolved, so nothing dangles.
-        use horned_owl::model::MutableOntology;
-        let imports: Vec<_> = merged
-            .ont
-            .iter()
-            .filter(|ac| matches!(ac.component, Component::Import(_)))
-            .cloned()
-            .collect();
-        for ac in imports {
-            merged.ont.remove(&ac);
+        if has_imports {
+            crate::cmd::fold_import_labels(&mut merged);
         }
-        // …and they stay dropped. `resolve_import_closure` records what it inlined
-        // so that a save can write the ROOT ontology: `om reason -i x.owl -o
-        // y.owl` hands back the ontology it was given, still importing. `merge`
-        // means the opposite — a collapsed merge inlines the closure and writes
-        // ONE self-contained document — so the record is discarded here, and the
-        // merged-in axioms become the result's own.
+        // A collapsed merge writes ONE self-contained document: the closure's
+        // axioms are the result's own.
         merged.detach_import_closure();
+    } else if !imports.is_empty() {
+        // The first input still imports what it imported, and its closure is
+        // lent to it as to any ontology a command reads.
+        if merged.banner_docs.is_empty() {
+            merged.banner_docs.push(crate::cmd::banner_doc_of(&merged, true));
+        }
+        for imp in imports {
+            crate::cmd::lend_import(&mut merged, imp.source, &imp.doc);
+        }
+        crate::cmd::finish_lending(&mut merged);
     }
 
     collapse_inverse_pairs(&mut merged);
@@ -236,6 +208,396 @@ impl Source {
             Source::Iri(iri) => crate::cmd::load_iri_via_catalog(iri, format, catalog),
         }
     }
+
+    /// Read the input with its imports closure. A file's imports resolve
+    /// through `catalog`, else the catalog beside it.
+    fn read(
+        &self,
+        format: Option<&str>,
+        iri_catalog: &std::collections::BTreeMap<String, PathBuf>,
+        catalog: Option<&std::path::Path>,
+    ) -> anyhow::Result<Input> {
+        let doc = self.load(format, iri_catalog)?;
+        let path = match self {
+            Source::File(p) => Some(p.as_path()),
+            Source::Iri(_) => None,
+        };
+        let (map, base) = crate::cmd::import_resolution(catalog, path)?;
+        let mut read = Vec::new();
+        crate::cmd::for_each_import(
+            crate::cmd::imports_of(&doc),
+            &crate::cmd::command_import_rule(&map, &base),
+            |source, m, _| {
+                read.push((source, m));
+                Ok(())
+            },
+        )?;
+        Ok(Input::new(doc, read, true))
+    }
+}
+
+/// An ontology a merge reads, with each ontology of its imports closure read
+/// on its own, as ROBOT's merge holds them.
+pub(crate) struct Input {
+    pub doc: Model,
+    /// Every ontology `doc` imports, directly or not, in the order they were
+    /// read.
+    pub imports: Vec<Imported>,
+    /// Whether `doc`'s signature still counts the entities of its imports.
+    ///
+    /// Reading an ontology together with its imports takes the signature of
+    /// the whole closure, and until the ontology changes, that is the
+    /// signature it reports as its own. So an input this merge read, and that
+    /// nothing has changed since, attributes its imports' entities to itself.
+    pub fresh: bool,
+}
+
+/// An ontology of an input's imports closure.
+pub(crate) struct Imported {
+    pub source: crate::model::ImportSource,
+    pub doc: Model,
+    /// The ontologies of the same closure this one imports, directly or not,
+    /// whose entities its signature counts as its own (see [`Input::fresh`]).
+    nested: Vec<usize>,
+}
+
+/// The entities the `i`th ontology of a closure reports as its signature.
+fn imported_signature(imports: &[Imported], i: usize) -> BTreeSet<String> {
+    let mut sig = entity_iris(&imports[i].doc);
+    for &j in &imports[i].nested {
+        sig.extend(entity_iris(&imports[j].doc));
+    }
+    sig
+}
+
+impl Input {
+    /// `doc` with the ontologies of its imports closure, in the order they were
+    /// read. `read_here` says whether the merge itself read `doc`.
+    pub(crate) fn new(
+        doc: Model,
+        imports: Vec<(crate::model::ImportSource, Model)>,
+        read_here: bool,
+    ) -> Input {
+        // The ontologies each import imports in turn: an import IRI names the
+        // ontology read for it, and an ontology is also named by its own IRIs.
+        let mut by_name: std::collections::HashMap<String, usize> = Default::default();
+        for (i, (source, m)) in imports.iter().enumerate() {
+            by_name.entry(source.iri.clone()).or_insert(i);
+            let (iri, version) = crate::cmd::annotate::ontology_iris(m);
+            for name in iri.into_iter().chain(version) {
+                by_name.entry(name).or_insert(i);
+            }
+        }
+        let direct: Vec<Vec<usize>> = imports
+            .iter()
+            .map(|(_, m)| crate::cmd::imports_of(m).iter().filter_map(|iri| by_name.get(iri).copied()).collect())
+            .collect();
+        let mut nested_of = Vec::with_capacity(imports.len());
+        for i in 0..imports.len() {
+            let mut nested = Vec::new();
+            let mut seen: HashSet<usize> = HashSet::from([i]);
+            let mut stack: Vec<usize> = direct[i].clone();
+            while let Some(j) = stack.pop() {
+                if seen.insert(j) {
+                    nested.push(j);
+                    stack.extend(direct[j].iter().copied());
+                }
+            }
+            nested_of.push(nested);
+        }
+        let imports: Vec<Imported> = imports
+            .into_iter()
+            .zip(nested_of)
+            .map(|((source, doc), nested)| Imported { source, doc, nested })
+            .collect();
+        let fresh = read_here && !imports.is_empty();
+        Input { doc, imports, fresh }
+    }
+
+    /// The ontology a pipeline hands the merge, and whether the documents of
+    /// its closure are already among those its banners draw labels from.
+    ///
+    /// A closure an earlier command lent it stays lent, unless the merge
+    /// attributes provenance: then each ontology of it is read again, on its
+    /// own. Imports nothing lent yet are read here.
+    fn piped(
+        mut doc: Model,
+        provenance: bool,
+        catalog: Option<&std::path::Path>,
+    ) -> anyhow::Result<(Input, bool)> {
+        if !doc.import_sources.is_empty() {
+            if !provenance {
+                return Ok((Input { doc, imports: Vec::new(), fresh: false }, true));
+            }
+            let sources = std::mem::take(&mut doc.import_sources);
+            crate::cmd::restore_root_for_save(&mut doc);
+            doc.detach_import_closure();
+            doc.banner_docs.truncate(1);
+            let mut read = Vec::new();
+            for source in sources {
+                let m = match &source.path {
+                    Some(p) => io::load(p)?,
+                    None => io::load_iri(&source.iri, None)?,
+                };
+                read.push((source, m));
+            }
+            return Ok((Input::new(doc, read, false), false));
+        }
+        let (map, base) = crate::cmd::import_resolution(catalog, None)?;
+        let mut read = Vec::new();
+        crate::cmd::for_each_import(
+            crate::cmd::imports_of(&doc),
+            &crate::cmd::command_import_rule(&map, &base),
+            |source, m, _| {
+                read.push((source, m));
+                Ok(())
+            },
+        )?;
+        Ok((Input::new(doc, read, false), false))
+    }
+}
+
+/// The IRIs of the entities in `model`'s signature.
+fn entity_iris(model: &Model) -> BTreeSet<String> {
+    crate::io::entities::signature(model).into_iter().map(|(_, iri)| iri).collect()
+}
+
+/// The signature `doc` reports: its own, and while it is `fresh`, its imports'.
+fn reported_signature(doc: &Model, fresh: bool, imports: &[Imported]) -> BTreeSet<String> {
+    let mut sig = entity_iris(doc);
+    if fresh {
+        for imp in imports {
+            sig.extend(entity_iris(&imp.doc));
+        }
+    }
+    sig
+}
+
+/// The order an ontology's imports closure is walked in: by ontology ID, as
+/// the ID is spelled `OntologyID(OntologyIRI(<…>) VersionIRI(<…>))`, compared
+/// character by character, with an ontology that has no IRI first.
+fn closure_order(imports: &[Imported]) -> Vec<usize> {
+    let key = |m: &Model| -> Option<Vec<u16>> {
+        let (iri, version) = crate::cmd::annotate::ontology_iris(m);
+        iri.map(|iri| {
+            format!("OntologyID(OntologyIRI(<{iri}>) VersionIRI(<{}>))", version.as_deref().unwrap_or("null"))
+                .encode_utf16()
+                .collect()
+        })
+    };
+    let keys: Vec<Option<Vec<u16>>> = imports.iter().map(|i| key(&i.doc)).collect();
+    let mut order: Vec<usize> = (0..imports.len()).collect();
+    order.sort_by(|&a, &b| keys[a].cmp(&keys[b]).then(a.cmp(&b)));
+    order
+}
+
+/// The axioms of `model` itself: every component but its name, its header
+/// annotations and its imports, and nothing a lent closure contributes.
+fn own_axioms(model: &Model) -> Vec<AnnotatedComponent<RcStr>> {
+    model
+        .ont
+        .iter()
+        .filter(|ac| {
+            !matches!(
+                ac.component,
+                Component::OntologyID(_) | Component::DocIRI(_) | Component::OntologyAnnotation(_) | Component::Import(_)
+            ) && !model.imported_components.contains(*ac)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Take every axiom out of `model`, keeping its header.
+fn clear_axioms(model: &mut Model) {
+    for ac in own_axioms(model) {
+        model.ont.remove(&ac);
+    }
+}
+
+const RDFS_IS_DEFINED_BY: &str = "http://www.w3.org/2000/01/rdf-schema#isDefinedBy";
+const PROV_WAS_DERIVED_FROM: &str = "http://www.w3.org/ns/prov#wasDerivedFrom";
+
+/// Assert `rdfs:isDefinedBy <ontology>` in `dst` of each entity of `signature`
+/// outside the OWL, RDF, RDFS and XSD vocabularies that `dst` gives no
+/// `rdfs:isDefinedBy`. Whether `dst` changed.
+fn define(dst: &mut Model, signature: &BTreeSet<String>, ontology: &str) -> bool {
+    let ap = dst.build.annotation_property(RDFS_IS_DEFINED_BY);
+    let defined: HashSet<String> = dst
+        .ont
+        .iter()
+        .filter(|ac| !dst.imported_components.contains(*ac))
+        .filter_map(|ac| match &ac.component {
+            Component::AnnotationAssertion(AnnotationAssertion { subject: AnnotationSubject::IRI(subject), ann })
+                if ann.ap == ap =>
+            {
+                Some(subject.as_ref().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    let value = dst.build.iri(ontology);
+    let mut changed = false;
+    for entity in signature {
+        if crate::cmd::annotate::reserved(entity) || defined.contains(entity) {
+            continue;
+        }
+        dst.ont.insert(Component::AnnotationAssertion(AnnotationAssertion {
+            subject: AnnotationSubject::IRI(dst.build.iri(entity.as_str())),
+            ann: Annotation { ann: BTreeSet::new(), ap: ap.clone(), av: AnnotationValue::IRI(value.clone()) },
+        }));
+        changed = true;
+    }
+    changed
+}
+
+/// The IRI an ontology's axioms are derived from: its version IRI, else its
+/// ontology IRI. An ontology with neither is refused.
+fn provenance(model: &Model) -> anyhow::Result<String> {
+    let (iri, version) = crate::cmd::annotate::ontology_iris(model);
+    version.or(iri).ok_or_else(|| anyhow::anyhow!("use Optional.orNull() instead of Optional.or(null)"))
+}
+
+/// Put into `dst` each of `axioms` annotated `prov:wasDerivedFrom <source>`,
+/// in place of the axiom as it was. An axiom that already says what it was
+/// derived from is left out, and so is the property's own declaration, which
+/// `dst` gains as it is.
+fn derive(dst: &mut Model, axioms: Vec<AnnotatedComponent<RcStr>>, source: &str) {
+    let ap = dst.build.annotation_property(PROV_WAS_DERIVED_FROM);
+    let declaration = AnnotatedComponent {
+        component: Component::DeclareAnnotationProperty(horned_owl::model::DeclareAnnotationProperty(ap.clone())),
+        ann: BTreeSet::new(),
+    };
+    let annotation = Annotation { ann: BTreeSet::new(), ap: ap.clone(), av: AnnotationValue::IRI(dst.build.iri(source)) };
+    for ax in axioms {
+        if ax == declaration || ax.ann.iter().any(|a| a.ap == ap) {
+            continue;
+        }
+        let mut derived = ax.clone();
+        derived.ann.insert(annotation.clone());
+        dst.ont.insert(derived);
+        dst.ont.remove(&ax);
+    }
+    dst.ont.insert(declaration);
+}
+
+/// Merge `rest` into `target`, as ROBOT's merge does, and hand back the result
+/// with the ontologies of the target's closure.
+///
+/// Each input in turn, the target first:
+/// - collapsing the imports closure, `--annotate-defined-by` attributes the
+///   entities of each ontology the input imports to that ontology, inside the
+///   input, and then the input's own entities to the input, in the result;
+///   `--annotate-derived-from` does the same for axioms, after which the
+///   ontologies it annotated are empty. The input and its closure are then
+///   merged in, and at the end the result imports nothing;
+/// - otherwise each input's own entities and axioms are attributed to it in the
+///   result, and only its own axioms are merged in. The result keeps the
+///   target's imports.
+///
+/// An entity that already has an `rdfs:isDefinedBy` keeps it, and an axiom that
+/// already says what it was derived from is not taken from an ontology other
+/// than the target.
+pub(crate) fn merge_inputs(
+    target: Input,
+    rest: Vec<Input>,
+    opts: &MergeOptions,
+) -> anyhow::Result<(Model, Vec<Imported>)> {
+    let collapse = opts.collapse_import_closure;
+    let Input { doc: mut t, imports: mut t_imports, fresh: mut t_fresh } = target;
+    if collapse {
+        if opts.annotate_defined_by {
+            for i in closure_order(&t_imports) {
+                if let Some(iri) = ontology_iri(&t_imports[i].doc) {
+                    t_fresh &= !define(&mut t, &imported_signature(&t_imports, i), &iri);
+                }
+            }
+            if let Some(iri) = ontology_iri(&t) {
+                let signature = reported_signature(&t, t_fresh, &t_imports);
+                define(&mut t, &signature, &iri);
+            }
+        }
+        if opts.annotate_derived_from {
+            for i in closure_order(&t_imports) {
+                let source = provenance(&t_imports[i].doc)?;
+                derive(&mut t, own_axioms(&t_imports[i].doc), &source);
+                clear_axioms(&mut t_imports[i].doc);
+            }
+            let source = provenance(&t)?;
+            let axioms = own_axioms(&t);
+            derive(&mut t, axioms, &source);
+        }
+        for imp in &t_imports {
+            merge_into(&mut t, &imp.doc, &MergeOptions::default());
+        }
+    } else {
+        if opts.annotate_defined_by {
+            if let Some(iri) = ontology_iri(&t) {
+                let signature = entity_iris(&t);
+                define(&mut t, &signature, &iri);
+            }
+        }
+        if opts.annotate_derived_from {
+            let source = provenance(&t)?;
+            let axioms = own_axioms(&t);
+            derive(&mut t, axioms, &source);
+        }
+    }
+    for input in rest {
+        let Input { mut doc, mut imports, mut fresh } = input;
+        if collapse {
+            if opts.annotate_defined_by {
+                for i in closure_order(&imports) {
+                    if let Some(iri) = ontology_iri(&imports[i].doc) {
+                        fresh &= !define(&mut doc, &imported_signature(&imports, i), &iri);
+                    }
+                }
+                if let Some(iri) = ontology_iri(&doc) {
+                    define(&mut t, &reported_signature(&doc, fresh, &imports), &iri);
+                }
+            }
+            if opts.annotate_derived_from {
+                for i in closure_order(&imports) {
+                    let source = provenance(&imports[i].doc)?;
+                    derive(&mut doc, own_axioms(&imports[i].doc), &source);
+                    clear_axioms(&mut imports[i].doc);
+                }
+                let source = provenance(&doc)?;
+                derive(&mut t, own_axioms(&doc), &source);
+                clear_axioms(&mut doc);
+            }
+        } else {
+            if opts.annotate_defined_by {
+                if let Some(iri) = ontology_iri(&doc) {
+                    define(&mut t, &reported_signature(&doc, fresh, &imports), &iri);
+                }
+            }
+            if opts.annotate_derived_from {
+                let source = provenance(&doc)?;
+                derive(&mut t, own_axioms(&doc), &source);
+                clear_axioms(&mut doc);
+            }
+        }
+        // What an input states is the result's own, even where the target's
+        // lent closure states it too.
+        let own = own_axioms(&doc);
+        merge_into(&mut t, &doc, opts);
+        for ax in &own {
+            t.imported_components.remove(ax);
+        }
+        if collapse {
+            for imp in &imports {
+                merge_into(&mut t, &imp.doc, &MergeOptions::default());
+            }
+        }
+    }
+    if collapse {
+        let imports: Vec<_> =
+            t.ont.iter().filter(|ac| matches!(ac.component, Component::Import(_))).cloned().collect();
+        for ac in imports {
+            t.ont.remove(&ac);
+        }
+    }
+    Ok((t, t_imports))
 }
 
 /// Drop an `InverseObjectProperties(B, A)` when `(A, B)` is already present.
@@ -270,10 +632,6 @@ fn collapse_inverse_pairs(model: &mut Model) {
     }
 }
 
-/// Merge `other`'s contents into `merged` honoring `opts`: keep only the primary
-/// ontology's identity (the OFN writer rejects multiple ontology IRIs);
-/// ontology-level annotations from secondaries are dropped unless
-/// `include_annotations` is set.
 /// A literal typed `xsd:string` and the same text untyped are one literal, so
 /// two axioms that differ only there are one axiom. This is the form the
 /// comparison is made in: every `xsd:string` literal of an axiom untyped.
@@ -334,8 +692,11 @@ impl MergedAxioms {
     }
 }
 
+/// Merge `other`'s contents into `merged` honoring `opts`: keep only the primary
+/// ontology's identity (the OFN writer rejects multiple ontology IRIs);
+/// ontology-level annotations from secondaries are dropped unless
+/// `include_annotations` is set.
 pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
-    let source = ontology_iri(other);
     let mut present = MergedAxioms::of(merged);
 
     // A merge keeps the PRIMARY's identity — but where there is no primary
@@ -369,10 +730,8 @@ pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
         match &component.component {
             // Never carry secondary identity/imports (single-identity result).
             Component::OntologyID(_) | Component::DocIRI(_) => continue,
-            // owl:imports are collapsed (dropped); owlmake merges explicit inputs
-            // only, so when collapse_import_closure is true (the default) this is
-            // satisfied. When false we still drop them — owlmake does not follow
-            // imports, so re-emitting bare import declarations would dangle.
+            // Another ontology's imports are its own: a merge keeps the
+            // primary's alone, or none once the closure is collapsed.
             Component::Import(_) => continue,
             // Secondary ontology annotations: keep iff --include-annotations.
             Component::OntologyAnnotation(_) => {
@@ -391,12 +750,6 @@ pub fn merge_into(merged: &mut Model, other: &Model, opts: &MergeOptions) {
         }
     }
 
-    // Per-entity provenance from this secondary's own declared entities, so each
-    // entity is attributed to the ontology it actually came from.
-    if (opts.annotate_defined_by || opts.annotate_derived_from) && source.is_some() {
-        let ents = declared_entities(other);
-        annotate_provenance(merged, source.as_deref().unwrap(), &ents, opts);
-    }
 
     // Carry over any prefixes declared by the additional inputs — both the
     // formal prefix map and the `xmlns:` bindings an RDF/XML input surfaces in
@@ -530,18 +883,22 @@ pub(crate) fn ontology_iri(model: &Model) -> Option<String> {
     None
 }
 
-/// Expand a filesystem wildcard pattern into matching files. Supports a single
-/// `*` (and `?`) in the final path component, matched against directory entries by
-/// the wildcard matcher below rather than through a glob dependency, so the `om`
-/// binary stays self-contained. A pattern with no wildcard is returned verbatim if
-/// it names an existing file.
+/// The files an `--inputs` pattern names: those in the pattern's directory
+/// whose names match its last component, where `*` matches any run of
+/// characters and `?` exactly one. A pattern with neither is refused. A
+/// directory that does not exist, or a pattern nothing matches, names no file
+/// and says so. The files come in name order.
 pub(crate) fn expand_glob(pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
-    let path = PathBuf::from(pattern);
     if !pattern.contains('*') && !pattern.contains('?') {
-        return Ok(if path.exists() { vec![path] } else { Vec::new() });
+        anyhow::bail!("WILDCARD ERROR --inputs argument must be a quoted wildcard pattern");
     }
+    let path = PathBuf::from(pattern);
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
+    if !dir.is_dir() {
+        status!("ERROR '{}' is not a valid directory for --inputs pattern", dir.display());
+        return Ok(Vec::new());
+    }
     let glob = path
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
@@ -554,6 +911,9 @@ pub(crate) fn expand_glob(pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
         if wildcard_match(&glob, &name) {
             out.push(entry.path());
         }
+    }
+    if out.is_empty() {
+        status!("ERROR No files match pattern: {pattern}");
     }
     out.sort();
     Ok(out)

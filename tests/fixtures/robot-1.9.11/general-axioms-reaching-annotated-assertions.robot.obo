@@ -1,0 +1,11 @@
+format-version: 1.2
+idspace: g http://example.org/g# 
+idspace: swrl http://www.w3.org/2003/11/swrl# 
+idspace: swrlb http://www.w3.org/2003/11/swrlb# 
+ontology: http://example.org/general-axioms-reaching-annotated-assertions
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/g#C4>))\nDeclaration(Class(<http://example.org/g#C5>))\nDeclaration(Class(<http://example.org/g#C6>))\nDeclaration(Class(<http://example.org/g#C7>))\nDeclaration(ObjectProperty(<http://example.org/g#op2>))\nDeclaration(ObjectProperty(<http://example.org/g#op3>))\nDeclaration(NamedIndividual(<http://example.org/g#i2>))\nDeclaration(NamedIndividual(<http://example.org/g#i3>))\nDeclaration(AnnotationProperty(<http://example.org/g#ap0>))\nDeclaration(AnnotationProperty(<http://example.org/g#ap1>))\nDeclaration(AnnotationProperty(<http://example.org/g#ap2>))\n\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/g#C5> (<http://example.org/g#C5>)\n\n\n# Class: <http://example.org/g#C6> (<http://example.org/g#C6>)\n\n\n# Class: <http://example.org/g#C7> (<http://example.org/g#C7>)\n\n\n\n\nSubClassOf(Annotation(<http://example.org/g#ap2> \"6\"^^xsd:integer) ObjectHasValue(<http://example.org/g#op3> _:genid2147483648) <http://example.org/g#C4>)\nDisjointClasses(Annotation(rdfs:label _:genid2147483649) <http://example.org/g#C5> <http://example.org/g#C6> <http://example.org/g#C7>)\nNegativeObjectPropertyAssertion(Annotation(Annotation(rdfs:comment \"nested\") rdfs:seeAlso \"negative\") <http://example.org/g#op3> _:genid2147483648 <http://example.org/g#i3>)\nNegativeObjectPropertyAssertion(Annotation(Annotation(<http://example.org/g#ap1> \"t6\"@en) <http://example.org/g#ap0> \"t1\"@en) <http://example.org/g#op2> _:genid2147483649 <http://example.org/g#i2>)\n)
+
+[Term]
+id: g:C5
+disjoint_from: g:C6 {name="_:genid2147483649"}
+

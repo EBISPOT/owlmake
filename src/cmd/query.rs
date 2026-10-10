@@ -1227,7 +1227,7 @@ fn finish_table(
             let cols = concat_columns(sparql, &table.columns);
             if !cols.is_empty() {
                 apply_jena_concat_order(table, q, &cols);
-            } else if !grouped {
+            } else if !grouped && !has_order_by(sparql) {
                 // A plain SELECT has no order of its own: the rows come out in the
                 // order the graph answers the pattern in.
                 if !apply_jena_union_scan_order(table, q, sparql)
@@ -2305,10 +2305,10 @@ pub fn step(
     // passed along the chain / saved by --output. We round-trip through an
     // oxigraph store: load triples, apply updates, dump back, reparse.
     if !args.update.is_empty() {
-        let mut rdf = Vec::new();
-        crate::io::write_to_ref(&model, &mut rdf, Format::RdfXml)?;
+        let rdf = crate::io::rendering(&model)?;
         let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
         load_preserving_literals(&store, &rdf)?;
+        crate::sparql::type_list_cells(&store)?;
         for upath in &args.update {
             let sparql = std::fs::read_to_string(upath)?;
             store

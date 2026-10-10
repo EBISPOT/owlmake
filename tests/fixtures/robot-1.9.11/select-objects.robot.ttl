@@ -1,0 +1,135 @@
+@prefix : <http://example.org/select-objects#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/select-objects> .
+
+<http://example.org/select-objects> rdf:type owl:Ontology ;
+                                     rdfs:comment "header" .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/ap
+<http://example.org/ap> rdf:type owl:AnnotationProperty ;
+                        rdfs:range <http://example.org/B> ;
+                        rdfs:domain <http://example.org/A> .
+
+
+###  http://example.org/ap2
+<http://example.org/ap2> rdf:type owl:AnnotationProperty ;
+                         rdfs:subPropertyOf <http://example.org/ap> .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/p
+<http://example.org/p> rdf:type owl:ObjectProperty ;
+                       rdfs:domain <http://example.org/A> ;
+                       rdfs:range [ rdf:type owl:Class ;
+                                    owl:unionOf ( <http://example.org/B>
+                                                  <http://example.org/C>
+                                                )
+                                  ] .
+
+
+###  http://example.org/q
+<http://example.org/q> rdf:type owl:ObjectProperty ;
+                       rdfs:subPropertyOf <http://example.org/p> .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/d
+<http://example.org/d> rdf:type owl:DatatypeProperty ;
+                       rdfs:domain <http://example.org/D> ;
+                       rdfs:range xsd:integer .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/A
+<http://example.org/A> rdf:type owl:Class ;
+                       owl:equivalentClass [ owl:intersectionOf ( <http://example.org/B>
+                                                                  [ rdf:type owl:Restriction ;
+                                                                    owl:onProperty <http://example.org/p> ;
+                                                                    owl:someValuesFrom <http://example.org/C>
+                                                                  ]
+                                                                ) ;
+                                             rdf:type owl:Class
+                                           ] ;
+                       rdfs:subClassOf owl:Thing .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://example.org/A> ;
+   owl:annotatedProperty rdfs:subClassOf ;
+   owl:annotatedTarget owl:Thing ;
+   rdfs:comment "why"
+ ] .
+
+
+###  http://example.org/B
+<http://example.org/B> rdf:type owl:Class ;
+                       rdfs:subClassOf <http://example.org/A> ;
+                       owl:disjointWith [ rdf:type owl:Class ;
+                                          owl:complementOf <http://example.org/C>
+                                        ] ;
+                       rdfs:label "B"@en .
+
+
+###  http://example.org/C
+<http://example.org/C> rdf:type owl:Class ;
+                       rdfs:subClassOf <http://example.org/B> ,
+                                       [ rdf:type owl:Restriction ;
+                                         owl:onProperty <http://example.org/p> ;
+                                         owl:someValuesFrom <http://example.org/A>
+                                       ] ;
+                       <http://example.org/ap> <http://example.org/A> ;
+                       rdfs:label "C" .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://example.org/C> ;
+   owl:annotatedProperty rdfs:label ;
+   owl:annotatedTarget "C" ;
+   rdfs:comment "src"
+ ] .
+
+
+###  http://example.org/D
+<http://example.org/D> rdf:type owl:Class ;
+                       rdfs:subClassOf <http://example.org/C> .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/A
+<http://example.org/A> rdf:type owl:NamedIndividual ,
+                                <http://example.org/B> .
+
+
+###  http://example.org/i
+<http://example.org/i> rdf:type owl:NamedIndividual ,
+                                <http://example.org/D> ;
+                       <http://example.org/p> <http://example.org/A> ;
+                       <http://example.org/d> 5 .
+
+
+#################################################################
+#    Annotations
+#################################################################
+
+<http://example.org/A> rdfs:label "A" .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

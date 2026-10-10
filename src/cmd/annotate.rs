@@ -90,10 +90,10 @@ pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
+    // The annotated document is written among the ontologies it imports, which
+    // the load reads.
     let mut model = crate::cmd::take_or_load_no_imports(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
-    // The annotated document is written among the ontologies it imports.
-    crate::cmd::read_imports_closure(&mut model, args.input.as_deref(), &args.common);
     let mut model = annotate_with(
         model,
         &AnnotateOptions {
@@ -125,7 +125,7 @@ fn string_literal(model: &crate::model::Model, value: &str) -> Literal<crate::mo
 }
 
 /// The ontology's IRI and version IRI, where it has them.
-fn ontology_iris(model: &crate::model::Model) -> (Option<String>, Option<String>) {
+pub(crate) fn ontology_iris(model: &crate::model::Model) -> (Option<String>, Option<String>) {
     model
         .ont
         .iter()
@@ -459,7 +459,7 @@ fn own_axiom(model: &crate::model::Model, ac: &AnnotatedComponent<crate::model::
 
 /// Whether `iri` belongs to the OWL, RDF, RDFS or XSD vocabulary: its namespace,
 /// what precedes its longest NCName suffix, is one of theirs.
-fn reserved(iri: &str) -> bool {
+pub(crate) fn reserved(iri: &str) -> bool {
     matches!(crate::owlapi_hash::iri_split(iri).0, OWL | RDF | RDFS | XSD)
 }
 

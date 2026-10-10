@@ -385,7 +385,8 @@ pub(crate) fn http_get(url: &str) -> Result<Vec<u8>> {
 ///
 /// Retried, because every mirror fetch depends on it and the PURLs really do
 /// flake: a bare `503` for `envo.owl` on one request is served fine by the next.
-/// Only a transport error or a 5xx is retried; a 404 is an answer.
+/// Only a transport error or a 5xx is retried; a 404 is an answer, and so is a
+/// URL no request can be made for.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn http_get_dated(url: &str) -> Result<(Vec<u8>, Option<String>)> {
     use std::io::Read as _;
@@ -411,6 +412,11 @@ pub(crate) fn http_get_dated(url: &str) -> Result<(Vec<u8>, Option<String>)> {
             }
             Err(ureq::Error::Status(code, _)) if !(500..600).contains(&code) => {
                 return Err(anyhow::anyhow!("HTTP GET {url}: status code {code}"));
+            }
+            Err(ureq::Error::Transport(t))
+                if matches!(t.kind(), ureq::ErrorKind::InvalidUrl | ureq::ErrorKind::UnknownScheme) =>
+            {
+                return Err(anyhow::Error::new(ureq::Error::Transport(t)).context(format!("HTTP GET {url}")));
             }
             Err(e) => last = Some(anyhow::Error::new(e).context(format!("HTTP GET {url}"))),
         }
@@ -1747,6 +1753,38 @@ fn sorted_ces(
 /// `ComponentMappedOntology`) can *move* the components in and back out rather
 /// than deep-cloning the whole ontology — a multi-GB copy on phenio-scale
 /// inputs. The model is left unchanged once the write returns.
+/// The ontologies `model` imports, directly or not, read again from where its
+/// closure was read: a writer that renders each of them on its own needs them
+/// whole. A model that imports and whose closure was never read has none to
+/// give, and that is an error rather than a document written without them.
+fn closure_documents(model: &Model) -> Result<Vec<Model>> {
+    let imports: Vec<String> = model
+        .ont
+        .iter()
+        .filter_map(|ac| match &ac.component {
+            horned_owl::model::Component::Import(i) => Some(i.0.to_string()),
+            _ => None,
+        })
+        .collect();
+    if imports.is_empty() {
+        return Ok(Vec::new());
+    }
+    let documents = model.imports_closure.as_ref().map(|c| c.documents.as_slice()).unwrap_or_default();
+    if documents.is_empty() {
+        anyhow::bail!(
+            "the ontology imports <{}>, and its imports closure was not read, so the closure's graphs cannot be written",
+            imports.join(">, <")
+        );
+    }
+    documents
+        .iter()
+        .map(|source| match &source.path {
+            Some(path) => load(path).with_context(|| format!("reading import <{}> from {}", source.iri, path.display())),
+            None => load_iri(&source.iri, None),
+        })
+        .collect()
+}
+
 pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
     if is_discard_path(path) {
         return Ok(());
@@ -1840,6 +1878,17 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
     Ok(())
 }
 
+/// The model's RDF rendering, which is what a query reads: the RDF/XML a file
+/// of the model holds, written as [`save_as`] writes it, read back as a graph
+/// (every XML literal a typed literal — see [`owlrdf::read_as_graph`]).
+pub(crate) fn rendering(model: &Model) -> Result<Vec<u8>> {
+    let mut copy = model.clone();
+    normalize_set_operands(&mut copy);
+    let mut rdf = Vec::new();
+    owlrdf::read_as_graph(|| write_to_with(&mut copy, &mut rdf, Format::RdfXml, RdfXmlWriter::Owlapi))?;
+    Ok(rdf)
+}
+
 /// Build a `CmOnto` view for the XML/functional writers WITHOUT emptying the
 /// model. It CLONES rather than moving: `SetOntology → ComponentMappedOntology`
 /// is lossless (the writers see every axiom), but the reverse
@@ -1857,8 +1906,8 @@ fn take_cm(model: &mut Model) -> CmOnto {
 fn restore_cm(_model: &mut Model, _cm: CmOnto) {}
 
 /// Serialize from a shared `&Model` by cloning into a scratch model first. Used
-/// by the internal buffer-serialization paths (turtle/sparql/rename round-trips)
-/// that only hold an immutable borrow. Like [`write_to`] it selects
+/// by the internal buffer-serialization paths (turtle/rename round-trips) that
+/// only hold an immutable borrow. Like [`write_to`] it selects
 /// [`RdfXmlWriter::Horned`], so both are for buffers owlmake parses straight back
 /// itself; a file is written by [`save_as`], which selects the full-fidelity
 /// RDF/XML writer instead.
@@ -1903,10 +1952,10 @@ pub fn write_to<W: Write>(model: &mut Model, writer: W, fmt: Format) -> Result<(
 
 /// Which RDF/XML serializer a write uses. This is a property of the write's
 /// DESTINATION, not ambient state: a file is read by the next build step and
-/// shipped as a release, so it gets the full-fidelity bytes; a buffer owlmake is
-/// about to parse itself (the SPARQL/rename round-trips in `write_to_ref`) only has
-/// to be valid RDF, and putting it through the full writer would make every query
-/// pay for byte-fidelity nothing reads.
+/// shipped as a release, so it gets the full-fidelity bytes, and so does the
+/// graph a query reads ([`rendering`]), which is what a file states; a buffer
+/// owlmake parses straight back for the axioms alone (a rename's round trip, in
+/// `write_to_ref`) only has to be valid RDF.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RdfXmlWriter {
     /// horned-owl's `pretty_rdf` — valid RDF/XML, for internal transport.
@@ -2079,7 +2128,10 @@ fn write_to_with<W: Write>(
             r?;
         }
         Format::Obo => obo::save(model, &mut writer)?,
-        Format::OboGraph => obograph::save(model, &mut writer)?,
+        Format::OboGraph => {
+            let imports = closure_documents(model)?;
+            obograph::save_closure(model, &imports, &mut writer)?
+        }
         Format::Manchester => {
             let prefixes = written_prefixes(model);
             manchester_write::save(model, &prefixes, &mut writer)?

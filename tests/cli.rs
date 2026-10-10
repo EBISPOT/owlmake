@@ -2552,6 +2552,26 @@ fn an_ofn_cache_keeps_its_state_in_a_companion() {
     );
 }
 
+/// A `SELECT` with an `ORDER BY` comes out in the order it asks for, in memory as
+/// on disk, as ROBOT 1.9.11 returns it.
+#[test]
+fn an_order_by_orders_the_rows() {
+    let out = tmp("ordered.csv");
+    for input in ["selection-options.ofn", "selection-options.owl"] {
+        let run = bin()
+            .args(["query", "--input"])
+            .arg(robot_fixture(input))
+            .arg("--query")
+            .arg(robot_fixture("select-classes.rq"))
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{input}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("selection-options.classes.robot.csv"), "{input}");
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
 /// A `SELECT` with no `ORDER BY` still has an order: the one the graph answers the
 /// pattern in. An arbitrary-length path drives it — the rows walk out from the
 /// path's object — and a `FILTER (?p IN (…))` is answered one alternative at a
@@ -3763,6 +3783,32 @@ fn fixture_text(name: &str) -> String {
     std::fs::read_to_string(robot_fixture(name)).unwrap()
 }
 
+/// Runs `cmd` to completion, failing the test once it has run for a minute.
+/// Its output goes to files, so a full pipe cannot stall it.
+fn output_within_a_minute(mut cmd: Command, tag: &str) -> std::process::Output {
+    let (out, err) = (tmp(&format!("{tag}.stdout")), tmp(&format!("{tag}.stderr")));
+    let mut child = cmd
+        .stdout(std::fs::File::create(&out).unwrap())
+        .stderr(std::fs::File::create(&err).unwrap())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(60) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{tag}: still running after a minute");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let output = std::process::Output { status, stdout: std::fs::read(&out).unwrap(), stderr: std::fs::read(&err).unwrap() };
+    let _ = (std::fs::remove_file(&out), std::fs::remove_file(&err));
+    output
+}
+
 /// `om export` a fixture with `args` to a file named `out`, whose extension picks
 /// the format when `args` names none; the bytes written.
 fn export_fixture(src: &str, out: &str, args: &[&str]) -> Vec<u8> {
@@ -4524,6 +4570,59 @@ fn a_difference_of_one_individual_is_an_all_different_node() {
     }
 }
 
+/// A set axiom whose members come to one, or to none, is written as ROBOT
+/// writes it: a disjoint union of one class, or of none, in its class's frame,
+/// its empty list `rdf:nil`; a disjointness of one property as an
+/// `owl:AllDisjointProperties` node in that property's frame, numbered among
+/// the frame's other nodes; an equivalence of one property not at all. As
+/// ROBOT 1.9.11 converts `set-axioms-of-one` and `disjoint-union-of-none`, in
+/// functional syntax, RDF/XML, Turtle and OBO.
+#[test]
+fn set_axioms_of_one_member_are_written_as_robot_writes_them() {
+    for source in ["set-axioms-of-one.ofn", "disjoint-union-of-none.owl"] {
+        let name = source.rsplit_once('.').unwrap().0;
+        for ext in ["ofn", "owl", "ttl", "obo"] {
+            assert_eq!(
+                convert_fixture(source, &format!("{name}.{ext}"), &[]),
+                fixture_text(&format!("{name}.robot.{ext}")),
+                "{name}.{ext}"
+            );
+        }
+    }
+}
+
+/// Anonymous individuals that name only each other, with nothing else naming
+/// any of them, are in no graph: one is an instance of a class enumerating the
+/// other, the two are the same, and one is annotated. Those axioms are written
+/// nowhere, and the command says so. A query reads the same document. As ROBOT
+/// 1.9.11 converts `select-objects`, in RDF/XML and Turtle, and answers a
+/// query over it.
+#[test]
+fn anonymous_individuals_naming_only_each_other_are_written_nowhere() {
+    for ext in ["owl", "ttl"] {
+        let path = tmp(&format!("select-objects.{ext}"));
+        let mut cmd = bin();
+        cmd.args(["convert", "-i"]).arg(robot_fixture("select-objects.ofn")).arg("-o").arg(&path);
+        let run = output_within_a_minute(cmd, &format!("select-objects-{ext}"));
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(run.status.success(), "{stderr}");
+        assert!(
+            stderr.contains("3 axiom(s) about anonymous individuals no other statement reaches are written nowhere"),
+            "{stderr}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fixture_text(&format!("select-objects.robot.{ext}")), "{ext}");
+    }
+    let query = tmp("select-objects-labels.rq");
+    std::fs::write(&query, "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\nSELECT ?s ?l WHERE { ?s rdfs:label ?l } ORDER BY ?l ?s\n")
+        .unwrap();
+    let out = tmp("select-objects-labels.csv");
+    let mut cmd = bin();
+    cmd.args(["query", "-i"]).arg(robot_fixture("select-objects.ofn")).arg("--query").arg(&query).arg(&out);
+    let run = output_within_a_minute(cmd, "select-objects-query");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("select-objects.labels.robot.csv"));
+}
+
 /// A sameness, or a difference of more than two, that an entity's graph
 /// reaches through an anonymous member before any named member's own is stated
 /// in that graph: each named member but the entity is a block of its own after
@@ -4893,6 +4992,112 @@ fn obo_owl_axioms_write_data_restrictions() {
     assert_eq!(clause(&written), clause(&fixture_text("obo-data-restrictions.obo")));
 }
 
+/// `om convert` a fixture to OBO as ROBOT 1.9.11, under ODK 1.6.1, writes it —
+/// with no [Instance] frames; the text written.
+fn convert_fixture_to_obo_as_robot(src: &str) -> String {
+    let path = tmp(&format!("{src}.as-robot.obo"));
+    let run = bin()
+        .args(["__emulate-robot-version=1.9.11", "__emulate-odk-version=1.6.1", "convert", "-i"])
+        .arg(robot_fixture(src))
+        .arg("-o")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{src}: {}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    text
+}
+
+/// An ontology's annotations are header clauses: a property with an OBO tag is
+/// that tag's clause — rdfs:comment a `remark:` — and any other a
+/// `property_value:`, each qualified by the annotation's own annotations, with
+/// a definition's xrefs its bracket list and an xref's label its description.
+/// Tags are written by rank, and those of one rank in the order of a hash set
+/// of every tag the header holds, so `name:` follows `owl-axioms:`. A literal
+/// outside OWL 2's datatype map, an anonymous individual and a blank value of a
+/// tag have no clause: in the header they are dropped, on a frame they go to
+/// `owl-axioms:`. As ROBOT 1.9.11 writes `obo-header-annotations`.
+#[test]
+fn ontology_annotations_are_written_as_robot_writes_them_in_obo() {
+    assert_eq!(
+        convert_fixture_to_obo_as_robot("obo-header-annotations.ofn"),
+        fixture_text("obo-header-annotations.robot.obo")
+    );
+}
+
+/// A [Typedef] clause carries its axiom's annotations as qualifiers — a
+/// characteristic, `is_a:`, `inverse_of:` and `domain:` alike — and starts the
+/// frame of a property that is not declared. A characteristic, domain or
+/// inverse pair on an inverse property, and a domain of owl:Thing, go to
+/// `owl-axioms:`; a sub-property of a top, bottom or OWL property, and a class
+/// expression as domain, are written nowhere. An annotation property has a
+/// frame through its `is_metadata_tag` assertion, whatever its value, and its
+/// sub-property axiom goes to `owl-axioms:`. As ROBOT 1.9.11 writes
+/// `obo-typedef-clauses`.
+#[test]
+fn typedef_clauses_are_written_as_robot_writes_them_in_obo() {
+    assert_eq!(
+        convert_fixture_to_obo_as_robot("obo-typedef-clauses.ofn"),
+        fixture_text("obo-typedef-clauses.robot.obo")
+    );
+}
+
+/// OWL input written as OBO, as ROBOT 1.9.11 writes it: an anonymous individual
+/// is its node id where a tag or a qualifier holds it, and no
+/// `property_value:`; only a declared class or property has its annotations
+/// translated, while an axiom's translation starts the frame of the class or
+/// property it is written on, declared or not; axioms that differ only in
+/// annotations each go to `owl-axioms:`; a datatype other than XSD's is
+/// written in full; and a label stated plain, as an `xsd:string` and with a
+/// language tag is one `name:`.
+#[test]
+fn owl_input_is_written_as_robot_writes_it_in_obo() {
+    for stem in [
+        "rdf-anonymous-individuals",
+        "rdf-nested-anonymous",
+        "general-axioms-reaching-annotated-assertions",
+        "imports-closure-leaf",
+        "reason-annotate",
+        "undeclared-properties",
+        "rdf-root-block-types",
+        "validate-prop-bottom",
+        "chain-twins",
+        "axioms-namespace",
+        "xml-literal",
+        "typed-string-duplicates",
+    ] {
+        assert_eq!(
+            convert_fixture_to_obo_as_robot(&format!("{stem}.ofn")),
+            fixture_text(&format!("{stem}.robot.obo")),
+            "{stem}"
+        );
+    }
+}
+
+/// A frame holding a lone `intersection_of:`, and an ontology stating the range
+/// of an inverse property, have no OBO document: neither is written, as ROBOT
+/// 1.9.11 writes neither.
+#[test]
+fn obo_refuses_what_robot_refuses() {
+    for (src, says) in [
+        ("rdf-connective-members.owl", "single intersection_of tags are not allowed"),
+        ("rdf-inverse-axioms.ofn", "states the range of an inverse property"),
+    ] {
+        let out = tmp(&format!("{src}.refused.obo"));
+        let run = bin()
+            .args(["__emulate-robot-version=1.9.11", "__emulate-odk-version=1.6.1", "convert", "-i"])
+            .arg(robot_fixture(src))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success() && stderr.contains(says), "{src}: {stderr}");
+        let _ = std::fs::remove_file(&out);
+    }
+}
+
 /// An OBO document declares its frames and what its relations reach, and nothing
 /// it only names: each [Term] and [Typedef], each alt_id, the filler of a
 /// `relationship:`, of a GCI and of an `intersection_of:` relation, and each
@@ -4950,11 +5155,28 @@ fn axioms_stated_from_both_ends_are_written_once() {
     }
 }
 
-/// A document the RDF layout cannot state is written whole through the plain
-/// RDF mapping: an annotated disjointness of more than two properties, one an
-/// inverse, comes back with its annotation, and the warning names it.
+/// A disjointness of more than two properties is an `owl:AllDisjointProperties`
+/// node. With an inverse member it is a root of the frame of the property that
+/// member names, in node order among the frame's others, and of the first such
+/// frame when two members are inverses; with none it is a general axiom. Its
+/// annotations, nested ones included, are statements of the node. As ROBOT
+/// 1.9.11 writes `all-disjoint-inverse.ofn` in RDF/XML and Turtle.
 #[test]
-fn the_plain_mapping_keeps_an_annotated_disjointness_of_properties() {
+fn a_disjointness_with_an_inverse_member_is_stated_in_the_frame_the_inverse_names() {
+    for ext in ["owl", "ttl"] {
+        assert_eq!(
+            convert_fixture("all-disjoint-inverse.ofn", &format!("all-disjoint-inverse.{ext}"), &[]),
+            fixture_text(&format!("all-disjoint-inverse.robot.{ext}")),
+            "{ext}"
+        );
+    }
+}
+
+/// An annotated disjointness of more than two properties, one an inverse, is
+/// written by the RDF layout without a warning, and comes back with its
+/// annotation.
+#[test]
+fn an_annotated_disjointness_of_properties_comes_back_with_its_annotation() {
     let src = tmp("annotated-disjoint-properties.ofn");
     std::fs::write(
         &src,
@@ -4969,7 +5191,7 @@ fn the_plain_mapping_keeps_an_annotated_disjointness_of_properties() {
         let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
         assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
         let stderr = String::from_utf8_lossy(&run.stderr);
-        assert!(stderr.contains("(first: DisjointObjectProperties(Annotation(rdfs:comment \"c\")"), "{ext}: {stderr}");
+        assert!(!stderr.contains("cannot state"), "{ext}: {stderr}");
         let back = tmp(&format!("annotated-disjoint-properties-{ext}.ofn"));
         let run = bin().args(["convert", "-i"]).arg(&out).arg("-o").arg(&back).output().unwrap();
         assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
@@ -5981,11 +6203,11 @@ fn an_axiom_between_a_property_and_an_earlier_inverse_is_stated() {
 }
 
 /// A document holding an axiom the RDF layout cannot state is written in full
-/// through the plain RDF mapping, with a warning naming the axiom. An annotated
-/// disjointness of three object properties, one of them an inverse, has no
-/// place in the layout; in RDF/XML and in Turtle it is one node of all its
-/// members, carrying its annotation, and the rest of the document is there
-/// beside it.
+/// through the plain RDF mapping, with a warning naming the axiom. The layout
+/// has no place for an annotation with an annotation of its own on an ontology
+/// with no IRI; in RDF/XML and in Turtle the ontology is a blank node carrying
+/// the annotation, a reification of it carries the inner one, and the rest of
+/// the document is there beside them.
 #[test]
 fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     use oxigraph::io::{RdfFormat, RdfParser};
@@ -5995,8 +6217,8 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
     std::fs::write(
         &src,
         "Prefix(:=<http://example.org/a#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
-         Ontology(<http://example.org/a>\n\
-         DisjointObjectProperties(Annotation(rdfs:comment \"c\") :p ObjectInverseOf(:q) :r)\n\
+         Ontology(\n\
+         Annotation(Annotation(rdfs:comment \"inner\") rdfs:comment \"c\")\n\
          SubClassOf(:A :B)\n)\n",
     )
     .unwrap();
@@ -6006,7 +6228,8 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
         assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
         let stderr = String::from_utf8_lossy(&run.stderr);
         assert!(
-            stderr.contains("layout cannot state 1 axiom(s)") && stderr.contains("DisjointObjectProperties"),
+            stderr.contains("layout cannot state 1 axiom(s)")
+                && stderr.contains("Annotation(Annotation(rdfs:comment \"inner\") rdfs:comment \"c\")"),
             "{ext}: {stderr}"
         );
         let text = std::fs::read(&out).unwrap();
@@ -6015,10 +6238,10 @@ fn a_document_the_layout_cannot_state_is_written_whole_with_a_warning() {
         let whole = SparqlEvaluator::new()
             .parse_query(
                 "PREFIX owl: <http://www.w3.org/2002/07/owl#> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> \
-                 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> PREFIX : <http://example.org/a#> \
-                 ASK { ?n a owl:AllDisjointProperties ; rdfs:comment \"c\" ; owl:members ?l . \
-                 ?l rdf:rest*/rdf:first :p . ?l rdf:rest*/rdf:first :r . ?l rdf:rest*/rdf:first ?i . \
-                 ?i owl:inverseOf :q . :A rdfs:subClassOf :B }",
+                 PREFIX : <http://example.org/a#> \
+                 ASK { ?o a owl:Ontology ; rdfs:comment \"c\" . FILTER(isBlank(?o)) \
+                 ?r a owl:Annotation ; owl:annotatedSource ?o ; owl:annotatedProperty rdfs:comment ; \
+                 owl:annotatedTarget \"c\" ; rdfs:comment \"inner\" . :A rdfs:subClassOf :B }",
             )
             .unwrap()
             .on_store(&store)
@@ -6233,6 +6456,59 @@ fn reason_and_materialize_take_the_reason_options_as_robot_does() {
     assert!(!out.exists());
 }
 
+/// `materialize` asserts the direct superclasses its reasoner infers, the
+/// restrictions over the ontology's object properties among them. The EL
+/// reasoners infer nothing from a universal restriction or a functional
+/// property, whelk does from a union, the DL reasoners from all three, and the
+/// structural reasoner only what an equivalence or a superclass names. Every
+/// class of a direct superclass's node is asserted, except under whelk, which
+/// asserts the one its walk over the subsumers reaches first — a restriction
+/// equivalent to a named class among them. A class gains superclasses only
+/// where the ontology's own axioms define it. As ROBOT 1.9.11 materializes
+/// `materialize-reasoners.ofn` with each reasoner.
+#[test]
+fn materialize_asserts_what_its_reasoner_infers() {
+    let out = tmp("materialize-reasoners.ofn");
+    for reasoner in ["elk", "hermit", "jfact", "whelk", "structural"] {
+        let run = bin()
+            .args(["materialize", "--input"])
+            .arg(robot_fixture("materialize-reasoners.ofn"))
+            .args(["--reasoner", reasoner, "--output"])
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{reasoner}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            fixture_text(&format!("materialize-reasoners.{reasoner}.robot.ofn")),
+            "{reasoner}"
+        );
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
+/// The structural reasoner's parents of a class are the named classes and the
+/// named conjuncts of an intersection that a `SubClassOf` it is the subclass
+/// of, or an `EquivalentClasses` it is a member of, names. As ROBOT 1.9.11
+/// reasons over `materialize-reasoners.ofn` with it.
+#[test]
+fn the_structural_reasoner_takes_named_conjuncts_as_parents() {
+    let out = tmp("materialize-reasoners.reason-structural.ofn");
+    let run = bin()
+        .args(["reason", "--input"])
+        .arg(robot_fixture("materialize-reasoners.ofn"))
+        .args(["--reasoner", "structural", "--output"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        fixture_text("materialize-reasoners.reason-structural.robot.ofn")
+    );
+    let _ = std::fs::remove_file(&out);
+}
+
 /// Before anything is inferred, `reason` and `materialize` check the ontology:
 /// an inconsistent ontology fails, then one with an unsatisfiable class, then
 /// one with an unsatisfiable object property, each logged as errors first. A
@@ -6307,6 +6583,63 @@ fn reason_and_materialize_check_the_ontology_as_robot_does() {
     assert!(differ.is_empty(), "{} of {} differ:\n{}", differ.len(), cases.len(), differ.join("\n"));
 }
 
+/// Every reasoner counts each member of a disjointness or a difference once:
+/// `DifferentIndividuals(:j :j)` says nothing, `DisjointClasses(:A :A :B)`
+/// leaves an instance of `:A` consistent, and `DisjointUnion(:U :C :C)` makes
+/// `:U` and `:C` equivalent without emptying `:C` (whelk reads no disjoint
+/// union, and the structural reasoner no equivalence). As ROBOT 1.9.11
+/// reasons over `repeated-operands` and `repeated-union`.
+#[test]
+fn every_reasoner_counts_a_repeated_member_once() {
+    for r in ["elk", "hermit", "jfact", "whelk", "structural"] {
+        let union = match r {
+            "whelk" | "structural" => "repeated-union.ignored.robot.ofn",
+            _ => "repeated-union.equivalent.robot.ofn",
+        };
+        for (src, expected) in [("repeated-operands", "repeated-operands.robot.ofn"), ("repeated-union", union)] {
+            let out = tmp(&format!("{src}.{r}.ofn"));
+            let run =
+                bin().args(["reason", "-r", r, "-i"]).arg(robot_fixture(&format!("{src}.ofn"))).arg("-o").arg(&out).output().unwrap();
+            assert!(run.status.success(), "{src} {r}: {}", String::from_utf8_lossy(&run.stderr));
+            assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text(expected), "{src} {r}");
+            let _ = std::fs::remove_file(&out);
+        }
+    }
+}
+
+/// A disjointness of one class is that class's disjointness from
+/// `owl:Thing`, so the class is empty, and so is every class below it. Every
+/// reasoner reports both, as ROBOT 1.9.11 logs them for
+/// `one-class-disjointness`.
+#[test]
+fn a_disjointness_of_one_class_empties_it() {
+    let out = tmp("one-class-disjointness.ofn");
+    for r in ["elk", "hermit", "jfact", "whelk"] {
+        let run = bin()
+            .args(["reason", "-r", r, "-i"])
+            .arg(robot_fixture("one-class-disjointness.ofn"))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&run.stdout);
+        let logged: Vec<&str> = stdout
+            .lines()
+            .filter_map(|l| l.split_once(" ERROR org.obolibrary.robot.ReasonerHelper - ").map(|(_, m)| m))
+            .collect();
+        assert_eq!(run.status.code(), Some(1), "{r}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            logged,
+            [
+                "There are 2 unsatisfiable classes in the ontology.",
+                "    unsatisfiable: http://example.org/one-class-disjointness#F",
+                "    unsatisfiable: http://example.org/one-class-disjointness#E",
+            ],
+            "{r}"
+        );
+    }
+}
+
 /// A command writes its ontology with the prefixes its own `--add-prefix` adds,
 /// also where it builds the ontology afresh. As ROBOT 1.9.11 runs `filter` over
 /// `filter-own-add-prefix.ofn`.
@@ -6354,6 +6687,80 @@ fn a_graph_has_a_node_for_a_property_only_where_the_ontology_declares_it() {
     );
     let _ = std::fs::remove_file(&owl);
     let _ = std::fs::remove_file(&json);
+}
+
+/// `convert` of `src` to OBO Graphs JSON, as ROBOT 1.9.11 writes it under ODK
+/// 1.6.1.
+fn convert_to_json_as_robot(src: &std::path::Path, tag: &str) -> String {
+    let path = tmp(&format!("{tag}.as-robot.json"));
+    let run = bin()
+        .args(["__emulate-robot-version=1.9.11", "__emulate-odk-version=1.6.1", "convert", "-i"])
+        .arg(src)
+        .arg("-o")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{tag}: {}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    text
+}
+
+/// A graph is built from the ontology's axioms in their sorted order. A node
+/// takes its place where an axiom first names it — a declaration, the named
+/// subclass of `SubClassOf`, either side of a class assertion, the subject of a
+/// property assertion or of an annotation assertion — and keeps the last type
+/// and label any axiom gives it; edges stand in the order of their axioms, so
+/// property assertions follow class assertions and order by subject. An
+/// anonymous individual is a node of its own (`_:genid…`). An axiom's
+/// annotations are the `meta` of its edge or equivalence — `owl:deprecated
+/// true`, xrefs, subsets and synonym types, property values — and the property
+/// values among an annotation assertion's annotations the `meta` of the value it
+/// writes. Axioms that differ only in their annotations are each written. A
+/// control character and a character outside the Basic Multilingual Plane are
+/// escaped in upper-case hex. As ROBOT 1.9.11 writes `obographs-axioms.ofn`.
+#[test]
+fn a_graph_is_built_from_the_axioms_in_their_sorted_order() {
+    assert_eq!(
+        convert_to_json_as_robot(&robot_fixture("obographs-axioms.ofn"), "obographs-axioms"),
+        fixture_text("obographs-axioms.robot.json")
+    );
+}
+
+/// A document that imports is written as its own graph and one graph for each
+/// ontology of its imports closure, in the order of their ontology ids' text:
+/// the root `uberon/core.owl` follows the `uberon/components/mappings.owl` it
+/// imports, and `mrg.owl` follows `merged-one/components/part.owl` and
+/// `merged-one/imports/merged_import.owl`. As ROBOT 1.9.11 converts
+/// `xref-twins/twin.obo` and the ODK 1.6.1 repository's `mrg-edit.obo`.
+#[test]
+fn a_graph_is_written_for_each_ontology_of_the_imports_closure() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for (src, expected) in [
+        ("xref-twins/twin.obo", "obographs-closure-twin.robot.json"),
+        ("odk-1.6.1-update/merged/after/src/ontology/mrg-edit.obo", "obographs-closure-mrg.robot.json"),
+    ] {
+        assert_eq!(convert_to_json_as_robot(&fixtures.join(src), expected), fixture_text(expected), "{src}");
+    }
+}
+
+/// What no graph can hold is refused, as ROBOT 1.9.11 fails to convert it: an
+/// axiom annotated with an anonymous individual, an ontology annotation whose
+/// value is one, and a domain or range of an inverse property.
+#[test]
+fn json_refuses_what_robot_refuses() {
+    for (src, says) in [
+        ("rdf-nested-anonymous.ofn", "is annotated with an anonymous individual"),
+        ("obo-header-annotations.ofn", "annotates the ontology with an anonymous individual"),
+        ("rdf-inverse-axioms.ofn", "states the domain of an inverse property"),
+    ] {
+        let out = tmp(&format!("{src}.refused.json"));
+        let run = bin().args(["convert", "-i"]).arg(robot_fixture(src)).arg("-o").arg(&out).output().unwrap();
+        assert!(!run.status.success(), "{src} was written");
+        let err = String::from_utf8_lossy(&run.stderr);
+        assert!(err.contains(says), "{src}: {err}");
+        let _ = std::fs::remove_file(&out);
+    }
 }
 
 /// `annotate`'s options do what ROBOT 1.9.11 does with them over
@@ -6806,6 +7213,101 @@ fn reduce_reads_its_switches_as_robot_does() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// reduce removes what its reasoner classifies as redundant. Over every class
+/// expression, the reasoner sees the `SubClassOf` axioms and property
+/// characteristics alone, so an asserted equivalence makes no subclass axiom
+/// redundant, and one asserted superclass hides another above it even through
+/// a class equivalent to the subclass. A union, a universal restriction or an
+/// unsatisfiable superclass hides more under the reasoners that read them.
+/// Between named classes only, an axiom is kept where its subclass's node
+/// lies directly below its superclass's: under `whelk` one class stands for
+/// each node, under `jfact` the walk from the top reaches only the bottom
+/// node, and under `structural` every told parent is direct. As ROBOT 1.9.11
+/// reduces `reduce-reasoners.ofn` with each reasoner.
+#[test]
+fn reduce_removes_what_its_reasoner_finds_redundant() {
+    let out = tmp("reduce-reasoners.ofn");
+    for reasoner in ["elk", "hermit", "jfact", "whelk", "structural"] {
+        for (tag, args) in [("plain", &[][..]), ("named", &["--named-classes-only", "true"][..])] {
+            let run = bin()
+                .args(["reduce", "-i"])
+                .arg(robot_fixture("reduce-reasoners.ofn"))
+                .args(["--reasoner", reasoner])
+                .args(args)
+                .arg("-o")
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "{reasoner} {tag}: {}", String::from_utf8_lossy(&run.stderr));
+            assert_eq!(
+                std::fs::read_to_string(&out).unwrap(),
+                fixture_text(&format!("reduce-reasoners.{reasoner}.{tag}.robot.ofn")),
+                "{reasoner} {tag}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
+/// reduce removes only the root's own axioms, judged by the superclasses the
+/// root asserts, over a classification of the whole import closure: an
+/// imported superclass hides nothing, an imported subsumption hides an
+/// asserted axiom above it. As ROBOT 1.9.11 reduces `reduce-imports.ofn`.
+#[test]
+fn reduce_judges_the_root_axioms_over_the_closure() {
+    let out = tmp("reduce-imports.ofn");
+    for (tag, args) in [("plain", &[][..]), ("named", &["--named-classes-only", "true"][..])] {
+        let run = bin()
+            .args(["reduce", "--catalog"])
+            .arg(robot_fixture("reduce-imports-catalog.xml"))
+            .arg("-i")
+            .arg(robot_fixture("reduce-imports.ofn"))
+            .args(args)
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{tag}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            fixture_text(&format!("reduce-imports.{tag}.robot.ofn")),
+            "{tag}"
+        );
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
+/// An inconsistent ontology loses nothing to reduce. Under `whelk` an
+/// ontology is inconsistent only where an individual is unsatisfiable, so
+/// `owl:Thing ⊑ owl:Nothing` alone is reduced: over every class expression as
+/// any other, and between named classes from the top node's representative,
+/// `owl:Nothing`, below which nothing lies. As ROBOT 1.9.11 reduces
+/// `reduce-inconsistent.ofn`.
+#[test]
+fn an_inconsistent_ontology_loses_nothing_to_reduce() {
+    let out = tmp("reduce-inconsistent.ofn");
+    for reasoner in ["elk", "whelk"] {
+        for (tag, args) in [("plain", &[][..]), ("named", &["--named-classes-only", "true"][..])] {
+            let run = bin()
+                .args(["reduce", "-i"])
+                .arg(robot_fixture("reduce-inconsistent.ofn"))
+                .args(["--reasoner", reasoner])
+                .args(args)
+                .arg("-o")
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(run.status.success(), "{reasoner} {tag}: {}", String::from_utf8_lossy(&run.stderr));
+            assert_eq!(
+                std::fs::read_to_string(&out).unwrap(),
+                fixture_text(&format!("reduce-inconsistent.{reasoner}.{tag}.robot.ofn")),
+                "{reasoner} {tag}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
 /// extract refuses what ROBOT 1.9.11 refuses: a MIREOT option with another
 /// method, no term at all, a MIREOT with neither lower nor branch terms or
 /// with upper terms and no lower ones, and terms the ontology does not name.
@@ -7029,9 +7531,9 @@ fn line_based_rdf_is_the_same_on_every_run() {
     std::fs::write(
         &src,
         "Prefix(:=<http://example.org/a#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
-         Ontology(<http://example.org/a>\n\
-         SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n\
-         DisjointObjectProperties(Annotation(rdfs:comment \"c\") :p ObjectInverseOf(:q) :r)\n)\n",
+         Ontology(\n\
+         Annotation(Annotation(rdfs:comment \"inner\") rdfs:comment \"c\")\n\
+         SubClassOf(:A ObjectSomeValuesFrom(:p ObjectIntersectionOf(:B ObjectSomeValuesFrom(:q :C))))\n)\n",
     )
     .unwrap();
     for ext in ["nt", "ttl"] {
@@ -7049,6 +7551,56 @@ fn line_based_rdf_is_the_same_on_every_run() {
         assert!(String::from_utf8_lossy(&runs[0]).contains("_:b0"), "{ext}: {}", String::from_utf8_lossy(&runs[0]));
     }
     let _ = std::fs::remove_file(&src);
+}
+
+/// An empty list is `rdf:nil` in line-based RDF: the intersection, union and
+/// one-of with no members in `rdf-connective-members.owl` are written as
+/// N-Triples, and the document read back holds the same axioms.
+#[test]
+fn line_based_rdf_writes_an_empty_list_as_rdf_nil() {
+    let nt = tmp("rdf-connective-members.nt");
+    let run = bin()
+        .args(["convert", "-i"])
+        .arg(robot_fixture("rdf-connective-members.owl"))
+        .arg("-o")
+        .arg(&nt)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let diff = tmp("rdf-connective-members.nt.diff");
+    let run = bin()
+        .args(["diff", "--left"])
+        .arg(robot_fixture("rdf-connective-members.owl"))
+        .arg("--right")
+        .arg(&nt)
+        .arg("-o")
+        .arg(&diff)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&diff).unwrap().trim_end(), "Ontologies are identical");
+    let _ = std::fs::remove_file(&nt);
+    let _ = std::fs::remove_file(&diff);
+}
+
+/// A rename keeps every annotation of the ontology on the ontology, one with
+/// an annotation of its own and the ones after it alike. As ROBOT 1.9.11
+/// renames `rename-header.ofn`.
+#[test]
+fn a_rename_keeps_each_ontology_annotation_on_the_ontology() {
+    let out = tmp("rename-header.ofn");
+    let run = bin()
+        .args(["rename", "-i"])
+        .arg(robot_fixture("rename-header.ofn"))
+        .arg("--mappings")
+        .arg(robot_fixture("rename-header.mappings.tsv"))
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), fixture_text("rename-header.robot.ofn"));
+    let _ = std::fs::remove_file(&out);
 }
 
 /// `owltools … --run-reasoner -u` lists, after the unsatisfiable count, every
@@ -7135,6 +7687,116 @@ fn query_answers_predicate_scans_and_unions_in_index_order() {
             "{query}"
         );
     }
+}
+
+/// A query reads an inverse property expression that several statements name
+/// as one node: `:q`'s super-property `ObjectInverseOf(:u)`, which an
+/// annotated axiom's reification also names, is the node stating its inverse.
+/// As ROBOT 1.9.11 answers over `span-gaps-properties`.
+#[test]
+fn a_query_joins_through_a_node_several_statements_name() {
+    for (name, query) in [
+        (
+            "inverse-supers",
+            "SELECT ?sub ?inverse WHERE { ?sub rdfs:subPropertyOf ?super . ?super owl:inverseOf ?inverse } \
+             ORDER BY ?sub ?inverse",
+        ),
+        (
+            "inverse-targets",
+            "SELECT ?source ?inverse WHERE { ?axiom owl:annotatedSource ?source ; owl:annotatedTarget ?target . \
+             ?target owl:inverseOf ?inverse } ORDER BY ?source ?inverse",
+        ),
+    ] {
+        let rq = tmp(&format!("{name}.rq"));
+        std::fs::write(
+            &rq,
+            format!(
+                "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\nPREFIX owl: <http://www.w3.org/2002/07/owl#>\n{query}\n"
+            ),
+        )
+        .unwrap();
+        let out = tmp(&format!("{name}.csv"));
+        let run = bin()
+            .args(["query", "-i"])
+            .arg(robot_fixture("span-gaps-properties.ofn"))
+            .arg("--query")
+            .arg(&rq)
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            fixture_text(&format!("span-gaps-properties.{name}.robot.csv")),
+            "{name}"
+        );
+    }
+}
+
+/// A query reads the ontology's RDF rendering, the document a file of it holds.
+/// The rendering types an entity the ontology names without declaring unless
+/// an ontology it imports has it: `:q`, declared nowhere, is an object
+/// property, and the chain's members, which the import declares, are not. Each
+/// cell of a list is an `rdf:List`, and a document with an empty list is read.
+/// As ROBOT 1.9.11 answers.
+#[test]
+fn a_query_reads_the_ontology_as_a_file_of_it_states_it() {
+    let dir = tmp("query-rendering");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("imp.ofn"),
+        "Prefix(:=<http://example.org/c#>)\nOntology(<http://example.org/imp.owl>\n\
+         Declaration(ObjectProperty(:bfo50))\nDeclaration(ObjectProperty(:bfo51))\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("root.ofn"),
+        "Prefix(:=<http://example.org/c#>)\nOntology(<http://example.org/root.owl>\n\
+         Import(<http://example.org/imp.owl>)\nDeclaration(Class(:A))\nDeclaration(ObjectProperty(:p))\n\
+         SubObjectPropertyOf(ObjectPropertyChain(:bfo50 :bfo51) :p)\nSubClassOf(:A ObjectSomeValuesFrom(:q :A))\n)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         \x20   <uri name=\"http://example.org/imp.owl\" uri=\"imp.ofn\"/>\n</catalog>\n",
+    )
+    .unwrap();
+    let query = |input: &std::path::Path, sparql: &str, name: &str| -> String {
+        let rq = dir.join(format!("{name}.rq"));
+        std::fs::write(&rq, sparql).unwrap();
+        let out = dir.join(format!("{name}.csv"));
+        let run = bin().args(["query", "-i"]).arg(input).arg("--query").arg(&rq).arg(&out).output().unwrap();
+        assert!(run.status.success(), "{name}: {}", String::from_utf8_lossy(&run.stderr));
+        std::fs::read_to_string(&out).unwrap()
+    };
+    assert_eq!(
+        query(
+            &dir.join("root.ofn"),
+            "PREFIX owl: <http://www.w3.org/2002/07/owl#>\nSELECT ?p WHERE { ?p a owl:ObjectProperty } ORDER BY ?p\n",
+            "properties"
+        ),
+        "p\r\nhttp://example.org/c#p\r\nhttp://example.org/c#q\r\n"
+    );
+    assert_eq!(
+        query(
+            &robot_fixture("select-objects.ofn"),
+            "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\n\
+             SELECT ?first WHERE { ?cell a rdf:List ; rdf:first ?first . FILTER(isIRI(?first)) } ORDER BY ?first\n",
+            "lists"
+        ),
+        "first\r\nhttp://example.org/B\r\nhttp://example.org/B\r\nhttp://example.org/C\r\n"
+    );
+    assert_eq!(
+        query(
+            &robot_fixture("rdf-connective-members.owl"),
+            "SELECT ?s WHERE { ?s a <http://www.w3.org/2002/07/owl#Class> } ORDER BY ?s\n",
+            "classes"
+        ),
+        fixture_text("rdf-connective-members.classes.robot.csv")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A functional write banners an entity with two labels by the one its
@@ -7339,6 +8001,189 @@ fn merge_reads_input_iris_after_its_files_through_the_catalog() {
         .status()
         .unwrap();
     assert!(!status.success(), "convert accepted both --input and --input-iri");
+}
+
+/// Two axioms the same but for their annotations are written in the order of
+/// those annotations, an IRI value by namespace and then by the rest, as ROBOT
+/// 1.9.11 writes them: declarations, an entity's annotation assertions and its
+/// other axioms alike.
+#[test]
+fn axioms_that_differ_only_in_annotations_are_ordered_by_them() {
+    assert_eq!(
+        convert_fixture("annotation-twins.ofn", "annotation-twins.ofn", &[]),
+        fixture_text("annotation-twins.robot.ofn")
+    );
+}
+
+/// `merge` attributes entities and axioms to the ontologies they come from as
+/// ROBOT 1.9.11 does: through each input's imports closure in turn, an entity
+/// in an import defined by the import rather than by its importer, and without
+/// collapsing the closure, only the first input keeping its imports. Every
+/// expected file is ROBOT's output for the same command.
+#[test]
+fn merge_attributes_provenance_as_robot_does() {
+    let catalog = robot_fixture("merge-prov-catalog.xml");
+    let (p, s) = ("merge-prov-p.ofn", "merge-prov-s.ofn");
+    let cases: &[(&str, &[&str], &[&str])] = &[
+        ("defined-by", &[p, s], &["--annotate-defined-by", "true"]),
+        ("derived-from", &[p, s], &["--annotate-derived-from", "true"]),
+        ("both", &[p, s], &["--annotate-defined-by", "true", "--annotate-derived-from", "true"]),
+        ("keep-imports.defined-by", &[p, s], &["--collapse-import-closure", "false", "--annotate-defined-by", "true"]),
+        ("keep-imports.derived-from", &[p, s], &["--collapse-import-closure", "false", "--annotate-derived-from", "true"]),
+        ("keep-imports.annotations", &[p, s], &["--collapse-import-closure", "false", "--include-annotations", "true"]),
+        ("one.defined-by", &[p], &["--annotate-defined-by", "true"]),
+        ("one.derived-from", &[p], &["--annotate-derived-from", "true"]),
+        ("secondary-first.defined-by", &[s, p], &["--annotate-defined-by", "true"]),
+        ("anonymous-first.defined-by", &["merge-prov-anon.ofn", p], &["--annotate-defined-by", "true"]),
+    ];
+    for (name, inputs, options) in cases {
+        let out = tmp(&format!("merge-prov.{name}.ofn"));
+        let mut cmd = bin();
+        cmd.arg("merge").arg("--catalog").arg(&catalog);
+        for input in *inputs {
+            cmd.arg("-i").arg(robot_fixture(input));
+        }
+        let run = cmd.args(*options).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{name}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            fixture_text(&format!("merge-prov.{name}.robot.ofn")),
+            "{name}"
+        );
+        let _ = std::fs::remove_file(&out);
+    }
+    // An ontology with no IRI has nothing its axioms could be derived from.
+    let run = bin()
+        .arg("merge")
+        .arg("--catalog")
+        .arg(&catalog)
+        .arg("-i")
+        .arg(robot_fixture(p))
+        .arg("-i")
+        .arg(robot_fixture("merge-prov-anon.ofn"))
+        .args(["--annotate-derived-from", "true", "-o"])
+        .arg(tmp("merge-prov.anonymous.ofn"))
+        .output()
+        .unwrap();
+    assert!(!run.status.success(), "derived-from over an ontology with no IRI succeeded");
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("use Optional.orNull() instead of Optional.or(null)"),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    // `--inputs` takes a wildcard pattern, and a merge whose pattern matches
+    // nothing has nothing to merge.
+    for (pattern, message) in [
+        (robot_fixture(p), "WILDCARD ERROR --inputs argument must be a quoted wildcard pattern"),
+        (robot_fixture("merge-prov-*.none"), "MISSING INPUT ERROR at least one --input is required"),
+    ] {
+        let run = bin()
+            .arg("merge")
+            .arg("--inputs")
+            .arg(&pattern)
+            .arg("-o")
+            .arg(tmp("merge-prov.pattern.ofn"))
+            .output()
+            .unwrap();
+        assert!(!run.status.success(), "{}", pattern.display());
+        assert!(String::from_utf8_lossy(&run.stderr).contains(message), "{}", String::from_utf8_lossy(&run.stderr));
+    }
+}
+
+/// Every command reads its input with the input's imports closure, so an import
+/// that resolves nowhere fails it, naming the import, as ROBOT 1.9.11 fails
+/// every load with `UnloadableImportException`. `template` reads its input as
+/// optional: one it cannot read is no input, so the table alone is written, and
+/// only a merge with it fails.
+#[test]
+fn an_import_that_resolves_nowhere_fails_the_load() {
+    let import = "file:///nonexistent-owlmake-fixture/unresolvable-import.owl";
+    let input = robot_fixture("import-unresolvable.ofn");
+    let other = robot_fixture("annotation-twins.ofn");
+    let dir = tmp("unresolvable-import");
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = dir.join("q.rq");
+    std::fs::write(&query, "SELECT ?s WHERE { ?s ?p ?o }\n").unwrap();
+    let (i, o, q) = (input.to_str().unwrap(), other.to_str().unwrap(), query.to_str().unwrap());
+    let out = |name: &str| dir.join(name).to_str().unwrap().to_string();
+    let table = robot_fixture("literal-template.tsv");
+    let t = table.to_str().unwrap();
+    let mint_ranges = ["--temp-id-prefix", "http://example.org/TEMP_", "--id-range-name", "x"];
+    let runs: Vec<Vec<String>> = [
+        vec!["convert", "-i", i, "-o", &out("c.ofn")],
+        vec!["annotate", "-i", i, "--annotation", "rdfs:comment", "x", "-o", &out("a.ofn")],
+        vec!["report", "-i", i, "-o", &out("r.tsv")],
+        vec!["query", "-i", i, "--query", q, &out("q.csv")],
+        vec!["verify", "-i", i, "--queries", q, "-O", &out("verify")],
+        vec!["diff", "--left", i, "--right", o],
+        vec!["diff", "--left", o, "--right", i],
+        vec!["unmerge", "-i", o, "-i", i, "-o", &out("u.ofn")],
+        vec!["merge", "-i", i, "-o", &out("m.ofn")],
+        vec!["remove", "-i", i, "--term", "http://example.org/x", "-o", &out("rm.ofn")],
+        [&["mint", "-i", i][..], &mint_ranges[..], &["-o", &out("mint.ofn")][..]].concat(),
+        vec!["template", "-i", i, "--merge-before", "true", "--prefix", "ex: http://example.org/t#", "-t", t, "-o", &out("tm.ofn")],
+    ]
+    .into_iter()
+    .map(|args| args.into_iter().map(String::from).collect())
+    .collect();
+    for args in &runs {
+        let run = bin().args(args).output().unwrap();
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success() && stderr.contains(import), "{args:?}: {stderr}");
+    }
+    let run = bin()
+        .args(["template", "-i", i, "--prefix", "ex: http://example.org/t#", "-t", t, "-o", &out("t.ofn")])
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        std::fs::read_to_string(out("t.ofn")).unwrap(),
+        fixture_text("import-unresolvable.template.robot.ofn")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An import named by a `file:` IRI is read from the file it names, as ROBOT
+/// 1.9.11 reads it, whatever command loads the importer.
+#[test]
+fn a_file_iri_import_is_read_from_its_file() {
+    let dir = tmp("file-iri-import");
+    std::fs::create_dir_all(dir.join("in sub")).unwrap();
+    std::fs::write(
+        dir.join("in sub/imported.ofn"),
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Ontology(<http://example.org/imported>\n\
+         Declaration(Class(<http://example.org/imported#S>))\n\
+         AnnotationAssertion(rdfs:label <http://example.org/imported#S> \"from a file IRI\")\n)\n",
+    )
+    .unwrap();
+    let importer = dir.join("importer.ofn");
+    std::fs::write(
+        &importer,
+        format!(
+            "Ontology(<http://example.org/importer>\n\
+             Import(<file://{}/in%20sub/imported.ofn>)\n\
+             SubClassOf(<http://example.org/imported#S> <http://example.org/importer#A>)\n)\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+    // The label the import gives `S` heads its section in the importer…
+    let converted = dir.join("converted.ofn");
+    let run = bin().arg("convert").arg("-i").arg(&importer).arg("-o").arg(&converted).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&converted).unwrap();
+    assert!(text.contains("# Class: <http://example.org/imported#S> (from a file IRI)"), "{text}");
+    // …and a merge takes the import's axioms in.
+    let merged = dir.join("merged.ofn");
+    let run = bin().arg("merge").arg("-i").arg(&importer).arg("-o").arg(&merged).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&merged).unwrap();
+    assert!(
+        text.contains("AnnotationAssertion(rdfs:label <http://example.org/imported#S> \"from a file IRI\")"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 

@@ -838,7 +838,7 @@ pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -
 
 /// Whether `s` is an absolute IRI: it opens with a scheme (a letter, then
 /// letters, digits, `+`, `-` or `.`, then `:`).
-fn has_scheme(s: &str) -> bool {
+pub(crate) fn has_scheme(s: &str) -> bool {
     let Some(colon) = s.find(':') else { return false };
     let scheme = &s[..colon];
     let mut chars = scheme.chars();

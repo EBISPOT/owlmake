@@ -12,9 +12,13 @@
 //! The EL engine classifies as the ELK that ROBOT 1.9.11 runs. Where that ELK
 //! classifies a case differently from the suite, `<Name>.robot.taxonomy` states
 //! what it computes, measured, and that is the classification required:
-//! `BottomObjectProperty`, where `owl:bottomObjectProperty` and its
-//! sub-properties are ordinary properties to it, so `∃R.C` over one is
-//! satisfiable.
+//! - `BottomObjectProperty`, where `owl:bottomObjectProperty` and its
+//!   sub-properties are ordinary properties to it, so `∃R.C` over one is
+//!   satisfiable;
+//! - `DisjointSelf`, where the members of a disjointness are a set, so
+//!   `DisjointClasses(:A :B :A :A)` leaves `:A` satisfiable, while a
+//!   disjointness of the one class `:C` is `:C`'s disjointness from
+//!   `owl:Thing`.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};

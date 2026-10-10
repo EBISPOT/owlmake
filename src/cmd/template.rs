@@ -151,10 +151,26 @@ pub fn step(
         status!("template: --merge-before/--merge-after/--ancestors given but no input ontology to merge with");
     }
 
+    // An input is read with its imports closure. One that cannot be read —
+    // missing, unparseable, or importing an ontology that resolves nowhere — is
+    // no input at all, unless the result is merged with it or draws its
+    // ancestors from it.
+    let read_input = |p: &std::path::Path| -> anyhow::Result<Model> {
+        let mut m = io::load(p)?;
+        crate::cmd::read_imports_closure(&mut m, Some(p), &args.common)?;
+        Ok(m)
+    };
     let mut model = match piped {
         Some(m) => m,
         None => match args.input.as_deref() {
-            Some(p) => io::load(p)?,
+            Some(p) => match read_input(p) {
+                Ok(m) => m,
+                Err(e) if !needs_input => {
+                    status!("template: {} not read ({e:#}); the template is built without it", p.display());
+                    Model::from_parts(SetOntology::new(), default_prefixes())
+                }
+                Err(e) => return Err(e),
+            },
             None => Model::from_parts(SetOntology::new(), default_prefixes()),
         },
     };

@@ -831,6 +831,16 @@ pub enum StepSpec {
         /// declarations and a read-only reasoning closure.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         collapse_import_closure: Option<bool>,
+        /// `--include-annotations`: the inputs' ontology annotations are kept.
+        #[serde(default, skip_serializing_if = "is_false")]
+        include_annotations: bool,
+        /// `--annotate-defined-by`: each entity is defined by the ontology that
+        /// names it.
+        #[serde(default, skip_serializing_if = "is_false")]
+        annotate_defined_by: bool,
+        /// `--annotate-derived-from`: each axiom names the ontology it came from.
+        #[serde(default, skip_serializing_if = "is_false")]
+        annotate_derived_from: bool,
     },
     /// Remove a second ontology's axioms from the current one.
     Unmerge {
@@ -1995,9 +2005,18 @@ impl StepSpec {
 
     fn from_op(op: &Op) -> Self {
         match op {
-            Op::Merge { inputs, collapse_import_closure } => StepSpec::Merge {
+            Op::Merge {
+                inputs,
+                collapse_import_closure,
+                include_annotations,
+                annotate_defined_by,
+                annotate_derived_from,
+            } => StepSpec::Merge {
                 inputs: inputs.clone(),
                 collapse_import_closure: *collapse_import_closure,
+                include_annotations: *include_annotations,
+                annotate_defined_by: *annotate_defined_by,
+                annotate_derived_from: *annotate_derived_from,
             },
             Op::Unmerge { second_input } => StepSpec::Unmerge { second_input: second_input.clone() },
             Op::Reason {
@@ -2264,9 +2283,19 @@ impl StepSpec {
     pub(crate) fn into_step(self) -> Step {
         match self {
             StepSpec::Boundary { input } => Step::Boundary { input },
-            StepSpec::Merge { inputs, collapse_import_closure } => {
-                Step::Op(Op::Merge { inputs, collapse_import_closure })
-            }
+            StepSpec::Merge {
+                inputs,
+                collapse_import_closure,
+                include_annotations,
+                annotate_defined_by,
+                annotate_derived_from,
+            } => Step::Op(Op::Merge {
+                inputs,
+                collapse_import_closure,
+                include_annotations,
+                annotate_defined_by,
+                annotate_derived_from,
+            }),
             StepSpec::Unmerge { second_input } => Step::Op(Op::Unmerge { second_input }),
             StepSpec::Reason {
                 reasoner,
@@ -2905,7 +2934,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.13";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.14";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3548,7 +3577,7 @@ imports:
             needs: vec!["tiny-edit.owl".into(), "components/c.owl".into()],
             order_only: vec![],
             steps: vec![
-                Step::Op(Op::Merge { inputs: vec!["tiny-edit.owl".into()], collapse_import_closure: None }),
+                Step::Op(Op::plain_merge(vec!["tiny-edit.owl".into()])),
                 Step::Op(Op::Remove(remove.clone())),
             ],
             gaps: vec![],
@@ -3921,7 +3950,12 @@ mod format_floor_tests {
         // and `allow_punning` may be the recipe's text where it is neither
         // `true` nor `false`, which fails the step where it reads the switch. A
         // 0.4.13 build refuses the text, loudly, so the floor stays.
-        const PLAN_SCHEMA_DIGEST: &str = "9a2ebefa15e6a384";
+        //
+        // A merge step carries `include_annotations`, `annotate_defined_by` and
+        // `annotate_derived_from`. A 0.4.13 build ignores them and would write
+        // the merge without the inputs' annotations and provenance the plan
+        // asks for, so the floor moves to 0.4.14.
+        const PLAN_SCHEMA_DIGEST: &str = "b9f8ea2bd72850fa";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -3987,10 +4021,7 @@ mod round_trip_tests {
                 input: Some("tiny-edit.ofn".into()),
                 needs: vec!["tiny-edit.ofn".into()],
                 order_only: vec![],
-                steps: vec![Step::Op(Op::Merge {
-                    inputs: vec!["tiny-edit.ofn".into()],
-                    collapse_import_closure: None,
-                })],
+                steps: vec![Step::Op(Op::plain_merge(vec!["tiny-edit.ofn".into()]))],
                 gaps: vec![],
                 missing_rule: false,
                 side_effect_only: false,
@@ -4121,6 +4152,13 @@ mod round_trip_tests {
                 include_subproperties: Some(true),
                 preserve_annotated_axioms: true,
                 named_classes_only: true,
+            }),
+            Step::Op(Op::Merge {
+                inputs: vec!["a.owl".into(), "http://example.org/b.owl".into()],
+                collapse_import_closure: Some(false),
+                include_annotations: true,
+                annotate_defined_by: true,
+                annotate_derived_from: true,
             }),
             Step::UnsupportedOptions {
                 command: "reason".into(),

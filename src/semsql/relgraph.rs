@@ -174,7 +174,7 @@ fn narrowed_targets(
 pub fn write_tsv(min_owl: &Path, prefixes: &[(String, String)], out: &Path) -> Result<()> {
     let ranked = prefix_map(prefixes);
     let model = crate::io::load(min_owl)?;
-    let translated = whelk::whelk::owl::translate_ontology(&model.ont);
+    let translated = whelk::whelk::owl::translate_ontology(crate::reason::owl_axioms(&model).as_ref());
     let state = whelk::whelk::reasoner::assert(&translated);
 
     let mut edges: BTreeSet<(String, String, String)> = BTreeSet::new();

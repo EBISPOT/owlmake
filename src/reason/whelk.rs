@@ -48,13 +48,21 @@ pub struct WhelkClassification {
     in_clique: HashSet<String>,
     /// Concept hashes, shared across the classes whose order gets reconstructed.
     hashes: RefCell<HashMap<ConceptId, i32>>,
+    /// Whether an axiom names `owl:Thing`. Only then is it among its own
+    /// subclasses as the reasoner visits them.
+    top_named: bool,
 }
 
 impl WhelkClassification {
     /// Translate `model` into whelk's normal form, saturate, and capture the
     /// named-subsumption closure.
     pub fn classify(model: &Model) -> WhelkClassification {
-        let translated = whelk::whelk::owl::translate_ontology(&model.ont);
+        let translated = whelk::whelk::owl::translate_ontology(crate::reason::owl_axioms(model).as_ref());
+        let top = translated.interner.top();
+        let top_named = translated.concept_inclusions.iter().any(|ci| {
+            translated.interner.concept_signature(ci.subclass).contains(&top)
+                || translated.interner.concept_signature(ci.superclass).contains(&top)
+        });
         let state = whelk::whelk::reasoner::assert(&translated);
 
         let mut subs: HashMap<String, HashSet<String>> = HashMap::new();
@@ -82,6 +90,7 @@ impl WhelkClassification {
             state,
             in_clique,
             hashes: RefCell::new(HashMap::new()),
+            top_named,
         }
     }
 
@@ -122,13 +131,106 @@ impl WhelkClassification {
         self.subs.get(a).is_some_and(|s| s.contains(b))
     }
 
-    /// Whether the ontology is consistent: inconsistency surfaces as
-    /// `owl:Thing` becoming unsatisfiable (`owl:Thing ⊑ owl:Nothing`), or as an
-    /// individual — which must exist — becoming unsatisfiable.
-    pub fn is_consistent(&self) -> bool {
-        if self.sub_of(OWL_THING, OWL_NOTHING) {
-            return false;
+    /// Whether the closure records `sub ⊑ sup`. A class the closure does not
+    /// hold, one named only as a superclass, is below nothing.
+    pub fn subsumes(&self, sub: &str, sup: &str) -> bool {
+        self.sub_of(sub, sup)
+    }
+
+    /// The classes of the top node: `owl:Thing` first, then the classes it is
+    /// a subclass of, sorted.
+    pub fn top_node(&self) -> Vec<String> {
+        let mut rest: Vec<String> = self
+            .subs
+            .get(OWL_THING)
+            .into_iter()
+            .flatten()
+            .filter(|c| c.as_str() != OWL_THING)
+            .cloned()
+            .collect();
+        rest.sort();
+        let mut out = vec![OWL_THING.to_string()];
+        out.extend(rest);
+        out
+    }
+
+    /// The classes directly below `c`, one class for each node. The reasoner
+    /// folds over `c`'s subclasses and `owl:Nothing` in the order it visits
+    /// them in. A subclass `c` is a subclass of in turn is equivalent to it and
+    /// none of them. Any other is kept unless one already kept lies above it,
+    /// and each kept one that lies below it is dropped. So of each node the
+    /// class met first stands for it, and `owl:Nothing` stays only while
+    /// nothing else is kept.
+    ///
+    /// Five or more subclasses are visited in a hash trie's order. Four or
+    /// fewer are visited in the order they were added in, `owl:Nothing` first;
+    /// the order the rest were added in is not recorded here, and the trie's
+    /// stands in for it.
+    pub fn direct_subclasses(&self, c: &str) -> Vec<String> {
+        let interner = &self.state.interner;
+        let bottom = interner.bottom();
+        let top = interner.top();
+        let concept = interner.find_concept(&ConceptData::AtomicConcept(c.to_string()));
+        let mut ids: Vec<ConceptId> = concept
+            .and_then(|id| self.state.closure_subs_by_superclass.get(&id))
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
+        if concept == Some(top) && !self.top_named {
+            ids.retain(|&id| id != top);
         }
+        if !ids.contains(&bottom) {
+            ids.push(bottom);
+        }
+        let order = {
+            let mut hashes = self.hashes.borrow_mut();
+            if ids.len() <= 4 {
+                let rest: Vec<ConceptId> = ids.iter().copied().filter(|&id| id != bottom).collect();
+                std::iter::once(bottom).chain(whelk_order::visit_order(interner, &rest, &mut hashes)).collect()
+            } else {
+                whelk_order::visit_order(interner, &ids, &mut hashes)
+            }
+        };
+        // Whether `a ⊑ b` in the closure.
+        let below = |a: ConceptId, b: ConceptId| {
+            self.state.closure_subs_by_superclass.get(&b).is_some_and(|s| s.contains(&a))
+        };
+        let mut direct: Vec<ConceptId> = Vec::new();
+        for s in order {
+            if !matches!(interner.concept_data(s), ConceptData::AtomicConcept(_)) || Some(s) == concept {
+                continue;
+            }
+            if concept == Some(bottom) || concept.is_some_and(|id| below(id, s)) {
+                continue;
+            }
+            let mut dropped: Vec<ConceptId> = Vec::new();
+            let mut covered = false;
+            for &other in &direct {
+                if s == bottom || below(s, other) {
+                    covered = true;
+                    break;
+                }
+                if other == bottom || below(other, s) {
+                    dropped.push(other);
+                }
+            }
+            direct.retain(|d| !dropped.contains(d));
+            if !covered {
+                direct.push(s);
+            }
+        }
+        direct
+            .into_iter()
+            .filter_map(|id| match interner.concept_data(id) {
+                ConceptData::AtomicConcept(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether the ontology is consistent: no individual, which must exist, is
+    /// unsatisfiable. `owl:Thing ⊑ owl:Nothing` alone leaves it consistent,
+    /// with every class unsatisfiable.
+    pub fn is_consistent(&self) -> bool {
         let bottom = self.state.interner.bottom();
         !self.state.closure_subs_by_superclass.get(&bottom).is_some_and(|subs| {
             subs.iter().any(|&c| matches!(self.state.interner.concept_data(c), ConceptData::Nominal(_)))

@@ -218,8 +218,7 @@ fn to_arc(model: &Model) -> SetOntology<ArcStr> {
     let cv = ArcConv {
         build: Build::new_arc(),
     };
-    model
-        .ont
+    crate::reason::owl_axioms(model)
         .iter()
         // DocIRI is horned-owl bookkeeping (where the document was loaded
         // from), not an OWL axiom, and an OFN round trip drops it — so drop it
@@ -875,6 +874,21 @@ impl DlReasoner {
         let bottom = h.bottom_node();
         let mut out: Vec<String> = h
             .node(bottom)
+            .equivalent_elements()
+            .iter()
+            .map(|c| c.0.to_string())
+            .filter(|iri| is_named(iri))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The named classes equivalent to `owl:Thing`, sorted: the members of the
+    /// taxonomy's top node.
+    pub fn top_equivalents(&self) -> Vec<String> {
+        let h = self.hierarchy();
+        let mut out: Vec<String> = h
+            .node(h.top_node())
             .equivalent_elements()
             .iter()
             .map(|c| c.0.to_string())

@@ -7,9 +7,11 @@
 //! an entity the logical axioms come first, then the annotation assertions
 //! sorted by (property IRI, value).
 //!
-//! horned's writer is kept for internal transport only (`write_to_ref`: the
-//! SPARQL and rename round-trips serialize to a buffer they parse straight back,
-//! where byte fidelity buys nothing and costs time).
+//! A SPARQL query or update reads this writer's document as well
+//! ([`crate::io::rendering`]): what a query sees of an ontology is what a file of
+//! it states. horned's writer is kept for internal transport only
+//! (`write_to_ref`: a rename's round trip serializes to a buffer it parses
+//! straight back, where byte fidelity buys nothing and costs time).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Write;
@@ -62,15 +64,17 @@ const PARSE_TYPE_LITERAL: &str = " rdf:parseType=\"Literal\"";
 
 /// A literal as a property element states it: the attribute that types it —
 /// a language, a datatype other than `xsd:string`, or `rdf:parseType` for an
-/// `rdf:XMLLiteral` — and its content, the text escaped, or an XML literal's
-/// markup as it stands.
+/// `rdf:XMLLiteral` in a document that is kept — and its content, the text
+/// escaped, or an XML literal's markup as it stands.
 fn literal_parts(l: &Literal<RcStr>) -> (String, String) {
     match l {
         Literal::Simple { literal } => (String::new(), esc(literal)),
         Literal::Language { literal, lang } => (format!(" xml:lang=\"{lang}\""), esc(literal)),
         Literal::Datatype { literal, datatype_iri } => match datatype_iri.as_ref() {
             XSD_STRING => (String::new(), esc(literal)),
-            RDF_XML_LITERAL => (PARSE_TYPE_LITERAL.to_string(), literal.clone()),
+            RDF_XML_LITERAL if !READ_AS_GRAPH.with(|c| c.get()) => {
+                (PARSE_TYPE_LITERAL.to_string(), literal.clone())
+            }
             dt => (format!(" rdf:datatype=\"{}\"", esc_attr(dt)), esc(literal)),
         },
     }
@@ -393,6 +397,25 @@ thread_local! {
     /// wherever it is an object. One that appears once is written in place.
     static ANON_REPEATED: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Whether the document is read back as a graph rather than kept: an
+    /// `rdf:XMLLiteral` is then a literal like any other, its text escaped
+    /// under `rdf:datatype`, and markup that could not stand as element content
+    /// is no reason to refuse it.
+    static READ_AS_GRAPH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with every document written in it read back as a graph (see
+/// `READ_AS_GRAPH`).
+pub(crate) fn read_as_graph<T>(f: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            READ_AS_GRAPH.with(|c| c.set(false));
+        }
+    }
+    READ_AS_GRAPH.with(|c| c.set(true));
+    let _reset = Reset;
+    f()
 }
 
 /// How many times each anonymous individual appears in the document: as either
@@ -1073,11 +1096,21 @@ fn build_anon_doc<'m>(
         }
     }
     // An axiom about an anonymous individual that no graph reaches is stated
-    // nowhere.
-    for key in g.unreached() {
-        if let Some(ac) = by_key.get(&key) {
-            left_out.push(ac);
-        }
+    // nowhere: anonymous individuals that only name each other, with nothing
+    // else naming any of them, are in no graph. The document leaves them out,
+    // and says so.
+    let mut unreached: Vec<String> = g
+        .unreached()
+        .filter_map(|key| by_key.get(&key))
+        .map(|ac| crate::io::owlfunc::render_component_line(ac))
+        .collect();
+    if !unreached.is_empty() {
+        unreached.sort();
+        status!(
+            "WARN: {} axiom(s) about anonymous individuals no other statement reaches are written nowhere (first: {})",
+            unreached.len(),
+            unreached[0]
+        );
     }
     let rdf_type = format!("{RDF_NS}type");
     // The node of each anonymous class an annotated assertion types an
@@ -3002,9 +3035,16 @@ fn list_def(gid: &str, items: &[String]) -> String {
     s
 }
 
-/// A list as the object of `tag` and as an annotated target: by id when it is
-/// named (its definition added to `defs`), else a collection in both places.
+/// A list as the object of `tag` and as an annotated target: `rdf:nil` when it
+/// is empty, by id when it is named (its definition added to `defs`), else a
+/// collection in both places.
 fn list_slots(tag: &str, items: &[String], gid: Option<&str>, defs: &mut String) -> (String, String) {
+    if items.is_empty() {
+        return (
+            format!("        <{tag} rdf:resource=\"{RDF_NIL}\"/>\n"),
+            format!("        <owl:annotatedTarget rdf:resource=\"{RDF_NIL}\"/>\n"),
+        );
+    }
     match gid {
         Some(g) => {
             defs.push_str(&list_def(g, items));
@@ -4060,7 +4100,9 @@ fn annotation_body(
 /// When the model holds axioms whose shape this layout cannot state, nothing is
 /// written and they come back, in functional syntax.
 pub(crate) fn try_save<W: Write>(model: &mut Model, w: &mut W) -> Result<Vec<String>> {
-    check_xml_literals(model)?;
+    if !READ_AS_GRAPH.with(|c| c.get()) {
+        check_xml_literals(model)?;
+    }
     let has_iri = model.ont.iter().any(|ac| {
         matches!(&ac.component, Component::OntologyID(id) if id.iri.is_some())
     });
@@ -5295,15 +5337,18 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                 }
             }
             Component::EquivalentObjectProperties(e) => {
-                // Three or more members are a chain, placed after the rest.
+                // Three or more members are a chain, placed after the rest; one
+                // member states nothing.
                 if crate::io::genid::ordered_opes(&e.0).len() > 2 {
                     chains.push(ac);
-                } else if let (Some(a), Some(b)) = (op_name(&e.0[0]), op_name(&e.0[1])) {
-                    let (a, b) = ordered(a, b);
-                    if annotated(ac) {
-                        edge_reifs.entry(a.clone()).or_default().push((P_EQUIV_PROPERTY, b.clone(), ax_anns(ac)));
+                } else if let [x, y] = e.0.as_slice() {
+                    if let (Some(a), Some(b)) = (op_name(x), op_name(y)) {
+                        let (a, b) = ordered(a, b);
+                        if annotated(ac) {
+                            edge_reifs.entry(a.clone()).or_default().push((P_EQUIV_PROPERTY, b.clone(), ax_anns(ac)));
+                        }
+                        op_equiv.entry(a).or_default().push(b);
                     }
-                    op_equiv.entry(a).or_default().push(b);
                 }
             }
             Component::EquivalentDataProperties(e) => {
@@ -5328,6 +5373,18 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         edge_reifs.entry(a.clone()).or_default().push((P_PROPERTY_DISJOINT, b.clone(), ax_anns(ac)));
                     }
                     dp_disjoint.entry(a).or_default().push(b);
+                } else if let [only] = d.0.as_slice() {
+                    // A disjointness of one property is a root of that
+                    // property's frame, in node order among its others.
+                    let only = only.0.as_ref().to_string();
+                    let block = render_all_disjoint_properties(&[(None, only.clone())], &node_annotations(ac, &prefixes));
+                    match genid_pass.all_disjoint_node.get(&crate::io::genid::axiom_identity(ac)) {
+                        Some(node) => inv_roots
+                            .entry(only)
+                            .or_default()
+                            .push((ann_order(&ax_anns(ac)), format!("{ROOT_KEY}{node}\n{block}"))),
+                        None => left_out.push(ac),
+                    }
                 } else {
                     let members: Vec<(Option<String>, String)> =
                         d.0.iter().map(|p| (None, p.0.as_ref().to_string())).collect();
@@ -5398,11 +5455,6 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                         op_disjoint.entry(a).or_default().push(b);
                     }
                 } else {
-                    // Stated of a property an inverse member names, not as a
-                    // general axiom.
-                    if d.0.iter().any(|m| matches!(m, OPE::InverseObjectProperty(_))) {
-                        left_out.push(ac);
-                    }
                     let members: Vec<(Option<String>, String)> = d
                         .0
                         .iter()
@@ -5411,7 +5463,22 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
                             OPE::InverseObjectProperty(p) => (Some(String::new()), p.0.as_ref().to_string()),
                         })
                         .collect();
-                    gci_blocks.push((ac, render_all_disjoint_properties(&members, &node_annotations(ac, &prefixes))));
+                    let block = render_all_disjoint_properties(&members, &node_annotations(ac, &prefixes));
+                    match crate::io::genid::all_disjoint_owner(&d.0) {
+                        // A root of the frame of the property an inverse member
+                        // names, in node order among its others.
+                        Some(owner) => {
+                            let identity = crate::io::genid::axiom_identity(ac);
+                            match genid_pass.all_disjoint_node.get(&identity) {
+                                Some(node) => inv_roots
+                                    .entry(owner)
+                                    .or_default()
+                                    .push((ann_order(&ax_anns(ac)), format!("{ROOT_KEY}{node}\n{block}"))),
+                                None => left_out.push(ac),
+                            }
+                        }
+                        None => gci_blocks.push((ac, block)),
+                    }
                 }
             }
             Component::FunctionalObjectProperty(p) => {
@@ -6362,10 +6429,13 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             }
             let (abody, ann_after) = annotation_body(iri, entity_anns(iri), None, prefixes);
             body.push_str(&abody);
+            let mut reified: Vec<&Reified> = inv_roots.get(iri).into_iter().flatten().collect();
+            reified.sort_by(|a, b| cmp_ann_list(&a.0, &b.0).then_with(|| a.1.cmp(&b.1)));
+            let frame_roots: String = reified.iter().map(|(_, block)| block.as_str()).collect();
             let (anon_roots, root_defs) = order_roots(
                 iri,
                 &format!(
-                    "{dr_reif}{ann_after}{}{}{}",
+                    "{dr_reif}{ann_after}{}{}{frame_roots}{}",
                     type_reifs(iri),
                     edge_reif_blocks(iri),
                     chain_roots.get(iri).map_or("", String::as_str)

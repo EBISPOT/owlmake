@@ -1,0 +1,56 @@
+Prefix(:=<http://example.org/set-axioms-of-one#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/set-axioms-of-one>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:V))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:q))
+Declaration(DataProperty(:d))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :p (:p)
+
+
+
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :d (:d)
+
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(Annotation(rdfs:comment "x") :A ObjectSomeValuesFrom(:p :B))
+
+# Class: :B (:B)
+
+SubClassOf(Annotation(rdfs:comment "y") :B ObjectSomeValuesFrom(:q :A))
+
+# Class: :V (:V)
+
+DisjointUnion(:V :B)
+
+
+
+)

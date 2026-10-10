@@ -99,13 +99,13 @@ def merge(*, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Seque
 
     Flags:
     input: (--input / -i) Input ontology paths (repeatable)
-    inputs: (--inputs) Merge ontologies matching a filesystem wildcard pattern. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here. Repeatable
+    inputs: (--inputs) Merge the ontologies whose file names match a wildcard pattern (`*` and `?` in the file name). The first pattern given is the one read. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here
     output: (--output / -o) Output ontology path
     format: (--format) Output format (overrides inference from the output extension). `-f` is taken by `--annotate-derived-from` on this command, so the format has no short; use the long `--format`
-    include_annotations: (--include-annotations / -a) Keep secondary inputs' ontology-level annotations (`<bool>`, default false: by default only the primary ontology's annotations survive)
-    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog` or as sibling files) and merged in, then the import declarations are dropped. When false, imports are kept and their content is not merged
-    annotate_defined_by: (--annotate-defined-by / -d) Annotate each entity with rdfs:isDefinedBy = its source ontology IRI (`<bool>`, default false)
-    annotate_derived_from: (--annotate-derived-from / -f) Annotate merged axioms with prov:wasDerivedFrom = their source ontology IRI (`<bool>`, default false)
+    include_annotations: (--include-annotations / -a) Keep the other inputs' ontology annotations (`<bool>`, default false: by default only the first ontology's annotations survive)
+    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog`, or the catalog beside the input) and merged in, then the import declarations are dropped. When false, the first ontology keeps its imports, every input contributes its own axioms only, and the other inputs' imports go
+    annotate_defined_by: (--annotate-defined-by / -d) Assert `rdfs:isDefinedBy` the ontology IRI of every entity an input or one of its imports names that has none (`<bool>`, default false)
+    annotate_derived_from: (--annotate-derived-from / -f) Annotate every axiom with `prov:wasDerivedFrom` the version IRI (else the ontology IRI) of the ontology it comes from (`<bool>`, default false)
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -146,13 +146,13 @@ def _chain_merge(self, *, input: Optional[Sequence[StrOrPath]] = None, inputs: O
 
     Flags:
     input: (--input / -i) Input ontology paths (repeatable)
-    inputs: (--inputs) Merge ontologies matching a filesystem wildcard pattern. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here. Repeatable
+    inputs: (--inputs) Merge the ontologies whose file names match a wildcard pattern (`*` and `?` in the file name). The first pattern given is the one read. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here
     output: (--output / -o) Output ontology path
     format: (--format) Output format (overrides inference from the output extension). `-f` is taken by `--annotate-derived-from` on this command, so the format has no short; use the long `--format`
-    include_annotations: (--include-annotations / -a) Keep secondary inputs' ontology-level annotations (`<bool>`, default false: by default only the primary ontology's annotations survive)
-    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog` or as sibling files) and merged in, then the import declarations are dropped. When false, imports are kept and their content is not merged
-    annotate_defined_by: (--annotate-defined-by / -d) Annotate each entity with rdfs:isDefinedBy = its source ontology IRI (`<bool>`, default false)
-    annotate_derived_from: (--annotate-derived-from / -f) Annotate merged axioms with prov:wasDerivedFrom = their source ontology IRI (`<bool>`, default false)
+    include_annotations: (--include-annotations / -a) Keep the other inputs' ontology annotations (`<bool>`, default false: by default only the first ontology's annotations survive)
+    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog`, or the catalog beside the input) and merged in, then the import declarations are dropped. When false, the first ontology keeps its imports, every input contributes its own axioms only, and the other inputs' imports go
+    annotate_defined_by: (--annotate-defined-by / -d) Assert `rdfs:isDefinedBy` the ontology IRI of every entity an input or one of its imports names that has none (`<bool>`, default false)
+    annotate_derived_from: (--annotate-derived-from / -f) Annotate every axiom with `prov:wasDerivedFrom` the version IRI (else the ontology IRI) of the ontology it comes from (`<bool>`, default false)
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -861,11 +861,11 @@ def reduce(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    reasoner: (--reasoner / -r) Reasoner to use. Reduction runs on the built-in EL reasoner
+    reasoner: (--reasoner / -r) Reasoner the hierarchy is classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
     preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve redundant axioms that carry annotations (`true` or `yes` in any case; default false)
-    include_subproperties: (--include-subproperties / -s) Take subproperties into account over existential restrictions (`true` or `yes` in any case; default false). A bare `reduce`, as OBA's build runs it, therefore does NOT eliminate existentials entailed only via sub-property or property-chain reasoning. Pass `--include-subproperties true` for the more aggressive reduction
-    named_classes_only: (--named-classes-only / -c) Only reduce named `A ⊑ B` subclass axioms (`true` or `yes` in any case; default false)
-    exact: (--exact) Use exact entailment-based reduction (drop an axiom iff the ontology minus it still entails it), via ⊥-module localization. Slower on huge ontologies than the default structural reduction, and exact rather than heuristic
+    include_subproperties: (--include-subproperties / -s) Classify the sub-property axioms and property chains too (`true` or `yes` in any case; default false), so that an existential restriction entailed through them is redundant
+    named_classes_only: (--named-classes-only / -c) Reduce only the axioms between named classes, over the classification of the whole ontology (`true` or `yes` in any case; default false)
+    exact: (--exact) Reduce by entailment instead: drop an axiom iff the ontology minus it still entails it, as the built-in EL reasoner decides over ⊥-modules. Slower on huge ontologies
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -908,11 +908,11 @@ def _chain_reduce(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    reasoner: (--reasoner / -r) Reasoner to use. Reduction runs on the built-in EL reasoner
+    reasoner: (--reasoner / -r) Reasoner the hierarchy is classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
     preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve redundant axioms that carry annotations (`true` or `yes` in any case; default false)
-    include_subproperties: (--include-subproperties / -s) Take subproperties into account over existential restrictions (`true` or `yes` in any case; default false). A bare `reduce`, as OBA's build runs it, therefore does NOT eliminate existentials entailed only via sub-property or property-chain reasoning. Pass `--include-subproperties true` for the more aggressive reduction
-    named_classes_only: (--named-classes-only / -c) Only reduce named `A ⊑ B` subclass axioms (`true` or `yes` in any case; default false)
-    exact: (--exact) Use exact entailment-based reduction (drop an axiom iff the ontology minus it still entails it), via ⊥-module localization. Slower on huge ontologies than the default structural reduction, and exact rather than heuristic
+    include_subproperties: (--include-subproperties / -s) Classify the sub-property axioms and property chains too (`true` or `yes` in any case; default false), so that an existential restriction entailed through them is redundant
+    named_classes_only: (--named-classes-only / -c) Reduce only the axioms between named classes, over the classification of the whole ontology (`true` or `yes` in any case; default false)
+    exact: (--exact) Reduce by entailment instead: drop an axiom iff the ontology minus it still entails it, as the built-in EL reasoner decides over ⊥-modules. Slower on huge ontologies
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -1053,7 +1053,7 @@ def materialize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
     format: (--format / -f)
     term: (--term / -t) Object properties to materialize over (IRIs/CURIEs, repeatable). If no properties are given, all properties are materialized
     term_file: (--term-file / -T) Load properties to materialize over from a file, one per line. Blank lines and `#` comments are ignored
-    reasoner: (--reasoner / -r) Reasoner the ontology is checked with before anything is materialized: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake`. The restrictions themselves are what the built-in EL reasoner infers, with union-elimination under `owlmake`
+    reasoner: (--reasoner / -r) Reasoner the ontology is checked and classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
     annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Any value. Changes nothing: what materialize asserts is never annotated
     create_new_ontology: (--create-new-ontology / -n) `true` or `yes` in any case: put the materialized axioms in an ontology of their own, which is not written: what is written is the input as it was
     remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) Any value. Changes nothing: materialize removes no axiom
@@ -1102,7 +1102,7 @@ def _chain_materialize(self, *, input: Optional[StrOrPath] = None, output: Optio
     format: (--format / -f)
     term: (--term / -t) Object properties to materialize over (IRIs/CURIEs, repeatable). If no properties are given, all properties are materialized
     term_file: (--term-file / -T) Load properties to materialize over from a file, one per line. Blank lines and `#` comments are ignored
-    reasoner: (--reasoner / -r) Reasoner the ontology is checked with before anything is materialized: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake`. The restrictions themselves are what the built-in EL reasoner infers, with union-elimination under `owlmake`
+    reasoner: (--reasoner / -r) Reasoner the ontology is checked and classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
     annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Any value. Changes nothing: what materialize asserts is never annotated
     create_new_ontology: (--create-new-ontology / -n) `true` or `yes` in any case: put the materialized axioms in an ontology of their own, which is not written: what is written is the input as it was
     remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) Any value. Changes nothing: materialize removes no axiom

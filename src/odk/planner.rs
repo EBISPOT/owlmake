@@ -2641,7 +2641,7 @@ fn rewrite_oort(artefacts: &mut Vec<ArtefactPlan>, id: &str, version: &str, ontb
         // drop redundant subclass axioms. Relaxed/simple then remove equivalence
         // axioms; simple additionally keeps only native ID-space classes.
         let mut steps = vec![
-            Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None }),
+            Step::Op(Op::plain_merge(vec![])),
             Step::Op(Op::Relax { include_subclass_of: false }),
             Step::Op(Op::Reason {
                 reasoner: Some(reasoner),
@@ -2762,7 +2762,7 @@ fn build_edit_only(repo: &OdkRepo, only: &[String]) -> Plan {
         axiom_generators: Vec::new(),
         properties: Vec::new(),
     };
-    let merge = || Op::Merge { inputs: components.clone(), collapse_import_closure: None };
+    let merge = || Op::plain_merge(components.clone());
     let ann = |art: &str| {
         Op::Annotate(AnnotateSpec {
             ontology_iri: Some(format!("{ontbase}/{art}")),

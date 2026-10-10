@@ -393,8 +393,8 @@ fn gather_sources(piped: Option<Model>, args: &Args) -> Result<Model> {
     }
 
     // Merge with single-identity semantics: drop secondary ontology IDs/imports
-    // so the result has one identity. When annotating defined-by, merge_into
-    // stamps each secondary's entities with that secondary's ontology IRI as it
+    // so the result has one identity. When annotating defined-by, each
+    // secondary's entities are stamped with that secondary's ontology IRI as it
     // is merged in.
     let annotate_defined_by = args.annotate_defined_by.unwrap_or(true);
     let opts = crate::cmd::merge::MergeOptions {
@@ -413,6 +413,12 @@ fn gather_sources(piped: Option<Model>, args: &Args) -> Result<Model> {
                         let _ = model.prefixes.add_prefix(k, v);
                     }
                     crate::cmd::merge::merge_into(&mut model, &src, &opts);
+                    if annotate_defined_by {
+                        if let Some(iri) = crate::cmd::merge::ontology_iri(&src) {
+                            let ents = crate::cmd::merge::declared_entities(&src);
+                            crate::cmd::merge::annotate_provenance(&mut model, &iri, &ents, &opts);
+                        }
+                    }
                 }
                 status!("  + {} ({} components total)", p.display(), model.ont.iter().count());
             }
@@ -421,7 +427,7 @@ fn gather_sources(piped: Option<Model>, args: &Args) -> Result<Model> {
     }
 
     // The base (first/piped) ontology's own entities are not stamped by the
-    // merge_into loop above (which only annotates each secondary). Attribute
+    // loop above (which only annotates each secondary). Attribute
     // them now to the merged ontology's identity IRI. annotate_provenance skips
     // any entity that already carries rdfs:isDefinedBy, so the secondaries keep
     // their own source attribution and only the base's entities get the base IRI.

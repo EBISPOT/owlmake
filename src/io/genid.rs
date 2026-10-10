@@ -554,6 +554,9 @@ pub struct Genids {
     /// The first node of each general axiom, by its `axiom_identity`: the
     /// root of its graph.
     pub general_root: HashMap<u64, u64>,
+    /// The node of each `owl:AllDisjointProperties` axiom, by its
+    /// `axiom_identity`.
+    pub all_disjoint_node: HashMap<u64, u64>,
     /// The node of the class expression of each annotated class assertion of
     /// an anonymous class about an anonymous individual, by its
     /// `axiom_identity`.
@@ -2501,9 +2504,11 @@ impl Genids {
                     self.translate_node_annotations(rid, &ac.ann);
                 }
             }
-            // `AllDisjointProperties`: the axiom's node, then its members list.
-            Component::DisjointObjectProperties(ax) if ax.0.len() > 2 => {
+            // `AllDisjointProperties`, for any number of members but two: the
+            // axiom's node, then its members list.
+            Component::DisjointObjectProperties(ax) if ax.0.len() != 2 => {
                 let node = self.fresh();
+                self.all_disjoint_node.insert(axiom_identity(ac), node);
                 let mut members: Vec<&OPE<RcStr>> = ax.0.iter().collect();
                 members.sort_by(|a, b| crate::io::owlfunc::cmp_ope(a, b));
                 for m in members.iter().rev() {
@@ -2512,8 +2517,9 @@ impl Genids {
                 }
                 self.translate_node_annotations(node, &ac.ann);
             }
-            Component::DisjointDataProperties(ax) if ax.0.len() > 2 => {
+            Component::DisjointDataProperties(ax) if ax.0.len() != 2 => {
                 let node = self.fresh();
+                self.all_disjoint_node.insert(axiom_identity(ac), node);
                 for _ in &ax.0 {
                     self.fresh_cell();
                 }
@@ -3077,6 +3083,7 @@ fn owner_iri(c: &Component<RcStr>) -> Option<String> {
         Component::InverseObjectProperties(ax) => nary_ope_owner(&[ax.0.clone(), ax.1.clone()]),
         Component::EquivalentObjectProperties(ax) => nary_ope_owner(&ax.0),
         Component::DisjointObjectProperties(ax) if ax.0.len() <= 2 => nary_ope_owner(&ax.0),
+        Component::DisjointObjectProperties(ax) => all_disjoint_owner(&ax.0),
         Component::SubAnnotationPropertyOf(ax) => Some(ax.sub.0.as_ref().to_string()),
         Component::AnnotationPropertyDomain(ax) => Some(ax.ap.0.as_ref().to_string()),
         Component::AnnotationPropertyRange(ax) => Some(ax.ap.0.as_ref().to_string()),
@@ -3201,6 +3208,26 @@ pub(crate) fn nary_ope_owner(members: &[OPE<RcStr>]) -> Option<String> {
             OPE::InverseObjectProperty(p) => Some(p.0.as_ref().to_string()),
             OPE::ObjectProperty(_) => None,
         }))
+        .min_by(|a, b| iri_order(a, b))
+}
+
+/// The property whose frame states a disjointness its `owl:propertyDisjointWith`
+/// edge cannot. A disjointness of one property is stated in that property's
+/// frame, or in the frame of the property its inverse names. One of three or
+/// more is stated in the frame of the first, in frame order, of the properties
+/// its inverse members name: a property's frame holds every axiom of its
+/// inverse, and none of the disjointness its named members are in. With no
+/// inverse member it is a general axiom.
+pub(crate) fn all_disjoint_owner(members: &[OPE<RcStr>]) -> Option<String> {
+    if let [OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p)] = members {
+        return Some(p.0.as_ref().to_string());
+    }
+    members
+        .iter()
+        .filter_map(|m| match m {
+            OPE::InverseObjectProperty(p) => Some(p.0.as_ref().to_string()),
+            OPE::ObjectProperty(_) => None,
+        })
         .min_by(|a, b| iri_order(a, b))
 }
 

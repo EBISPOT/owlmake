@@ -231,7 +231,7 @@ impl ReasonerKind {
 
     /// Whether classification runs on the built-in EL engine, which can take
     /// ownership of the model and free it before saturating.
-    fn is_builtin_el(self) -> bool {
+    pub(crate) fn is_builtin_el(self) -> bool {
         matches!(self, ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr)
     }
 }
@@ -1277,41 +1277,16 @@ pub(crate) fn told_unsatisfiable_properties(model: &Model) -> Vec<String> {
 /// `--reasoner structural` — the told class hierarchy.
 ///
 /// This is a *told* hierarchy, not a reasoner: it is the transitive closure of
-/// the asserted named `SubClassOf` and `EquivalentClasses` edges, with no
-/// normalisation, no ∃-role reasoning and no satisfiability testing at all: no
+/// the told parents [`told_parents`] reads, with no normalisation, no ∃-role
+/// reasoning and no satisfiability testing at all: no
 /// class is ever reported unsatisfiable — `owl:Nothing` included — and the
 /// ontology is always consistent. It is a legal `--reasoner` value, and a repo
 /// may well be configured with it, so it has to stay this weak rather than
 /// quietly running the full EL engine — which would report inferences a told
 /// hierarchy does not make, and unsatisfiable classes it can never find.
-fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Classification {
+fn classify_structural<'a>(model: &'a Model, need_all: bool, need_equiv: bool) -> Classification {
     status!("reason: using the structural reasoner (told class hierarchy)");
-    // Told edges: asserted named `C ⊑ D`, plus both directions of every asserted
-    // named `C ≡ D`. Nothing else contributes an edge — an anonymous superclass
-    // is simply not a told parent.
-    let mut told: HashMap<&str, Vec<&str>> = HashMap::new();
-    for (sub, sup) in existing_named_subclass_edges(model) {
-        told.entry(sub).or_default().push(sup);
-    }
-    for ac in model.ont.iter() {
-        if let Component::EquivalentClasses(eq) = &ac.component {
-            let named: Vec<&str> = eq
-                .0
-                .iter()
-                .filter_map(|ce| match ce {
-                    CE::Class(c) => Some(c.0.as_ref()),
-                    _ => None,
-                })
-                .collect();
-            for &a in &named {
-                for &b in &named {
-                    if a != b {
-                        told.entry(a).or_default().push(b);
-                    }
-                }
-            }
-        }
-    }
+    let told = told_parents(model);
 
     // Transitive closure, one BFS per class over the told graph. No reduction
     // shortcuts: the told graph is walked exactly as asserted, cycles and all.
@@ -1346,16 +1321,33 @@ fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Class
                 equiv.push((c.to_string(), d.to_string()));
             }
         }
-        // Transitive reduction, matching the EL backend's `direct_subsumptions`:
-        // clique siblings of `c` are related by an equivalence, not an edge, and
-        // `d` is dropped when some other super lies strictly between.
-        let proper: Vec<&str> = sups.iter().copied().filter(|&d| !sub_of(d, c)).collect();
-        for &d in &proper {
-            let redundant = proper
-                .iter()
-                .any(|&mid| mid != d && sub_of(mid, d) && !sub_of(d, mid));
-            if !redundant {
-                direct.push((c.to_string(), d.to_string()));
+    }
+    // A class's direct parents are the told parents of its node, each with every
+    // class of its own node: a told parent is direct whatever else lies between.
+    // The class's own node (the classes a told cycle makes equivalent to it) is
+    // no parent of it.
+    let node_of = |c: &'a str| -> HashSet<&'a str> {
+        let mut node: HashSet<&str> = HashSet::from([c]);
+        if let Some(sups) = closure.get(c) {
+            node.extend(sups.iter().copied().filter(|&d| sub_of(d, c)));
+        }
+        node
+    };
+    for &c in told.keys() {
+        if c == OWL_THING || c == OWL_NOTHING {
+            continue;
+        }
+        let node = node_of(c);
+        for &e in &node {
+            for &p in told.get(e).into_iter().flatten() {
+                if node.contains(p) || p == OWL_THING || p == OWL_NOTHING {
+                    continue;
+                }
+                for m in node_of(p) {
+                    if !node.contains(m) {
+                        direct.push((c.to_string(), m.to_string()));
+                    }
+                }
             }
         }
     }
@@ -1377,6 +1369,91 @@ fn classify_structural(model: &Model, need_all: bool, need_equiv: bool) -> Class
         property_assertions: Vec::new(),
         unsat_properties: Vec::new(),
     }
+}
+
+/// The told parents of each named class: the named superclass of a
+/// `SubClassOf` it is the subclass of, or the named conjuncts of an
+/// intersection there; and in an `EquivalentClasses` it is a member of, every
+/// other named member and the named conjuncts of every other intersection.
+/// Nothing else is told: a restriction, a union or a complement names no
+/// parent.
+pub(crate) fn told_parents(model: &Model) -> HashMap<&str, Vec<&str>> {
+    // A named class, or the named conjuncts of an intersection, nested
+    // intersections included.
+    fn named_conjuncts<'a>(ce: &'a CE<horned_owl::model::RcStr>, out: &mut Vec<&'a str>) {
+        match ce {
+            CE::Class(c) => out.push(c.0.as_ref()),
+            CE::ObjectIntersectionOf(ops) => {
+                for op in ops {
+                    if let CE::Class(c) = op {
+                        out.push(c.0.as_ref());
+                    } else if matches!(op, CE::ObjectIntersectionOf(_)) {
+                        named_conjuncts(op, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut told: HashMap<&str, Vec<&str>> = HashMap::new();
+    for ac in model.ont.iter() {
+        match &ac.component {
+            Component::SubClassOf(sc) => {
+                if let CE::Class(sub) = &sc.sub {
+                    let mut parents = Vec::new();
+                    named_conjuncts(&sc.sup, &mut parents);
+                    told.entry(sub.0.as_ref()).or_default().extend(parents);
+                }
+            }
+            Component::EquivalentClasses(eq) => {
+                for member in &eq.0 {
+                    let CE::Class(child) = member else { continue };
+                    let mut parents = Vec::new();
+                    for other in eq.0.iter().filter(|&o| o != member) {
+                        named_conjuncts(other, &mut parents);
+                    }
+                    told.entry(child.0.as_ref()).or_default().extend(parents);
+                }
+            }
+            _ => {}
+        }
+    }
+    told
+}
+
+/// Each class's direct superclasses as `kind` gives them: every class of each
+/// node directly above the class's own. Under `structural` those are the told
+/// parents; under any other reasoner the superclasses with none of the class's
+/// other superclasses strictly below them. `whelk` takes one class of each
+/// such node, the first its walk over the class's subsumers reaches.
+/// `owl:Thing` and `owl:Nothing` are no superclass.
+pub(crate) fn direct_superclass_nodes(model: &Model, kind: ReasonerKind) -> Vec<(String, String)> {
+    match kind {
+        ReasonerKind::Structural => return classify_structural(model, false, false).direct,
+        ReasonerKind::Whelk => return crate::reason::WhelkClassification::classify(model).direct_subsumptions(),
+        _ => {}
+    }
+    let all = classify(model, kind, true, false, false, false, &HashSet::new(), PropertyCheck::None).all;
+    let mut supers: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for (a, b) in &all {
+        if a != b && ![a, b].iter().any(|c| *c == OWL_THING || *c == OWL_NOTHING) {
+            supers.entry(a.as_str()).or_default().insert(b.as_str());
+        }
+    }
+    let sub_of = |a: &str, b: &str| supers.get(a).is_some_and(|s| s.contains(b));
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (&c, sups) in &supers {
+        // The class's own node is no superclass of it.
+        let strict: Vec<&str> = sups.iter().copied().filter(|&d| !sub_of(d, c)).collect();
+        for &d in &strict {
+            let between = strict.iter().any(|&e| e != d && sub_of(e, d) && !sub_of(d, e));
+            if !between {
+                out.push((c.to_string(), d.to_string()));
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// What a classification says about an ontology's coherence, for [`validate`].
@@ -1531,20 +1608,6 @@ fn existing_subclass_pairs(model: &Model) -> HashSet<(String, String)> {
         if let Component::SubClassOf(sc) = &ac.component {
             if let (CE::Class(a), CE::Class(b)) = (&sc.sub, &sc.sup) {
                 out.insert((a.0.as_ref().to_string(), b.0.as_ref().to_string()));
-            }
-        }
-    }
-    out
-}
-
-/// The asserted named `SubClassOf` edges, borrowed from the model (no
-/// allocation) — the told graph the structural reasoner closes over.
-fn existing_named_subclass_edges(model: &Model) -> Vec<(&str, &str)> {
-    let mut out = Vec::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (CE::Class(a), CE::Class(b)) = (&sc.sub, &sc.sup) {
-                out.push((a.0.as_ref(), b.0.as_ref()));
             }
         }
     }

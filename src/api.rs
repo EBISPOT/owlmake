@@ -103,10 +103,8 @@ pub use crate::sparql::QueryTable;
 // Operation option structs + the operations whose signature is already the
 // canonical `Model`-shape, re-exported under one namespace.
 pub use crate::cmd::merge::MergeOptions;
-pub use crate::cmd::reason::ReasonOptions;
-pub use crate::cmd::reduce::{
-    reduce, reduce_exact, reduce_with_opts, reduce_with_options, ReduceOptions,
-};
+pub use crate::cmd::reason::{ReasonOptions, ReasonerKind};
+pub use crate::cmd::reduce::{reduce, reduce_exact, reduce_with_options, ReduceOptions};
 pub use crate::cmd::relax::{relax, relax_with, RelaxOptions};
 
 /// Parse an ontology from in-memory bytes in the given serialization format.

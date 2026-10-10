@@ -705,7 +705,7 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
         match t.as_str() {
             "--merge-imports-closure" | "--merge-import-closure" => {
                 // Resolve and inline the import closure (then drop the imports).
-                steps.push(Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None }));
+                steps.push(Step::Op(Op::plain_merge(vec![])));
             }
             "--merge-axiom-annotations" => {
                 steps.push(Step::Op(Op::Repair {
@@ -1459,18 +1459,18 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> (Step, Vec<bool
         // with no inputs: an inert step that wrote a 658-byte empty ontology, and
         // MONDO's OMIM-gene QC check then grepped `mondo-edit.obo` for the one
         // word its empty report left behind.
+        //
+        // `--inputs` names the files a pattern matches when the command runs, and
+        // a plan names every file it reads, so it stays an option no step reads.
         "merge" => Step::Op(Op::Merge {
             inputs: all2("--input", "-i")
                 .into_iter()
                 .chain(all2("--input-iri", "-I"))
                 .collect(),
-            collapse_import_closure: {
-                let collapse = switch("--collapse-import-closure", true, true);
-                switch("--include-annotations", false, false);
-                switch("--annotate-derived-from", false, false);
-                switch("--annotate-defined-by", false, false);
-                collapse
-            },
+            collapse_import_closure: switch("--collapse-import-closure", true, true),
+            include_annotations: switch("--include-annotations", true, false) == Some(true),
+            annotate_derived_from: switch("--annotate-derived-from", true, false) == Some(true),
+            annotate_defined_by: switch("--annotate-defined-by", true, false) == Some(true),
         }),
         // As with `merge`, `-I/--input-iri` names an input: CL subtracts the taxon
         // disjointness axioms with `unmerge -I <url>`, and reading only `-i` left
@@ -2652,6 +2652,25 @@ mod tests {
             }))),
             "{steps:?}"
         );
+        let steps = parse_command(
+            "robot merge -i a.owl -I http://example.org/b.owl -d true -a true --annotate-derived-from false -o y.owl",
+            "robot",
+        );
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Merge {
+                inputs,
+                collapse_import_closure: None,
+                include_annotations: true,
+                annotate_defined_by: true,
+                annotate_derived_from: false,
+            }) if inputs == &["a.owl", "http://example.org/b.owl"])),
+            "{steps:?}"
+        );
+        // The files a pattern matches are known when the command runs, and the
+        // plan must name them, so the pattern is a gap.
+        let steps = parse_command("robot merge -i a.owl --inputs 'parts/*.owl' -o y.owl", "robot");
+        let gaps: Vec<String> = steps.iter().flat_map(Step::unrunnable_gaps).collect();
+        assert_eq!(gaps, ["unsupported option `merge --inputs parts/*.owl`"], "{steps:?}");
     }
 
     /// An option a command is given that its step does not read is a gap that
