@@ -1,0 +1,8 @@
+format-version: 1.2
+idspace: leaf http://example.org/leaf# 
+ontology: http://example.org/imports-closure/leaf
+
+[Term]
+id: L
+is_a: L2
+

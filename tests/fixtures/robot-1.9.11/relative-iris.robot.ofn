@@ -1,0 +1,34 @@
+Prefix(:=<http://example.org/relative-iris#>)
+Prefix(ex:=<http://example.org/relative-iris#rel/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/relative-iris>
+
+Declaration(Class(<:c>))
+Declaration(Class(<http://example.org/f<g>))
+Declaration(Class(<http://example.org/h i
+j>))
+Declaration(Class(<http://example.org/relative-iris#a b:c>))
+Declaration(Class(<http://example.org/relative-iris#a.owl#B>))
+Declaration(Class(<http://example.org/relative-iris#a/b:c>))
+Declaration(Class(ex:A))
+Declaration(Class(<http://example.org/relative-iris#{fixtures}/a.owl#D>))
+Declaration(Class(<http://example.org/{e}>))
+Declaration(Class(<x:y>))
+Declaration(AnnotationProperty(rdfs:seeAlso))
+
+############################
+#   Classes
+############################
+
+# Class: ex:A (ex:A)
+
+AnnotationAssertion(rdfs:seeAlso ex:A <http://example.org/relative-iris#b.owl#E>)
+
+
+)

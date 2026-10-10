@@ -1,0 +1,38 @@
+Prefix(:=<{fixtures}/%7Bfixtures%7D/%7Bfixtures%7D/ttl-document-base.ttl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<{fixtures}/%7Bfixtures%7D/%7Bfixtures%7D/ttl-document-base.ttl>
+
+Declaration(Class(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#A>))
+Declaration(Class(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#B>))
+Declaration(ObjectProperty(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#p>))
+Declaration(NamedIndividual(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#i>))
+Declaration(NamedIndividual(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#j>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#A> (<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#A>)
+
+AnnotationAssertion(rdfs:seeAlso <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#A> <{fixtures}/%7Bfixtures%7D/%7Bfixtures%7D/other.owl#C>)
+SubClassOf(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#A> <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#B>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#i> (<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#i>)
+
+ClassAssertion(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#A> <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#i>)
+ObjectPropertyAssertion(<{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#p> <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#i> <{fixtures}/%7Bfixtures%7D/ttl-document-base.ttl#j>)
+
+
+)

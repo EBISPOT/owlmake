@@ -68,9 +68,9 @@ pub struct Args {
     #[arg(long)]
     pub format: Option<String>,
 
-    /// If true, log template errors and continue instead of aborting.
-    /// `<bool>`.
-    #[arg(short = 'f', long, num_args = 1, default_missing_value = "true")]
+    /// Log template errors and continue instead of aborting (`true` or `yes`
+    /// in any case).
+    #[arg(short = 'f', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::parse_option_true)]
     pub force: Option<bool>,
 
     /// Write template errors to this file (TSV or CSV).
@@ -88,27 +88,28 @@ pub struct Args {
     #[arg(short = 'V', long, value_name = "IRI")]
     pub version_iri: Option<String>,
 
-    /// Merge the generated axioms into the input ontology before output.
-    /// owlmake already merges into the input when one is present; this forces
-    /// that behavior on. `<bool>`.
-    #[arg(short = 'm', long, num_args = 1, default_missing_value = "true")]
-    pub merge_before: Option<bool>,
-    /// Merge the generated axioms into the input ontology after output. Treated
-    /// like `--merge-before` here. `<bool>`.
-    #[arg(short = 'M', long, num_args = 1, default_missing_value = "true")]
-    pub merge_after: Option<bool>,
+    /// Add the generated axioms to the input ontology, and write and go on
+    /// with the input so merged.
+    #[arg(short = 'm', long)]
+    pub merge_before: bool,
+    /// Write the generated axioms alone, then add them to the input ontology
+    /// and go on with the input so merged.
+    #[arg(short = 'M', long)]
+    pub merge_after: bool,
 
-    /// MIREOT the ancestors of generated terms from the input into the
-    /// results. `<bool>`.
-    #[arg(short = 'a', long, num_args = 1, default_missing_value = "true")]
-    pub ancestors: Option<bool>,
-    /// If true, include ontology annotations from the merge input.
-    /// `<bool>`.
-    #[arg(short = 'A', long, num_args = 1, default_missing_value = "true")]
+    /// Add the ancestors the input gives the generated axioms' terms, each
+    /// with its labels: every term the axioms name that the input names too,
+    /// climbed as `extract --method MIREOT` climbs a lower term.
+    #[arg(short = 'a', long)]
+    pub ancestors: bool,
+    /// If true, a merge adds the ontology annotations of the generated
+    /// axioms' ontology, which has none. `<bool>`.
+    #[arg(short = 'A', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub include_annotations: Option<bool>,
-    /// If true, collapse the import closure when merging. Accepted for
-    /// compatibility. `<bool>`.
-    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true")]
+    /// If true, a merge takes the input ontology's imports out of it: the
+    /// merged ontology imports nothing, and the imports' axioms stay out.
+    /// `<bool>`.
+    #[arg(short = 'c', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub collapse_import_closure: Option<bool>,
 
     #[command(flatten)]
@@ -135,29 +136,43 @@ pub fn step(
         bail!("template requires at least one --template file");
     }
     let force = args.force.unwrap_or(false);
+    if args.merge_before && args.merge_after {
+        bail!("MERGE ERROR merge-before and merge-after cannot be combined");
+    }
 
     // `template` emits ONLY the generated axioms: without
     // `--merge-before`/`--merge-after` the result is the fresh ontology built from
     // the rows. The input is there to resolve labels, not to be carried — a
     // component such as EFO's `components/gwas_import.owl` is the template's own
     // axioms, not the whole of `efo-edit.owl` plus the template.
-    //
-    // `--ancestors` is approximated by merging the whole input rather than
-    // MIREOTing the ancestors of the generated terms; it is a superset, and no
-    // repo owlmake builds passes the flag. Warn only when there is nothing
-    let merge = args.merge_before.unwrap_or(false) || args.merge_after.unwrap_or(false);
-    let needs_input = merge || args.ancestors.unwrap_or(false);
-    if needs_input && piped.is_none() && args.input.is_none() {
-        status!("template: --merge-before/--merge-after/--ancestors given but no input ontology to merge with");
-    }
+    let merge = args.merge_before || args.merge_after;
+    let needs_input = merge || args.ancestors;
 
-    let mut model = match piped {
-        Some(m) => m,
+    // An input is read with its imports closure. One that cannot be read —
+    // missing, unparseable, or importing an ontology that resolves nowhere — is
+    // no input at all, unless the result is merged with it or draws its
+    // ancestors from it.
+    let read_input = |p: &std::path::Path| -> anyhow::Result<Model> {
+        let mut m = io::load(p)?;
+        crate::cmd::read_imports_closure(&mut m, Some(p), &args.common)?;
+        Ok(m)
+    };
+    let input = match piped {
+        Some(m) => Some(m),
         None => match args.input.as_deref() {
-            Some(p) => io::load(p)?,
-            None => Model::from_parts(SetOntology::new(), default_prefixes()),
+            Some(p) => match read_input(p) {
+                Ok(m) => Some(m),
+                Err(e) if !needs_input => {
+                    status!("template: {} not read ({e:#}); the template is built without it", p.display());
+                    None
+                }
+                Err(e) => return Err(e),
+            },
+            None => None,
         },
     };
+    let has_input = input.is_some();
+    let mut model = input.unwrap_or_else(|| Model::from_parts(SetOntology::new(), default_prefixes()));
     args.common.apply(&mut model)?;
 
     let b = Build::new();
@@ -218,8 +233,9 @@ pub fn step(
     }
 
     // The generated axioms go into their own ontology, which carries the input's
-    // prefixes so a cell's CURIE expands the same way it would have.
+    // prefixes and reads its cells with the command line's context.
     let mut out = Model::from_parts(SetOntology::new(), crate::model::clone_prefixes(&model.prefixes));
+    out.context = model.context.clone();
     for p in &parsed_tables {
         for (row, data) in &p.rows {
             apply_row(
@@ -252,37 +268,79 @@ pub fn step(
         }
     }
 
-    // Either merge into the input and return that, or return the generated
-    // ontology alone (`--merge-before` and `--merge-after` differ only in whether
-    // the un-merged output is the one written to `--output`, which owlmake does
-    // not distinguish because it writes once, at the end).
-    let mut model = if merge || args.ancestors.unwrap_or(false) {
-        for ac in out.ont.iter() {
-            model.ont.insert(ac.clone());
-        }
-        model
-    } else {
-        // The prefixes the command line ADDED are declared by whatever is
-        // written, and what is written is this ontology, not the input.
-        out.added_prefixes = std::mem::take(&mut model.added_prefixes);
-        out
-    };
+    // `template` builds a NEW ontology from the rows, and a new ontology has a
+    // fresh document format — so the prefix block it writes is the bare default
+    // set, not the input's. Same rule as `filter` and `query --update`. OBA's
+    // `components/synonyms.owl` and `obsoletes.owl` come out of `template`, and
+    // carrying the input's prefixes through would change every downstream artefact.
+    out.format_prefixes_cleared = true;
+    // The prefixes the command line ADDED are declared by every document the
+    // command writes: the generated axioms' own, and the input they join.
+    out.added_prefixes = model.added_prefixes.clone();
 
-    // --include-annotations (default false): keep the merged input's ontology
-    // annotations only when asked; otherwise strip them (the template itself emits
-    // none, so these can only have come from the input).
-    if !args.include_annotations.unwrap_or(false) {
-        let anns: Vec<_> = model
-            .ont
-            .iter()
-            .filter(|ac| matches!(ac.component, Component::OntologyAnnotation(_)))
-            .cloned()
-            .collect();
-        for ac in anns {
-            model.ont.remove(&ac);
+    // `--ancestors`: the terms of the generated axioms the input names too,
+    // each with the ancestors the input gives it and their labels. With no
+    // input there are none.
+    if args.ancestors && has_input {
+        let closure = crate::mireot::closure_of(&model)?;
+        let source = crate::mireot::Source::new(closure.as_ref().unwrap_or(&model), &model);
+        let mut terms: HashSet<crate::mireot::Term> = HashSet::new();
+        for ac in out.ont.iter() {
+            for (kind, iri) in crate::sig::typed_signature(&ac.component) {
+                terms.insert(crate::mireot::Term { kind, iri });
+            }
+            for a in ac.ann.iter() {
+                terms.insert(crate::mireot::Term { kind: crate::sig::kind::ANNOTATION_PROPERTY, iri: a.ap.0.to_string() });
+            }
+        }
+        let lower: Vec<crate::mireot::Term> = terms.into_iter().filter(|t| source.has(t)).collect();
+        let spec = crate::mireot::Spec {
+            lower: &lower,
+            upper: &[],
+            branch: &[],
+            only_annotations: Some(crate::mireot::RDFS_LABEL),
+            intermediates: crate::extract::Intermediates::All,
+        };
+        for ac in crate::mireot::module(&source, &spec)?.iter() {
+            out.ont.insert(ac.clone());
         }
     }
-    // --collapse-import-closure: drop any owl:imports from the (merged) result.
+
+    if !merge {
+        // The generated axioms' ontology takes the IRIs `--ontology-iri` and
+        // `--version-iri` give it, through annotate's core.
+        if args.ontology_iri.is_some() || args.version_iri.is_some() {
+            out = crate::cmd::annotate::annotate_with(
+                out,
+                &crate::cmd::annotate::AnnotateOptions {
+                    ontology_iri: args.ontology_iri.clone(),
+                    version_iri: args.version_iri.clone(),
+                    ..Default::default()
+                },
+            )?;
+        }
+        crate::cmd::maybe_save(&mut out, args.output.as_deref(), args.format.as_deref())?;
+        return Ok(Some(out));
+    }
+
+    // A merge adds the generated axioms to the input, which keeps its own IRIs,
+    // annotations and prefixes: `--ontology-iri` and `--version-iri` name nothing
+    // under it. `--merge-after` writes the generated axioms alone first, and
+    // only then finds whether there is an input to add them to.
+    if args.merge_after {
+        crate::cmd::maybe_save(&mut out, args.output.as_deref(), args.format.as_deref())?;
+    }
+    if !has_input {
+        let switch = if args.merge_before { "--merge-before" } else { "--merge-after" };
+        bail!("template: {switch} has no input ontology to merge into");
+    }
+    for ac in out.ont.iter() {
+        model.ont.insert(ac.clone());
+    }
+    // The input counts as changed whatever the merge added to it.
+    model.mark_root_changed();
+    // `--collapse-import-closure true` takes the input's imports out of it. The
+    // imports' axioms stay out, and the ontology is written among no closure.
     if args.collapse_import_closure.unwrap_or(false) {
         let imports: Vec<_> = model
             .ont
@@ -294,26 +352,9 @@ pub fn step(
             model.ont.remove(&ac);
         }
     }
-
-    // Set the output ontology / version IRI, reusing annotate's core.
-    if args.ontology_iri.is_some() || args.version_iri.is_some() {
-        model = crate::cmd::annotate::annotate_with(
-            model,
-            &crate::cmd::annotate::AnnotateOptions {
-                ontology_iri: args.ontology_iri.clone(),
-                version_iri: args.version_iri.clone(),
-                ..Default::default()
-            },
-        )?;
+    if args.merge_before {
+        crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     }
-
-    // `template` builds a NEW ontology from the rows, and a new ontology has a
-    // fresh document format — so the prefix block it writes is the bare default
-    // set, not the input's. Same rule as `filter` and `query --update`. OBA's
-    // `components/synonyms.owl` and `obsoletes.owl` come out of `template`, and
-    // carrying the input's prefixes through would change every downstream artefact.
-    model.format_prefixes_cleared = true;
-    crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(model))
 }
 
@@ -452,7 +493,7 @@ fn index_row_label(
             _ => continue,
         };
         match tmpl.as_str() {
-            "ID" => id = Some(expand_t(model, cell)),
+            "ID" => id = expand_t(model, cell),
             "LABEL" => label = Some(cell.clone()),
             _ => {}
         }
@@ -491,7 +532,7 @@ fn index_row_data_property(
     };
     if let (Some(id), Some(ty)) = (cell("ID"), cell("TYPE")) {
         if SubjectType::from_cell(ty) == Some(SubjectType::DataProperty) {
-            data_properties.insert(expand_t(model, id));
+            data_properties.extend(expand_t(model, id));
         }
     }
 }
@@ -561,7 +602,18 @@ fn apply_row(
         if tmpl == "ID" {
             if let Some(cell) = data.get(i) {
                 if !cell.is_empty() {
-                    id = Some(expand_t(model, cell));
+                    match expand_t(model, cell) {
+                        Some(iri) => id = Some(iri),
+                        None => {
+                            errors.push(TemplateError {
+                                table: table.to_string(),
+                                row,
+                                column: "ID".to_string(),
+                                message: unknown(cell),
+                            });
+                            return;
+                        }
+                    }
                 }
             }
         }
@@ -620,7 +672,7 @@ fn apply_row(
     //    following `>` (axiom-annotation) column can attach to it. The resolver
     //    owns a snapshot of the prefix map (not a borrow of `model`) so the loop
     //    can still mutate `model.ont` while resolving entity references.
-    let resolver = make_resolver(robot_context_prefixes(model), labels);
+    let resolver = make_resolver(model.context.clone(), labels);
     for ty in &individual_types {
         match parse_ce(b, "", ty, &resolver) {
             Ok(ce) => {
@@ -738,9 +790,9 @@ fn apply_row(
 
 /// Build the entity resolver closure passed to the Manchester parser: try the
 /// label index first, then CURIE/IRI expansion (so cells may mix both). Owns a
-/// cloned prefix map so it does not borrow the (mutated) model.
+/// copy of the context so it does not borrow the (mutated) model.
 fn make_resolver<'a>(
-    prefixes: horned_owl::curie::PrefixMapping,
+    context: crate::context::Context,
     labels: &'a HashMap<String, String>,
 ) -> impl Fn(&str) -> Option<String> + 'a {
     move |tok: &str| {
@@ -751,73 +803,16 @@ fn make_resolver<'a>(
         if let Some(iri) = labels.get(t) {
             return Some(iri.clone());
         }
-        // Full IRI in <...> or bare http(s) — pass through.
-        if t.starts_with("http://") || t.starts_with("https://") || t.starts_with("urn:") {
-            return Some(t.to_string());
-        }
-        // CURIE: resolve against the prefix map, falling back to the OBO PURL
-        // convention for prefixed ids whose prefix is not declared.
-        if t.contains(':') {
-            return Some(expand_curie(&prefixes, t));
-        }
-        None
+        context.iri(t)
     }
 }
 
-/// Expand a template cell's CURIE against the prefix map template cells resolve
-/// through — the model's prefixes with `dc:` rebound, per
-/// [`robot_context_prefixes`] — falling back to the model-aware resolution
-/// (labels, bare OBO ids) for anything that is not a plain `prefix:local`.
-fn expand_t(model: &Model, s: &str) -> String {
-    if let Some((prefix, rest)) = s.split_once(':') {
-        if !prefix.is_empty() && !rest.starts_with("//") {
-            if let Ok(v) = robot_context_prefixes(model).expand_curie_string(s) {
-                return v;
-            }
-        }
-    }
-    let expanded = select::expand(model, s);
-    // A template cell is one of the DOCUMENT's own ids, not a command-line term:
-    // it follows the `PREFIX:LOCAL` → `obo/PREFIX_LOCAL` convention whatever any
-    // context binds, exactly as [`expand_curie`] just below does. `select::expand`
-    // dropped that fallback when the command-line term rule was corrected — right
-    // for a `--term`, wrong here, and it left an `EX:partof` ID column declaring
-    // `<EX:partof>`.
-    if expanded == s && s.contains(':') && !s.starts_with("http") {
-        return crate::io::obo::expand_id(s);
-    }
-    expanded
-}
-
-/// The model's prefix map with `dc:` rebound for template-cell expansion.
-///
-/// In a template cell `dc:` binds to `http://purl.org/dc/TERMS/` — NOT
-/// dc/elements/1.1/, which is what a document declares and what the writers'
-/// prefix tables hold. OBA's `templates/synonyms.tsv` declares its contributor
-/// column `AI dc:contributor`, and the two expansions are different properties,
-/// so the wrong one lands on 31 axioms of every downstream artefact.
-fn robot_context_prefixes(model: &Model) -> horned_owl::curie::PrefixMapping {
-    let mut p = crate::model::clone_prefixes(&model.prefixes);
-    let _ = p.add_prefix("dc", "http://purl.org/dc/terms/");
-    p
-}
-
-/// CURIE/IRI expansion mirroring [`select::expand`] but against a standalone
-/// prefix map rather than a whole `Model`.
-fn expand_curie(prefixes: &horned_owl::curie::PrefixMapping, s: &str) -> String {
-    let s = s.trim();
-    let s = s.strip_prefix('<').and_then(|x| x.strip_suffix('>')).unwrap_or(s);
-    if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
-        return s.to_string();
-    }
-    if let Ok(expanded) = prefixes.expand_curie_string(s) {
-        return expanded;
-    }
-    if s.contains(':') {
-        crate::io::obo::expand_id(s)
-    } else {
-        s.to_string()
-    }
+/// The IRI a cell names, read with the command line's context
+/// ([`crate::context`]) — where `dc:` is dc/TERMS/, so OBA's `AI dc:contributor`
+/// column names `http://purl.org/dc/terms/contributor` — never with the
+/// document's own prefixes; `None` where it names none.
+fn expand_t(model: &Model, s: &str) -> Option<String> {
+    select::iri(model, s)
 }
 
 /// Declare the subject as the right entity kind.
@@ -1159,6 +1154,12 @@ fn characteristic(value: &str, ope: OPE<RcStr>) -> Option<Component<RcStr>> {
     })
 }
 
+/// The error a cell or header naming nothing the context can read is refused
+/// with.
+fn unknown(text: &str) -> String {
+    format!("UNKNOWN ENTITY ERROR could not interpret '{text}'")
+}
+
 /// Build an annotation from an `A`/`AT`/`AL`/`AI` header and cell value.
 ///
 /// Header forms:
@@ -1180,7 +1181,7 @@ fn build_annotation(
         .ok_or_else(|| format!("annotation header '{header}' is missing a property"))?;
     match key {
         "A" => {
-            let prop = expand_t(model, rest);
+            let prop = expand_t(model, rest).ok_or_else(|| unknown(rest))?;
             declare_annotation_property(b, model, &prop);
             Ok(lit_ann(b, &prop, value))
         }
@@ -1189,8 +1190,9 @@ fn build_annotation(
             let (prop, dt) = rest
                 .split_once("^^")
                 .ok_or_else(|| format!("AT header '{header}' must be 'AT prop^^datatype'"))?;
-            let prop = expand_t(model, prop.trim());
-            let dt_iri = expand_t(model, dt.trim().trim_start_matches('<').trim_end_matches('>'));
+            let prop = expand_t(model, prop.trim()).ok_or_else(|| unknown(prop.trim()))?;
+            let dt = dt.trim().trim_start_matches('<').trim_end_matches('>');
+            let dt_iri = expand_t(model, dt).ok_or_else(|| unknown(dt))?;
             declare_annotation_property(b, model, &prop);
             Ok(Annotation { ann: Default::default(),
                 ap: b.annotation_property(prop.as_str()),
@@ -1205,7 +1207,7 @@ fn build_annotation(
             let (prop, lang) = rest
                 .split_once('@')
                 .ok_or_else(|| format!("AL header '{header}' must be 'AL prop@lang'"))?;
-            let prop = expand_t(model, prop.trim());
+            let prop = expand_t(model, prop.trim()).ok_or_else(|| unknown(prop.trim()))?;
             declare_annotation_property(b, model, &prop);
             Ok(Annotation { ann: Default::default(),
                 ap: b.annotation_property(prop.as_str()),
@@ -1216,7 +1218,7 @@ fn build_annotation(
             })
         }
         "AI" => {
-            let prop = expand_t(model, rest);
+            let prop = expand_t(model, rest).ok_or_else(|| unknown(rest))?;
             let target = resolver(value.trim())
                 .unwrap_or_else(|| select::expand(model, value));
             declare_annotation_property(b, model, &prop);

@@ -1,0 +1,5 @@
+Prefix(oboInOwl:=<http://www.geneontology.org/formats/oboInOwl#>)
+Ontology(<http://purl.obolibrary.org/obo/q.owl>
+Annotation(oboInOwl:date "2021-03-05")
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_1>))
+)

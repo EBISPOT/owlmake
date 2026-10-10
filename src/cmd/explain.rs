@@ -1,12 +1,13 @@
 //! `explain` — find a justification: a minimal set of axioms that entails a
-//! subsumption.
+//! subsumption, or that is inconsistent.
 //!
 //! Strategy: extract the ⊥-module for the query signature — it contains every
 //! justification for the entailment — then grow a set outward from the terms of
 //! the entailment until it entails, and black-box minimize that: drop axioms
 //! whose removal preserves the entailment until none can be removed. When
 //! `--max > 1`, multiple distinct justifications are enumerated with Reiter's
-//! hitting-set tree.
+//! hitting-set tree. An inconsistency has no terms to grow from: its search
+//! holds every logical axiom of the ontology.
 //!
 //! Every step — which classes are unsatisfiable, whether the entailment holds,
 //! and each of the entailment tests the minimization asks — is put to the
@@ -25,15 +26,16 @@ use crate::cmd::reason::ReasonerKind;
 use crate::cmd::select;
 use crate::extract::{self, Method};
 use crate::model::{clone_prefixes, Model};
-use crate::reason::{DlReasoner, Reasoner, WhelkClassification};
+use crate::reason::{Reasoner, WhelkClassification};
 
 #[derive(ClapArgs)]
 pub struct Args {
     #[arg(short, long)]
     pub input: Option<PathBuf>,
-    /// The axiom to explain, in Manchester syntax. Only `<SUBCLASS>
-    /// SubClassOf <SUPERCLASS>` axioms are supported; this is the ROBOT-style
-    /// alternative to owlmake's --sub/--sup pair.
+    /// The axiom to explain, in Manchester syntax: `<SUBCLASS> SubClassOf
+    /// <SUPERCLASS>` between two named classes, each named by a label, the
+    /// short form of its IRI, a CURIE or an IRI. An axiom the ontology does
+    /// not entail has no explanation.
     #[arg(short = 'a', long)]
     pub axiom: Option<String>,
     /// The subclass of the entailment to explain (IRI/CURIE). owlmake extension;
@@ -44,14 +46,17 @@ pub struct Args {
     /// extension; alternative to --axiom.
     #[arg(long)]
     pub sup: Option<String>,
-    /// What to explain: `entailment` (default), or
-    /// `inconsistency`/`unsatisfiability` (explain why class(es) are
-    /// unsatisfiable, i.e. C ⊑ owl:Nothing).
+    /// What to explain: `entailment` (default), `unsatisfiability` (why
+    /// class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing), or `inconsistency`
+    /// (why the ontology is inconsistent, i.e. owl:Thing ⊑ owl:Nothing).
     #[arg(short = 'M', long, default_value = "entailment")]
     pub mode: String,
-    /// For unsatisfiability/inconsistency mode, which class(es) to
-    /// explain: `all`, `root`, or a specific CLASS IRI/CURIE. Default
-    /// `all`.
+    /// For unsatisfiability mode, which unsatisfiable classes to explain: `all`;
+    /// `root`, those no other unsatisfiable class's told definition explains;
+    /// `most_general`, those with no unsatisfiable told superclass;
+    /// `random:N`, the first N by IRI (all of them when N is not positive); a
+    /// class's IRI or CURIE; or `list`, which explains none and writes their
+    /// CURIEs to --explanation, one per line. Without it nothing is explained.
     #[arg(short = 'u', long)]
     pub unsatisfiable: Option<String>,
     /// Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake`
@@ -90,6 +95,11 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+/// Why a whelk classification inside the search cannot fail: whelk refuses
+/// part of the ontology — an axiom it has no reading of, or a rule that fires
+/// with an unbound head variable — only where it refuses all of it, and
+/// [`run`] classifies all of it before the search starts.
+const WHOLE_FIRST: &str = "what whelk refuses in part of the ontology it refuses in all of it, which explain classified first";
 
 pub fn step(
     piped: Option<crate::model::Model>,
@@ -109,81 +119,123 @@ pub fn step(
     let kind = ReasonerKind::parse(&args.reasoner)?;
     crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
     let backend = Backend::of(kind);
+    if backend == Backend::Whelk {
+        WhelkClassification::classify(&model)?;
+    }
 
     let max = args.max.max(1);
 
     // Determine the set of (sub, sup) entailments to explain, depending on mode.
+    // `--unsatisfiable list` explains none and lists the unsatisfiable classes.
+    let mut listed: Option<Vec<String>> = None;
     let mode = args.mode.to_ascii_lowercase();
+    let inconsistency = mode == "inconsistency";
     let targets: Vec<(String, String)> = match mode.as_str() {
-        "unsatisfiability" | "inconsistency" => {
+        // Explain why the ontology is inconsistent, i.e. owl:Thing ⊑ owl:Nothing,
+        // when the reasoner finds it so.
+        "inconsistency" => {
+            let (consistent, _) = crate::cmd::reason::coherence(&model, kind)?;
+            if consistent {
+                status!("explain: Ontology consistent, nothing to be done.");
+                Vec::new()
+            } else {
+                vec![(OWL_THING.to_string(), OWL_NOTHING.to_string())]
+            }
+        }
+        "unsatisfiability" => {
             // Explain why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing.
-            let unsat = backend.unsatisfiable(&model, &args.reasoner);
-            let selector = args.unsatisfiable.as_deref().unwrap_or("all");
-            let chosen: Vec<String> = match selector.to_ascii_lowercase().as_str() {
-                "all" | "root" | "most_general" => {
-                    // owlmake does not distinguish root vs derived unsatisfiable
-                    // classes; treat `root` like `all`.
-                    //
-                    // An EMPTY set is not an error. `ExplainOperation
-                    // .explainUnsatisfiableClasses` just returns no explanations,
-                    // and `ExplainCommand` writes the (empty) markdown and exits 0
-                    // — which is the whole point of MONDO's `explain_unsat.owl`
-                    // QC step: it passes when the ontology is coherent.
-                    let mut u = unsat;
-                    u.sort();
-                    u
+            let selector = Unsatisfiable::parse(args.unsatisfiable.as_deref())?;
+            if selector == Unsatisfiable::None {
+                // Nothing is asked of the reasoner, so only one that reads the
+                // ontology as it is made can refuse it.
+                if kind.reads_ontology_when_made() {
+                    crate::cmd::reason::coherence(&model, kind)?;
                 }
-                // `random:n` is not random: `explainUnsatisfiableClasses` SORTS the
-                // unsatisfiable classes and takes the first `n` (`ExplainOperation`
-                // line 107 onward). MONDO's `test` runs `--unsatisfiable random:10`,
-                // and reading it as a term selected nothing, so the check failed
-                // with "random:10 is satisfiable" on a perfectly coherent ontology.
-                s if s.starts_with("random:") => {
-                    let n: usize = s["random:".len()..].parse().with_context(|| {
-                        format!(
-                            "ILLEGAL UNSATISFIABLE ARGUMENT ERROR: {selector}. Must have either a \
-                             valid --unsatisfiable option (all, root, most_general, random:n), \
-                             where n is an integer."
-                        )
-                    })?;
-                    let mut u = unsat;
-                    u.sort();
-                    u.truncate(n);
-                    u
+            }
+            let (consistent, mut unsat) = if selector == Unsatisfiable::None {
+                (true, Vec::new())
+            } else {
+                crate::cmd::reason::coherence(&model, kind)?
+            };
+            if !consistent && kind.refuses_inconsistent_ontology() {
+                bail!("Inconsistent ontology");
+            }
+            // An EMPTY set is not an error: the report says there is nothing to
+            // explain, which is what a QC step running this on a coherent
+            // ontology wants.
+            unsat.sort_by(|a, b| crate::io::natural_order::iri_cmp(a, b));
+            let chosen: Vec<String> = match selector {
+                Unsatisfiable::None => Vec::new(),
+                Unsatisfiable::All => unsat,
+                Unsatisfiable::Root => {
+                    let mut failed = None;
+                    let roots = crate::cmd::explain_unsat::roots(&model, &unsat, &mut |ce| {
+                        satisfiable(&model, kind, ce).unwrap_or_else(|e| {
+                            failed.get_or_insert(e);
+                            true
+                        })
+                    });
+                    if let Some(e) = failed {
+                        return Err(e);
+                    }
+                    roots
                 }
-                _ => {
-                    let c = select::expand(&model, selector);
+                Unsatisfiable::MostGeneral => crate::cmd::explain_unsat::most_general(&model, &unsat)?,
+                Unsatisfiable::List => {
+                    listed = Some(crate::cmd::explain_unsat::curie_list(&unsat));
+                    Vec::new()
+                }
+                Unsatisfiable::Random(n) => {
+                    if n > 0 {
+                        unsat.truncate(n as usize);
+                    }
+                    unsat
+                }
+                Unsatisfiable::Class(term) => {
+                    let c = select::expand_with_document_prefixes(&model, &term);
+                    if !class_signature(&model).contains(&c) {
+                        bail!(illegal_unsatisfiable(&term));
+                    }
                     if !unsat.contains(&c) {
                         bail!("{c} is satisfiable (not entailed to be ⊑ owl:Nothing)");
                     }
                     vec![c]
                 }
             };
-            chosen
-                .into_iter()
-                .map(|c| (c, OWL_NOTHING.to_string()))
-                .collect()
+            chosen.into_iter().map(|c| (c, OWL_NOTHING.to_string())).collect()
         }
         _ => {
             if mode != "entailment" {
                 status!("explain: unknown mode '{}'; using 'entailment'", args.mode);
             }
-            // entailment mode: take the pair from --axiom or --sub/--sup.
-            let (sub, sup) = resolve_entailment(&model, args)?;
-            // Both ends must name a class the ontology actually uses. Without
-            // this check a term that expanded to nothing — `EFO:0000998` against
-            // a document that binds `efo:` and an OBO context that binds no
-            // `EFO` — went to the reasoner as an unknown IRI and came back as
-            // "not entailed": a verdict on the ontology, when the fault was in
-            // the spelling of the query (EBISPOT/owlmake#2).
-            let classes = class_signature(&model);
-            require_class(&classes, &sub)?;
-            require_class(&classes, &sup)?;
-            let (sub, sup) = (sub.iri, sup.iri);
-            if !backend.decide(&model, &args.reasoner, &sub, &sup) {
-                bail!("{sub} ⊑ {sup} is not entailed by the ontology");
+            if let Some(axiom) = &args.axiom {
+                // An axiom the ontology does not entail has no explanation.
+                let (sub, sup) = crate::cmd::explain_axiom::subsumption(&model, axiom)?;
+                if stated_subsumption(&model, &sub, &sup).is_some() || backend.decide(&model, &args.reasoner, &sub, &sup)
+                {
+                    vec![(sub, sup)]
+                } else {
+                    Vec::new()
+                }
+            } else {
+                let (sub, sup) = match (&args.sub, &args.sup) {
+                    (Some(sub), Some(sup)) => (term(&model, sub), term(&model, sup)),
+                    _ => bail!("explain requires --axiom or both --sub and --sup (in entailment mode)"),
+                };
+                // Both ends must name a class the ontology actually uses, so
+                // that a term that expanded to nothing — `EFO:0000998` against
+                // a document that binds `efo:` and an OBO context that binds no
+                // `EFO` — is an error about the query rather than a verdict on
+                // the ontology.
+                let classes = class_signature(&model);
+                require_class(&classes, &sub)?;
+                require_class(&classes, &sup)?;
+                let (sub, sup) = (sub.iri, sup.iri);
+                if stated_subsumption(&model, &sub, &sup).is_none() && !backend.decide(&model, &args.reasoner, &sub, &sup) {
+                    bail!("{sub} ⊑ {sup} is not entailed by the ontology");
+                }
+                vec![(sub, sup)]
             }
-            vec![(sub, sup)]
         }
     };
 
@@ -217,12 +269,26 @@ pub fn step(
     // What the markdown report needs of the examined ontology: the label each
     // entity is shown with, and which ontology each axiom comes from.
     let md_labels = if args.explanation.is_some() { crate::cmd::rdfs_labels(&model) } else { Default::default() };
+    let order = model.natural_order();
+    // The root ontology's own logical axioms, which an inconsistency search's
+    // set of axioms is made with room for.
+    let root_logical = model
+        .ont
+        .iter()
+        .filter(|ac| select::is_logical(&ac.component) && !model.imported_components.contains(*ac))
+        .count();
     let provenance = crate::cmd::explain_markdown::Provenance {
         root: crate::build::model_ontology_id(&model).0,
         import: if model.inlined_imports.len() == 1 { model.inlined_imports.first().cloned() } else { None },
         imported: std::mem::take(&mut model.imported_components),
     };
-    let module = if targets.is_empty() {
+    // The subsumption each target states as the ontology does, unannotated:
+    // its own first justification, whether or not its module holds it.
+    let stated: Vec<Option<AnnotatedComponent<RcStr>>> = targets
+        .iter()
+        .map(|(sub, sup)| if inconsistency { None } else { stated_subsumption(&model, sub, sup) })
+        .collect();
+    let module = if targets.is_empty() || inconsistency {
         model
     } else {
         let t0 = std::time::Instant::now();
@@ -239,7 +305,9 @@ pub fn step(
 
     for (n, (sub, sup)) in targets.iter().enumerate() {
         status!("explain: [{}/{}] {sub} ⊑ {sup}", n + 1, targets.len());
-        let (text, axioms, justifications) = explain_one(&module, backend, sub, sup, max);
+        let goal =
+            if inconsistency { Goal::Inconsistency(root_logical, &provenance.imported) } else { Goal::Subsumption(sub, sup) };
+        let (text, axioms, justifications) = explain_one(&module, backend, goal, stated[n].as_ref(), max);
         report.push_str(&text);
         justification_axioms.extend(axioms);
         for j in justifications {
@@ -253,12 +321,22 @@ pub fn step(
         report.push_str("No explanations found.");
     }
 
-    // `--explanation` carries the markdown report.
-    if let Some(p) = &args.explanation {
-        std::fs::write(p, crate::cmd::explain_markdown::report(&explained, &md_labels, &provenance))?;
-    }
-    if args.output.is_none() && args.explanation.is_none() {
-        print!("{report}");
+    if let Some(lines) = &listed {
+        // `--explanation` carries the list, a line per class.
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        if let Some(p) = &args.explanation {
+            std::fs::write(p, text)?;
+        } else if args.output.is_none() {
+            print!("{text}");
+        }
+    } else {
+        // `--explanation` carries the markdown report.
+        if let Some(p) = &args.explanation {
+            std::fs::write(p, crate::cmd::explain_markdown::report(&explained, &md_labels, &provenance, order))?;
+        }
+        if args.output.is_none() && args.explanation.is_none() {
+            print!("{report}");
+        }
     }
     // The model handed to the next command in a chain is the ontology OF the
     // justifications — the union of their axioms, empty when nothing needed
@@ -299,8 +377,9 @@ pub fn step(
 enum Backend {
     /// The built-in EL reasoner (`elk`/`emr`/`structural`/`owlmake`).
     El,
-    /// The hermit-rs OWL 2 DL reasoner (`hermit`/`jfact`).
-    Dl,
+    /// The hermit-rs OWL 2 DL reasoner (`hermit`/`jfact`), as the kind it
+    /// serves reads the ontology.
+    Dl(ReasonerKind),
     /// The whelk-rs EL reasoner (`whelk`).
     Whelk,
 }
@@ -308,7 +387,7 @@ enum Backend {
 impl Backend {
     fn of(kind: ReasonerKind) -> Backend {
         match kind {
-            ReasonerKind::Hermit | ReasonerKind::JFact => Backend::Dl,
+            kind @ (ReasonerKind::Hermit | ReasonerKind::JFact) => Backend::Dl(kind),
             ReasonerKind::Whelk => Backend::Whelk,
             ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Structural | ReasonerKind::Emr => {
                 Backend::El
@@ -321,7 +400,7 @@ impl Backend {
     fn engine(self) -> &'static str {
         match self {
             Backend::El => "the built-in EL reasoner",
-            Backend::Dl => "hermit-rs",
+            Backend::Dl(_) => "hermit-rs",
             Backend::Whelk => "whelk-rs",
         }
     }
@@ -330,26 +409,17 @@ impl Backend {
     fn is_subsumed(self, model: &Model, sub: &str, sup: &str) -> bool {
         match self {
             Backend::El => Reasoner::classify(model).is_subsumed(sub, sup),
-            Backend::Dl => DlReasoner::classify(model).is_subsumed(sub, sup),
-            Backend::Whelk => WhelkClassification::classify(model)
-                .all_subsumptions()
-                .iter()
-                .any(|(a, b)| a == sub && b == sup),
+            Backend::Dl(kind) => kind.dl_reasoner(model).is_subsumed(sub, sup),
+            Backend::Whelk => WhelkClassification::classify(model).expect(WHOLE_FIRST).subsumes(sub, sup),
         }
     }
 
-    /// The unsatisfiable named classes, as the requested reasoner sees them. A
-    /// class only a DL reasoner finds unsatisfiable must be found here too, or
-    /// `-M unsatisfiability -r hermit` explains a different set of classes from
-    /// the one that reasoner reports.
-    fn unsatisfiable(self, model: &Model, name: &str) -> Vec<String> {
-        if self != Backend::El {
-            status!("explain: unsatisfiable classes decided by {} (--reasoner {name})", self.engine());
-        }
+    /// Is the ontology consistent?
+    fn is_consistent(self, model: &Model) -> bool {
         match self {
-            Backend::El => Reasoner::classify(model).unsatisfiable(),
-            Backend::Dl => DlReasoner::classify(model).unsatisfiable(),
-            Backend::Whelk => WhelkClassification::classify(model).unsatisfiable(),
+            Backend::El => Reasoner::classify(model).is_consistent(),
+            Backend::Dl(kind) => kind.dl_reasoner(model).is_consistent(),
+            Backend::Whelk => WhelkClassification::classify(model).expect(WHOLE_FIRST).is_consistent(),
         }
     }
 
@@ -389,6 +459,72 @@ fn class_signature(model: &Model) -> HashSet<String> {
     out
 }
 
+/// What `--unsatisfiable` asks for. See [`Args::unsatisfiable`].
+#[derive(Debug, PartialEq, Eq)]
+enum Unsatisfiable {
+    None,
+    All,
+    Root,
+    MostGeneral,
+    List,
+    Random(i32),
+    Class(String),
+}
+
+impl Unsatisfiable {
+    /// The keywords are matched exactly. `random:` takes the integer after it,
+    /// up to any further `:`.
+    fn parse(value: Option<&str>) -> anyhow::Result<Unsatisfiable> {
+        Ok(match value {
+            None => Unsatisfiable::None,
+            Some("all") => Unsatisfiable::All,
+            Some("root") => Unsatisfiable::Root,
+            Some("most_general") => Unsatisfiable::MostGeneral,
+            Some("list") => Unsatisfiable::List,
+            Some(s) if s.starts_with("random:") => {
+                let n = s.split(':').nth(1).and_then(crate::java_number::parse_int);
+                Unsatisfiable::Random(n.with_context(|| illegal_unsatisfiable(s))?)
+            }
+            Some(s) => Unsatisfiable::Class(s.to_string()),
+        })
+    }
+}
+
+fn illegal_unsatisfiable(value: &str) -> String {
+    format!(
+        "ILLEGAL UNSATISFIABLE ARGUMENT ERROR: {value}. Must have either a valid --unsatisfiable option (all, \
+         root, most_general, random:n), where n is an integer."
+    )
+}
+
+/// Whether `kind` finds the class expression `ce` satisfiable in `model`: a
+/// fresh class made equivalent to it is not unsatisfiable.
+fn satisfiable(model: &Model, kind: ReasonerKind, ce: &horned_owl::model::ClassExpression<RcStr>) -> anyhow::Result<bool> {
+    const PROBE: &str = "urn:owlmake:explain:probe";
+    let b = horned_owl::model::Build::new_rc();
+    let mut probed = model.clone();
+    probed.ont.insert(Component::EquivalentClasses(horned_owl::model::EquivalentClasses(vec![
+        horned_owl::model::ClassExpression::Class(b.class(PROBE)),
+        ce.clone(),
+    ])));
+    let (_, unsat) = crate::cmd::reason::coherence(&probed, kind)?;
+    Ok(!unsat.iter().any(|c| c == PROBE))
+}
+
+/// The axiom `SubClassOf(sub, sup)` as the ontology or its imports state it,
+/// without annotations.
+fn stated_subsumption(model: &Model, sub: &str, sup: &str) -> Option<AnnotatedComponent<RcStr>> {
+    use horned_owl::model::{ClassExpression, SubClassOf};
+    let stated = AnnotatedComponent {
+        component: Component::SubClassOf(SubClassOf {
+            sub: ClassExpression::Class(model.build.class(sub)),
+            sup: ClassExpression::Class(model.build.class(sup)),
+        }),
+        ann: Default::default(),
+    };
+    model.ont.i().contains(&stated).then_some(stated)
+}
+
 /// A query term as the caller typed it, with the IRI it expanded to.
 struct Term {
     raw: String,
@@ -398,7 +534,7 @@ struct Term {
 fn term(model: &Model, raw: &str) -> Term {
     Term {
         raw: raw.to_string(),
-        iri: select::expand(model, raw),
+        iri: select::expand_with_document_prefixes(model, raw),
     }
 }
 
@@ -443,71 +579,71 @@ fn require_class(classes: &HashSet<String>, t: &Term) -> anyhow::Result<()> {
         ),
     };
     bail!(
-        "`{raw}` did not expand to an IRI: the prefix `{pre}` is bound neither in the ontology's \
-         prefix map nor in the bundled OBO context, so it names no class.{hint}"
+        "`{raw}` did not expand to an IRI: no prefix `{pre}` is bound where it is read, so it \
+         names no class.{hint}"
     )
 }
 
-/// Resolve the entailment to explain from `--axiom` (Manchester
-/// `SUB SubClassOf SUP`) or the `--sub`/`--sup` pair.
-fn resolve_entailment(model: &Model, args: &Args) -> anyhow::Result<(Term, Term)> {
-    if let Some(axiom) = &args.axiom {
-        return parse_subclassof_axiom(model, axiom);
+/// What a justification is a justification of.
+#[derive(Clone, Copy)]
+enum Goal<'a> {
+    /// The subsumption `sub ⊑ sup`.
+    Subsumption(&'a str, &'a str),
+    /// The inconsistency of the whole ontology, owl:Thing ⊑ owl:Nothing: the
+    /// number of logical axioms the root ontology states itself, and the
+    /// axioms its imports bring.
+    Inconsistency(usize, &'a HashSet<AnnotatedComponent<RcStr>>),
+}
+
+impl<'a> Goal<'a> {
+    /// The entailment's subclass and superclass.
+    fn terms(self) -> (&'a str, &'a str) {
+        match self {
+            Goal::Subsumption(sub, sup) => (sub, sup),
+            Goal::Inconsistency(..) => (OWL_THING, OWL_NOTHING),
+        }
     }
-    match (&args.sub, &args.sup) {
-        (Some(sub), Some(sup)) => Ok((term(model, sub), term(model, sup))),
-        _ => bail!("explain requires --axiom or both --sub and --sup (in entailment mode)"),
+
+    /// Does `model` entail it, as `backend` decides?
+    fn holds(self, backend: Backend, model: &Model) -> bool {
+        match self {
+            Goal::Subsumption(sub, sup) => backend.is_subsumed(model, sub, sup),
+            Goal::Inconsistency(..) => !backend.is_consistent(model),
+        }
     }
 }
 
-/// Parse a Manchester `<SUBCLASS> SubClassOf <SUPERCLASS>` axiom into the
-/// expanded subclass/superclass terms. Only named classes on either side are
-/// supported (matching what the justification machinery can explain).
-fn parse_subclassof_axiom(model: &Model, axiom: &str) -> anyhow::Result<(Term, Term)> {
-    // Split on the SubClassOf keyword (case-insensitive), tolerating extra
-    // whitespace.
-    let lower = axiom.to_ascii_lowercase();
-    let Some(pos) = lower.find("subclassof") else {
-        bail!("--axiom must be a Manchester 'A SubClassOf B' axiom");
-    };
-    let sub_str = axiom[..pos].trim();
-    let sup_str = axiom[pos + "subclassof".len()..].trim();
-    if sub_str.is_empty() || sup_str.is_empty() {
-        bail!("--axiom must name both a subclass and a superclass");
-    }
-    let parse_side = |side: &str| -> anyhow::Result<Term> {
-        let iri = match crate::io::manchester::parse_class_expression(&model.build, &model.prefixes, side) {
-            Some(horned_owl::model::ClassExpression::Class(c)) => c.0.as_ref().to_string(),
-            Some(_) => bail!("--axiom: only named classes are supported (got a complex expression in '{side}')"),
-            None => select::expand(model, side), // fall back to CURIE/IRI expansion
-        };
-        Ok(Term { raw: side.to_string(), iri })
-    };
-    Ok((parse_side(sub_str)?, parse_side(sup_str)?))
-}
-
-
-/// Compute and format the justification(s) for a single `sub ⊑ sup` entailment.
-/// Returns the human-readable report and the deduplicated union of all axioms
+/// Compute and format the justification(s) for a single entailment. Returns
+/// the human-readable report and the deduplicated union of all axioms
 /// appearing in any justification (for ontology output).
 fn explain_one(
     model: &crate::model::Model,
     backend: Backend,
-    sub: &str,
-    sup: &str,
+    goal: Goal,
+    stated: Option<&AnnotatedComponent<RcStr>>,
     max: usize,
 ) -> (String, Vec<AnnotatedComponent<RcStr>>, Vec<Vec<AnnotatedComponent<RcStr>>>) {
     let t0 = std::time::Instant::now();
-    // Shrink to the ⊥-module for the two terms: it contains every justification
-    // for the entailment, so the search never has to look outside it.
-    let seed: HashSet<String> = [sub.to_string(), sup.to_string()].into_iter().collect();
-    let module = extract::extract(model, &seed, Method::Bot);
+    let (sub, sup) = goal.terms();
+    // A subsumption's justifications all lie in the ⊥-module for its two terms,
+    // so the search never has to look outside it. An inconsistency's search
+    // holds the whole ontology.
+    let extracted;
+    let module = match goal {
+        Goal::Subsumption(..) => {
+            let seed: HashSet<String> = [sub.to_string(), sup.to_string()].into_iter().collect();
+            extracted = extract::extract(model, &seed, Method::Bot);
+            &extracted
+        }
+        Goal::Inconsistency(..) => model,
+    };
 
-    let search = Search::new(&module, backend, sub, sup);
+    let search = Search::new(module, backend, sub, sup);
     let justifications = {
         let _hb = crate::progress::Heartbeat::start(format!("explain: justifying {sub} ⊑ {sup}"));
-        if max == 1 {
-            // One justification: the one black-box search finds.
+        // One justification is the one black-box search finds, and an
+        // inconsistency's justifications are the ones its hitting-set tree finds.
+        if max == 1 || matches!(goal, Goal::Inconsistency(..)) {
             let axioms: Vec<AnnotatedComponent<RcStr>> = module.ont.iter().cloned().collect();
             let entails = |axs: &[&AnnotatedComponent<RcStr>]| -> bool {
                 search.tests.set(search.tests.get() + 1);
@@ -524,11 +660,25 @@ fn explain_one(
                     }
                 }
                 let m = Model::from_parts(ont, clone_prefixes(&module.prefixes));
-                backend.is_subsumed(&m, sub, sup)
+                goal.holds(backend, &m)
             };
-            crate::cmd::explain_blackbox::justification(&axioms, sub, sup, &entails)
-                .map(|j| vec![j])
-                .unwrap_or_default()
+            match goal {
+                // A subsumption the ontology states is its own justification.
+                Goal::Subsumption(..) if stated.is_some() => stated.into_iter().map(|ac| vec![ac.clone()]).collect(),
+                Goal::Subsumption(sub, sup) => {
+                    crate::cmd::explain_blackbox::justification(&axioms, sub, sup, &entails, module.natural_order())
+                        .map(|j| vec![j])
+                        .unwrap_or_default()
+                }
+                Goal::Inconsistency(root_logical, imported) => crate::cmd::explain_blackbox::inconsistency_justifications(
+                    &axioms,
+                    root_logical,
+                    max,
+                    &|ac| imported.contains(ac),
+                    &entails,
+                    module.natural_order(),
+                ),
+            }
         } else {
             search.enumerate(max)
         }
@@ -613,7 +763,7 @@ impl<'a> Search<'a> {
         let mut candidates = Vec::new();
         let mut declarations = std::collections::HashMap::new();
         for ac in module.ont.iter() {
-            if is_logical(&ac.component) {
+            if select::is_logical(&ac.component) {
                 candidates.push(ac.clone());
             } else if is_declaration(&ac.component) {
                 if let Some((_, iri)) = crate::sig::typed_signature(&ac.component).into_iter().next() {
@@ -852,19 +1002,3 @@ fn is_declaration(c: &Component<RcStr>) -> bool {
     )
 }
 
-fn is_logical(c: &Component<RcStr>) -> bool {
-    !matches!(
-        c,
-        Component::DeclareClass(_)
-            | Component::DeclareObjectProperty(_)
-            | Component::DeclareDataProperty(_)
-            | Component::DeclareAnnotationProperty(_)
-            | Component::DeclareNamedIndividual(_)
-            | Component::DeclareDatatype(_)
-            | Component::AnnotationAssertion(_)
-            | Component::OntologyAnnotation(_)
-            | Component::OntologyID(_)
-            | Component::DocIRI(_)
-            | Component::Import(_)
-    )
-}

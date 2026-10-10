@@ -1,0 +1,418 @@
+@prefix : <http://purl.obolibrary.org/obo/ex.owl#> .
+@prefix foo: <http://example.org/foo/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://purl.obolibrary.org/obo/ex.owl> .
+
+<http://purl.obolibrary.org/obo/ex.owl> rdf:type owl:Ontology ;
+                                         owl:versionIRI <http://purl.obolibrary.org/obo/ex/ex/releases/2026-01-01/ex.owl/ex.owl> ;
+                                         <http://purl.org/dc/elements/1.1/title> "Example ontology" ;
+                                         <http://purl.org/dc/terms/license> <http://creativecommons.org/licenses/by/4.0/> ;
+                                         <http://www.geneontology.org/formats/oboInOwl#auto-generated-by> "something" ;
+                                         <http://www.geneontology.org/formats/oboInOwl#date> "01:01:2026 12:00" ;
+                                         <http://www.geneontology.org/formats/oboInOwl#default-namespace> "example" ;
+                                         <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "1.2" ;
+                                         <http://www.geneontology.org/formats/oboInOwl#saved-by> "someone" ;
+                                         rdfs:comment "A remark." .
+
+#################################################################
+#    Annotation properties
+#################################################################
+
+###  http://example.org/foo/score
+foo:score rdf:type owl:AnnotationProperty .
+
+
+###  http://purl.obolibrary.org/obo/IAO_0000112
+<http://purl.obolibrary.org/obo/IAO_0000112> rdf:type owl:AnnotationProperty .
+
+
+###  http://purl.obolibrary.org/obo/IAO_0000115
+<http://purl.obolibrary.org/obo/IAO_0000115> rdf:type owl:AnnotationProperty ;
+                                             rdfs:label "definition" .
+
+
+###  http://purl.obolibrary.org/obo/IAO_0000231
+<http://purl.obolibrary.org/obo/IAO_0000231> rdf:type owl:AnnotationProperty .
+
+
+###  http://purl.obolibrary.org/obo/IAO_0100001
+<http://purl.obolibrary.org/obo/IAO_0100001> rdf:type owl:AnnotationProperty ;
+                                             rdfs:label "term replaced by" .
+
+
+###  http://purl.obolibrary.org/obo/RO_0002161
+<http://purl.obolibrary.org/obo/RO_0002161> rdf:type owl:AnnotationProperty .
+
+
+###  http://purl.obolibrary.org/obo/ex#ABBR
+<http://purl.obolibrary.org/obo/ex#ABBR> <http://www.geneontology.org/formats/oboInOwl#hasScope> <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> ;
+                                         rdfs:label "abbreviation" ;
+                                         rdf:type owl:AnnotationProperty ;
+                                         rdfs:subPropertyOf <http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty> .
+
+
+###  http://purl.obolibrary.org/obo/ex#OLD
+<http://purl.obolibrary.org/obo/ex#OLD> <http://www.geneontology.org/formats/oboInOwl#hasScope> <http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> ;
+                                        rdfs:label "old name" ;
+                                        rdf:type owl:AnnotationProperty ;
+                                        rdfs:subPropertyOf <http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty> .
+
+
+###  http://purl.obolibrary.org/obo/ex#PLURAL
+<http://purl.obolibrary.org/obo/ex#PLURAL> rdfs:label "plural form" ;
+                                           rdf:type owl:AnnotationProperty ;
+                                           rdfs:subPropertyOf <http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty> .
+
+
+###  http://purl.obolibrary.org/obo/ex#core
+<http://purl.obolibrary.org/obo/ex#core> rdfs:comment "Core subset" ;
+                                         rdf:type owl:AnnotationProperty ;
+                                         rdfs:subPropertyOf <http://www.geneontology.org/formats/oboInOwl#SubsetProperty> .
+
+
+###  http://purl.obolibrary.org/obo/ex#note
+<http://purl.obolibrary.org/obo/ex#note> rdf:type owl:AnnotationProperty ;
+                                         <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                         <http://www.geneontology.org/formats/oboInOwl#id> "note" ;
+                                         <http://www.geneontology.org/formats/oboInOwl#is_class_level> "true"^^xsd:boolean ;
+                                         <http://www.geneontology.org/formats/oboInOwl#is_metadata_tag> "true"^^xsd:boolean ;
+                                         rdfs:label "note" .
+
+
+###  http://purl.obolibrary.org/obo/ex#slim_extra
+<http://purl.obolibrary.org/obo/ex#slim_extra> rdfs:comment "Extra slim" ;
+                                               rdf:type owl:AnnotationProperty ;
+                                               rdfs:subPropertyOf <http://www.geneontology.org/formats/oboInOwl#SubsetProperty> .
+
+
+###  http://purl.org/dc/elements/1.1/title
+<http://purl.org/dc/elements/1.1/title> rdf:type owl:AnnotationProperty .
+
+
+###  http://purl.org/dc/terms/license
+<http://purl.org/dc/terms/license> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#SubsetProperty
+<http://www.geneontology.org/formats/oboInOwl#SubsetProperty> rdf:type owl:AnnotationProperty ;
+                                                              rdfs:label "subset_property" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty
+<http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty> rdf:type owl:AnnotationProperty ;
+                                                                   rdfs:label "synonym_type_property" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#auto-generated-by
+<http://www.geneontology.org/formats/oboInOwl#auto-generated-by> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#consider
+<http://www.geneontology.org/formats/oboInOwl#consider> rdf:type owl:AnnotationProperty ;
+                                                        rdfs:label "consider" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#created_by
+<http://www.geneontology.org/formats/oboInOwl#created_by> rdf:type owl:AnnotationProperty ;
+                                                          rdfs:label "created by" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#creation_date
+<http://www.geneontology.org/formats/oboInOwl#creation_date> rdf:type owl:AnnotationProperty ;
+                                                             rdfs:label "creation date" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#date
+<http://www.geneontology.org/formats/oboInOwl#date> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#default-namespace
+<http://www.geneontology.org/formats/oboInOwl#default-namespace> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasAlternativeId
+<http://www.geneontology.org/formats/oboInOwl#hasAlternativeId> rdf:type owl:AnnotationProperty ;
+                                                                rdfs:label "has_alternative_id" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym
+<http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym> rdf:type owl:AnnotationProperty ;
+                                                               rdfs:label "has_broad_synonym" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasDbXref
+<http://www.geneontology.org/formats/oboInOwl#hasDbXref> rdf:type owl:AnnotationProperty ;
+                                                         rdfs:label "database_cross_reference" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasExactSynonym
+<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> rdf:type owl:AnnotationProperty ;
+                                                               rdfs:label "has_exact_synonym" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasNarrowSynonym
+<http://www.geneontology.org/formats/oboInOwl#hasNarrowSynonym> rdf:type owl:AnnotationProperty ;
+                                                                rdfs:label "has_narrow_synonym" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion
+<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> rdf:type owl:AnnotationProperty ;
+                                                                   rdfs:label "has_obo_format_version" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasOBONamespace
+<http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> rdf:type owl:AnnotationProperty ;
+                                                               rdfs:label "has_obo_namespace" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym
+<http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> rdf:type owl:AnnotationProperty ;
+                                                                 rdfs:label "has_related_synonym" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasScope
+<http://www.geneontology.org/formats/oboInOwl#hasScope> rdf:type owl:AnnotationProperty ;
+                                                        rdfs:label "has_scope" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#hasSynonymType
+<http://www.geneontology.org/formats/oboInOwl#hasSynonymType> rdf:type owl:AnnotationProperty ;
+                                                              rdfs:label "has_synonym_type" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#id
+<http://www.geneontology.org/formats/oboInOwl#id> rdf:type owl:AnnotationProperty ;
+                                                  rdfs:label "id" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#inSubset
+<http://www.geneontology.org/formats/oboInOwl#inSubset> rdf:type owl:AnnotationProperty ;
+                                                        rdfs:label "in_subset" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#is_class_level
+<http://www.geneontology.org/formats/oboInOwl#is_class_level> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#is_metadata_tag
+<http://www.geneontology.org/formats/oboInOwl#is_metadata_tag> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#is_symmetric
+<http://www.geneontology.org/formats/oboInOwl#is_symmetric> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#saved-by
+<http://www.geneontology.org/formats/oboInOwl#saved-by> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#shorthand
+<http://www.geneontology.org/formats/oboInOwl#shorthand> rdf:type owl:AnnotationProperty ;
+                                                         rdfs:label "shorthand" .
+
+
+###  http://www.geneontology.org/formats/oboInOwl#source
+<http://www.geneontology.org/formats/oboInOwl#source> rdf:type owl:AnnotationProperty .
+
+
+###  http://www.w3.org/2000/01/rdf-schema#comment
+rdfs:comment rdf:type owl:AnnotationProperty .
+
+
+###  http://www.w3.org/2000/01/rdf-schema#label
+rdfs:label rdf:type owl:AnnotationProperty .
+
+
+###  http://www.w3.org/2002/07/owl#deprecated
+owl:deprecated rdf:type owl:AnnotationProperty .
+
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://purl.obolibrary.org/obo/BFO_0000050
+<http://purl.obolibrary.org/obo/BFO_0000050> rdf:type owl:ObjectProperty ;
+                                             owl:inverseOf <http://purl.obolibrary.org/obo/BFO_0000051> ;
+                                             rdf:type owl:TransitiveProperty ;
+                                             rdfs:domain <http://purl.obolibrary.org/obo/EX_0000001> ;
+                                             rdfs:range <http://purl.obolibrary.org/obo/EX_0000003> ;
+                                             <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "BFO:0000050" ;
+                                             <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                             <http://www.geneontology.org/formats/oboInOwl#id> "part_of" ;
+                                             <http://www.geneontology.org/formats/oboInOwl#shorthand> "part_of" ;
+                                             rdfs:label "part of" .
+
+
+###  http://purl.obolibrary.org/obo/BFO_0000051
+<http://purl.obolibrary.org/obo/BFO_0000051> rdf:type owl:ObjectProperty ;
+                                             owl:propertyChainAxiom ( <http://purl.obolibrary.org/obo/BFO_0000050>
+                                                                      <http://purl.obolibrary.org/obo/BFO_0000050>
+                                                                    ) ,
+                                                                    ( <http://purl.obolibrary.org/obo/BFO_0000051>
+                                                                      <http://purl.obolibrary.org/obo/BFO_0000050>
+                                                                    ) ;
+                                             <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "BFO:0000051" ;
+                                             <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                             <http://www.geneontology.org/formats/oboInOwl#id> "has_part" ;
+                                             <http://www.geneontology.org/formats/oboInOwl#is_symmetric> "false"^^xsd:boolean ;
+                                             <http://www.geneontology.org/formats/oboInOwl#shorthand> "has_part" ;
+                                             rdfs:label "has part" .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://purl.obolibrary.org/obo/EX_0000001
+<http://purl.obolibrary.org/obo/EX_0000001> rdf:type owl:Class ;
+                                            foo:score 3 ;
+                                            <http://purl.obolibrary.org/obo/IAO_0000112> "example use" ;
+                                            <http://purl.obolibrary.org/obo/IAO_0000115> "The first example thing." ;
+                                            <http://purl.obolibrary.org/obo/RO_0002161> <http://purl.obolibrary.org/obo/NCBITaxon_9606> ;
+                                            <http://www.geneontology.org/formats/oboInOwl#created_by> "someone" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#creation_date> "2020-01-01T00:00:00Z" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasAlternativeId> "EX:0000099" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym> "the one" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "Wikipedia:Thing" ,
+                                                                                                     "foo:xyz" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> "T1" ,
+                                                                                                           "previous" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasNarrowSynonym> "thingo" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> "things one" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#id> "EX:0000001" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#inSubset> <http://purl.obolibrary.org/obo/ex#core> ;
+                                            rdfs:comment "A comment." ;
+                                            rdfs:label "thing one" .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> ;
+   owl:annotatedTarget "previous" ;
+   <http://www.geneontology.org/formats/oboInOwl#hasSynonymType> <http://purl.obolibrary.org/obo/ex#OLD>
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> ;
+   owl:annotatedTarget "things one" ;
+   <http://www.geneontology.org/formats/oboInOwl#hasSynonymType> <http://purl.obolibrary.org/obo/ex#PLURAL>
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://purl.obolibrary.org/obo/IAO_0000115> ;
+   owl:annotatedTarget "The first example thing." ;
+   <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "PMID:123" ,
+                                                            "foo:abc"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym> ;
+   owl:annotatedTarget "the one" ;
+   <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "foo:x"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://www.geneontology.org/formats/oboInOwl#hasDbXref> ;
+   owl:annotatedTarget "Wikipedia:Thing" ;
+   rdfs:label "a description"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://www.geneontology.org/formats/oboInOwl#hasDbXref> ;
+   owl:annotatedTarget "foo:xyz" ;
+   rdfs:comment "hello"
+ ] .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000001> ;
+   owl:annotatedProperty <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> ;
+   owl:annotatedTarget "T1" ;
+   <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "PMID:9" ;
+   <http://www.geneontology.org/formats/oboInOwl#hasSynonymType> <http://purl.obolibrary.org/obo/ex#ABBR>
+ ] .
+
+
+###  http://purl.obolibrary.org/obo/EX_0000002
+<http://purl.obolibrary.org/obo/EX_0000002> rdf:type owl:Class ;
+                                            owl:equivalentClass [ owl:intersectionOf ( <http://purl.obolibrary.org/obo/EX_0000001>
+                                                                                       [ rdf:type owl:Restriction ;
+                                                                                         owl:onProperty <http://purl.obolibrary.org/obo/BFO_0000050> ;
+                                                                                         owl:someValuesFrom <http://purl.obolibrary.org/obo/EX_0000003>
+                                                                                       ]
+                                                                                     ) ;
+                                                                  rdf:type owl:Class
+                                                                ] ;
+                                            rdfs:subClassOf <http://purl.obolibrary.org/obo/EX_0000001> ,
+                                                            [ rdf:type owl:Restriction ;
+                                                              owl:onProperty <http://purl.obolibrary.org/obo/BFO_0000050> ;
+                                                              owl:someValuesFrom <http://purl.obolibrary.org/obo/EX_0000003>
+                                                            ] ;
+                                            owl:disjointWith <http://purl.obolibrary.org/obo/EX_0000003> ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#id> "EX:0000002" ;
+                                            rdfs:label "thing two" .
+
+[ rdf:type owl:Axiom ;
+   owl:annotatedSource <http://purl.obolibrary.org/obo/EX_0000002> ;
+   owl:annotatedProperty rdfs:subClassOf ;
+   owl:annotatedTarget <http://purl.obolibrary.org/obo/EX_0000001> ;
+   <http://www.geneontology.org/formats/oboInOwl#source> "PMID:7"
+ ] .
+
+
+###  http://purl.obolibrary.org/obo/EX_0000003
+<http://purl.obolibrary.org/obo/EX_0000003> rdf:type owl:Class ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#id> "EX:0000003" ;
+                                            rdfs:label "thing three" ;
+                                            owl:deprecated "false"^^xsd:boolean .
+
+
+###  http://purl.obolibrary.org/obo/EX_0000004
+<http://purl.obolibrary.org/obo/EX_0000004> rdf:type owl:Class ;
+                                            <http://purl.obolibrary.org/obo/IAO_0100001> <http://purl.obolibrary.org/obo/EX_0000001> ;
+                                            <http://www.geneontology.org/formats/oboInOwl#consider> <http://purl.obolibrary.org/obo/EX_0000002> ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#id> "EX:0000004" ;
+                                            rdfs:label "obsolete thing" ;
+                                            owl:deprecated "true"^^xsd:boolean .
+
+
+###  http://purl.obolibrary.org/obo/EX_0000005
+<http://purl.obolibrary.org/obo/EX_0000005> rdf:type owl:Class ;
+                                            owl:equivalentClass <http://purl.obolibrary.org/obo/EX_0000006> ,
+                                                                [ rdf:type owl:Class ;
+                                                                  owl:unionOf ( <http://purl.obolibrary.org/obo/EX_0000001>
+                                                                                <http://purl.obolibrary.org/obo/EX_0000003>
+                                                                              )
+                                                                ] ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#id> "EX:0000005" ;
+                                            rdfs:label "union thing" .
+
+
+###  http://purl.obolibrary.org/obo/EX_0000006
+<http://purl.obolibrary.org/obo/EX_0000006> rdf:type owl:Class ;
+                                            <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "example" ;
+                                            <http://www.geneontology.org/formats/oboInOwl#id> "EX:0000006" ;
+                                            rdfs:label "six" .
+
+
+###  http://purl.obolibrary.org/obo/EX_0000099
+<http://purl.obolibrary.org/obo/EX_0000099> rdf:type owl:Class ;
+                                            <http://purl.obolibrary.org/obo/IAO_0000231> <http://purl.obolibrary.org/obo/IAO_0000227> ;
+                                            <http://purl.obolibrary.org/obo/IAO_0100001> <http://purl.obolibrary.org/obo/EX_0000001> ;
+                                            owl:deprecated "true"^^xsd:boolean .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

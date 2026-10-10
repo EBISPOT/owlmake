@@ -57,230 +57,91 @@ pub(crate) fn term_line(line: &str) -> Option<&str> {
     (!body.is_empty()).then_some(body)
 }
 
-/// Gather the seed term set from `--term` values and `--term-file` files,
-/// expanding CURIEs against the model's prefix map.
+/// Gather the seed term set from `--term` values and `--term-file` files, each
+/// read as [`iri`] reads it. A term that names no IRI is no term at all.
 pub fn collect_terms(
     model: &Model,
     terms: &[String],
     term_files: &[PathBuf],
 ) -> Result<HashSet<String>> {
+    gather(terms, term_files, |t| iri(model, t))
+}
+
+/// [`collect_terms`] for a command that reads its terms as the document reads
+/// its own CURIEs ([`expand_with_document_prefixes`]).
+pub fn collect_terms_with_document_prefixes(
+    model: &Model,
+    terms: &[String],
+    term_files: &[PathBuf],
+) -> Result<HashSet<String>> {
+    gather(terms, term_files, |t| Some(expand_with_document_prefixes(model, t)))
+}
+
+/// Each `--term` value and each line of each `--term-file`, as `read` reads it.
+fn gather(
+    terms: &[String],
+    term_files: &[PathBuf],
+    read: impl Fn(&str) -> Option<String>,
+) -> Result<HashSet<String>> {
     let mut set = HashSet::new();
     for t in terms {
-        set.insert(expand(model, t));
+        set.extend(read(t));
     }
     for f in term_files {
         let content =
             std::fs::read_to_string(f).with_context(|| format!("reading term file {}", f.display()))?;
         for line in content.lines() {
             let Some(line) = term_line(line) else { continue };
-            set.insert(expand(model, line));
+            set.extend(read(line));
         }
     }
     Ok(set)
 }
 
-/// The terms that actually SELECT something in `filter`/`remove`.
+/// The IRI a term given on the command line names, read with the command line's
+/// context ([`crate::context`]) — never with the document's own prefixes — or
+/// `None` where it names none. Angle brackets around it are dropped.
 ///
-/// A `--term`/`--term-file` entry resolves only when the IRI names an entity of
-/// EXACTLY ONE kind in the ontology's signature. An IRI the ontology never
-/// mentions resolves to nothing, and so does a PUNNED one: an IRI used as more
-/// than one kind of entity is ambiguous, and an ambiguous term selects nothing.
-///
-/// GSSO puns `GSSO_000699` as a class and an individual and EFO's import seed
-/// lists it, so `gsso_import.owl` loses the class while keeping every unpunned
-/// neighbour. `extract` is deliberately NOT this: it seeds from every entity an
-/// IRI names, which is why the same term survives into `gsso_bot.owl`.
-pub fn resolve_entity_terms(model: &Model, terms: HashSet<String>) -> HashSet<String> {
-    let sig = signature_entities(model);
-    let count = |iri: &String| {
-        [
-            &sig.classes,
-            &sig.object_properties,
-            &sig.data_properties,
-            &sig.annotation_properties,
-            &sig.datatypes,
-            &sig.individuals,
-        ]
-        .iter()
-        .filter(|k| k.contains(iri))
-        .count()
-    };
-    terms.into_iter().filter(|t| count(t) == 1).collect()
+/// It is trimmed as a term-file line is (see [`term_line`]): code points
+/// `<= U+0020` only. A term carrying a NO-BREAK SPACE keeps it, so the CURIE
+/// expands to an IRI that names no entity and the term selects nothing —
+/// `imports/chebi_terms.txt` ends seven of its lines with one.
+pub fn iri(model: &Model, s: &str) -> Option<String> {
+    model.context.iri(bare(s))
 }
 
-/// Expand a CURIE against the model's prefix map; pass full IRIs through. Also
-/// strips surrounding angle brackets. A `PREFIX:LOCAL` the model's map does not
-/// cover is expanded only when `obo_context.jsonld` binds `PREFIX`; a prefix bound
-/// nowhere is returned unchanged rather than assumed to follow the OBO PURL
-/// convention — see the note in the body for why.
+/// [`iri`], or the term as written where it names no IRI, so that it matches
+/// nothing.
 pub fn expand(model: &Model, s: &str) -> String {
-    // The same trim a term-file line gets (see [`term_line`]): code points
-    // `<= U+0020` only. A term carrying a NO-BREAK SPACE keeps it, so the CURIE
-    // expands to an IRI that names no entity and the term selects nothing —
-    // `imports/chebi_terms.txt` ends seven of its lines with one.
-    let s = ascii_trim(s);
-    let s = s.strip_prefix('<').and_then(|x| x.strip_suffix('>')).unwrap_or(s);
-    if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("urn:") {
-        return s.to_string();
+    iri(model, s).unwrap_or_else(|| bare(s).to_string())
+}
+
+/// The IRI a term names where a command reads it as the document reads its own
+/// CURIEs: an IRI as itself, a CURIE of the document's prefixes, else one the
+/// command line's context reads ([`iri`]), else the term as written, so that it
+/// matches nothing. A prefix bound in neither expands to nothing: uPheno's
+/// merged mirror passes fourteen `--root-phenotype` roots and MGPO is the one
+/// prefix of them the built-in map does not bind, so `MGPO:0001001` names no
+/// root unless the caller binds `MGPO`.
+pub fn expand_with_document_prefixes(model: &Model, s: &str) -> String {
+    let t = bare(s);
+    if t.starts_with("http://") || t.starts_with("https://") || t.starts_with("urn:") {
+        return t.to_string();
     }
-    if let Ok(expanded) = model.prefixes.expand_curie_string(s) {
+    if let Ok(expanded) = model.prefixes.expand_curie_string(t) {
         return expanded;
     }
-    // A COMMAND-LINE term is expanded only by a prefix that is actually BOUND: in
-    // the ontology's own map, in whatever `--prefix` added, or in the bundled
-    // `obo_context.jsonld`. A prefix bound in none of those is not expanded at all —
-    // `MGPO:0001001` stays an IRI whose scheme is `MGPO`, which names no entity, so
-    // the term selects nothing.
-    //
-    // uPheno's merged mirror is where that matters. It passes fourteen
-    // `--root-phenotype` roots, and MGPO is the one prefix of the fourteen that
-    // `obo_context.jsonld` does not bind; a caller that wants it in scope binds it
-    // with an explicit `--prefix "MGPO: …"`. Expanding it by the OBO convention
-    // regardless would pull every MGPO phenotype into scope and add `UPHENO:0000001`
-    // and `UPHENO:0000003` axioms the merged mirror must not carry.
-    //
-    // This is the term-resolution rule only. An OBO document's own ids really do
-    // follow the `PREFIX:LOCAL` → `obo/PREFIX_LOCAL` convention whatever any
-    // context says, and [`crate::io::obo::expand_id`] still does that.
-    if let Some((pre, local)) = s.split_once(':') {
-        if let Some(ns) = obo_context_namespace(pre) {
-            return format!("{ns}{local}");
-        }
+    if t.contains(':') {
+        expand(model, t)
+    } else {
+        t.to_string()
     }
-    s.to_string()
 }
 
-/// The namespace `obo_context.jsonld` binds `prefix` to, if any.
-fn obo_context_namespace(prefix: &str) -> Option<&'static str> {
-    crate::report::obo_context_map().get(prefix).map(|s| s.as_str())
-}
-
-/// The keyword `--select` selectors owlmake recognises (so any other token is an
-/// IRI / CURIE / wildcard entity pattern).
-const SELECT_KEYWORDS: &[&str] = &[
-    "imports", "complement", "ontology", "anonymous", "named", "self", "annotations",
-    "classes", "object-properties", "data-properties", "annotation-properties", "individuals",
-    "named-individuals", "datatypes", "properties", "parents", "ancestors", "children",
-    "descendants", "equivalents", "instances", "types", "domains", "ranges",
-];
-
-/// Whether a `--select` token is an entity pattern (an IRI/CURIE/wildcard) rather
-/// than one of the known keyword selectors. A `PROP=VALUE` annotation-value
-/// selector is neither — it has its own resolution, and glob-matching it against
-/// entity IRIs would select nothing.
-pub fn is_pattern(tok: &str) -> bool {
-    !SELECT_KEYWORDS.contains(&tok) && parse_annotation_value(tok).is_none()
-}
-
-/// Split a `PROP=VALUE` annotation-value selector into its two halves.
-///
-/// Only a token whose left side is a CURIE or IRI qualifies, so a wildcard like
-/// `<…/UBERON_*>` — which has no `=` — and an ordinary keyword are both left
-/// alone.
-pub fn parse_annotation_value(tok: &str) -> Option<(&str, &str)> {
-    let (p, v) = tok.split_once('=')?;
-    let (p, v) = (p.trim(), v.trim());
-    if p.is_empty() || v.is_empty() {
-        return None;
-    }
-    // A left side that is a CURIE (`oboInOwl:inSubset`) or a full IRI. Anything
-    // else — an `=` inside a wildcard, say — is not this selector.
-    let looks_like_property =
-        p.starts_with('<') || p.starts_with("http://") || p.starts_with("https://") || {
-            let mut it = p.splitn(2, ':');
-            matches!((it.next(), it.next()), (Some(a), Some(b)) if !a.is_empty() && !b.is_empty() && !b.contains('/'))
-        };
-    looks_like_property.then_some((p, v))
-}
-
-/// Entities carrying `AnnotationAssertion(PROP, entity, VALUE)`, for a
-/// `--select 'PROP=VALUE'` selector.
-///
-/// Both halves are expanded against the ontology's prefix map and whatever
-/// `--prefix` bound, so `oboInOwl:inSubset=uberon:cumbo` resolves once the recipe
-/// has passed `--prefix 'uberon: http://purl.obolibrary.org/obo/uberon/core#'`.
-/// The value matches an IRI-valued annotation by IRI and a literal-valued one by
-/// its lexical form, since a subset tag is written both ways across OBO.
-pub fn annotation_value_members(model: &Model, prop: &str, value: &str) -> HashSet<String> {
-    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component};
-    let prop_iri = expand(model, prop);
-    // A literal value may be written the way a recipe writes it — quoted, with a
-    // datatype: UBERON's `composite-vertebrate-basic.owl` is
-    // `remove --select owl:deprecated='true'^^xsd:boolean`. Compare on the LEXICAL
-    // form, so that spelling and a bare `true` both match the same assertion.
-    let lexical = {
-        let v = match value.find("^^") {
-            Some(i) => &value[..i],
-            None => value,
-        }
-        .trim();
-        v.strip_prefix('\'')
-            .and_then(|x| x.strip_suffix('\''))
-            .or_else(|| v.strip_prefix('"').and_then(|x| x.strip_suffix('"')))
-            .unwrap_or(v)
-    };
-    let want = expand(model, lexical);
-    // A selector selects ENTITIES. An IRI that carries the annotation but is no
-    // longer declared and appears in no logical axiom is not one, so it is not
-    // selected and the axioms about it stay: a `-basic` composite reaches this
-    // selector after a `filter --axioms` has dropped every declaration, and its
-    // deprecated classes keep their annotations as a bare `rdf:Description`.
-    let entities: HashSet<String> = signature_entities(model).all().cloned().collect();
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        let Component::AnnotationAssertion(ax) = &ac.component else { continue };
-        if ax.ann.ap.0.as_ref() != prop_iri.as_str() {
-            continue;
-        }
-        let hit = match &ax.ann.av {
-            AnnotationValue::IRI(i) => i.as_ref() == want.as_str(),
-            AnnotationValue::Literal(l) => {
-                let lex = l.literal();
-                lex == want.as_str() || lex == value
-            }
-            AnnotationValue::AnonymousIndividual(_) => false,
-        };
-        if hit {
-            if let AnnotationSubject::IRI(s) = &ax.subject {
-                let s = s.to_string();
-                if entities.contains(&s) {
-                    out.insert(s);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Minimal glob match supporting `*` (any run) over an entity IRI.
-pub fn glob_match(pat: &str, s: &str) -> bool {
-    if !pat.contains('*') {
-        return pat == s;
-    }
-    let parts: Vec<&str> = pat.split('*').collect();
-    let mut pos = 0usize;
-    for (i, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-        if i == 0 {
-            if !s[pos..].starts_with(part) {
-                return false;
-            }
-            pos += part.len();
-        } else if let Some(idx) = s[pos..].find(part) {
-            pos += idx + part.len();
-        } else {
-            return false;
-        }
-    }
-    // A trailing non-`*` part must reach the end.
-    if let Some(last) = parts.last() {
-        if !last.is_empty() && !pat.ends_with('*') && !s.ends_with(last) {
-            return false;
-        }
-    }
-    true
+/// A term trimmed as a term-file line is, without the angle brackets around it.
+fn bare(s: &str) -> &str {
+    let s = ascii_trim(s);
+    s.strip_prefix('<').and_then(|x| x.strip_suffix('>')).unwrap_or(s)
 }
 
 /// Declared entities grouped by kind (from `Declaration` axioms).
@@ -406,290 +267,6 @@ pub fn entities(model: &Model) -> Entities {
     e
 }
 
-/// The declared entities of a keyword type selector (`classes`,
-/// `object-properties`, …), if it names one. The `properties` selector spans
-/// object/data/annotation properties.
-pub fn type_set<'a>(ent: &'a Entities, kw: &str) -> Option<&'a HashSet<String>> {
-    match kw {
-        "classes" => Some(&ent.classes),
-        "object-properties" => Some(&ent.object_properties),
-        "data-properties" => Some(&ent.data_properties),
-        "annotation-properties" => Some(&ent.annotation_properties),
-        "individuals" | "named-individuals" => Some(&ent.individuals),
-        "datatypes" => Some(&ent.datatypes),
-        _ => None,
-    }
-}
-
-/// The set of entity IRIs belonging to a category selector, expanded to handle
-/// the multi-kind `properties` (object ∪ data ∪ annotation) selector. Unlike
-/// [`type_set`], this owns the result and covers `properties`.
-pub fn category_members(ent: &Entities, kw: &str) -> Option<HashSet<String>> {
-    match kw {
-        "properties" => {
-            let mut s: HashSet<String> = HashSet::new();
-            s.extend(ent.object_properties.iter().cloned());
-            s.extend(ent.data_properties.iter().cloned());
-            s.extend(ent.annotation_properties.iter().cloned());
-            Some(s)
-        }
-        _ => type_set(ent, kw).map(|s| s.clone()),
-    }
-}
-
-/// Direct named superclasses of the classes in `seed`, plus direct
-/// super-properties of the properties in `seed` (`--select parents`).
-pub fn direct_parents(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, ObjectPropertyExpression as OPE,
-        SubObjectPropertyExpression as SOPE};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        match &ac.component {
-            C::SubClassOf(sc) => {
-                if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
-                    if seed.contains(&sub.0.to_string()) {
-                        out.insert(sup.0.to_string());
-                    }
-                }
-            }
-            C::SubObjectPropertyOf(sp) => {
-                if let (SOPE::ObjectPropertyExpression(OPE::ObjectProperty(sub)), OPE::ObjectProperty(sup)) =
-                    (&sp.sub, &sp.sup)
-                {
-                    if seed.contains(&sub.0.to_string()) {
-                        out.insert(sup.0.to_string());
-                    }
-                }
-            }
-            C::SubDataPropertyOf(sp) => {
-                if seed.contains(&sp.sub.0.to_string()) {
-                    out.insert(sp.sup.0.to_string());
-                }
-            }
-            C::SubAnnotationPropertyOf(sp) => {
-                if seed.contains(&sp.sub.0.to_string()) {
-                    out.insert(sp.sup.0.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-/// Direct named subclasses of the classes in `seed`, plus direct sub-properties
-/// of the properties in `seed` (`--select children`).
-pub fn direct_children(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, ObjectPropertyExpression as OPE,
-        SubObjectPropertyExpression as SOPE};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        match &ac.component {
-            C::SubClassOf(sc) => {
-                if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
-                    if seed.contains(&sup.0.to_string()) {
-                        out.insert(sub.0.to_string());
-                    }
-                }
-            }
-            C::SubObjectPropertyOf(sp) => {
-                if let (SOPE::ObjectPropertyExpression(OPE::ObjectProperty(sub)), OPE::ObjectProperty(sup)) =
-                    (&sp.sub, &sp.sup)
-                {
-                    if seed.contains(&sup.0.to_string()) {
-                        out.insert(sub.0.to_string());
-                    }
-                }
-            }
-            C::SubDataPropertyOf(sp) => {
-                if seed.contains(&sp.sup.0.to_string()) {
-                    out.insert(sp.sub.0.to_string());
-                }
-            }
-            C::SubAnnotationPropertyOf(sp) => {
-                if seed.contains(&sp.sup.0.to_string()) {
-                    out.insert(sp.sub.0.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-/// Transitive closure of a one-step expansion `step` starting from `seed`,
-/// returning only the *newly reached* terms (not the seed itself). Loop-safe: a
-/// term already reached is never expanded again, so a cycle terminates.
-fn closure<F>(seed: &HashSet<String>, step: F) -> HashSet<String>
-where
-    F: Fn(&HashSet<String>) -> HashSet<String>,
-{
-    let mut acc: HashSet<String> = HashSet::new();
-    let mut frontier = seed.clone();
-    loop {
-        let next = step(&frontier);
-        let new: HashSet<String> =
-            next.into_iter().filter(|n| !acc.contains(n) && !seed.contains(n)).collect();
-        if new.is_empty() {
-            break;
-        }
-        acc.extend(new.iter().cloned());
-        frontier = new;
-    }
-    acc
-}
-
-/// All ancestors (transitive superclasses/super-properties) of `seed`.
-pub fn ancestors(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    closure(seed, |f| direct_parents(model, f))
-}
-
-/// All descendants (transitive subclasses/sub-properties) of `seed`.
-pub fn descendants(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    closure(seed, |f| direct_children(model, f))
-}
-
-/// Named classes/properties asserted equivalent to any member of `seed`
-/// (`--select equivalents`).
-pub fn equivalents_of(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, ObjectPropertyExpression as OPE};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        match &ac.component {
-            C::EquivalentClasses(eq) => {
-                let named: Vec<String> = eq
-                    .0
-                    .iter()
-                    .filter_map(|m| match m {
-                        CE::Class(c) => Some(c.0.to_string()),
-                        _ => None,
-                    })
-                    .collect();
-                if named.iter().any(|n| seed.contains(n)) {
-                    out.extend(named);
-                }
-            }
-            C::EquivalentObjectProperties(eq) => {
-                let named: Vec<String> = eq
-                    .0
-                    .iter()
-                    .filter_map(|m| match m {
-                        OPE::ObjectProperty(p) => Some(p.0.to_string()),
-                        _ => None,
-                    })
-                    .collect();
-                if named.iter().any(|n| seed.contains(n)) {
-                    out.extend(named);
-                }
-            }
-            C::EquivalentDataProperties(eq) => {
-                let named: Vec<String> = eq.0.iter().map(|p| p.0.to_string()).collect();
-                if named.iter().any(|n| seed.contains(n)) {
-                    out.extend(named);
-                }
-            }
-            _ => {}
-        }
-    }
-    // Don't re-add the seed itself.
-    out.retain(|n| !seed.contains(n));
-    out
-}
-
-/// For individuals in `seed`, their asserted named class types
-/// (`--select types`).
-pub fn types_of(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, Individual};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        if let C::ClassAssertion(ca) = &ac.component {
-            let ind = match &ca.i {
-                Individual::Named(n) => n.0.to_string(),
-                Individual::Anonymous(_) => continue,
-            };
-            if seed.contains(&ind) {
-                if let CE::Class(c) = &ca.ce {
-                    out.insert(c.0.to_string());
-                }
-            }
-        }
-    }
-    out
-}
-
-/// For classes in `seed`, the named individuals asserted to be instances of them
-/// (`--select instances`).
-pub fn instances_of(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, Individual};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        if let C::ClassAssertion(ca) = &ac.component {
-            if let CE::Class(c) = &ca.ce {
-                if seed.contains(&c.0.to_string()) {
-                    if let Individual::Named(n) = &ca.i {
-                        out.insert(n.0.to_string());
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-
-/// For properties in `seed`, the named classes used as their domains
-/// (`--select domains`).
-pub fn domains_of(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, ObjectPropertyExpression as OPE};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        match &ac.component {
-            C::ObjectPropertyDomain(d) => {
-                let p = match &d.ope {
-                    OPE::ObjectProperty(p) => p.0.to_string(),
-                    OPE::InverseObjectProperty(p) => p.0.to_string(),
-                };
-                if seed.contains(&p) {
-                    if let CE::Class(c) = &d.ce {
-                        out.insert(c.0.to_string());
-                    }
-                }
-            }
-            C::DataPropertyDomain(d) => {
-                if seed.contains(&d.dp.0.to_string()) {
-                    if let CE::Class(c) = &d.ce {
-                        out.insert(c.0.to_string());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-/// For properties in `seed`, the named classes used as their ranges
-/// (`--select ranges`). Data-property ranges are datatypes (not part of
-/// the class/entity seed) so only object-property ranges contribute named
-/// classes.
-pub fn ranges_of(model: &Model, seed: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component as C, ObjectPropertyExpression as OPE};
-    let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        if let C::ObjectPropertyRange(r) = &ac.component {
-            let p = match &r.ope {
-                OPE::ObjectProperty(p) => p.0.to_string(),
-                OPE::InverseObjectProperty(p) => p.0.to_string(),
-            };
-            if seed.contains(&p) {
-                if let CE::Class(c) = &r.ce {
-                    out.insert(c.0.to_string());
-                }
-            }
-        }
-    }
-    out
-}
-
 type Rc = horned_owl::model::RcStr;
 
 /// Any of the OWL entity declaration components.
@@ -706,12 +283,17 @@ pub fn is_declaration(comp: &horned_owl::model::Component<Rc>) -> bool {
     )
 }
 
-/// A logical (non-annotation, non-declaration, non-ontology) axiom.
+/// Whether an axiom is logical: neither a declaration, nor an annotation
+/// axiom — an annotation assertion, a sub-annotation-property axiom, an
+/// annotation property's domain or range — nor part of the ontology's header.
 pub fn is_logical(comp: &horned_owl::model::Component<Rc>) -> bool {
     use horned_owl::model::Component as C;
     !matches!(
         comp,
         C::AnnotationAssertion(_)
+            | C::SubAnnotationPropertyOf(_)
+            | C::AnnotationPropertyDomain(_)
+            | C::AnnotationPropertyRange(_)
             | C::OntologyAnnotation(_)
             | C::OntologyID(_)
             | C::DocIRI(_)
@@ -824,30 +406,6 @@ fn is_axiom(comp: &horned_owl::model::Component<Rc>) -> bool {
     !matches!(comp, C::OntologyID(_) | C::DocIRI(_) | C::OntologyAnnotation(_) | C::Import(_))
 }
 
-/// The namespace selectors among the `--axioms` values that take effect. An
-/// `internal` named after an `external` is ignored, with a warning; an
-/// `external` named after an `internal` applies with it, and the two together
-/// select every axiom.
-pub fn namespace_selectors(toks: &[String]) -> Vec<&'static str> {
-    let mut out: Vec<&'static str> = Vec::new();
-    for t in toks {
-        match t.as_str() {
-            "internal" if out.contains(&"external") => status!(
-                "warning: ignoring the 'internal' axiom selector named after 'external': the two together would select every axiom"
-            ),
-            "internal" if !out.contains(&"internal") => out.push("internal"),
-            "external" if !out.contains(&"external") => {
-                if out.contains(&"internal") {
-                    status!("warning: 'internal' and 'external' together select every axiom");
-                }
-                out.push("external");
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
 /// Axiom-type classification: does `comp` belong to the named category?
 /// Covers `all`, `logical`, `annotation`, `subclass`, `subproperty`,
 /// `equivalent`, `disjoint`, `type`, `tbox`, `abox`, `rbox`, `declaration`,
@@ -876,28 +434,17 @@ pub fn axiom_in_category(
                 | C::AnnotationPropertyRange(_)
         ),
         "declaration" => is_declaration(comp),
-        // `subclass` is the whole SUBSUMPTION family, not just class subsumption:
-        // a filter keeping `subclass` keeps `SubObjectPropertyOf`,
-        // `SubDataPropertyOf` and `SubAnnotationPropertyOf` with it. The `-basic`
-        // composites turn on this — their `filter --axioms "subclass equivalent
-        // annotation"` is what carries the property hierarchy (1,098 lines) into
-        // the result, and with it the declarations that let the NEXT step's
-        // object-property complement remove the unused properties outright.
-        // The subsumption family: one thing is under another. A property CHAIN
-        // says a composition implies a property, not that one property is under
-        // another, so it is not in it.
-        "subclass" => match comp {
-            C::SubClassOf(_) | C::SubDataPropertyOf(_) | C::SubAnnotationPropertyOf(_) => true,
+        "subclass" => matches!(comp, C::SubClassOf(_)),
+        // A property chain says a composition implies a property, not that one
+        // property is under another, so it is no sub-property axiom.
+        "subproperty" => match comp {
+            C::SubDataPropertyOf(_) | C::SubAnnotationPropertyOf(_) => true,
             C::SubObjectPropertyOf(ax) => !matches!(
                 ax.sub,
                 horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(_)
             ),
             _ => false,
         },
-        "subproperty" => matches!(
-            comp,
-            C::SubObjectPropertyOf(_) | C::SubDataPropertyOf(_) | C::SubAnnotationPropertyOf(_)
-        ),
         "equivalent" => matches!(
             comp,
             C::EquivalentClasses(_)
@@ -1042,14 +589,14 @@ fn axiom_type_matches(comp: &horned_owl::model::Component<Rc>, name: &str) -> bo
 }
 
 /// Every value `--axioms` accepts: the grouping categories, the two selectors
-/// that are namespace tests rather than type tests, `structural-tautologies`,
-/// and each single axiom type by its object-model name.
+/// that are namespace tests rather than type tests and `structural-tautologies`,
+/// in any case, and each single axiom type by its object-model name.
 ///
 /// One list serves the classifier and the plan's coverage check, so a category
 /// cannot be executable but reported as a gap, or the reverse.
 pub fn is_axiom_category(name: &str) -> bool {
     matches!(
-        name,
+        name.to_ascii_lowercase().as_str(),
         "all" | "logical" | "annotation" | "declaration" | "subclass" | "subproperty"
             | "equivalent" | "disjoint" | "type" | "tbox" | "abox" | "rbox"
             | "internal" | "external" | "structural-tautologies"

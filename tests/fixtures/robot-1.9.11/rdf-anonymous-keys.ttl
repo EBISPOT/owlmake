@@ -1,0 +1,47 @@
+@prefix : <http://example.org/keys#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<http://example.org/keys> a owl:Ontology .
+
+:r a owl:ObjectProperty .
+:d a owl:DatatypeProperty .
+
+# A key on a union, an empty union and an empty intersection.
+[ a owl:Class ; owl:unionOf ( :A1 :B1 ) ] owl:hasKey ( :r ) .
+[ a owl:Class ; owl:unionOf ( ) ] owl:hasKey ( :r ) .
+[ a owl:Class ; owl:intersectionOf ( ) ] owl:hasKey ( :d ) .
+
+# A key on a restriction, of an object and a data property, and on a complement.
+[ a owl:Restriction ; owl:onProperty :r ; owl:someValuesFrom :A4 ] owl:hasKey ( :r :d ) .
+[ a owl:Class ; owl:complementOf :A5 ] owl:hasKey ( :d ) .
+
+# An annotated key on an intersection, its reification naming a list of its own.
+_:k6 a owl:Class ; owl:intersectionOf ( :A6 :B6 ) ; owl:hasKey ( :r ) .
+[ a owl:Axiom ; owl:annotatedSource _:k6 ; owl:annotatedProperty owl:hasKey ;
+  owl:annotatedTarget ( :r ) ; rdfs:comment "annotated key" ] .
+
+# A key on a one-of.
+[ a owl:Class ; owl:oneOf ( :i7 :j7 ) ] owl:hasKey ( :r ) .
+
+# One node that is the subject of a key and of a general subclass axiom.
+[ a owl:Class ; owl:unionOf ( :A8 :B8 ) ] owl:hasKey ( :r ) ; rdfs:subClassOf :A8 .
+
+# A key of no properties, on an anonymous class and on a named one.
+[ a owl:Class ; owl:unionOf ( :A9 :B9 ) ] owl:hasKey ( ) .
+:A11 a owl:Class ; owl:hasKey ( ) .
+
+# Two keys on one node.
+_:u10 a owl:Class ; owl:unionOf ( :A10 :B10 ) ; owl:hasKey ( :r ) ; owl:hasKey ( :d ) .
+
+# A node that is a named class's superclass and the subject of a key.
+:C12 a owl:Class ; rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :A12 :B12 ) ; owl:hasKey ( :r ) ] .
+
+# An annotated key of no properties.
+_:k13 a owl:Class ; owl:unionOf ( :A13 :B13 ) ; owl:hasKey ( ) .
+[ a owl:Axiom ; owl:annotatedSource _:k13 ; owl:annotatedProperty owl:hasKey ;
+  owl:annotatedTarget ( ) ; rdfs:comment "empty key" ] .
+
+# A key on a named class.
+:A14 a owl:Class ; owl:hasKey ( :r :d ) .

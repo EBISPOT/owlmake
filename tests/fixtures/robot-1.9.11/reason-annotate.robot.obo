@@ -1,0 +1,19 @@
+format-version: 1.2
+ontology: http://example.org/inf.owl
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/C>))\nDeclaration(Class(<http://example.org/D>))\nDeclaration(ObjectProperty(<http://example.org/p>))\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/D> (<http://example.org/D>)\n\nEquivalentClasses(<http://example.org/D> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/C>))\n\n\n)
+
+[Term]
+id: http://example.org/A
+is_a: http://example.org/B
+
+[Term]
+id: http://example.org/B
+is_a: http://example.org/C
+
+[Term]
+id: http://example.org/D
+
+[Term]
+id: http://example.org/E
+relationship: http://example.org/p http://example.org/A
+

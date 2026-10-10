@@ -38,7 +38,6 @@ pub const BOT: CId = 1;
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
-const OWL_BOTTOM_OP: &str = "http://www.w3.org/2002/07/owl#bottomObjectProperty";
 const OWL_TOP_OP: &str = "http://www.w3.org/2002/07/owl#topObjectProperty";
 
 /// EL normal-form general concept inclusions.
@@ -166,9 +165,14 @@ pub struct Reasoner {
     ignored: usize,
     /// Ids that correspond to real named classes (not fresh/auxiliary).
     named: Vec<CId>,
+    /// Whether each concept id is one of `named`. An individual's nominal has
+    /// an IRI too, but is no class.
+    is_named: Vec<bool>,
     /// Ids that stand for asserted individuals (nominals). An unsatisfiable
     /// individual makes the whole ontology inconsistent.
     individuals: Vec<CId>,
+    /// Property probes, as built (see [`Reasoner::classify_probing`]).
+    probes: Vec<(CId, String)>,
 }
 
 /// Enable/disable the union-elimination completion rule for the current thread.
@@ -185,12 +189,22 @@ pub fn set_whelk_mode(on: bool) {
 impl Reasoner {
     /// Classify the TBox + RBox of `model`.
     pub fn classify(model: &Model) -> Reasoner {
+        Self::classify_probing(model, &[])
+    }
+
+    /// Classify `model` together with one probe per object property in
+    /// `properties`: an anonymous concept `P ⊑ ∃p.⊤`, saturated with the
+    /// ontology. A probe is no named class, so it shows up in no classification
+    /// result; [`Reasoner::unsatisfiable_probes`] reads back which are
+    /// unsatisfiable. A fresh concept that only has superclasses changes
+    /// nothing else the ontology entails.
+    pub fn classify_probing(model: &Model, properties: &[String]) -> Reasoner {
         // Arm the memory safety valve before any large structure is built, so the
         // reasoner can never drive the whole machine into the OOM-killer.
         let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
-        let b = Self::normalize(model, t0, timing);
+        let b = Self::normalize(model, properties, t0, timing);
         b.finish(timing, t0)
     }
 
@@ -201,13 +215,19 @@ impl Reasoner {
     /// RSS by that much. Use only when the caller no longer needs the model
     /// (reasoning-only / fresh-output modes).
     pub fn classify_consume(model: Model) -> Reasoner {
+        Self::classify_consume_probing(model, &[])
+    }
+
+    /// [`Reasoner::classify_consume`] with property probes, as
+    /// [`Reasoner::classify_probing`] adds them.
+    pub fn classify_consume_probing(model: Model, properties: &[String]) -> Reasoner {
         let _mem_guard = spawn_mem_watchdog();
         let t0 = crate::time::Instant::now();
         let timing = std::env::var_os("OWLMAKE_TIMING").is_some();
         // `normalize` returns a fully-owned `Builder` (interned ids + normal
         // forms), borrowing the model only through the local `comps` Vec which is
         // dropped on return — so the model can be released here, before saturating.
-        let b = Self::normalize(&model, t0, timing);
+        let b = Self::normalize(&model, properties, t0, timing);
         if timing {
             status!("el: freeing parsed model before saturation (RSS {} MB)", vmrss_mb());
         }
@@ -221,7 +241,7 @@ impl Reasoner {
     /// Build the normalized [`Builder`] (interning + RBox/TBox normal forms) from
     /// a model. Shared by [`Reasoner::classify`] and [`Reasoner::classify_consume`];
     /// the returned `Builder` is fully owned and holds no reference to `model`.
-    fn normalize(model: &Model, t0: crate::time::Instant, timing: bool) -> Builder {
+    fn normalize(model: &Model, probes: &[String], t0: crate::time::Instant, timing: bool) -> Builder {
         let mut b = Builder::new();
         // Capture the elk-vs-owlmake mode once: it decides whether an axiom with
         // a non-EL sub-expression is dropped whole (elk) or has its EL part
@@ -231,11 +251,10 @@ impl Reasoner {
         b.intern_class(OWL_NOTHING); // -> BOT (1)
         debug_assert_eq!(b.iri_to_cid[OWL_THING], TOP);
         debug_assert_eq!(b.iri_to_cid[OWL_NOTHING], BOT);
-        // Intern the special object properties eagerly so the RBox-phase
-        // computation of bottom/top roles sees them even when they only occur
-        // inside TBox class expressions.
+        // Intern the universal role eagerly so the RBox-phase computation of
+        // the top roles sees it even when it only occurs inside TBox class
+        // expressions.
         b.intern_role(OWL_TOP_OP);
-        b.intern_role(OWL_BOTTOM_OP);
 
         // `SetOntology` iterates in `HashSet` order, which varies run-to-run.
         // Only the non-confluent WHELK union-elimination rule depends on axiom
@@ -243,7 +262,8 @@ impl Reasoner {
         // identical regardless of order (the parallel engine already processes in
         // nondeterministic order). Sorting millions of components structurally is
         // very slow (≈90 s on phenio), so do it ONLY in WHELK mode.
-        let mut comps: Vec<&AnnotatedComponent<RcStr>> = model.ont.iter().collect();
+        let ont = crate::reason::owl_axioms(model);
+        let mut comps: Vec<&AnnotatedComponent<RcStr>> = ont.iter().collect();
         if WHELK_MODE.with(|m| m.get()) {
             comps.sort();
         }
@@ -275,6 +295,17 @@ impl Reasoner {
             }
         }
         bar.finish(base * 2);
+        // Probes last: `∃p.⊤` takes p's ranges, which the RBox pass settled.
+        let build = horned_owl::model::Build::new_rc();
+        for p in probes {
+            let probe = b.fresh_class(5);
+            let some = CE::ObjectSomeValuesFrom {
+                ope: OPE::ObjectProperty(build.object_property(p.as_str())),
+                bce: Box::new(CE::Class(build.class(OWL_THING))),
+            };
+            b.normalize_sup(probe, &some);
+            b.probes.push((probe, p.clone()));
+        }
         if timing {
             status!(
                 "el: normalize {:.1}s  ({} classes, {} roles, {} normal forms)",
@@ -298,6 +329,20 @@ impl Reasoner {
             }
         }
         out.sort();
+        out
+    }
+
+    /// The object properties whose probe is unsatisfiable — those for which
+    /// `∃p.⊤` entails ⊥ — sorted.
+    pub fn unsatisfiable_probes(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .probes
+            .iter()
+            .filter(|(c, _)| self.state.s[*c as usize].contains(&BOT))
+            .map(|(_, p)| p.clone())
+            .collect();
+        out.sort();
+        out.dedup();
         out
     }
 
@@ -331,9 +376,7 @@ impl Reasoner {
         props: &std::collections::HashSet<String>,
     ) -> Vec<(String, String, String)> {
         let mut out = Vec::new();
-        let named_class = |c: CId| {
-            c != TOP && c != BOT && self.class_iri[c as usize].is_some() && self.named.contains(&c)
-        };
+        let named_class = |c: CId| c != TOP && c != BOT && self.is_named[c as usize];
         for ((r, x), ys) in &self.state.r_succ {
             let r_iri = match self.role_iri.get(*r as usize) {
                 Some(iri)
@@ -393,12 +436,25 @@ impl Reasoner {
         }
     }
 
+    /// The named classes equivalent to `owl:Thing`, sorted: those `owl:Thing`
+    /// is subsumed by.
+    pub fn top_equivalents(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .named
+            .iter()
+            .copied()
+            .filter(|&c| c != TOP && c != BOT && self.state.s[TOP as usize].contains(&c))
+            .filter_map(|c| self.class_iri[c as usize].clone())
+            .collect();
+        out.sort();
+        out
+    }
+
     /// Inferred *direct* class assertions: for every asserted individual (treated
     /// as a singleton nominal), the most-specific named classes it is entailed to
     /// be an instance of — its direct types. Returns (individual_iri, class_iri)
     /// pairs.
     pub fn class_assertions(&self) -> Vec<(String, String)> {
-        let named: HashSet<CId> = self.named.iter().copied().collect();
         let mut out = Vec::new();
         for &i in &self.individuals {
             let ind_iri = match &self.class_iri[i as usize] {
@@ -410,7 +466,7 @@ impl Reasoner {
             let types: Vec<CId> = self.state.s[i as usize]
                 .iter()
                 .copied()
-                .filter(|&d| d != TOP && d != BOT && d != i && named.contains(&d))
+                .filter(|&d| d != TOP && d != BOT && d != i && self.is_named[d as usize])
                 .collect();
             // Keep only the most-specific (direct) types: drop D if some other type
             // E is a *strict* subclass of D (E ⊑ D and not D ⊑ E). The strictness
@@ -491,7 +547,7 @@ impl Reasoner {
                 None => continue,
             };
             for &d in &self.state.s[c as usize] {
-                if d == c || d == TOP || d == BOT {
+                if d == c || d == TOP || d == BOT || !self.is_named[d as usize] {
                     continue;
                 }
                 if let Some(di) = &self.class_iri[d as usize] {
@@ -521,7 +577,7 @@ impl Reasoner {
                 None => continue,
             };
             for &d in &self.state.s[c as usize] {
-                if d == c || d == TOP || d == BOT {
+                if d == c || d == TOP || d == BOT || !self.is_named[d as usize] {
                     continue;
                 }
                 let Some(di) = &self.class_iri[d as usize] else {
@@ -581,11 +637,7 @@ impl Reasoner {
     fn direct_subsumptions_chunk(&self, classes: &[CId]) -> Vec<(String, String)> {
         let satisfiable = |c: CId| !self.state.s[c as usize].contains(&BOT);
         let named_sup = |c: CId, d: CId| {
-            d != c
-                && d != TOP
-                && d != BOT
-                && self.class_iri[d as usize].is_some()
-                && satisfiable(d)
+            d != c && d != TOP && d != BOT && self.is_named[d as usize] && satisfiable(d)
         };
         // `d` is a direct super of `c` unless some other super `mid` lies strictly
         // between (`mid ⊑ d` and not `d ⊑ mid`).
@@ -860,16 +912,13 @@ struct Builder {
     /// Effective range of each role: union of the ranges of the role and all
     /// its super-roles (computed after the RBox pass).
     eff_range: HashMap<RId, Vec<CId>>,
-    /// Roles that are sub-roles of owl:bottomObjectProperty (the empty role):
-    /// any `∃r.C` over such a role is unsatisfiable.
-    bottom_roles: HashSet<RId>,
     /// Roles that are owl:topObjectProperty (the universal role).
     top_roles: HashSet<RId>,
     /// Roles asserted reflexive.
     reflexive: Vec<RId>,
-    /// Ids that name a genuine class (used in class position), as opposed to
-    /// ids interned only to stand for an individual (a nominal).
-    seen_as_class: HashSet<CId>,
+    /// The nominal `{a}` of each named individual, by IRI. A class with the
+    /// same IRI is another concept (see [`Builder::individual_concept`]).
+    individual_to_cid: HashMap<String, CId>,
     /// Ids that stand for individuals (nominals).
     individuals: HashSet<CId>,
     /// Hash-consing of complex class expressions to their concept-name id, so
@@ -891,6 +940,9 @@ struct Builder {
     /// memory diagnostics only: 0 named, 1 ∃some, 2 ⊓conj, 3 ⊔union, 4 ¬compl,
     /// 5 opaque(self/data).
     kind: Vec<u8>,
+    /// Property probes: an anonymous concept `P ⊑ ∃p.⊤` per object property
+    /// asked about, with that property's IRI.
+    probes: Vec<(CId, String)>,
 }
 
 impl Builder {
@@ -909,33 +961,32 @@ impl Builder {
             unions: Vec::new(),
             ranges: Vec::new(),
             eff_range: HashMap::default(),
-            bottom_roles: HashSet::default(),
             top_roles: HashSet::default(),
             reflexive: Vec::new(),
-            seen_as_class: HashSet::default(),
+            individual_to_cid: HashMap::default(),
             individuals: HashSet::default(),
             expr_memo: HashMap::default(),
             ignored: 0,
             whelk: false,
+            probes: Vec::new(),
         }
     }
 
-    /// Intern an IRI to a concept-name id (no class/individual tagging).
-    fn intern_entity(&mut self, iri: &str) -> CId {
-        if let Some(&id) = self.iri_to_cid.get(iri) {
-            return id;
-        }
+    /// A new concept-name id named by `iri`.
+    fn named_concept(&mut self, iri: &str) -> CId {
         let id = self.class_iri.len() as CId;
         self.class_iri.push(Some(iri.to_string()));
         self.kind.push(0);
-        self.iri_to_cid.insert(iri.to_string(), id);
         id
     }
 
-    /// Intern an IRI used as a genuine class.
+    /// Intern a class IRI to its concept-name id.
     fn intern_class(&mut self, iri: &str) -> CId {
-        let id = self.intern_entity(iri);
-        self.seen_as_class.insert(id);
+        if let Some(&id) = self.iri_to_cid.get(iri) {
+            return id;
+        }
+        let id = self.named_concept(iri);
+        self.iri_to_cid.insert(iri.to_string(), id);
         id
     }
 
@@ -1059,14 +1110,6 @@ impl Builder {
         }
         self.eff_range = eff;
 
-        // Roles that are sub-roles of owl:bottomObjectProperty are empty.
-        if let Some(&bot_rid) = self.role_to_rid.get(OWL_BOTTOM_OP) {
-            for r in 0..n as RId {
-                if supers[r as usize].contains(&bot_rid) {
-                    self.bottom_roles.insert(r);
-                }
-            }
-        }
         // owl:topObjectProperty is the universal role: model it as reflexive
         // (so `C ⊑ ∃top.C`) plus a link from ⊤ to each individual (so a
         // non-empty filler forces `⊤ ⊑ ∃top.filler`). The (⊤, a) links are
@@ -1103,12 +1146,19 @@ impl Builder {
                 // DisjointUnion(D; C1..Cn): the Ci are pairwise disjoint and each
                 // Ci ⊑ D. (The D ⊑ C1 ⊔ ... ⊔ Cn direction is not EL and is
                 // omitted; it is not needed for the EL-entailed subsumptions.)
+                // With a single Ci that direction is D ⊑ C1, and with none it
+                // is D ⊑ ⊥; both are EL and are kept.
                 let d = self.intern_class(ax.0 .0.as_ref());
                 self.add_disjoint(&ax.1);
                 for member in &ax.1 {
                     if let Some(c) = self.flatten(member) {
                         self.nfs.push(Nf::Sub(c, d));
                     }
+                }
+                match ax.1.as_slice() {
+                    [] => self.nfs.push(Nf::Sub(d, BOT)),
+                    [only] => self.normalize_sup(d, only),
+                    _ => {}
                 }
             }
             Component::ObjectPropertyDomain(ax) => {
@@ -1210,11 +1260,6 @@ impl Builder {
                         return;
                     }
                 };
-                // ∃r.C over the empty role is unsatisfiable.
-                if self.bottom_roles.contains(&r) {
-                    self.nfs.push(Nf::Sub(lhs, BOT));
-                    return;
-                }
                 let filler = match self.flatten(bce) {
                     Some(f) => f,
                     None => {
@@ -1260,9 +1305,6 @@ impl Builder {
             }
             CE::ObjectSomeValuesFrom { ope, bce } => {
                 let r = self.role_of(ope)?;
-                if self.bottom_roles.contains(&r) {
-                    return Some(BOT); // ∃(empty role).C ≡ ⊥
-                }
                 let filler = self.flatten(bce)?;
                 Some(self.intern_some(r, filler))
             }
@@ -1477,13 +1519,18 @@ impl Builder {
         acc
     }
 
-    /// Treat a named individual as a singleton nominal concept name. The id is
+    /// The nominal `{a}` of a named individual: a concept name of its own,
     /// tagged as an individual so it does not surface as a class in the
-    /// taxonomy.
+    /// taxonomy. A class with the same IRI is a different concept, so the
+    /// individual's types are not that class's superclasses.
     fn individual_concept(&mut self, i: &Individual<RcStr>) -> Option<CId> {
         match i {
             Individual::Named(n) => {
-                let id = self.intern_entity(n.0.as_ref());
+                if let Some(&id) = self.individual_to_cid.get(n.0.as_ref()) {
+                    return Some(id);
+                }
+                let id = self.named_concept(n.0.as_ref());
+                self.individual_to_cid.insert(n.0.to_string(), id);
                 self.individuals.insert(id);
                 Some(id)
             }
@@ -1819,8 +1866,12 @@ impl Builder {
         }
 
         let named: Vec<CId> = (0..n_classes as CId)
-            .filter(|&c| self.class_iri[c as usize].is_some() && self.seen_as_class.contains(&c))
+            .filter(|&c| self.class_iri[c as usize].is_some() && !self.individuals.contains(&c))
             .collect();
+        let mut is_named = vec![false; n_classes];
+        for &c in &named {
+            is_named[c as usize] = true;
+        }
         let mut individuals: Vec<CId> = self.individuals.iter().copied().collect();
         individuals.sort_unstable();
 
@@ -1831,7 +1882,9 @@ impl Builder {
             state,
             ignored: self.ignored,
             named,
+            is_named,
             individuals,
+            probes: self.probes,
         }
     }
 }

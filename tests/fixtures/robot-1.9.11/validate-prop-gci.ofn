@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/prop-gci.owl>
+Declaration(Class(:B))
+Declaration(Class(:D))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:q))
+SubClassOf(ObjectSomeValuesFrom(:p owl:Thing) owl:Nothing)
+SubClassOf(:D ObjectSomeValuesFrom(:q :B))
+)

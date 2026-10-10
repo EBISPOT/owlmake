@@ -1,0 +1,64 @@
+Prefix(:=<http://example.org/keys#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/keys>
+
+Declaration(Class(:A1))
+Declaration(Class(:A10))
+Declaration(Class(:A11))
+Declaration(Class(:A12))
+Declaration(Class(:A13))
+Declaration(Class(:A14))
+Declaration(Class(:A4))
+Declaration(Class(:A5))
+Declaration(Class(:A6))
+Declaration(Class(:A8))
+Declaration(Class(:A9))
+Declaration(Class(:B1))
+Declaration(Class(:B10))
+Declaration(Class(:B12))
+Declaration(Class(:B13))
+Declaration(Class(:B6))
+Declaration(Class(:B8))
+Declaration(Class(:B9))
+Declaration(Class(:C12))
+Declaration(ObjectProperty(:r))
+Declaration(DataProperty(:d))
+Declaration(NamedIndividual(:i7))
+Declaration(NamedIndividual(:j7))
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :C12 (:C12)
+
+SubClassOf(:C12 ObjectUnionOf(:A12 :B12))
+
+
+
+SubClassOf(ObjectUnionOf(:A8 :B8) :A8)
+HasKey(:A11 () ())
+HasKey(:A14 (:r) (:d))
+HasKey(ObjectIntersectionOf() () (:d))
+HasKey(Annotation(rdfs:comment "annotated key") ObjectIntersectionOf(:A6 :B6) (:r) ())
+HasKey(ObjectUnionOf() (:r) ())
+HasKey(ObjectUnionOf(:A1 :B1) (:r) ())
+HasKey(ObjectUnionOf(:A10 :B10) (:r) ())
+HasKey(ObjectUnionOf(:A10 :B10) () (:d))
+HasKey(ObjectUnionOf(:A12 :B12) (:r) ())
+HasKey(Annotation(rdfs:comment "empty key") ObjectUnionOf(:A13 :B13) () ())
+HasKey(ObjectUnionOf(:A8 :B8) (:r) ())
+HasKey(ObjectUnionOf(:A9 :B9) () ())
+HasKey(ObjectComplementOf(:A5) () (:d))
+HasKey(ObjectOneOf(:i7 :j7) (:r) ())
+HasKey(ObjectSomeValuesFrom(:r :A4) (:r) (:d))
+)

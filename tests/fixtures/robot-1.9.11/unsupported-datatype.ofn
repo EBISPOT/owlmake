@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/unsupported-datatype#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/unsupported-datatype>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(DataProperty(:born))
+Declaration(NamedIndividual(:i))
+SubClassOf(:A :B)
+SubClassOf(:B DataSomeValuesFrom(:born xsd:date))
+ClassAssertion(:A :i)
+DataPropertyAssertion(:born :i "2020-01-01"^^xsd:date)
+)

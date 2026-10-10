@@ -1,6 +1,6 @@
 [package]
 name = "owlmake"
-version = "0.4.8"
+version = "0.4.18"
 edition = "2021"
 description = "A complete ontology build stack in a single self-contained Rust binary: OWL I/O, reasoning, QC and releases."
 license = "Apache-2.0"
@@ -134,6 +134,9 @@ owo-colors = "4"
 #     toolchain).
 tiktoken-rs = "0.7"
 sha1 = "0.10"
+# md-5 — a Turtle blank-node label longer than 32 UTF-16 units is named by its
+# MD5 digest.
+md-5 = "0.10"
 flate2 = "1"
 
 # hermit-rs: the OWL 2 DL reasoner backend (`--reasoner hermit`/`jfact`;
@@ -143,7 +146,7 @@ flate2 = "1"
 # classification, a wasm-safe clock). A general dependency that builds for wasm,
 # so DL reasoning is available in the browser too. Depends on
 # horned-owl ^4.0, redirected by the root `[patch.crates-io]`.
-hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "db59403b284302272eca423e8ace549646a28315" }
+hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "49faccd24a19ec5e9d2852cffad1de0cbf802198" }
 
 # whelk-rs: native Rust OWL 2 EL reasoner (`--reasoner whelk`). From the
 # EBISPOT/whelk-rs fork, which requests horned-owl without `remote` so it builds
@@ -263,7 +266,7 @@ regex-syntax = "0.8"
 # satisfies every requirement in the graph and keeps one shared model. Pinned
 # by rev, not by branch, so a build is reproducible without the lockfile; bump
 # it when devel moves.
-horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "1c8147b" }
+horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "694b756" }
 # pretty_rdf is no longer a separate dependency: horned-owl now vendors it as the
 # `horned-pretty-rdf` workspace member, so no patch is needed here.
 # oxigraph SPARQL optimizer (sparopt) — kept in-tree under deps/ (the one

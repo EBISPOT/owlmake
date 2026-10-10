@@ -850,6 +850,8 @@ fn serve_image_assets(line: &str, dir: &Path) -> String {
 /// `robot_prefix` is the expanded launcher text a recipe puts at command
 /// position (e.g. `robot`, or `java -jar robot.jar`), used to recognise — and
 /// strip — such an invocation before its arguments reach that subcommand.
+/// `env` is the run's command-line `VAR=value` assignments, which every command
+/// the line spawns has in its environment.
 pub fn run_line(
     line: &str,
     dir: &Path,
@@ -857,7 +859,6 @@ pub fn run_line(
     robot_prefix: &str,
     env: &[(String, String)],
 ) -> Result<()> {
-    *RUN_ENV.lock().unwrap() = env.to_vec();
     let line = &serve_image_assets(line, dir);
     // Strip the per-line recipe prefixes: `@` (silent), `+` (always run), and a
     // leading `-` (ignore errors).
@@ -877,7 +878,7 @@ pub fn run_line(
     // `for … do … done`, `case … esac`) must run as a whole through the shell;
     // splitting it on `;`/`&&`/`||` would tear the construct apart.
     if l.split_whitespace().any(is_control_keyword) {
-        let r = run_shell(l, dir, exe, robot_prefix);
+        let r = run_shell(l, dir, exe, robot_prefix, env);
         if let Err(e) = r {
             if ignore_err {
                 status!("make:   (ignored) {e:#}");
@@ -892,7 +893,7 @@ pub fn run_line(
     // assignment, a `$?` — runs as one shell, as make runs it (see
     // `robot::shares_shell_state`).
     if robot::shares_shell_state(l) {
-        let r = run_shell(l, dir, exe, robot_prefix);
+        let r = run_shell(l, dir, exe, robot_prefix, env);
         return match r {
             Err(e) if ignore_err => {
                 status!("make:   (ignored) {e:#}");
@@ -919,7 +920,7 @@ pub fn run_line(
         if cmd.is_empty() {
             continue;
         }
-        match run_sub(cmd, dir, exe, robot_prefix) {
+        match run_sub(cmd, dir, exe, robot_prefix, env) {
             Ok(()) => {
                 last_ok = true;
                 pending_err = None;
@@ -941,7 +942,7 @@ pub fn run_line(
 }
 
 /// Execute one `;`/`&&`/`||`-delimited command.
-fn run_sub(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str) -> Result<()> {
+fn run_sub(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str, env: &[(String, String)]) -> Result<()> {
     let stages = split_pipe(sub);
     let toks = robot::tokenize_quoted(stages[0].trim());
     let Some((head, _)) = toks.first() else { return Ok(()) };
@@ -950,7 +951,7 @@ fn run_sub(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str) -> Result<()> 
     // through `sh` with owlmake's own implementations substituted by explicit
     // path. Single text-processing commands likewise stay shell-native.
     if stages.len() > 1 || is_control_keyword(head) {
-        return run_shell(sub, dir, exe, robot_prefix);
+        return run_shell(sub, dir, exe, robot_prefix, env);
     }
 
     let (argv, redir) = strip_redirects(&toks);
@@ -962,7 +963,7 @@ fn run_sub(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str) -> Result<()> 
     // command into a `FileOp` would use its text verbatim (see
     // [`has_shell_expansion`]).
     if has_shell_expansion(sub) {
-        return run_shell(sub, dir, exe, robot_prefix);
+        return run_shell(sub, dir, exe, robot_prefix, env);
     }
 
     if let Some(op) = FileOp::parse(&argv) {
@@ -983,19 +984,19 @@ fn run_sub(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str) -> Result<()> 
     }
     if robot::is_robot(&argv, robot_prefix) {
         let args = robot::robot_subcommand_args(&argv, robot_prefix);
-        return run_tool(exe, &args, dir, &redir);
+        return run_tool(exe, &args, dir, &redir, env);
     }
     if is_jq(head) {
         let mut args = vec!["jq".to_string()];
         args.extend_from_slice(&argv[1..]);
-        return run_tool(exe, &args, dir, &redir);
+        return run_tool(exe, &args, dir, &redir, env);
     }
     if let Some(sssom_args) = as_sssom(&argv) {
-        return run_tool(exe, &sssom_args, dir, &redir);
+        return run_tool(exe, &sssom_args, dir, &redir, env);
     }
     // A lone text processor (perl/grep/sed/echo/…): run it through the shell so
     // its own quoting/globbing/redirection semantics are preserved exactly.
-    run_shell(sub, dir, exe, robot_prefix)
+    run_shell(sub, dir, exe, robot_prefix, env)
 }
 
 /// Environment names an owlmake child is allowed to inherit.
@@ -1016,13 +1017,13 @@ const CHILD_ENV_ALLOWED: &[&str] = &[
 /// whole process environment to a filter as `$ENV`, as the filter language
 /// requires, so an inherited variable could otherwise reach a plan step's data
 /// transform. A recipe's own `sh` line still inherits — a shell step is a
-/// declared escape hatch — but it receives this run's `VAR=value` assignments
-/// explicitly, via `apply_run_env`.
+/// declared escape hatch — and both receive this run's `VAR=value` assignments,
+/// `env`, explicitly.
 ///
 /// It runs under this run's emulation, which its arguments name ahead of the
 /// command (`build::emulation_args`), as every owlmake process a build starts
 /// does.
-fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Result<()> {
+fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects, env: &[(String, String)]) -> Result<()> {
     // As in `run_shell`: the child writes to the inherited stderr.
     let _quiet = crate::progress::Suspend::new();
     let mut cmd = Command::new(exe);
@@ -1036,7 +1037,7 @@ fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Resul
     // This run's `VAR=value` assignments are an explicit run input, so they DO
     // reach the child: a variable given on the command line is exported into
     // every recipe environment it parameterises.
-    apply_run_env(&mut cmd);
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
     // A replayed command needs no signal about how to write RDF/XML: every file
     // owlmake writes gets the same serialisation, in this process or a child.
     if let Some(infile) = &redir.stdin {
@@ -1088,35 +1089,20 @@ fn run_tool(exe: &Path, args: &[String], dir: &Path, redir: &Redirects) -> Resul
     Ok(())
 }
 
-/// This invocation's `VAR=value` assignments, applied to every child a recipe
-/// spawns, on whichever thread it runs. Scoped to the run rather than written
-/// into owlmake's own environment, so one invocation's variables cannot reach a
-/// later invocation in the same process.
-static RUN_ENV: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
-
-/// Apply this run's command-line variable assignments to a child: a `VAR=value`
-/// given on the command line is exported into every recipe environment, so the
-/// commands a recipe spawns see it too.
-fn apply_run_env(cmd: &mut Command) {
-    for (k, v) in RUN_ENV.lock().unwrap().iter() {
-        cmd.env(k, v);
-    }
-}
-
 /// Run a command line through `sh -c`. The tools named directly in the line are
 /// rewritten to the explicit `exe`; in addition the bundled-tool shim directory
 /// is prepended to the shell's `PATH`, so that any *external* script the command
 /// invokes (e.g. `python3 build.py`, a project `*.sh`) which itself calls
 /// `robot`/`jq`/`sssom`/`sed`/`grep`/`comm` still resolves to the bundled
 /// engines — without requiring a system copy.
-fn run_shell(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str) -> Result<()> {
+fn run_shell(sub: &str, dir: &Path, exe: &Path, robot_prefix: &str, env: &[(String, String)]) -> Result<()> {
     // The child inherits stderr; stop the stage spinner redrawing while it writes.
     let _quiet = crate::progress::Suspend::new();
     let rewritten = rewrite_tools(sub, exe, robot_prefix);
     let mut cmd = Command::new("sh");
     cmd.arg("-c").arg(&rewritten).current_dir(dir);
     prepend_tool_path(&mut cmd, exe);
-    apply_run_env(&mut cmd);
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
     let status = cmd
         .status()
         .with_context(|| format!("spawning recipe command: {rewritten}"))?;
@@ -1612,20 +1598,18 @@ pub fn owlmake_exe() -> PathBuf {
 /// [`run_line`] applies. Exposed so the executor can run a shell-shaped *step*
 /// where it sits in the pipeline, instead of abandoning the step list and
 /// replaying a whole recipe: the step list is the complete description of the
-/// build, so no recipe text has to travel alongside it.
-pub fn run_step_command(
-    cmd: &str,
-    dir: &Path,
-    robot_prefix: &str,
-) -> Result<()> {
-    run_line(cmd, dir, &owlmake_exe(), robot_prefix, &[])
+/// build, so no recipe text has to travel alongside it. `env` is the run's
+/// command-line `VAR=value` assignments, which every command the line spawns
+/// has in its environment.
+pub fn run_step_command(cmd: &str, dir: &Path, robot_prefix: &str, env: &[(String, String)]) -> Result<()> {
+    run_line(cmd, dir, &owlmake_exe(), robot_prefix, env)
 }
 
 /// Invoke the owlmake binary directly with `args` in argv order (no shell, no
 /// redirection), for steps that recorded their tokens rather than a line:
 /// `Jq`, `Sssom`, `OwlmakeCli`.
-pub fn run_owlmake_args(args: &[String], dir: &Path) -> Result<()> {
-    run_tool(&owlmake_exe(), args, dir, &Redirects::default())
+pub fn run_owlmake_args(args: &[String], dir: &Path, env: &[(String, String)]) -> Result<()> {
+    run_tool(&owlmake_exe(), args, dir, &Redirects::default(), env)
 }
 
 #[cfg(test)]

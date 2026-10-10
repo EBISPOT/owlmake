@@ -1,0 +1,11 @@
+Prefix(:=<http://purl.obolibrary.org/obo/>)
+Ontology(<http://purl.obolibrary.org/obo/explain-unsat-incons.owl>
+Declaration(Class(:X_1))
+Declaration(Class(:X_2))
+Declaration(Class(:X_3))
+Declaration(NamedIndividual(:i))
+DisjointClasses(:X_1 :X_2)
+SubClassOf(:X_3 :X_1)
+SubClassOf(:X_3 :X_2)
+ClassAssertion(:X_3 :i)
+)

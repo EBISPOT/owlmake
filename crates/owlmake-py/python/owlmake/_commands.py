@@ -9,7 +9,7 @@ from typing import Mapping, Optional, Sequence
 from . import _runtime as _rt
 from ._runtime import Chain, OwlmakeResult, StrOrPath
 
-def convert(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, check: Optional[bool] = None, clean_obo: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def convert(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, check: Optional[bool] = None, clean_obo: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Convert an ontology between serialization formats
 
     Flags:
@@ -18,10 +18,11 @@ def convert(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     format: (--format / -f) Output format (overrides inference from the output extension)
     check: (--check / -c) Check OBO document structure on write (`<bool>`, default true). When false, OBO-structure strictness is suppressed (the OBO writer is already lenient and never errors, so this controls only the OBO strictness gate)
     clean_obo: (--clean-obo) Options for clean OBO output, comma-separated. Recognized tokens: `true`, `drop-untranslatable-axioms`, `drop-gci-axioms`. When set and the output format is OBO, drop axioms that do not translate to OBO before writing
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -38,7 +39,8 @@ def convert(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -48,7 +50,7 @@ def convert(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_convert(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, check: Optional[bool] = None, clean_obo: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_convert(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, check: Optional[bool] = None, clean_obo: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Convert an ontology between serialization formats
 
     Flags:
@@ -57,10 +59,11 @@ def _chain_convert(self, *, input: Optional[StrOrPath] = None, output: Optional[
     format: (--format / -f) Output format (overrides inference from the output extension)
     check: (--check / -c) Check OBO document structure on write (`<bool>`, default true). When false, OBO-structure strictness is suppressed (the OBO writer is already lenient and never errors, so this controls only the OBO strictness gate)
     clean_obo: (--clean-obo) Options for clean OBO output, comma-separated. Recognized tokens: `true`, `drop-untranslatable-axioms`, `drop-gci-axioms`. When set and the output format is OBO, drop axioms that do not translate to OBO before writing
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -77,7 +80,8 @@ def _chain_convert(self, *, input: Optional[StrOrPath] = None, output: Optional[
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -90,22 +94,23 @@ def _chain_convert(self, *, input: Optional[StrOrPath] = None, output: Optional[
 Chain.convert = _chain_convert
 
 
-def merge(*, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def merge(*, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Merge multiple ontologies into one
 
     Flags:
     input: (--input / -i) Input ontology paths (repeatable)
-    inputs: (--inputs) Merge ontologies matching a filesystem wildcard pattern. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here. Repeatable
+    inputs: (--inputs) Merge the ontologies whose file names match a wildcard pattern (`*` and `?` in the file name). The first pattern given is the one read. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here
     output: (--output / -o) Output ontology path
     format: (--format) Output format (overrides inference from the output extension). `-f` is taken by `--annotate-derived-from` on this command, so the format has no short; use the long `--format`
-    include_annotations: (--include-annotations / -a) Keep secondary inputs' ontology-level annotations (`<bool>`, default false: by default only the primary ontology's annotations survive)
-    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog` or as sibling files) and merged in, then the import declarations are dropped. When false, imports are kept and their content is not merged
-    annotate_defined_by: (--annotate-defined-by / -d) Annotate each entity with rdfs:isDefinedBy = its source ontology IRI (`<bool>`, default false)
-    annotate_derived_from: (--annotate-derived-from / -f) Annotate merged axioms with prov:wasDerivedFrom = their source ontology IRI (`<bool>`, default false)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    include_annotations: (--include-annotations / -a) Keep the other inputs' ontology annotations (`<bool>`, default false: by default only the first ontology's annotations survive)
+    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog`, or the catalog beside the input) and merged in, then the import declarations are dropped. When false, the first ontology keeps its imports, every input contributes its own axioms only, and the other inputs' imports go
+    annotate_defined_by: (--annotate-defined-by / -d) Assert `rdfs:isDefinedBy` the ontology IRI of every entity an input or one of its imports names that has none (`<bool>`, default false)
+    annotate_derived_from: (--annotate-derived-from / -f) Annotate every axiom with `prov:wasDerivedFrom` the version IRI (else the ontology IRI) of the ontology it comes from (`<bool>`, default false)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -125,7 +130,8 @@ def merge(*, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Seque
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -135,22 +141,23 @@ def merge(*, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Seque
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_merge(self, *, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_merge(self, *, input: Optional[Sequence[StrOrPath]] = None, inputs: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Merge multiple ontologies into one
 
     Flags:
     input: (--input / -i) Input ontology paths (repeatable)
-    inputs: (--inputs) Merge ontologies matching a filesystem wildcard pattern. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here. Repeatable
+    inputs: (--inputs) Merge the ontologies whose file names match a wildcard pattern (`*` and `?` in the file name). The first pattern given is the one read. Bound without a short: `-p` collides with the global `-P,--prefixes`/`--prefix`, so only the long form is exposed here
     output: (--output / -o) Output ontology path
     format: (--format) Output format (overrides inference from the output extension). `-f` is taken by `--annotate-derived-from` on this command, so the format has no short; use the long `--format`
-    include_annotations: (--include-annotations / -a) Keep secondary inputs' ontology-level annotations (`<bool>`, default false: by default only the primary ontology's annotations survive)
-    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog` or as sibling files) and merged in, then the import declarations are dropped. When false, imports are kept and their content is not merged
-    annotate_defined_by: (--annotate-defined-by / -d) Annotate each entity with rdfs:isDefinedBy = its source ontology IRI (`<bool>`, default false)
-    annotate_derived_from: (--annotate-derived-from / -f) Annotate merged axioms with prov:wasDerivedFrom = their source ontology IRI (`<bool>`, default false)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    include_annotations: (--include-annotations / -a) Keep the other inputs' ontology annotations (`<bool>`, default false: by default only the first ontology's annotations survive)
+    collapse_import_closure: (--collapse-import-closure / -c) Merge the imports closure (`<bool>`, default true). When true, each input's `owl:imports` transitive closure is resolved (via `--catalog`, or the catalog beside the input) and merged in, then the import declarations are dropped. When false, the first ontology keeps its imports, every input contributes its own axioms only, and the other inputs' imports go
+    annotate_defined_by: (--annotate-defined-by / -d) Assert `rdfs:isDefinedBy` the ontology IRI of every entity an input or one of its imports names that has none (`<bool>`, default false)
+    annotate_derived_from: (--annotate-derived-from / -f) Annotate every axiom with `prov:wasDerivedFrom` the version IRI (else the ontology IRI) of the ontology it comes from (`<bool>`, default false)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -170,7 +177,8 @@ def _chain_merge(self, *, input: Optional[Sequence[StrOrPath]] = None, inputs: O
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -183,7 +191,7 @@ def _chain_merge(self, *, input: Optional[Sequence[StrOrPath]] = None, inputs: O
 Chain.merge = _chain_merge
 
 
-def merge_equivalent_sets(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, set_prefix: Optional[Sequence[StrOrPath]] = None, label_prefix: Optional[Sequence[StrOrPath]] = None, definition_prefix: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def merge_equivalent_sets(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, set_prefix: Optional[Sequence[StrOrPath]] = None, label_prefix: Optional[Sequence[StrOrPath]] = None, definition_prefix: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Collapse cliques of equivalent classes into a prefix-priority leader
 
     Flags:
@@ -193,10 +201,11 @@ def merge_equivalent_sets(*, input: Optional[StrOrPath] = None, output: Optional
     set_prefix: (--set-prefix / -s) Leader-selection priority `PREFIX=SCORE` (repeatable). Highest wins
     label_prefix: (--label-prefix / -l) Label-source priority `PREFIX=SCORE` (repeatable)
     definition_prefix: (--definition-prefix / -d) Definition-source priority `PREFIX=SCORE` (repeatable)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -214,7 +223,8 @@ def merge_equivalent_sets(*, input: Optional[StrOrPath] = None, output: Optional
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -224,7 +234,7 @@ def merge_equivalent_sets(*, input: Optional[StrOrPath] = None, output: Optional
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_merge_equivalent_sets(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, set_prefix: Optional[Sequence[StrOrPath]] = None, label_prefix: Optional[Sequence[StrOrPath]] = None, definition_prefix: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_merge_equivalent_sets(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, set_prefix: Optional[Sequence[StrOrPath]] = None, label_prefix: Optional[Sequence[StrOrPath]] = None, definition_prefix: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Collapse cliques of equivalent classes into a prefix-priority leader
 
     Flags:
@@ -234,10 +244,11 @@ def _chain_merge_equivalent_sets(self, *, input: Optional[StrOrPath] = None, out
     set_prefix: (--set-prefix / -s) Leader-selection priority `PREFIX=SCORE` (repeatable). Highest wins
     label_prefix: (--label-prefix / -l) Label-source priority `PREFIX=SCORE` (repeatable)
     definition_prefix: (--definition-prefix / -d) Definition-source priority `PREFIX=SCORE` (repeatable)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -255,7 +266,8 @@ def _chain_merge_equivalent_sets(self, *, input: Optional[StrOrPath] = None, out
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -268,7 +280,7 @@ def _chain_merge_equivalent_sets(self, *, input: Optional[StrOrPath] = None, out
 Chain.merge_equivalent_sets = _chain_merge_equivalent_sets
 
 
-def unmerge(*, input: Optional[Sequence[StrOrPath]] = None, second_input: Optional[StrOrPath] = None, inputs: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def unmerge(*, input: Optional[Sequence[StrOrPath]] = None, second_input: Optional[StrOrPath] = None, inputs: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Remove the axioms of a second ontology from the first
 
     Flags:
@@ -277,10 +289,11 @@ def unmerge(*, input: Optional[Sequence[StrOrPath]] = None, second_input: Option
     inputs: (--inputs / -p) Subtract every ontology matching this glob pattern
     output: (--output / -o)
     format: (--format / -f)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -297,7 +310,8 @@ def unmerge(*, input: Optional[Sequence[StrOrPath]] = None, second_input: Option
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -307,7 +321,7 @@ def unmerge(*, input: Optional[Sequence[StrOrPath]] = None, second_input: Option
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_unmerge(self, *, input: Optional[Sequence[StrOrPath]] = None, second_input: Optional[StrOrPath] = None, inputs: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_unmerge(self, *, input: Optional[Sequence[StrOrPath]] = None, second_input: Optional[StrOrPath] = None, inputs: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Remove the axioms of a second ontology from the first
 
     Flags:
@@ -316,10 +330,11 @@ def _chain_unmerge(self, *, input: Optional[Sequence[StrOrPath]] = None, second_
     inputs: (--inputs / -p) Subtract every ontology matching this glob pattern
     output: (--output / -o)
     format: (--format / -f)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -336,7 +351,8 @@ def _chain_unmerge(self, *, input: Optional[Sequence[StrOrPath]] = None, second_
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -349,7 +365,7 @@ def _chain_unmerge(self, *, input: Optional[Sequence[StrOrPath]] = None, second_
 Chain.unmerge = _chain_unmerge
 
 
-def mint(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, temp_id_prefix: Optional[StrOrPath] = None, id_range_name: Optional[StrOrPath] = None, id_ranges: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def mint(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, temp_id_prefix: Optional[StrOrPath] = None, id_range_name: Optional[StrOrPath] = None, id_ranges: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Allocate definitive IDs for temporary ones from a named ID range (KGCL `kgcl:mint`; the `allocate-definitive-ids` target)
 
     Flags:
@@ -359,10 +375,11 @@ def mint(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = Non
     temp_id_prefix: (--temp-id-prefix) [required] IRI prefix that marks a temporary ID (KGCL `--temp-id-prefix`), e.g. `http://purl.obolibrary.org/obo/CL_99`. Every entity whose IRI starts with this prefix is reassigned a definitive ID
     id_range_name: (--id-range-name) [required] Name (the `allocatedto` owner) of the ID range to draw definitive IDs from, e.g. `Automation` (KGCL `--id-range-name`)
     id_ranges: (--id-ranges) The `*-idranges.owl` file. Defaults to the single `*-idranges.owl` sitting next to the input file (or in the current directory when piped)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -380,7 +397,8 @@ def mint(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = Non
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -390,7 +408,7 @@ def mint(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = Non
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_mint(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, temp_id_prefix: Optional[StrOrPath] = None, id_range_name: Optional[StrOrPath] = None, id_ranges: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_mint(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, temp_id_prefix: Optional[StrOrPath] = None, id_range_name: Optional[StrOrPath] = None, id_ranges: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Allocate definitive IDs for temporary ones from a named ID range (KGCL `kgcl:mint`; the `allocate-definitive-ids` target)
 
     Flags:
@@ -400,10 +418,11 @@ def _chain_mint(self, *, input: Optional[StrOrPath] = None, output: Optional[Str
     temp_id_prefix: (--temp-id-prefix) [required] IRI prefix that marks a temporary ID (KGCL `--temp-id-prefix`), e.g. `http://purl.obolibrary.org/obo/CL_99`. Every entity whose IRI starts with this prefix is reassigned a definitive ID
     id_range_name: (--id-range-name) [required] Name (the `allocatedto` owner) of the ID range to draw definitive IDs from, e.g. `Automation` (KGCL `--id-range-name`)
     id_ranges: (--id-ranges) The `*-idranges.owl` file. Defaults to the single `*-idranges.owl` sitting next to the input file (or in the current directory when piped)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -421,7 +440,8 @@ def _chain_mint(self, *, input: Optional[StrOrPath] = None, output: Optional[Str
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -434,7 +454,7 @@ def _chain_mint(self, *, input: Optional[StrOrPath] = None, output: Optional[Str
 Chain.mint = _chain_mint
 
 
-def ogrep(*, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, iri_only: bool = False, case_sensitive: bool = False, self_only: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def ogrep(*, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, iri_only: bool = False, case_sensitive: bool = False, self_only: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Print every axiom mentioning an entity that matches a pattern — the shorthand for `filter --term <IRI> --trim false`, in any format
 
     Flags:
@@ -445,10 +465,11 @@ def ogrep(*, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = N
     iri_only: (--iri-only) Match only entity IRIs, not labels/synonyms/definitions
     case_sensitive: (--case-sensitive) Match case-sensitively
     self_only: (--self-only) Print only the matched entities' own axioms, not everything that refers to them
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -467,7 +488,8 @@ def ogrep(*, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -477,7 +499,7 @@ def ogrep(*, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_ogrep(self, *, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, iri_only: bool = False, case_sensitive: bool = False, self_only: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_ogrep(self, *, pattern: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, iri_only: bool = False, case_sensitive: bool = False, self_only: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Print every axiom mentioning an entity that matches a pattern — the shorthand for `filter --term <IRI> --trim false`, in any format
 
     Flags:
@@ -488,10 +510,11 @@ def _chain_ogrep(self, *, pattern: Optional[StrOrPath] = None, input: Optional[S
     iri_only: (--iri-only) Match only entity IRIs, not labels/synonyms/definitions
     case_sensitive: (--case-sensitive) Match case-sensitively
     self_only: (--self-only) Print only the matched entities' own axioms, not everything that refers to them
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -510,7 +533,8 @@ def _chain_ogrep(self, *, pattern: Optional[StrOrPath] = None, input: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -523,17 +547,18 @@ def _chain_ogrep(self, *, pattern: Optional[StrOrPath] = None, input: Optional[S
 Chain.ogrep = _chain_ogrep
 
 
-def mirror(*, input: Optional[StrOrPath] = None, directory: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def mirror(*, input: Optional[StrOrPath] = None, directory: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Download an ontology's import closure and write an XML catalog
 
     Flags:
     input: (--input / -i)
     directory: (--directory / -d) Directory to write mirrored imports into
     output: (--output / -o) Output catalog path (XML catalog v001)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -548,7 +573,8 @@ def mirror(*, input: Optional[StrOrPath] = None, directory: Optional[StrOrPath] 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -558,17 +584,18 @@ def mirror(*, input: Optional[StrOrPath] = None, directory: Optional[StrOrPath] 
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_mirror(self, *, input: Optional[StrOrPath] = None, directory: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_mirror(self, *, input: Optional[StrOrPath] = None, directory: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Download an ontology's import closure and write an XML catalog
 
     Flags:
     input: (--input / -i)
     directory: (--directory / -d) Directory to write mirrored imports into
     output: (--output / -o) Output catalog path (XML catalog v001)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -583,7 +610,8 @@ def _chain_mirror(self, *, input: Optional[StrOrPath] = None, directory: Optiona
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -596,7 +624,7 @@ def _chain_mirror(self, *, input: Optional[StrOrPath] = None, directory: Optiona
 Chain.mirror = _chain_mirror
 
 
-def import_(*, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term_file: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def import_(*, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term_file: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Generate an import module (signature of edit ontology → module of source)
 
     Flags:
@@ -606,10 +634,11 @@ def import_(*, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = 
     format: (--format / -f)
     method: (--method) Extraction method: BOT (default), TOP, or STAR
     term_file: (--term-file) Also include terms from this seed file (one IRI/CURIE per line)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -627,7 +656,8 @@ def import_(*, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -637,7 +667,7 @@ def import_(*, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = 
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_import_(self, *, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term_file: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_import_(self, *, input: Optional[StrOrPath] = None, source: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term_file: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Generate an import module (signature of edit ontology → module of source)
 
     Flags:
@@ -647,10 +677,11 @@ def _chain_import_(self, *, input: Optional[StrOrPath] = None, source: Optional[
     format: (--format / -f)
     method: (--method) Extraction method: BOT (default), TOP, or STAR
     term_file: (--term-file) Also include terms from this seed file (one IRI/CURIE per line)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -668,7 +699,8 @@ def _chain_import_(self, *, input: Optional[StrOrPath] = None, source: Optional[
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -681,7 +713,7 @@ def _chain_import_(self, *, input: Optional[StrOrPath] = None, source: Optional[
 Chain.import_ = _chain_import_
 
 
-def reason(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[StrOrPath] = None, axiom_generators: Optional[Sequence[StrOrPath]] = None, include_indirect: Optional[StrOrPath] = None, equivalent_classes_allowed: Optional[StrOrPath] = None, create_new_ontology: Optional[StrOrPath] = None, create_new_ontology_with_annotations: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[StrOrPath] = None, remove_redundant_subclass_axioms: Optional[StrOrPath] = None, exclude_tautologies: Optional[StrOrPath] = None, exclude_owl_thing: Optional[StrOrPath] = None, exclude_duplicate_axioms: Optional[StrOrPath] = None, exclude_external_entities: Optional[StrOrPath] = None, dump_unsatisfiable: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def reason(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[StrOrPath] = None, axiom_generators: Optional[Sequence[StrOrPath]] = None, properties: Optional[Sequence[StrOrPath]] = None, include_indirect: Optional[StrOrPath] = None, equivalent_classes_allowed: Optional[StrOrPath] = None, create_new_ontology: Optional[StrOrPath] = None, create_new_ontology_with_annotations: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[StrOrPath] = None, remove_redundant_subclass_axioms: Optional[StrOrPath] = None, exclude_tautologies: Optional[StrOrPath] = None, exclude_owl_thing: Optional[StrOrPath] = None, exclude_duplicate_axioms: Optional[StrOrPath] = None, exclude_external_entities: Optional[StrOrPath] = None, dump_unsatisfiable: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Classify with the EL reasoner and assert inferred subsumptions
 
     Flags:
@@ -689,24 +721,26 @@ def reason(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     output: (--output / -o) Output ontology path
     format: (--format / -f) Output format (overrides inference from the output extension)
     reasoner: (--reasoner / -r) Reasoner to use. `elk` uses the built-in EL reasoner, and is what CL, UBERON and MONDO classify their releases with; `structural`/`emr` likewise. `owlmake` is that same reasoner with sound union-elimination, which is more complete on disjunctions. `whelk` uses the whelk-rs EL reasoner. `hermit`/`jfact` use the hermit-rs OWL 2 DL reasoner (full SROIQ(D), for non-EL inputs)
-    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Annotate asserted inferred axioms with `is_inferred true` (`<bool>`)
-    axiom_generators: (--axiom-generators / -A) Inference types to assert: `SubClass`, `EquivalentClass`, `ClassAssertion`, … Repeatable / comma-separated. Default: `SubClass`
-    include_indirect: (--include-indirect / -d) Assert all (indirect) subsumptions, not just the direct ones (`<bool>`)
+    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Annotate asserted inferred axioms with `is_inferred true` (`true` or `yes` in any case)
+    axiom_generators: (--axiom-generators / -A) Inference types to assert: `SubClass`, `EquivalentClass`, `ClassAssertion`, `PropertyAssertion`. Repeatable / comma-separated. Default: `SubClass`
+    properties: (--properties) The object properties whose inferred assertions the `PropertyAssertion` generator asserts, as IRIs or CURIEs. Repeatable / comma-separated. Default: every named object property in the signature
+    include_indirect: (--include-indirect / -d) Assert all (indirect) subsumptions, not just the direct ones (`true` or `yes` in any case)
     equivalent_classes_allowed: (--equivalent-classes-allowed / -e) Equivalent-class policy: `all` (allow), `none` (error on any inferred equivalence) or `asserted-only` (error only on an inferred equivalence that is not already asserted). `true`/`false` alias `all`/`none`
-    create_new_ontology: (--create-new-ontology / -n) Output a NEW ontology containing only the inferred axioms (`<bool>`)
-    create_new_ontology_with_annotations: (--create-new-ontology-with-annotations / -m) Like --create-new-ontology, also copying entity annotations (`<bool>`)
-    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve annotated axioms when removing redundant ones (`<bool>`)
-    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) After asserting, remove redundant SubClassOf axioms (run reduce) (`<bool>`)
+    create_new_ontology: (--create-new-ontology / -n) Output a NEW ontology containing only the inferred axioms (`true` or `yes` in any case)
+    create_new_ontology_with_annotations: (--create-new-ontology-with-annotations / -m) Like --create-new-ontology, also copying entity annotations (`true` or `yes` in any case)
+    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve annotated axioms when removing redundant ones (`true` or `yes` in any case)
+    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) After asserting, remove redundant SubClassOf axioms (run reduce) (`true` or `yes` in any case)
     exclude_tautologies: (--exclude-tautologies / -t) Exclude tautologies from output: `structural` or `all`
-    exclude_owl_thing: (--exclude-owl-thing / -T) Do not assert subsumptions whose superclass is owl:Thing (`<bool>`)
-    exclude_duplicate_axioms: (--exclude-duplicate-axioms / -x) Do not assert an axiom already present in the ontology (`<bool>`, default false, so an inferred edge can still be annotated)
-    exclude_external_entities: (--exclude-external-entities / -X) Do not assert axioms whose subject is an external (undeclared) entity (`<bool>`)
+    exclude_owl_thing: (--exclude-owl-thing / -T) Do not assert subsumptions whose superclass is owl:Thing (`true` or `yes` in any case)
+    exclude_duplicate_axioms: (--exclude-duplicate-axioms / -x) Do not assert an axiom already present in the ontology (`true` or `yes` in any case; default false, so an inferred edge can still be annotated)
+    exclude_external_entities: (--exclude-external-entities / -X) Do not assert axioms whose subject is an external (undeclared) entity (`true` or `yes` in any case)
     dump_unsatisfiable: (--dump-unsatisfiable / -D) Write the unsatisfiable classes to this file
     allow_incoherent: (--allow-incoherent) Do not fail when the ontology is incoherent; report only (owlmake extension)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -721,6 +755,7 @@ def reason(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "reasoner": reasoner,
         "annotate_inferred_axioms": annotate_inferred_axioms,
         "axiom_generators": axiom_generators,
+        "properties": properties,
         "include_indirect": include_indirect,
         "equivalent_classes_allowed": equivalent_classes_allowed,
         "create_new_ontology": create_new_ontology,
@@ -736,7 +771,8 @@ def reason(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -746,7 +782,7 @@ def reason(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_reason(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[StrOrPath] = None, axiom_generators: Optional[Sequence[StrOrPath]] = None, include_indirect: Optional[StrOrPath] = None, equivalent_classes_allowed: Optional[StrOrPath] = None, create_new_ontology: Optional[StrOrPath] = None, create_new_ontology_with_annotations: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[StrOrPath] = None, remove_redundant_subclass_axioms: Optional[StrOrPath] = None, exclude_tautologies: Optional[StrOrPath] = None, exclude_owl_thing: Optional[StrOrPath] = None, exclude_duplicate_axioms: Optional[StrOrPath] = None, exclude_external_entities: Optional[StrOrPath] = None, dump_unsatisfiable: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_reason(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[StrOrPath] = None, axiom_generators: Optional[Sequence[StrOrPath]] = None, properties: Optional[Sequence[StrOrPath]] = None, include_indirect: Optional[StrOrPath] = None, equivalent_classes_allowed: Optional[StrOrPath] = None, create_new_ontology: Optional[StrOrPath] = None, create_new_ontology_with_annotations: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[StrOrPath] = None, remove_redundant_subclass_axioms: Optional[StrOrPath] = None, exclude_tautologies: Optional[StrOrPath] = None, exclude_owl_thing: Optional[StrOrPath] = None, exclude_duplicate_axioms: Optional[StrOrPath] = None, exclude_external_entities: Optional[StrOrPath] = None, dump_unsatisfiable: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Classify with the EL reasoner and assert inferred subsumptions
 
     Flags:
@@ -754,24 +790,26 @@ def _chain_reason(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     output: (--output / -o) Output ontology path
     format: (--format / -f) Output format (overrides inference from the output extension)
     reasoner: (--reasoner / -r) Reasoner to use. `elk` uses the built-in EL reasoner, and is what CL, UBERON and MONDO classify their releases with; `structural`/`emr` likewise. `owlmake` is that same reasoner with sound union-elimination, which is more complete on disjunctions. `whelk` uses the whelk-rs EL reasoner. `hermit`/`jfact` use the hermit-rs OWL 2 DL reasoner (full SROIQ(D), for non-EL inputs)
-    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Annotate asserted inferred axioms with `is_inferred true` (`<bool>`)
-    axiom_generators: (--axiom-generators / -A) Inference types to assert: `SubClass`, `EquivalentClass`, `ClassAssertion`, … Repeatable / comma-separated. Default: `SubClass`
-    include_indirect: (--include-indirect / -d) Assert all (indirect) subsumptions, not just the direct ones (`<bool>`)
+    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Annotate asserted inferred axioms with `is_inferred true` (`true` or `yes` in any case)
+    axiom_generators: (--axiom-generators / -A) Inference types to assert: `SubClass`, `EquivalentClass`, `ClassAssertion`, `PropertyAssertion`. Repeatable / comma-separated. Default: `SubClass`
+    properties: (--properties) The object properties whose inferred assertions the `PropertyAssertion` generator asserts, as IRIs or CURIEs. Repeatable / comma-separated. Default: every named object property in the signature
+    include_indirect: (--include-indirect / -d) Assert all (indirect) subsumptions, not just the direct ones (`true` or `yes` in any case)
     equivalent_classes_allowed: (--equivalent-classes-allowed / -e) Equivalent-class policy: `all` (allow), `none` (error on any inferred equivalence) or `asserted-only` (error only on an inferred equivalence that is not already asserted). `true`/`false` alias `all`/`none`
-    create_new_ontology: (--create-new-ontology / -n) Output a NEW ontology containing only the inferred axioms (`<bool>`)
-    create_new_ontology_with_annotations: (--create-new-ontology-with-annotations / -m) Like --create-new-ontology, also copying entity annotations (`<bool>`)
-    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve annotated axioms when removing redundant ones (`<bool>`)
-    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) After asserting, remove redundant SubClassOf axioms (run reduce) (`<bool>`)
+    create_new_ontology: (--create-new-ontology / -n) Output a NEW ontology containing only the inferred axioms (`true` or `yes` in any case)
+    create_new_ontology_with_annotations: (--create-new-ontology-with-annotations / -m) Like --create-new-ontology, also copying entity annotations (`true` or `yes` in any case)
+    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve annotated axioms when removing redundant ones (`true` or `yes` in any case)
+    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) After asserting, remove redundant SubClassOf axioms (run reduce) (`true` or `yes` in any case)
     exclude_tautologies: (--exclude-tautologies / -t) Exclude tautologies from output: `structural` or `all`
-    exclude_owl_thing: (--exclude-owl-thing / -T) Do not assert subsumptions whose superclass is owl:Thing (`<bool>`)
-    exclude_duplicate_axioms: (--exclude-duplicate-axioms / -x) Do not assert an axiom already present in the ontology (`<bool>`, default false, so an inferred edge can still be annotated)
-    exclude_external_entities: (--exclude-external-entities / -X) Do not assert axioms whose subject is an external (undeclared) entity (`<bool>`)
+    exclude_owl_thing: (--exclude-owl-thing / -T) Do not assert subsumptions whose superclass is owl:Thing (`true` or `yes` in any case)
+    exclude_duplicate_axioms: (--exclude-duplicate-axioms / -x) Do not assert an axiom already present in the ontology (`true` or `yes` in any case; default false, so an inferred edge can still be annotated)
+    exclude_external_entities: (--exclude-external-entities / -X) Do not assert axioms whose subject is an external (undeclared) entity (`true` or `yes` in any case)
     dump_unsatisfiable: (--dump-unsatisfiable / -D) Write the unsatisfiable classes to this file
     allow_incoherent: (--allow-incoherent) Do not fail when the ontology is incoherent; report only (owlmake extension)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -786,6 +824,7 @@ def _chain_reason(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "reasoner": reasoner,
         "annotate_inferred_axioms": annotate_inferred_axioms,
         "axiom_generators": axiom_generators,
+        "properties": properties,
         "include_indirect": include_indirect,
         "equivalent_classes_allowed": equivalent_classes_allowed,
         "create_new_ontology": create_new_ontology,
@@ -801,7 +840,8 @@ def _chain_reason(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -814,22 +854,23 @@ def _chain_reason(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.reason = _chain_reason
 
 
-def reduce(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[bool] = None, include_subproperties: Optional[bool] = None, named_classes_only: Optional[bool] = None, exact: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def reduce(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[StrOrPath] = None, include_subproperties: Optional[StrOrPath] = None, named_classes_only: Optional[StrOrPath] = None, exact: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Remove redundant SubClassOf axioms (transitive reduction)
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    reasoner: (--reasoner / -r) Reasoner to use. Reduction runs on the built-in EL reasoner
-    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve redundant axioms that carry annotations (`<bool>`)
-    include_subproperties: (--include-subproperties / -s) Take subproperties into account over existential restrictions (`<bool>`, default false). A bare `reduce`, as OBA's build runs it, therefore does NOT eliminate existentials entailed only via sub-property or property-chain reasoning. Pass `--include-subproperties true` for the more aggressive reduction
-    named_classes_only: (--named-classes-only / -c) Only reduce named `A ⊑ B` subclass axioms (`<bool>`)
-    exact: (--exact) Use exact entailment-based reduction (drop an axiom iff the ontology minus it still entails it), via ⊥-module localization. Slower on huge ontologies than the default structural reduction, and exact rather than heuristic
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    reasoner: (--reasoner / -r) Reasoner the hierarchy is classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
+    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve redundant axioms that carry annotations (`true` or `yes` in any case; default false)
+    include_subproperties: (--include-subproperties / -s) Classify the sub-property axioms and property chains too (`true` or `yes` in any case; default false), so that an existential restriction entailed through them is redundant
+    named_classes_only: (--named-classes-only / -c) Reduce only the axioms between named classes, over the classification of the whole ontology (`true` or `yes` in any case; default false)
+    exact: (--exact) Reduce by entailment instead: drop an axiom iff the ontology minus it still entails it, as the built-in EL reasoner decides over ⊥-modules. Slower on huge ontologies
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -849,7 +890,8 @@ def reduce(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -859,22 +901,23 @@ def reduce(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_reduce(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[bool] = None, include_subproperties: Optional[bool] = None, named_classes_only: Optional[bool] = None, exact: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_reduce(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, preserve_annotated_axioms: Optional[StrOrPath] = None, include_subproperties: Optional[StrOrPath] = None, named_classes_only: Optional[StrOrPath] = None, exact: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Remove redundant SubClassOf axioms (transitive reduction)
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    reasoner: (--reasoner / -r) Reasoner to use. Reduction runs on the built-in EL reasoner
-    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve redundant axioms that carry annotations (`<bool>`)
-    include_subproperties: (--include-subproperties / -s) Take subproperties into account over existential restrictions (`<bool>`, default false). A bare `reduce`, as OBA's build runs it, therefore does NOT eliminate existentials entailed only via sub-property or property-chain reasoning. Pass `--include-subproperties true` for the more aggressive reduction
-    named_classes_only: (--named-classes-only / -c) Only reduce named `A ⊑ B` subclass axioms (`<bool>`)
-    exact: (--exact) Use exact entailment-based reduction (drop an axiom iff the ontology minus it still entails it), via ⊥-module localization. Slower on huge ontologies than the default structural reduction, and exact rather than heuristic
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    reasoner: (--reasoner / -r) Reasoner the hierarchy is classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
+    preserve_annotated_axioms: (--preserve-annotated-axioms / -p) Preserve redundant axioms that carry annotations (`true` or `yes` in any case; default false)
+    include_subproperties: (--include-subproperties / -s) Classify the sub-property axioms and property chains too (`true` or `yes` in any case; default false), so that an existential restriction entailed through them is redundant
+    named_classes_only: (--named-classes-only / -c) Reduce only the axioms between named classes, over the classification of the whole ontology (`true` or `yes` in any case; default false)
+    exact: (--exact) Reduce by entailment instead: drop an axiom iff the ontology minus it still entails it, as the built-in EL reasoner decides over ⊥-modules. Slower on huge ontologies
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -894,7 +937,8 @@ def _chain_reduce(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -907,7 +951,7 @@ def _chain_reduce(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.reduce = _chain_reduce
 
 
-def relax(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_subclass_of: Optional[bool] = None, enforce_obo_format: Optional[bool] = None, exclude_named_classes: Optional[bool] = None, clean_self_genus: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def relax(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_subclass_of: Optional[bool] = None, enforce_obo_format: Optional[bool] = None, exclude_named_classes: Optional[bool] = None, clean_self_genus: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Relax equivalence axioms into weaker SubClassOf existentials
 
     Flags:
@@ -918,10 +962,11 @@ def relax(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = No
     enforce_obo_format: (--enforce-obo-format) Only emit OBO-expressible relaxed superclasses (`<bool>`, default false): a named class, or `R some named`. Relaxed leaves that are not OBO-expressible are skipped
     exclude_named_classes: (--exclude-named-classes) Do not relax an EquivalentClasses axiom whose members are ALL named classes (`<bool>`, default false)
     clean_self_genus: (--clean-self-genus) Suppress the degenerate self-subclass `C ⊑ C` that a self-referential genus `C ≡ C ⊓ X` otherwise relaxes to (`<bool>`, default false). The default emits the `C ⊑ C`, which `reduce` then collapses C's hierarchy to, because that is the shape released ontologies carry. Set true for the cleaner (and arguably more correct) output that keeps C's real parents
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -940,7 +985,8 @@ def relax(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = No
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -950,7 +996,7 @@ def relax(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = No
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_relax(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_subclass_of: Optional[bool] = None, enforce_obo_format: Optional[bool] = None, exclude_named_classes: Optional[bool] = None, clean_self_genus: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_relax(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, include_subclass_of: Optional[bool] = None, enforce_obo_format: Optional[bool] = None, exclude_named_classes: Optional[bool] = None, clean_self_genus: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Relax equivalence axioms into weaker SubClassOf existentials
 
     Flags:
@@ -961,10 +1007,11 @@ def _chain_relax(self, *, input: Optional[StrOrPath] = None, output: Optional[St
     enforce_obo_format: (--enforce-obo-format) Only emit OBO-expressible relaxed superclasses (`<bool>`, default false): a named class, or `R some named`. Relaxed leaves that are not OBO-expressible are skipped
     exclude_named_classes: (--exclude-named-classes) Do not relax an EquivalentClasses axiom whose members are ALL named classes (`<bool>`, default false)
     clean_self_genus: (--clean-self-genus) Suppress the degenerate self-subclass `C ⊑ C` that a self-referential genus `C ≡ C ⊓ X` otherwise relaxes to (`<bool>`, default false). The default emits the `C ⊑ C`, which `reduce` then collapses C's hierarchy to, because that is the shape released ontologies carry. Set true for the cleaner (and arguably more correct) output that keeps C's real parents
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -983,7 +1030,8 @@ def _chain_relax(self, *, input: Optional[StrOrPath] = None, output: Optional[St
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -996,7 +1044,7 @@ def _chain_relax(self, *, input: Optional[StrOrPath] = None, output: Optional[St
 Chain.relax = _chain_relax
 
 
-def materialize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[bool] = None, create_new_ontology: Optional[bool] = None, remove_redundant_subclass_axioms: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def materialize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[StrOrPath] = None, create_new_ontology: Optional[StrOrPath] = None, remove_redundant_subclass_axioms: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Materialize inferred existential restrictions
 
     Flags:
@@ -1005,14 +1053,15 @@ def materialize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
     format: (--format / -f)
     term: (--term / -t) Object properties to materialize over (IRIs/CURIEs, repeatable). If no properties are given, all properties are materialized
     term_file: (--term-file / -T) Load properties to materialize over from a file, one per line. Blank lines and `#` comments are ignored
-    reasoner: (--reasoner / -r) Reasoner to use. Materializing existential restrictions is an EL operation; `elk`/`structural`/`emr`/`owlmake` all use the built-in EL reasoner
-    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Annotate asserted inferred axioms with `is_inferred true`
-    create_new_ontology: (--create-new-ontology / -n) Output a new ontology containing only the materialized axioms. `<bool>`
-    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) After materializing, remove redundant SubClassOf axioms by running reduce. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    reasoner: (--reasoner / -r) Reasoner the ontology is checked and classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
+    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Any value. Changes nothing: what materialize asserts is never annotated
+    create_new_ontology: (--create-new-ontology / -n) `true` or `yes` in any case: put the materialized axioms in an ontology of their own, which is not written: what is written is the input as it was
+    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) Any value. Changes nothing: materialize removes no axiom
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1033,7 +1082,8 @@ def materialize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1043,7 +1093,7 @@ def materialize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_materialize(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[bool] = None, create_new_ontology: Optional[bool] = None, remove_redundant_subclass_axioms: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_materialize(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, reasoner: Optional[StrOrPath] = None, annotate_inferred_axioms: Optional[StrOrPath] = None, create_new_ontology: Optional[StrOrPath] = None, remove_redundant_subclass_axioms: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Materialize inferred existential restrictions
 
     Flags:
@@ -1052,14 +1102,15 @@ def _chain_materialize(self, *, input: Optional[StrOrPath] = None, output: Optio
     format: (--format / -f)
     term: (--term / -t) Object properties to materialize over (IRIs/CURIEs, repeatable). If no properties are given, all properties are materialized
     term_file: (--term-file / -T) Load properties to materialize over from a file, one per line. Blank lines and `#` comments are ignored
-    reasoner: (--reasoner / -r) Reasoner to use. Materializing existential restrictions is an EL operation; `elk`/`structural`/`emr`/`owlmake` all use the built-in EL reasoner
-    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Annotate asserted inferred axioms with `is_inferred true`
-    create_new_ontology: (--create-new-ontology / -n) Output a new ontology containing only the materialized axioms. `<bool>`
-    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) After materializing, remove redundant SubClassOf axioms by running reduce. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    reasoner: (--reasoner / -r) Reasoner the ontology is checked and classified with: `elk`, `hermit`, `jfact`, `whelk`, `structural`, or `owlmake` (the built-in EL reasoner with union-elimination)
+    annotate_inferred_axioms: (--annotate-inferred-axioms / -a) Any value. Changes nothing: what materialize asserts is never annotated
+    create_new_ontology: (--create-new-ontology / -n) `true` or `yes` in any case: put the materialized axioms in an ontology of their own, which is not written: what is written is the input as it was
+    remove_redundant_subclass_axioms: (--remove-redundant-subclass-axioms / -s) Any value. Changes nothing: materialize removes no axiom
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1080,7 +1131,8 @@ def _chain_materialize(self, *, input: Optional[StrOrPath] = None, output: Optio
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1093,21 +1145,22 @@ def _chain_materialize(self, *, input: Optional[StrOrPath] = None, output: Optio
 Chain.materialize = _chain_materialize
 
 
-def normalize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, subset_decls: Optional[bool] = None, synonym_decls: Optional[bool] = None, add_source: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def normalize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, subset_decls: Optional[bool] = None, synonym_decls: Optional[bool] = None, add_source: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Inject subset / synonym-type subproperty declarations (`odk:normalize`)
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    base_iri: (--base-iri) IRI namespace(s) whose properties get declarations (repeatable). Defaults to OBO / EFO / Biolink
+    base_iri: (--base-iri) IRI namespace(s) whose properties get declarations (repeatable). Each one is ADDED to the built-in OBO / EFO / Biolink namespaces rather than replacing them, so naming one namespace does not stop the others being declared
     subset_decls: (--subset-decls) Inject `SubAnnotationPropertyOf(.., oboInOwl:SubsetProperty)` for subset properties (`<bool>`, default true)
     synonym_decls: (--synonym-decls) Inject `SubAnnotationPropertyOf(.., oboInOwl:SynonymTypeProperty)` for synonym-type properties (`<bool>`, default true)
     add_source: (--add-source) Annotate the ontology with `dc:source <its version IRI>` (`<bool>`, default false). A no-op when the ontology has no version IRI
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1126,7 +1179,8 @@ def normalize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1136,21 +1190,22 @@ def normalize(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] 
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_normalize(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, subset_decls: Optional[bool] = None, synonym_decls: Optional[bool] = None, add_source: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_normalize(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, subset_decls: Optional[bool] = None, synonym_decls: Optional[bool] = None, add_source: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Inject subset / synonym-type subproperty declarations (`odk:normalize`)
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    base_iri: (--base-iri) IRI namespace(s) whose properties get declarations (repeatable). Defaults to OBO / EFO / Biolink
+    base_iri: (--base-iri) IRI namespace(s) whose properties get declarations (repeatable). Each one is ADDED to the built-in OBO / EFO / Biolink namespaces rather than replacing them, so naming one namespace does not stop the others being declared
     subset_decls: (--subset-decls) Inject `SubAnnotationPropertyOf(.., oboInOwl:SubsetProperty)` for subset properties (`<bool>`, default true)
     synonym_decls: (--synonym-decls) Inject `SubAnnotationPropertyOf(.., oboInOwl:SynonymTypeProperty)` for synonym-type properties (`<bool>`, default true)
     add_source: (--add-source) Annotate the ontology with `dc:source <its version IRI>` (`<bool>`, default false). A no-op when the ontology has no version IRI
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1169,7 +1224,8 @@ def _chain_normalize(self, *, input: Optional[StrOrPath] = None, output: Optiona
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1182,7 +1238,132 @@ def _chain_normalize(self, *, input: Optional[StrOrPath] = None, output: Optiona
 Chain.normalize = _chain_normalize
 
 
-def babelon(*, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence[StrOrPath]] = None, oak_adapter: Optional[StrOrPath] = None, language_code: Optional[StrOrPath] = None, field: Optional[Sequence[StrOrPath]] = None, term_list: Optional[StrOrPath] = None, output_source_changed: Optional[StrOrPath] = None, output_not_translated: Optional[StrOrPath] = None, include_not_translated: Optional[bool] = None, update_translation_status: Optional[bool] = None, sort_tables: Optional[bool] = None, drop_unknown_columns: Optional[bool] = None, update_translations: Optional[bool] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, output_format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def check_align(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, upper_ontology: Optional[StrOrPath] = None, upper_ontology_iri: Optional[StrOrPath] = None, use_cob: Optional[bool] = None, use_self: Optional[bool] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, base_iri: Optional[Sequence[StrOrPath]] = None, ignore_dangling: Optional[bool] = None, detail: Optional[StrOrPath] = None, report_output: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, fail: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Check that the ontology's classes sit under an upper ontology (`odk:check-align`)
+
+    Flags:
+    input: (--input / -i)
+    output: (--output / -o)
+    format: (--format)
+    upper_ontology: (--upper-ontology / -u) Load the upper ontology from a file
+    upper_ontology_iri: (--upper-ontology-iri / -U) Load the upper ontology from an IRI
+    use_cob: (--use-cob / -C) Use COB as the upper ontology (`<bool>`)
+    use_self: (--use-self / -S) Check against the roots the ontology declares for itself (`<bool>`)
+    term: (--term / -t) A class to check alignment against (repeatable)
+    term_file: (--term-file / -T) A file listing classes to check alignment against
+    base_iri: (--base-iri / -b) Only check classes in this namespace (repeatable)
+    ignore_dangling: (--ignore-dangling / -d) Skip a class nothing is said about (`<bool>`)
+    detail: (--detail) Which unaligned classes to report: `root`, `base-root` or `all`
+    report_output: (--report-output / -O) Write the unaligned classes to this file
+    reasoner: (--reasoner / -r) The reasoner to classify with
+    fail: (--fail) Whether an unaligned class fails the command (`<bool>`, default true)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
+    input_format: (--input-format) Override the input parser format
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
+    add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
+    noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
+    xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
+    catalog: (--catalog) XML catalog used to resolve imports
+    strict: (--strict) Use strict parsing when loading
+    verbose: (--verbose / --very-verbose / --very-very-verbose / -v) Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable
+    """
+    return _rt.run_command('check-align', {
+        "input": input,
+        "output": output,
+        "format": format,
+        "upper_ontology": upper_ontology,
+        "upper_ontology_iri": upper_ontology_iri,
+        "use_cob": use_cob,
+        "use_self": use_self,
+        "term": term,
+        "term_file": term_file,
+        "base_iri": base_iri,
+        "ignore_dangling": ignore_dangling,
+        "detail": detail,
+        "report_output": report_output,
+        "reasoner": reasoner,
+        "fail": fail,
+        "input_iri": input_iri,
+        "input_format": input_format,
+        "prefixes": prefixes,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
+        "add_prefixes": add_prefixes,
+        "noprefixes": noprefixes,
+        "xml_entities": xml_entities,
+        "catalog": catalog,
+        "strict": strict,
+        "verbose": verbose,
+    }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
+
+
+def _chain_check_align(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, upper_ontology: Optional[StrOrPath] = None, upper_ontology_iri: Optional[StrOrPath] = None, use_cob: Optional[bool] = None, use_self: Optional[bool] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, base_iri: Optional[Sequence[StrOrPath]] = None, ignore_dangling: Optional[bool] = None, detail: Optional[StrOrPath] = None, report_output: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, fail: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Check that the ontology's classes sit under an upper ontology (`odk:check-align`)
+
+    Flags:
+    input: (--input / -i)
+    output: (--output / -o)
+    format: (--format)
+    upper_ontology: (--upper-ontology / -u) Load the upper ontology from a file
+    upper_ontology_iri: (--upper-ontology-iri / -U) Load the upper ontology from an IRI
+    use_cob: (--use-cob / -C) Use COB as the upper ontology (`<bool>`)
+    use_self: (--use-self / -S) Check against the roots the ontology declares for itself (`<bool>`)
+    term: (--term / -t) A class to check alignment against (repeatable)
+    term_file: (--term-file / -T) A file listing classes to check alignment against
+    base_iri: (--base-iri / -b) Only check classes in this namespace (repeatable)
+    ignore_dangling: (--ignore-dangling / -d) Skip a class nothing is said about (`<bool>`)
+    detail: (--detail) Which unaligned classes to report: `root`, `base-root` or `all`
+    report_output: (--report-output / -O) Write the unaligned classes to this file
+    reasoner: (--reasoner / -r) The reasoner to classify with
+    fail: (--fail) Whether an unaligned class fails the command (`<bool>`, default true)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
+    input_format: (--input-format) Override the input parser format
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
+    add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
+    noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
+    xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
+    catalog: (--catalog) XML catalog used to resolve imports
+    strict: (--strict) Use strict parsing when loading
+    verbose: (--verbose / --very-verbose / --very-very-verbose / -v) Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable
+    """
+    return self._add('check-align', {
+        "input": input,
+        "output": output,
+        "format": format,
+        "upper_ontology": upper_ontology,
+        "upper_ontology_iri": upper_ontology_iri,
+        "use_cob": use_cob,
+        "use_self": use_self,
+        "term": term,
+        "term_file": term_file,
+        "base_iri": base_iri,
+        "ignore_dangling": ignore_dangling,
+        "detail": detail,
+        "report_output": report_output,
+        "reasoner": reasoner,
+        "fail": fail,
+        "input_iri": input_iri,
+        "input_format": input_format,
+        "prefixes": prefixes,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
+        "add_prefixes": add_prefixes,
+        "noprefixes": noprefixes,
+        "xml_entities": xml_entities,
+        "catalog": catalog,
+        "strict": strict,
+        "verbose": verbose,
+    })
+
+
+Chain.check_align = _chain_check_align
+
+
+def babelon(*, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence[StrOrPath]] = None, oak_adapter: Optional[StrOrPath] = None, language_code: Optional[StrOrPath] = None, field: Optional[Sequence[StrOrPath]] = None, term_list: Optional[StrOrPath] = None, output_source_changed: Optional[StrOrPath] = None, output_not_translated: Optional[StrOrPath] = None, include_not_translated: Optional[bool] = None, update_translation_status: Optional[bool] = None, sort_tables: Optional[bool] = None, drop_unknown_columns: Optional[bool] = None, update_translations: Optional[bool] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, output_format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Convert a Babelon translation TSV into OWL annotation axioms
 
     Flags:
@@ -1202,10 +1383,11 @@ def babelon(*, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence
     input: (--input / -i) The Babelon translation TSV to convert
     output: (--output / -o) Output file
     output_format: (--output-format) Output format (accepted for babelon-CLI compatibility; only `owl` is emitted)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1233,7 +1415,8 @@ def babelon(*, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1243,7 +1426,7 @@ def babelon(*, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_babelon(self, *, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence[StrOrPath]] = None, oak_adapter: Optional[StrOrPath] = None, language_code: Optional[StrOrPath] = None, field: Optional[Sequence[StrOrPath]] = None, term_list: Optional[StrOrPath] = None, output_source_changed: Optional[StrOrPath] = None, output_not_translated: Optional[StrOrPath] = None, include_not_translated: Optional[bool] = None, update_translation_status: Optional[bool] = None, sort_tables: Optional[bool] = None, drop_unknown_columns: Optional[bool] = None, update_translations: Optional[bool] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, output_format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_babelon(self, *, subcommand: Optional[StrOrPath] = None, inputs: Optional[Sequence[StrOrPath]] = None, oak_adapter: Optional[StrOrPath] = None, language_code: Optional[StrOrPath] = None, field: Optional[Sequence[StrOrPath]] = None, term_list: Optional[StrOrPath] = None, output_source_changed: Optional[StrOrPath] = None, output_not_translated: Optional[StrOrPath] = None, include_not_translated: Optional[bool] = None, update_translation_status: Optional[bool] = None, sort_tables: Optional[bool] = None, drop_unknown_columns: Optional[bool] = None, update_translations: Optional[bool] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, output_format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Convert a Babelon translation TSV into OWL annotation axioms
 
     Flags:
@@ -1263,10 +1446,11 @@ def _chain_babelon(self, *, subcommand: Optional[StrOrPath] = None, inputs: Opti
     input: (--input / -i) The Babelon translation TSV to convert
     output: (--output / -o) Output file
     output_format: (--output-format) Output format (accepted for babelon-CLI compatibility; only `owl` is emitted)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1294,7 +1478,8 @@ def _chain_babelon(self, *, subcommand: Optional[StrOrPath] = None, inputs: Opti
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1307,7 +1492,7 @@ def _chain_babelon(self, *, subcommand: Optional[StrOrPath] = None, inputs: Opti
 Chain.babelon = _chain_babelon
 
 
-def rewrite_def(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, filter_prefix: Optional[StrOrPath] = None, include_obsolete: bool = False, dot_definitions: bool = False, null_definitions: bool = False, no_ids: bool = False, sub_definitions: bool = False, add_annotation: Optional[Sequence[StrOrPath]] = None, add_annotation_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def rewrite_def(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, filter_prefix: Optional[StrOrPath] = None, include_obsolete: bool = False, dot_definitions: bool = False, null_definitions: bool = False, no_ids: bool = False, sub_definitions: bool = False, add_annotation: Optional[Sequence[StrOrPath]] = None, add_annotation_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Regenerate textual definitions (FlyBase `rewrite-def`: DOT/SUB definitions)
 
     Flags:
@@ -1322,10 +1507,11 @@ def rewrite_def(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
     sub_definitions: (--sub-definitions / -s)
     add_annotation: (--add-annotation)
     add_annotation_iri: (--add-annotation-iri)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1348,7 +1534,8 @@ def rewrite_def(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1358,7 +1545,7 @@ def rewrite_def(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_rewrite_def(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, filter_prefix: Optional[StrOrPath] = None, include_obsolete: bool = False, dot_definitions: bool = False, null_definitions: bool = False, no_ids: bool = False, sub_definitions: bool = False, add_annotation: Optional[Sequence[StrOrPath]] = None, add_annotation_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_rewrite_def(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, filter_prefix: Optional[StrOrPath] = None, include_obsolete: bool = False, dot_definitions: bool = False, null_definitions: bool = False, no_ids: bool = False, sub_definitions: bool = False, add_annotation: Optional[Sequence[StrOrPath]] = None, add_annotation_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Regenerate textual definitions (FlyBase `rewrite-def`: DOT/SUB definitions)
 
     Flags:
@@ -1373,10 +1560,11 @@ def _chain_rewrite_def(self, *, input: Optional[StrOrPath] = None, output: Optio
     sub_definitions: (--sub-definitions / -s)
     add_annotation: (--add-annotation)
     add_annotation_iri: (--add-annotation-iri)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1399,7 +1587,8 @@ def _chain_rewrite_def(self, *, input: Optional[StrOrPath] = None, output: Optio
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1412,7 +1601,7 @@ def _chain_rewrite_def(self, *, input: Optional[StrOrPath] = None, output: Optio
 Chain.rewrite_def = _chain_rewrite_def
 
 
-def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, label_langs_priority: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Compare two ontologies and report differences
 
     Flags:
@@ -1420,16 +1609,18 @@ def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None,
     right: (--right / -r) Right ontology file
     left_iri: (--left-iri / -L) Load the left ontology from an IRI instead of a file
     right_iri: (--right-iri / -R) Load the right ontology from an IRI instead of a file
-    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports. Accepted for compatibility
-    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports. Accepted for compatibility
+    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports
+    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports
     output: (--output / -o) Output file for the diff report (defaults to stdout)
     format: (--format / -f) Diff output format: plain (default), pretty, or markdown. (html is accepted but rendered as markdown.)
+    label_langs_priority: (--label-langs-priority) Comma-separated language tags, in priority order, for choosing the label a `pretty` report names an entity by (e.g. `en-GB,en,none`); `none` stands for a label with no language tag and `*` for any
     input: (--input / -i) The ontology to diff as the LEFT side when `--left`/`--left-iri` is absent. `diff` is chainable — `om merge -i a.owl diff --right b.owl` compares the merged ontology against `b.owl` — so the piped or `--input` ontology stands in for the left. Accepted and unused when `--left` is given, which is how a release diff invokes it
-    labels: (--labels) Append rdfs:label after entity IRIs in the report
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    labels: (--labels) Write the report in the `pretty` format, which names entities by their labels, where the `plain` format would be written (`true` or `yes` in any case)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1446,12 +1637,14 @@ def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None,
         "right_catalog": right_catalog,
         "output": output,
         "format": format,
+        "label_langs_priority": label_langs_priority,
         "input": input,
         "labels": labels,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1461,7 +1654,7 @@ def diff(*, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None,
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOrPath] = None, left_iri: Optional[StrOrPath] = None, right_iri: Optional[StrOrPath] = None, left_catalog: Optional[StrOrPath] = None, right_catalog: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, label_langs_priority: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Compare two ontologies and report differences
 
     Flags:
@@ -1469,16 +1662,18 @@ def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOr
     right: (--right / -r) Right ontology file
     left_iri: (--left-iri / -L) Load the left ontology from an IRI instead of a file
     right_iri: (--right-iri / -R) Load the right ontology from an IRI instead of a file
-    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports. Accepted for compatibility
-    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports. Accepted for compatibility
+    left_catalog: (--left-catalog) Catalog for resolving the left ontology's imports
+    right_catalog: (--right-catalog) Catalog for resolving the right ontology's imports
     output: (--output / -o) Output file for the diff report (defaults to stdout)
     format: (--format / -f) Diff output format: plain (default), pretty, or markdown. (html is accepted but rendered as markdown.)
+    label_langs_priority: (--label-langs-priority) Comma-separated language tags, in priority order, for choosing the label a `pretty` report names an entity by (e.g. `en-GB,en,none`); `none` stands for a label with no language tag and `*` for any
     input: (--input / -i) The ontology to diff as the LEFT side when `--left`/`--left-iri` is absent. `diff` is chainable — `om merge -i a.owl diff --right b.owl` compares the merged ontology against `b.owl` — so the piped or `--input` ontology stands in for the left. Accepted and unused when `--left` is given, which is how a release diff invokes it
-    labels: (--labels) Append rdfs:label after entity IRIs in the report
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    labels: (--labels) Write the report in the `pretty` format, which names entities by their labels, where the `plain` format would be written (`true` or `yes` in any case)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1495,12 +1690,14 @@ def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOr
         "right_catalog": right_catalog,
         "output": output,
         "format": format,
+        "label_langs_priority": label_langs_priority,
         "input": input,
         "labels": labels,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1513,7 +1710,7 @@ def _chain_diff(self, *, left: Optional[StrOrPath] = None, right: Optional[StrOr
 Chain.diff = _chain_diff
 
 
-def annotate(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, link_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, axiom_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, language_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, typed_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, annotation_file: Optional[Sequence[StrOrPath]] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, remove_annotations: bool = False, interpolate: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def annotate(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, link_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, axiom_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, language_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, typed_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, annotation_file: Optional[Sequence[StrOrPath]] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, remove_annotations: bool = False, interpolate: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Add ontology annotations / set ontology and version IRIs
 
     Flags:
@@ -1524,18 +1721,19 @@ def annotate(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] =
     version_iri: (--version-iri / -V) Set the version IRI
     annotation: (--annotation / --annotate / -a) Add an ontology annotation as `PROP VALUE` (literal value). May be repeated. (Also spelled `--annotate`.)
     link_annotation: (--link-annotation / -k) Add an ontology annotation as `PROP IRI` (IRI value). May be repeated
-    axiom_annotation: (--axiom-annotation / -x) Annotate every axiom in the ontology with `PROP VALUE` (literal value). May be repeated
+    axiom_annotation: (--axiom-annotation / -x) Annotate the axioms with `PROP VALUE` (literal value). Each occurrence takes three values, and the values of every occurrence are read in `PROP VALUE` pairs. Each pair replaces the annotations of every `SubClassOf`; an ontology with an axiom of any other type is refused
     language_annotation: (--language-annotation / -l) Add an ontology annotation with a language-tagged literal as `PROP VALUE LANG`. May be repeated
     typed_annotation: (--typed-annotation / -t) Add an ontology annotation with a typed literal as `PROP VALUE TYPE` (TYPE is a datatype CURIE/IRI). May be repeated
-    annotation_file: (--annotation-file / -A) Load ontology annotations from a Turtle/OWL file and merge them. May be repeated
-    annotate_defined_by: (--annotate-defined-by / -d) Add an `rdfs:isDefinedBy` annotation to each entity, pointing at the ontology IRI (`<bool>`, default false)
-    annotate_derived_from: (--annotate-derived-from / -f) Add a `prov:wasDerivedFrom` ontology annotation pointing at the version IRI (`<bool>`, default false)
+    annotation_file: (--annotation-file / -A) Merge the axioms and ontology annotations of an ontology file, but not its imports. May be repeated
+    annotate_defined_by: (--annotate-defined-by / -d) Assert `rdfs:isDefinedBy` the ontology IRI of every entity of the signature outside the OWL, RDF, RDFS and XSD vocabularies that has no `rdfs:isDefinedBy` (`<bool>`, default false)
+    annotate_derived_from: (--annotate-derived-from / -f) Annotate every axiom with no `prov:wasDerivedFrom` with one naming the version IRI, or the ontology IRI where there is no version IRI (`<bool>`, default false)
     remove_annotations: (--remove-annotations / -R) Remove all existing ontology annotations first
-    interpolate: (--interpolate / -e) If true, interpolate `%{...}` placeholders within annotation values. Accepted for compatibility; placeholder interpolation is not performed. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    interpolate: (--interpolate / -e) If true, replace `%{ontology_iri}` and `%{version_iri}` in each annotation value with the ontology's IRI and version IRI. `<bool>`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1562,7 +1760,8 @@ def annotate(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] =
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1572,7 +1771,7 @@ def annotate(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] =
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_annotate(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, link_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, axiom_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, language_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, typed_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, annotation_file: Optional[Sequence[StrOrPath]] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, remove_annotations: bool = False, interpolate: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_annotate(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, link_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, axiom_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, language_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, typed_annotation: Optional[Sequence[Sequence[StrOrPath]]] = None, annotation_file: Optional[Sequence[StrOrPath]] = None, annotate_defined_by: Optional[bool] = None, annotate_derived_from: Optional[bool] = None, remove_annotations: bool = False, interpolate: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Add ontology annotations / set ontology and version IRIs
 
     Flags:
@@ -1583,18 +1782,19 @@ def _chain_annotate(self, *, input: Optional[StrOrPath] = None, output: Optional
     version_iri: (--version-iri / -V) Set the version IRI
     annotation: (--annotation / --annotate / -a) Add an ontology annotation as `PROP VALUE` (literal value). May be repeated. (Also spelled `--annotate`.)
     link_annotation: (--link-annotation / -k) Add an ontology annotation as `PROP IRI` (IRI value). May be repeated
-    axiom_annotation: (--axiom-annotation / -x) Annotate every axiom in the ontology with `PROP VALUE` (literal value). May be repeated
+    axiom_annotation: (--axiom-annotation / -x) Annotate the axioms with `PROP VALUE` (literal value). Each occurrence takes three values, and the values of every occurrence are read in `PROP VALUE` pairs. Each pair replaces the annotations of every `SubClassOf`; an ontology with an axiom of any other type is refused
     language_annotation: (--language-annotation / -l) Add an ontology annotation with a language-tagged literal as `PROP VALUE LANG`. May be repeated
     typed_annotation: (--typed-annotation / -t) Add an ontology annotation with a typed literal as `PROP VALUE TYPE` (TYPE is a datatype CURIE/IRI). May be repeated
-    annotation_file: (--annotation-file / -A) Load ontology annotations from a Turtle/OWL file and merge them. May be repeated
-    annotate_defined_by: (--annotate-defined-by / -d) Add an `rdfs:isDefinedBy` annotation to each entity, pointing at the ontology IRI (`<bool>`, default false)
-    annotate_derived_from: (--annotate-derived-from / -f) Add a `prov:wasDerivedFrom` ontology annotation pointing at the version IRI (`<bool>`, default false)
+    annotation_file: (--annotation-file / -A) Merge the axioms and ontology annotations of an ontology file, but not its imports. May be repeated
+    annotate_defined_by: (--annotate-defined-by / -d) Assert `rdfs:isDefinedBy` the ontology IRI of every entity of the signature outside the OWL, RDF, RDFS and XSD vocabularies that has no `rdfs:isDefinedBy` (`<bool>`, default false)
+    annotate_derived_from: (--annotate-derived-from / -f) Annotate every axiom with no `prov:wasDerivedFrom` with one naming the version IRI, or the ontology IRI where there is no version IRI (`<bool>`, default false)
     remove_annotations: (--remove-annotations / -R) Remove all existing ontology annotations first
-    interpolate: (--interpolate / -e) If true, interpolate `%{...}` placeholders within annotation values. Accepted for compatibility; placeholder interpolation is not performed. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    interpolate: (--interpolate / -e) If true, replace `%{ontology_iri}` and `%{version_iri}` in each annotation value with the ontology's IRI and version IRI. `<bool>`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1621,7 +1821,8 @@ def _chain_annotate(self, *, input: Optional[StrOrPath] = None, output: Optional
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1634,7 +1835,7 @@ def _chain_annotate(self, *, input: Optional[StrOrPath] = None, output: Optional
 Chain.annotate = _chain_annotate
 
 
-def filter(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[StrOrPath] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def filter(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[Sequence[StrOrPath]] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Keep only axioms mentioning the selected terms
 
     Flags:
@@ -1643,23 +1844,24 @@ def filter(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     format: (--format / -f)
     term: (--term / -t) Terms (IRIs or CURIEs) to keep. Repeatable
     term_file: (--term-file / -T) Files listing terms to keep, one per line
-    select: (--select / -s) Selectors (space- or repeat-separated): `annotations`, `ontology`, `anonymous`, `self`, …
-    axioms: (--axioms / -a) Axiom categories to filter for (accepted for compatibility; advisory)
+    select: (--select / -s) Selector groups, applied in turn: each value's space-separated selectors (`self`, `classes`, `parents`, `anonymous`, `complement`, `PROP=VALUE`, `<IRI-pattern>`, …) select the union of what each maps the set to. `annotations`, `imports` and `ontology` ask for the kept entities' annotation assertions, the imports and the ontology annotations
+    axioms: (--axioms / -a) Axiom types to keep: `all` (the default), `logical`, `annotation`, `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`, `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by name, or `internal`/`external` to the `--base-iri` namespaces
     preserve_structure: (--preserve-structure / -p) If false, do not preserve hierarchical relationships (`<bool>`)
-    trim: (--trim / -r) If true, keep axioms containing only selected objects (`<bool>`)
-    exclude_term: (--exclude-term / -e) Terms to force-exclude (never kept on their own account). Repeatable
-    exclude_terms: (--exclude-terms / -E) Files of terms to force-exclude. Repeatable
-    include_term: (--include-term / -n) Terms to force-include in the seed. Repeatable
-    include_terms: (--include-terms / -N) Files of terms to force-include in the seed. Repeatable
-    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop axiom annotations involving a particular annotation property, or `all`/`true` to strip every annotation from kept axioms
-    signature: (--signature / -S) Signature mode: when true keep an axiom if ANY of its entities is in the seed; when false (the OBO sub-ontology filter) keep only when *all* of its entities are in the seed (`<bool>`)
-    allow_punning: (--allow-punning) If true, allow selecting punned entities (`<bool>`)
-    base_iri: (--base-iri) Base IRI(s). Accepted for compatibility
-    ontology_iri: (--ontology-iri / -O) Set the output ontology IRI
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    trim: (--trim / -r) If true (the default), keep the axioms all of whose objects are selected; if false, those with any selected object (`<bool>`)
+    exclude_term: (--exclude-term / -e) Terms to take out of the selection. Repeatable
+    exclude_terms: (--exclude-terms / -E) Files of terms to take out of the selection. Repeatable
+    include_term: (--include-term / -n) Terms to add to the selection. Repeatable
+    include_terms: (--include-terms / -N) Files of terms to add to the selection. Repeatable
+    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop the annotations of the kept axioms: `PROP` drops a property's, `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value the regex finds (`'` taken out of either); `all` drops every one. Repeatable
+    signature: (--signature / -S) If true, judge an axiom by the IRIs it names rather than by its objects, which include its anonymous class expressions and individuals (`<bool>`)
+    allow_punning: (--allow-punning) If true, a term naming entities of several kinds selects all of them; otherwise it selects none (`<bool>`)
+    base_iri: (--base-iri) Base IRI(s): the namespaces `--axioms internal` and `--axioms external` judge an axiom's subjects by. Repeatable
+    ontology_iri: (--ontology-iri / -O) The IRI of the output ontology, taken as written; the input's when absent
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1689,7 +1891,8 @@ def filter(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1699,7 +1902,7 @@ def filter(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_filter(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[StrOrPath] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_filter(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[Sequence[StrOrPath]] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Keep only axioms mentioning the selected terms
 
     Flags:
@@ -1708,23 +1911,24 @@ def _chain_filter(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     format: (--format / -f)
     term: (--term / -t) Terms (IRIs or CURIEs) to keep. Repeatable
     term_file: (--term-file / -T) Files listing terms to keep, one per line
-    select: (--select / -s) Selectors (space- or repeat-separated): `annotations`, `ontology`, `anonymous`, `self`, …
-    axioms: (--axioms / -a) Axiom categories to filter for (accepted for compatibility; advisory)
+    select: (--select / -s) Selector groups, applied in turn: each value's space-separated selectors (`self`, `classes`, `parents`, `anonymous`, `complement`, `PROP=VALUE`, `<IRI-pattern>`, …) select the union of what each maps the set to. `annotations`, `imports` and `ontology` ask for the kept entities' annotation assertions, the imports and the ontology annotations
+    axioms: (--axioms / -a) Axiom types to keep: `all` (the default), `logical`, `annotation`, `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`, `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by name, or `internal`/`external` to the `--base-iri` namespaces
     preserve_structure: (--preserve-structure / -p) If false, do not preserve hierarchical relationships (`<bool>`)
-    trim: (--trim / -r) If true, keep axioms containing only selected objects (`<bool>`)
-    exclude_term: (--exclude-term / -e) Terms to force-exclude (never kept on their own account). Repeatable
-    exclude_terms: (--exclude-terms / -E) Files of terms to force-exclude. Repeatable
-    include_term: (--include-term / -n) Terms to force-include in the seed. Repeatable
-    include_terms: (--include-terms / -N) Files of terms to force-include in the seed. Repeatable
-    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop axiom annotations involving a particular annotation property, or `all`/`true` to strip every annotation from kept axioms
-    signature: (--signature / -S) Signature mode: when true keep an axiom if ANY of its entities is in the seed; when false (the OBO sub-ontology filter) keep only when *all* of its entities are in the seed (`<bool>`)
-    allow_punning: (--allow-punning) If true, allow selecting punned entities (`<bool>`)
-    base_iri: (--base-iri) Base IRI(s). Accepted for compatibility
-    ontology_iri: (--ontology-iri / -O) Set the output ontology IRI
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    trim: (--trim / -r) If true (the default), keep the axioms all of whose objects are selected; if false, those with any selected object (`<bool>`)
+    exclude_term: (--exclude-term / -e) Terms to take out of the selection. Repeatable
+    exclude_terms: (--exclude-terms / -E) Files of terms to take out of the selection. Repeatable
+    include_term: (--include-term / -n) Terms to add to the selection. Repeatable
+    include_terms: (--include-terms / -N) Files of terms to add to the selection. Repeatable
+    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop the annotations of the kept axioms: `PROP` drops a property's, `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value the regex finds (`'` taken out of either); `all` drops every one. Repeatable
+    signature: (--signature / -S) If true, judge an axiom by the IRIs it names rather than by its objects, which include its anonymous class expressions and individuals (`<bool>`)
+    allow_punning: (--allow-punning) If true, a term naming entities of several kinds selects all of them; otherwise it selects none (`<bool>`)
+    base_iri: (--base-iri) Base IRI(s): the namespaces `--axioms internal` and `--axioms external` judge an axiom's subjects by. Repeatable
+    ontology_iri: (--ontology-iri / -O) The IRI of the output ontology, taken as written; the input's when absent
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1754,7 +1958,8 @@ def _chain_filter(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1767,7 +1972,7 @@ def _chain_filter(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.filter = _chain_filter
 
 
-def remove(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[StrOrPath] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def remove(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[Sequence[StrOrPath]] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Remove axioms mentioning the selected terms
 
     Flags:
@@ -1776,22 +1981,23 @@ def remove(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     format: (--format / -f)
     term: (--term / -t) Terms (IRIs or CURIEs) to remove. Repeatable
     term_file: (--term-file / -T) Files listing terms to remove, one per line
-    select: (--select / -s) Selectors: `imports`, `complement`, `object-properties` (repeatable)
-    axioms: (--axioms / -a) Axiom categories to remove: `external`, `equivalent`, `disjoint`
+    select: (--select / -s) Selector groups, applied in turn: each value's space-separated selectors (`self`, `classes`, `parents`, `anonymous`, `complement`, `PROP=VALUE`, `<IRI-pattern>`, …) select the union of what each maps the set to. `imports` removes the imports and `ontology` the ontology annotations; with `anonymous`, no anonymous superclass is re-linked
+    axioms: (--axioms / -a) Axiom types to remove: `all` (the default), `logical`, `annotation`, `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`, `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by name, or `internal`/`external` to the `--base-iri` namespaces
     preserve_structure: (--preserve-structure / -p) If false, do not preserve hierarchical relationships (`<bool>`)
-    trim: (--trim / -r) If true, remove axioms containing any selected object (`<bool>`)
-    exclude_term: (--exclude-term / -e) Terms to force-exclude from removal (never removed). Repeatable
-    exclude_terms: (--exclude-terms / -E) Files of terms to force-exclude from removal. Repeatable
-    include_term: (--include-term / -n) Terms to force-include in removal. Repeatable
-    include_terms: (--include-terms / -N) Files of terms to force-include in removal. Repeatable
-    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop axiom annotations involving a particular annotation property, or `all`/`true` to strip every annotation from kept axioms
-    signature: (--signature / -S) If true, keep axioms with any selected entity in their signature when deciding what to remove (`<bool>`)
-    allow_punning: (--allow-punning) If true, allow selecting punned entities (widens IRI matching) (`<bool>`)
-    base_iri: (--base-iri) Base IRI(s) defining "internal" terms for `--axioms external`. Repeatable
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    trim: (--trim / -r) If true (the default), remove the axioms any of whose objects is selected; if false, those all of whose objects are (`<bool>`)
+    exclude_term: (--exclude-term / -e) Terms to take out of the selection. Repeatable
+    exclude_terms: (--exclude-terms / -E) Files of terms to take out of the selection. Repeatable
+    include_term: (--include-term / -n) Terms to add to the selection. Repeatable
+    include_terms: (--include-terms / -N) Files of terms to add to the selection. Repeatable
+    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop the annotations of the ontology's own axioms: `PROP` drops a property's, `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value the regex finds (`'` taken out of either); `all` drops every one. Repeatable
+    signature: (--signature / -S) If true, judge an axiom by the IRIs it names rather than by its objects, which include its anonymous class expressions and individuals (`<bool>`)
+    allow_punning: (--allow-punning) If true, a term naming entities of several kinds selects all of them; otherwise it selects none (`<bool>`)
+    base_iri: (--base-iri) Base IRI(s): the namespaces `--axioms internal` and `--axioms external` judge an axiom's subjects by. Repeatable
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1820,7 +2026,8 @@ def remove(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1830,7 +2037,7 @@ def remove(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_remove(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[StrOrPath] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_remove(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, select: Optional[Sequence[StrOrPath]] = None, axioms: Optional[Sequence[StrOrPath]] = None, preserve_structure: Optional[bool] = None, trim: Optional[bool] = None, exclude_term: Optional[Sequence[StrOrPath]] = None, exclude_terms: Optional[Sequence[StrOrPath]] = None, include_term: Optional[Sequence[StrOrPath]] = None, include_terms: Optional[Sequence[StrOrPath]] = None, drop_axiom_annotations: Optional[Sequence[StrOrPath]] = None, signature: Optional[bool] = None, allow_punning: Optional[bool] = None, base_iri: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Remove axioms mentioning the selected terms
 
     Flags:
@@ -1839,22 +2046,23 @@ def _chain_remove(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     format: (--format / -f)
     term: (--term / -t) Terms (IRIs or CURIEs) to remove. Repeatable
     term_file: (--term-file / -T) Files listing terms to remove, one per line
-    select: (--select / -s) Selectors: `imports`, `complement`, `object-properties` (repeatable)
-    axioms: (--axioms / -a) Axiom categories to remove: `external`, `equivalent`, `disjoint`
+    select: (--select / -s) Selector groups, applied in turn: each value's space-separated selectors (`self`, `classes`, `parents`, `anonymous`, `complement`, `PROP=VALUE`, `<IRI-pattern>`, …) select the union of what each maps the set to. `imports` removes the imports and `ontology` the ontology annotations; with `anonymous`, no anonymous superclass is re-linked
+    axioms: (--axioms / -a) Axiom types to remove: `all` (the default), `logical`, `annotation`, `subclass`, `subproperty`, `equivalent`, `disjoint`, `type`, `abox`, `tbox`, `rbox`, `declaration`, `structural-tautologies`, one axiom type by name, or `internal`/`external` to the `--base-iri` namespaces
     preserve_structure: (--preserve-structure / -p) If false, do not preserve hierarchical relationships (`<bool>`)
-    trim: (--trim / -r) If true, remove axioms containing any selected object (`<bool>`)
-    exclude_term: (--exclude-term / -e) Terms to force-exclude from removal (never removed). Repeatable
-    exclude_terms: (--exclude-terms / -E) Files of terms to force-exclude from removal. Repeatable
-    include_term: (--include-term / -n) Terms to force-include in removal. Repeatable
-    include_terms: (--include-terms / -N) Files of terms to force-include in removal. Repeatable
-    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop axiom annotations involving a particular annotation property, or `all`/`true` to strip every annotation from kept axioms
-    signature: (--signature / -S) If true, keep axioms with any selected entity in their signature when deciding what to remove (`<bool>`)
-    allow_punning: (--allow-punning) If true, allow selecting punned entities (widens IRI matching) (`<bool>`)
-    base_iri: (--base-iri) Base IRI(s) defining "internal" terms for `--axioms external`. Repeatable
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    trim: (--trim / -r) If true (the default), remove the axioms any of whose objects is selected; if false, those all of whose objects are (`<bool>`)
+    exclude_term: (--exclude-term / -e) Terms to take out of the selection. Repeatable
+    exclude_terms: (--exclude-terms / -E) Files of terms to take out of the selection. Repeatable
+    include_term: (--include-term / -n) Terms to add to the selection. Repeatable
+    include_terms: (--include-terms / -N) Files of terms to add to the selection. Repeatable
+    drop_axiom_annotations: (--drop-axiom-annotations / -d) Drop the annotations of the ontology's own axioms: `PROP` drops a property's, `PROP=VALUE` those with that value and `PROP=~REGEX` those whose value the regex finds (`'` taken out of either); `all` drops every one. Repeatable
+    signature: (--signature / -S) If true, judge an axiom by the IRIs it names rather than by its objects, which include its anonymous class expressions and individuals (`<bool>`)
+    allow_punning: (--allow-punning) If true, a term naming entities of several kinds selects all of them; otherwise it selects none (`<bool>`)
+    base_iri: (--base-iri) Base IRI(s): the namespaces `--axioms internal` and `--axioms external` judge an axiom's subjects by. Repeatable
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1883,7 +2091,8 @@ def _chain_remove(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1896,7 +2105,7 @@ def _chain_remove(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.remove = _chain_remove
 
 
-def extract(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, upper_term: Optional[Sequence[StrOrPath]] = None, upper_terms: Optional[Sequence[StrOrPath]] = None, lower_term: Optional[Sequence[StrOrPath]] = None, lower_terms: Optional[Sequence[StrOrPath]] = None, branch_from_term: Optional[Sequence[StrOrPath]] = None, branch_from_terms: Optional[Sequence[StrOrPath]] = None, copy_ontology_annotations: Optional[bool] = None, annotate_with_source: Optional[bool] = None, individuals: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, intermediates: Optional[StrOrPath] = None, sources: Optional[StrOrPath] = None, force: Optional[bool] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def extract(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, upper_term: Optional[Sequence[StrOrPath]] = None, upper_terms: Optional[Sequence[StrOrPath]] = None, lower_term: Optional[Sequence[StrOrPath]] = None, lower_terms: Optional[Sequence[StrOrPath]] = None, branch_from_term: Optional[Sequence[StrOrPath]] = None, branch_from_terms: Optional[Sequence[StrOrPath]] = None, copy_ontology_annotations: Optional[bool] = None, annotate_with_source: Optional[StrOrPath] = None, individuals: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, intermediates: Optional[StrOrPath] = None, sources: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Extract a module for a seed term set (BOT/TOP/STAR/MIREOT)
 
     Flags:
@@ -1904,26 +2113,27 @@ def extract(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     output: (--output / -o)
     format: (--format) Output format. `-f` is taken by `--force` on this command, so the format has no short; use the long `--format`
     method: (--method / -m) Extraction method: star, top, bot, mireot
-    term: (--term / -t) Seed term to extract (repeatable). For MIREOT these are the lower terms
+    term: (--term / -t) Seed term to extract (repeatable). MIREOT reads its lower, upper and branch terms instead
     term_file: (--term-file / -T) File(s) listing seed terms (repeatable)
     upper_term: (--upper-term / -u) MIREOT upper (boundary) term (repeatable)
     upper_terms: (--upper-terms / -U) File(s) of MIREOT upper terms (repeatable)
-    lower_term: (--lower-term / -l) MIREOT lower term (repeatable; alias for --term under MIREOT)
+    lower_term: (--lower-term / -l) MIREOT lower term (repeatable): its ancestors are extracted
     lower_terms: (--lower-terms / -L) File(s) of MIREOT lower terms (repeatable)
-    branch_from_term: (--branch-from-term / -b) Branch root term (repeatable): extract the branch rooted here
+    branch_from_term: (--branch-from-term / -b) MIREOT branch term (repeatable): its descendants are extracted
     branch_from_terms: (--branch-from-terms / -B) File(s) of branch root terms (repeatable)
     copy_ontology_annotations: (--copy-ontology-annotations / -c) Copy the source ontology's ontology-level annotations into the module (`<bool>`, default false)
-    annotate_with_source: (--annotate-with-source / -a) Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`<bool>`, default false)
+    annotate_with_source: (--annotate-with-source / -a) Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`true` or `yes` in any case; default false)
     individuals: (--individuals / -n) Handle individuals: include|minimal|definitions|exclude
     imports: (--imports / -M) Handle imports: include|exclude. owlmake operates on the already-merged input (it does not follow owl:imports during extract), so `include` is a no-op and `exclude` drops any owl:imports declarations
     intermediates: (--intermediates / -N) Handle intermediate terms: all|minimal|none
     sources: (--sources / -s) Mapping file of term→source ontology IRI, one `TERM<tab/space>SOURCE_IRI` per line, used by --annotate-with-source
-    force: (--force / -f) Warn (instead of error) when no input terms are given (`<bool>`, default false)
+    force: (--force / -f) Extract even when the ontology names none of the terms (`true` or `yes` in any case; default false)
     output_iri: (--output-iri / -O) Set the module's ontology IRI
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -1955,7 +2165,8 @@ def extract(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -1965,7 +2176,7 @@ def extract(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, upper_term: Optional[Sequence[StrOrPath]] = None, upper_terms: Optional[Sequence[StrOrPath]] = None, lower_term: Optional[Sequence[StrOrPath]] = None, lower_terms: Optional[Sequence[StrOrPath]] = None, branch_from_term: Optional[Sequence[StrOrPath]] = None, branch_from_terms: Optional[Sequence[StrOrPath]] = None, copy_ontology_annotations: Optional[bool] = None, annotate_with_source: Optional[bool] = None, individuals: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, intermediates: Optional[StrOrPath] = None, sources: Optional[StrOrPath] = None, force: Optional[bool] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, method: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, upper_term: Optional[Sequence[StrOrPath]] = None, upper_terms: Optional[Sequence[StrOrPath]] = None, lower_term: Optional[Sequence[StrOrPath]] = None, lower_terms: Optional[Sequence[StrOrPath]] = None, branch_from_term: Optional[Sequence[StrOrPath]] = None, branch_from_terms: Optional[Sequence[StrOrPath]] = None, copy_ontology_annotations: Optional[bool] = None, annotate_with_source: Optional[StrOrPath] = None, individuals: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, intermediates: Optional[StrOrPath] = None, sources: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Extract a module for a seed term set (BOT/TOP/STAR/MIREOT)
 
     Flags:
@@ -1973,26 +2184,27 @@ def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[
     output: (--output / -o)
     format: (--format) Output format. `-f` is taken by `--force` on this command, so the format has no short; use the long `--format`
     method: (--method / -m) Extraction method: star, top, bot, mireot
-    term: (--term / -t) Seed term to extract (repeatable). For MIREOT these are the lower terms
+    term: (--term / -t) Seed term to extract (repeatable). MIREOT reads its lower, upper and branch terms instead
     term_file: (--term-file / -T) File(s) listing seed terms (repeatable)
     upper_term: (--upper-term / -u) MIREOT upper (boundary) term (repeatable)
     upper_terms: (--upper-terms / -U) File(s) of MIREOT upper terms (repeatable)
-    lower_term: (--lower-term / -l) MIREOT lower term (repeatable; alias for --term under MIREOT)
+    lower_term: (--lower-term / -l) MIREOT lower term (repeatable): its ancestors are extracted
     lower_terms: (--lower-terms / -L) File(s) of MIREOT lower terms (repeatable)
-    branch_from_term: (--branch-from-term / -b) Branch root term (repeatable): extract the branch rooted here
+    branch_from_term: (--branch-from-term / -b) MIREOT branch term (repeatable): its descendants are extracted
     branch_from_terms: (--branch-from-terms / -B) File(s) of branch root terms (repeatable)
     copy_ontology_annotations: (--copy-ontology-annotations / -c) Copy the source ontology's ontology-level annotations into the module (`<bool>`, default false)
-    annotate_with_source: (--annotate-with-source / -a) Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`<bool>`, default false)
+    annotate_with_source: (--annotate-with-source / -a) Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`true` or `yes` in any case; default false)
     individuals: (--individuals / -n) Handle individuals: include|minimal|definitions|exclude
     imports: (--imports / -M) Handle imports: include|exclude. owlmake operates on the already-merged input (it does not follow owl:imports during extract), so `include` is a no-op and `exclude` drops any owl:imports declarations
     intermediates: (--intermediates / -N) Handle intermediate terms: all|minimal|none
     sources: (--sources / -s) Mapping file of term→source ontology IRI, one `TERM<tab/space>SOURCE_IRI` per line, used by --annotate-with-source
-    force: (--force / -f) Warn (instead of error) when no input terms are given (`<bool>`, default false)
+    force: (--force / -f) Extract even when the ontology names none of the terms (`true` or `yes` in any case; default false)
     output_iri: (--output-iri / -O) Set the module's ontology IRI
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2024,7 +2236,8 @@ def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2037,7 +2250,7 @@ def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[
 Chain.extract = _chain_extract
 
 
-def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string
 
     Flags:
@@ -2048,10 +2261,11 @@ def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
     base_iri: (--base-iri) Base IRI(s) whose entities are "defining" (embedded): an entity is included iff its IRI starts with one of these. Repeatable — these are the base IRIs that define internal/owned terms
     preferred_prefix: (--preferred-prefix) OBO preferred prefix (e.g. `ECTO`); adds `obo/<PREFIX>_` as a base IRI and is used for the shortForm fallback
     label_property: (--label-property) Annotation property IRI(s) to treat as labels. If given, **replaces** the default set (rdfs:label, dc:title, dcterms:title, skos:prefLabel), matching OLS `LabelAnnotator`. Repeatable
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2070,7 +2284,8 @@ def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2080,7 +2295,7 @@ def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string
 
     Flags:
@@ -2091,10 +2306,11 @@ def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: O
     base_iri: (--base-iri) Base IRI(s) whose entities are "defining" (embedded): an entity is included iff its IRI starts with one of these. Repeatable — these are the base IRIs that define internal/owned terms
     preferred_prefix: (--preferred-prefix) OBO preferred prefix (e.g. `ECTO`); adds `obo/<PREFIX>_` as a base IRI and is used for the shortForm fallback
     label_property: (--label-property) Annotation property IRI(s) to treat as labels. If given, **replaces** the default set (rdfs:label, dc:title, dcterms:title, skos:prefLabel), matching OLS `LabelAnnotator`. Repeatable
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2113,7 +2329,8 @@ def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: O
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2126,7 +2343,7 @@ def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: O
 Chain.extract_strings = _chain_extract_strings
 
 
-def extract_upheno_relations(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, relation: Optional[Sequence[StrOrPath]] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, root_phenotype: Optional[Sequence[StrOrPath]] = None, root_phenotype_file: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def extract_upheno_relations(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, relation: Optional[Sequence[StrOrPath]] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, root_phenotype: Optional[Sequence[StrOrPath]] = None, root_phenotype_file: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Materialize uPheno's phenotype shortcut relations from EQ definitions (`upheno:extract-upheno-relations`)
 
     Flags:
@@ -2137,11 +2354,12 @@ def extract_upheno_relations(*, input: Optional[StrOrPath] = None, output: Optio
     term: (--term / -t) A class to consider, by IRI or CURIE (repeatable)
     term_file: (--term-file / -T) A file of classes to consider, one per line (repeatable)
     root_phenotype: (--root-phenotype / -p) A class whose told descendants are all considered (repeatable)
-    root_phenotype_file: (--root-phenotype-file / -P) A file of root classes, one per line (repeatable)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    root_phenotype_file: (--root-phenotype-file) A file of root classes, one per line (repeatable)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2161,7 +2379,8 @@ def extract_upheno_relations(*, input: Optional[StrOrPath] = None, output: Optio
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2171,7 +2390,7 @@ def extract_upheno_relations(*, input: Optional[StrOrPath] = None, output: Optio
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_extract_upheno_relations(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, relation: Optional[Sequence[StrOrPath]] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, root_phenotype: Optional[Sequence[StrOrPath]] = None, root_phenotype_file: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_extract_upheno_relations(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, relation: Optional[Sequence[StrOrPath]] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, root_phenotype: Optional[Sequence[StrOrPath]] = None, root_phenotype_file: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Materialize uPheno's phenotype shortcut relations from EQ definitions (`upheno:extract-upheno-relations`)
 
     Flags:
@@ -2182,11 +2401,12 @@ def _chain_extract_upheno_relations(self, *, input: Optional[StrOrPath] = None, 
     term: (--term / -t) A class to consider, by IRI or CURIE (repeatable)
     term_file: (--term-file / -T) A file of classes to consider, one per line (repeatable)
     root_phenotype: (--root-phenotype / -p) A class whose told descendants are all considered (repeatable)
-    root_phenotype_file: (--root-phenotype-file / -P) A file of root classes, one per line (repeatable)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    root_phenotype_file: (--root-phenotype-file) A file of root classes, one per line (repeatable)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2206,7 +2426,8 @@ def _chain_extract_upheno_relations(self, *, input: Optional[StrOrPath] = None, 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2342,7 +2563,7 @@ def _chain_map(self, *, queries: Optional[StrOrPath] = None, tagger_db: Optional
 Chain.map = _chain_map
 
 
-def lexmatch(*, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, rules_file: Optional[StrOrPath] = None, add_pipeline_step: Optional[Sequence[StrOrPath]] = None, exclude_self_matches: bool = False, mapping_tool: Optional[StrOrPath] = None, mapping_set_id: Optional[StrOrPath] = None, license: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def lexmatch(*, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, rules_file: Optional[StrOrPath] = None, add_pipeline_step: Optional[Sequence[StrOrPath]] = None, exclude_self_matches: bool = False, mapping_tool: Optional[StrOrPath] = None, mapping_set_id: Optional[StrOrPath] = None, license: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Lexical matching between ontology entities → SSSOM (normalized label/synonym key equality; base-2 logit confidence from a rules file)
 
     Flags:
@@ -2355,10 +2576,11 @@ def lexmatch(*, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrP
     mapping_tool: (--mapping-tool) `mapping_tool` cell — the tool credited with producing the mapping set. Defaults to `owlmake`; set it to match a set produced elsewhere
     mapping_set_id: (--mapping-set-id) `mapping_set_id` metadata. A fresh id is generated each run, so set this when a mapping set needs a stable identifier across runs
     license: (--license) `license` metadata
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2379,7 +2601,8 @@ def lexmatch(*, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrP
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2389,7 +2612,7 @@ def lexmatch(*, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrP
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_lexmatch(self, *, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, rules_file: Optional[StrOrPath] = None, add_pipeline_step: Optional[Sequence[StrOrPath]] = None, exclude_self_matches: bool = False, mapping_tool: Optional[StrOrPath] = None, mapping_set_id: Optional[StrOrPath] = None, license: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_lexmatch(self, *, input: Optional[StrOrPath] = None, add: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, rules_file: Optional[StrOrPath] = None, add_pipeline_step: Optional[Sequence[StrOrPath]] = None, exclude_self_matches: bool = False, mapping_tool: Optional[StrOrPath] = None, mapping_set_id: Optional[StrOrPath] = None, license: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Lexical matching between ontology entities → SSSOM (normalized label/synonym key equality; base-2 logit confidence from a rules file)
 
     Flags:
@@ -2402,10 +2625,11 @@ def _chain_lexmatch(self, *, input: Optional[StrOrPath] = None, add: Optional[Se
     mapping_tool: (--mapping-tool) `mapping_tool` cell — the tool credited with producing the mapping set. Defaults to `owlmake`; set it to match a set produced elsewhere
     mapping_set_id: (--mapping-set-id) `mapping_set_id` metadata. A fresh id is generated each run, so set this when a mapping set needs a stable identifier across runs
     license: (--license) `license` metadata
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2426,7 +2650,8 @@ def _chain_lexmatch(self, *, input: Optional[StrOrPath] = None, add: Optional[Se
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2488,7 +2713,7 @@ def _chain_kgx(self, *, action: Optional[StrOrPath] = None, input: Optional[Sequ
 Chain.kgx = _chain_kgx
 
 
-def measure(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, metrics: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def measure(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, metrics: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Report ontology metrics
 
     Flags:
@@ -2497,10 +2722,11 @@ def measure(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     format: (--format / -f) Output format: tsv (default), csv, yaml, or json
     metrics: (--metrics / -m) Which metric set to compute: `essential` (default, entity/axiom counts), `extended`, or `all` (also include the per-axiom-kind breakdown)
     reasoner: (--reasoner / -r) Reasoner to use for reasoned metrics: `elk` (default), `structural`, `emr`, `owlmake`, `whelk`, `hermit`, `jfact`. Only the `extended`/`all` metric sets use the reasoner; they add an `inferred_subclass_axioms` count (the total number of inferred SubClassOf edges from classification)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2517,7 +2743,8 @@ def measure(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2527,7 +2754,7 @@ def measure(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_measure(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, metrics: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_measure(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, metrics: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Report ontology metrics
 
     Flags:
@@ -2536,10 +2763,11 @@ def _chain_measure(self, *, input: Optional[StrOrPath] = None, output: Optional[
     format: (--format / -f) Output format: tsv (default), csv, yaml, or json
     metrics: (--metrics / -m) Which metric set to compute: `essential` (default, entity/axiom counts), `extended`, or `all` (also include the per-axiom-kind breakdown)
     reasoner: (--reasoner / -r) Reasoner to use for reasoned metrics: `elk` (default), `structural`, `emr`, `owlmake`, `whelk`, `hermit`, `jfact`. Only the `extended`/`all` metric sets use the reasoner; they add an `inferred_subclass_axioms` count (the total number of inferred SubClassOf edges from classification)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2556,7 +2784,8 @@ def _chain_measure(self, *, input: Optional[StrOrPath] = None, output: Optional[
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2569,7 +2798,7 @@ def _chain_measure(self, *, input: Optional[StrOrPath] = None, output: Optional[
 Chain.measure = _chain_measure
 
 
-def information_content(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, property: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, relations: bool = False, reference_count: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def information_content(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, property: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, relations: bool = False, reference_count: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Annotate every class with a structural information-content (IC) score derived from the subclass hierarchy (leaves score 100, the root 0)
 
     Flags:
@@ -2580,10 +2809,11 @@ def information_content(*, input: Optional[StrOrPath] = None, output: Optional[S
     reasoner: (--reasoner / -r) Classify with this reasoner before computing IC, so the score reflects the *inferred* subclass hierarchy: e.g. `elk`, `structural`, `emr`, `owlmake`, `whelk`, `hermit`, or `jfact`. When omitted, IC is computed over the subclass axioms already in the ontology (chain `owlmake reason … information-content …` for the same effect with finer control)
     relations: (--relations) Compute IC over the full **relation graph** rather than only the subclass hierarchy: materialize ubergraph's redundant existential-relation graph (every `SubClassOf C (R some D)` becomes an `R` edge, transitively closed) and count references across *all* edges, matching ubergraph's `normalizedInformationContent`. Implies EL reasoning, so `--reasoner` is ignored. Without this flag IC is the subclass-only structural measure
     reference_count: (--reference-count) Also emit an integer `reasoner:referenceCount` per class — the size of its reflexive-transitive subclass set (or, with `--relations`, its total reference count across all relation edges)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2602,7 +2832,8 @@ def information_content(*, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2612,7 +2843,7 @@ def information_content(*, input: Optional[StrOrPath] = None, output: Optional[S
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_information_content(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, property: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, relations: bool = False, reference_count: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_information_content(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, property: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, relations: bool = False, reference_count: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Annotate every class with a structural information-content (IC) score derived from the subclass hierarchy (leaves score 100, the root 0)
 
     Flags:
@@ -2623,10 +2854,11 @@ def _chain_information_content(self, *, input: Optional[StrOrPath] = None, outpu
     reasoner: (--reasoner / -r) Classify with this reasoner before computing IC, so the score reflects the *inferred* subclass hierarchy: e.g. `elk`, `structural`, `emr`, `owlmake`, `whelk`, `hermit`, or `jfact`. When omitted, IC is computed over the subclass axioms already in the ontology (chain `owlmake reason … information-content …` for the same effect with finer control)
     relations: (--relations) Compute IC over the full **relation graph** rather than only the subclass hierarchy: materialize ubergraph's redundant existential-relation graph (every `SubClassOf C (R some D)` becomes an `R` edge, transitively closed) and count references across *all* edges, matching ubergraph's `normalizedInformationContent`. Implies EL reasoning, so `--reasoner` is ignored. Without this flag IC is the subclass-only structural measure
     reference_count: (--reference-count) Also emit an integer `reasoner:referenceCount` per class — the size of its reflexive-transitive subclass set (or, with `--relations`, its total reference count across all relation edges)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2645,7 +2877,8 @@ def _chain_information_content(self, *, input: Optional[StrOrPath] = None, outpu
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2658,17 +2891,18 @@ def _chain_information_content(self, *, input: Optional[StrOrPath] = None, outpu
 Chain.information_content = _chain_information_content
 
 
-def validate_profile(*, input: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def validate_profile(*, input: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Validate an ontology against an OWL 2 profile (EL/QL/RL/DL)
 
     Flags:
     input: (--input / -i)
     profile: (--profile / -p) OWL profile to validate against: DL, EL, RL, QL, or Full. `Full` accepts any OWL 2 ontology (no restrictions). Required — there is no default
     output: (--output / -o) Optional report output file (defaults to stdout)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2683,7 +2917,8 @@ def validate_profile(*, input: Optional[StrOrPath] = None, profile: Optional[Str
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2693,17 +2928,18 @@ def validate_profile(*, input: Optional[StrOrPath] = None, profile: Optional[Str
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_validate_profile(self, *, input: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_validate_profile(self, *, input: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Validate an ontology against an OWL 2 profile (EL/QL/RL/DL)
 
     Flags:
     input: (--input / -i)
     profile: (--profile / -p) OWL profile to validate against: DL, EL, RL, QL, or Full. `Full` accepts any OWL 2 ontology (no restrictions). Required — there is no default
     output: (--output / -o) Optional report output file (defaults to stdout)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2718,7 +2954,8 @@ def _chain_validate_profile(self, *, input: Optional[StrOrPath] = None, profile:
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2818,6 +3055,21 @@ def _chain_check_rdfxml(self, *, files: Optional[Sequence[StrOrPath]] = None, in
 Chain.check_rdfxml = _chain_check_rdfxml
 
 
+def semsql(*, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Build an ontology's SQL database (`semsql make <name>.db`): its triples, its reasoned relation graph, and the views over both
+    """
+    return _rt.run_command('semsql', {}, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
+
+
+def _chain_semsql(self) -> 'Chain':
+    """Build an ontology's SQL database (`semsql make <name>.db`): its triples, its reasoned relation graph, and the views over both
+    """
+    return self._add('semsql', {})
+
+
+Chain.semsql = _chain_semsql
+
+
 def sha256sum(*, files: Optional[Sequence[StrOrPath]] = None, binary_: bool = False, text: bool = False, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Print SHA-256 checksums in the usual `<hash>  <name>` layout (`config_check`)
 
@@ -2905,7 +3157,7 @@ def _chain_odk_info(self, *, tools: bool = False) -> 'Chain':
 Chain.odk_info = _chain_odk_info
 
 
-def query(*, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequence[StrOrPath]]] = None, query_string: Optional[StrOrPath] = None, construct: Optional[Sequence[Sequence[StrOrPath]]] = None, select: Optional[Sequence[Sequence[StrOrPath]]] = None, query_pair: Optional[Sequence[Sequence[StrOrPath]]] = None, queries: Optional[Sequence[StrOrPath]] = None, update: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, use_graphs: Optional[bool] = None, tdb: Optional[bool] = None, keep_tdb_mappings: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, create_tdb: Optional[bool] = None, temporary_file: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def query(*, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequence[StrOrPath]]] = None, query_string: Optional[StrOrPath] = None, construct: Optional[Sequence[Sequence[StrOrPath]]] = None, select: Optional[Sequence[Sequence[StrOrPath]]] = None, query_pair: Optional[Sequence[Sequence[StrOrPath]]] = None, queries: Optional[Sequence[StrOrPath]] = None, update: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, use_graphs: Optional[bool] = None, tdb: Optional[bool] = None, keep_tdb_mappings: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, create_tdb: Optional[bool] = None, temporary_file: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Run a SPARQL SELECT/ASK/CONSTRUCT query over the ontology
 
     Flags:
@@ -2926,10 +3178,11 @@ def query(*, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequenc
     tdb_directory: (--tdb-directory / -d) TDB directory. No-op (no TDB)
     create_tdb: (--create-tdb / -C) Create a TDB directory without querying. Accepted for compatibility; owlmake always evaluates in memory and never creates a TDB store, so this is a no-op
     temporary_file: (--temporary-file / -y) Store intermediate --update results in a temporary file to reduce heap usage. TDB-only; accepted for compatibility and a no-op in the in- memory engine
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -2958,7 +3211,8 @@ def query(*, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequenc
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -2968,7 +3222,7 @@ def query(*, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequenc
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_query(self, *, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequence[StrOrPath]]] = None, query_string: Optional[StrOrPath] = None, construct: Optional[Sequence[Sequence[StrOrPath]]] = None, select: Optional[Sequence[Sequence[StrOrPath]]] = None, query_pair: Optional[Sequence[Sequence[StrOrPath]]] = None, queries: Optional[Sequence[StrOrPath]] = None, update: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, use_graphs: Optional[bool] = None, tdb: Optional[bool] = None, keep_tdb_mappings: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, create_tdb: Optional[bool] = None, temporary_file: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_query(self, *, input: Optional[StrOrPath] = None, query: Optional[Sequence[Sequence[StrOrPath]]] = None, query_string: Optional[StrOrPath] = None, construct: Optional[Sequence[Sequence[StrOrPath]]] = None, select: Optional[Sequence[Sequence[StrOrPath]]] = None, query_pair: Optional[Sequence[Sequence[StrOrPath]]] = None, queries: Optional[Sequence[StrOrPath]] = None, update: Optional[Sequence[StrOrPath]] = None, output: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, use_graphs: Optional[bool] = None, tdb: Optional[bool] = None, keep_tdb_mappings: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, create_tdb: Optional[bool] = None, temporary_file: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Run a SPARQL SELECT/ASK/CONSTRUCT query over the ontology
 
     Flags:
@@ -2989,10 +3243,11 @@ def _chain_query(self, *, input: Optional[StrOrPath] = None, query: Optional[Seq
     tdb_directory: (--tdb-directory / -d) TDB directory. No-op (no TDB)
     create_tdb: (--create-tdb / -C) Create a TDB directory without querying. Accepted for compatibility; owlmake always evaluates in memory and never creates a TDB store, so this is a no-op
     temporary_file: (--temporary-file / -y) Store intermediate --update results in a temporary file to reduce heap usage. TDB-only; accepted for compatibility and a no-op in the in- memory engine
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3021,7 +3276,8 @@ def _chain_query(self, *, input: Optional[StrOrPath] = None, query: Optional[Seq
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3034,18 +3290,19 @@ def _chain_query(self, *, input: Optional[StrOrPath] = None, query: Optional[Seq
 Chain.query = _chain_query
 
 
-def verify(*, input: Optional[StrOrPath] = None, queries: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, fail_on_violation: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def verify(*, input: Optional[StrOrPath] = None, queries: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, fail_on_violation: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Run SPARQL QC checks that must each return zero rows
 
     Flags:
     input: (--input / -i)
     queries: (--queries / -q) [required] SPARQL constraint query files. Each must return no rows to pass
     output_dir: (--output-dir / -O) Directory to write per-query violation reports
-    fail_on_violation: (--fail-on-violation / -F) Logging level at which a non-empty result causes failure. `none`/`false` reports violations without failing the command
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    fail_on_violation: (--fail-on-violation / -F) If false, report violations without failing the command (`<bool>`, default true)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3061,7 +3318,8 @@ def verify(*, input: Optional[StrOrPath] = None, queries: Optional[Sequence[StrO
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3071,18 +3329,19 @@ def verify(*, input: Optional[StrOrPath] = None, queries: Optional[Sequence[StrO
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_verify(self, *, input: Optional[StrOrPath] = None, queries: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, fail_on_violation: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_verify(self, *, input: Optional[StrOrPath] = None, queries: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, fail_on_violation: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Run SPARQL QC checks that must each return zero rows
 
     Flags:
     input: (--input / -i)
     queries: (--queries / -q) [required] SPARQL constraint query files. Each must return no rows to pass
     output_dir: (--output-dir / -O) Directory to write per-query violation reports
-    fail_on_violation: (--fail-on-violation / -F) Logging level at which a non-empty result causes failure. `none`/`false` reports violations without failing the command
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    fail_on_violation: (--fail-on-violation / -F) If false, report violations without failing the command (`<bool>`, default true)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3098,7 +3357,8 @@ def _chain_verify(self, *, input: Optional[StrOrPath] = None, queries: Optional[
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3111,7 +3371,7 @@ def _chain_verify(self, *, input: Optional[StrOrPath] = None, queries: Optional[
 Chain.verify = _chain_verify
 
 
-def report(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, fail_on: Optional[StrOrPath] = None, labels: Optional[bool] = None, print: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, tdb: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, keep_tdb_mappings: Optional[bool] = None, standalone: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def report(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, fail_on: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, print: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, tdb: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, keep_tdb_mappings: Optional[StrOrPath] = None, standalone: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Run the QC report profile and emit violations
 
     Flags:
@@ -3120,18 +3380,19 @@ def report(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     profile: (--profile / -p) Custom reporting profile file: lines of `LEVEL<TAB>rule`, where the rule is either one of the built-in rule names or `file:<path>` naming a custom SPARQL query to run as an extra rule. The file REPLACES the default profile — a rule it omits does not run
     format: (--format / -f) Output format: tsv (default), csv, html, json or yaml. Defaults to the --output extension when given
     fail_on: (--fail-on / -F) Fail if any violation at or above this level is present: ERROR (default), WARN, INFO, or none
-    labels: (--labels / -l) Report labels instead of CURIEs for entities
+    labels: (--labels / -l) Report labels instead of CURIEs for entities (`true` or `yes` in any case)
     print: (--print) Print this many violations to the terminal (long-only: the `-P` short is taken by the global `--prefixes`)
     base_iri: (--base-iri) Base namespace for filtering. REPEATABLE — OBA passes two (`…/OBA_` and `…/oba`), and a violation is kept if its subject is under ANY of them
     limit: (--limit / -L) Limit the number of violations reported PER RULE
     tdb: (--tdb / -t) Load RDF onto disk via TDB. Accepted for compatibility; owlmake always evaluates the report in memory
     tdb_directory: (--tdb-directory / -d) TDB directory. No-op (no TDB)
-    keep_tdb_mappings: (--keep-tdb-mappings / -k) Keep the TDB directory. No-op (no TDB)
-    standalone: (--standalone) Wrap HTML output in a complete document (default true). Only affects `--format html`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    keep_tdb_mappings: (--keep-tdb-mappings / -k) Keep the TDB directory (`true` or `yes` in any case). No-op (no TDB)
+    standalone: (--standalone) Wrap HTML output in a complete document (`true` or `yes` in any case; default true). Only affects `--format html`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3156,7 +3417,8 @@ def report(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3166,7 +3428,7 @@ def report(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_report(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, fail_on: Optional[StrOrPath] = None, labels: Optional[bool] = None, print: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, tdb: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, keep_tdb_mappings: Optional[bool] = None, standalone: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_report(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, profile: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, fail_on: Optional[StrOrPath] = None, labels: Optional[StrOrPath] = None, print: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, tdb: Optional[bool] = None, tdb_directory: Optional[StrOrPath] = None, keep_tdb_mappings: Optional[StrOrPath] = None, standalone: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Run the QC report profile and emit violations
 
     Flags:
@@ -3175,18 +3437,19 @@ def _chain_report(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     profile: (--profile / -p) Custom reporting profile file: lines of `LEVEL<TAB>rule`, where the rule is either one of the built-in rule names or `file:<path>` naming a custom SPARQL query to run as an extra rule. The file REPLACES the default profile — a rule it omits does not run
     format: (--format / -f) Output format: tsv (default), csv, html, json or yaml. Defaults to the --output extension when given
     fail_on: (--fail-on / -F) Fail if any violation at or above this level is present: ERROR (default), WARN, INFO, or none
-    labels: (--labels / -l) Report labels instead of CURIEs for entities
+    labels: (--labels / -l) Report labels instead of CURIEs for entities (`true` or `yes` in any case)
     print: (--print) Print this many violations to the terminal (long-only: the `-P` short is taken by the global `--prefixes`)
     base_iri: (--base-iri) Base namespace for filtering. REPEATABLE — OBA passes two (`…/OBA_` and `…/oba`), and a violation is kept if its subject is under ANY of them
     limit: (--limit / -L) Limit the number of violations reported PER RULE
     tdb: (--tdb / -t) Load RDF onto disk via TDB. Accepted for compatibility; owlmake always evaluates the report in memory
     tdb_directory: (--tdb-directory / -d) TDB directory. No-op (no TDB)
-    keep_tdb_mappings: (--keep-tdb-mappings / -k) Keep the TDB directory. No-op (no TDB)
-    standalone: (--standalone) Wrap HTML output in a complete document (default true). Only affects `--format html`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    keep_tdb_mappings: (--keep-tdb-mappings / -k) Keep the TDB directory (`true` or `yes` in any case). No-op (no TDB)
+    standalone: (--standalone) Wrap HTML output in a complete document (`true` or `yes` in any case; default true). Only affects `--format html`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3211,7 +3474,8 @@ def _chain_report(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3224,7 +3488,7 @@ def _chain_report(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.report = _chain_report
 
 
-def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[bool] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: Optional[bool] = None, merge_after: Optional[bool] = None, ancestors: Optional[bool] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: bool = False, merge_after: bool = False, ancestors: bool = False, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Generate OWL from a template table (TSV/CSV)
 
     Flags:
@@ -3232,20 +3496,21 @@ def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[
     input: (--input / -i) Optional input ontology to merge the generated axioms into
     output: (--output / -o)
     format: (--format) Output format. Long-only: `-f` is taken by `--force` on `template`
-    force: (--force / -f) If true, log template errors and continue instead of aborting. `<bool>`
+    force: (--force / -f) Log template errors and continue instead of aborting (`true` or `yes` in any case)
     errors: (--errors / -e) Write template errors to this file (TSV or CSV)
     external_template: (--external-template / -E) Additional template file(s), treated exactly like `--template`
     ontology_iri: (--ontology-iri / -O) Set the output ontology IRI
     version_iri: (--version-iri / -V) Set the output version IRI
-    merge_before: (--merge-before / -m) Merge the generated axioms into the input ontology before output. owlmake already merges into the input when one is present; this forces that behavior on. `<bool>`
-    merge_after: (--merge-after / -M) Merge the generated axioms into the input ontology after output. Treated like `--merge-before` here. `<bool>`
-    ancestors: (--ancestors / -a) MIREOT the ancestors of generated terms from the input into the results. `<bool>`
-    include_annotations: (--include-annotations / -A) If true, include ontology annotations from the merge input. `<bool>`
-    collapse_import_closure: (--collapse-import-closure / -c) If true, collapse the import closure when merging. Accepted for compatibility. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    merge_before: (--merge-before / -m) Add the generated axioms to the input ontology, and write and go on with the input so merged
+    merge_after: (--merge-after / -M) Write the generated axioms alone, then add them to the input ontology and go on with the input so merged
+    ancestors: (--ancestors / -a) Add the ancestors the input gives the generated axioms' terms, each with its labels: every term the axioms name that the input names too, climbed as `extract --method MIREOT` climbs a lower term
+    include_annotations: (--include-annotations / -A) If true, a merge adds the ontology annotations of the generated axioms' ontology, which has none. `<bool>`
+    collapse_import_closure: (--collapse-import-closure / -c) If true, a merge takes the input ontology's imports out of it: the merged ontology imports nothing, and the imports' axioms stay out. `<bool>`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3271,7 +3536,8 @@ def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3281,7 +3547,7 @@ def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[bool] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: Optional[bool] = None, merge_after: Optional[bool] = None, ancestors: Optional[bool] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: bool = False, merge_after: bool = False, ancestors: bool = False, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Generate OWL from a template table (TSV/CSV)
 
     Flags:
@@ -3289,20 +3555,21 @@ def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, inp
     input: (--input / -i) Optional input ontology to merge the generated axioms into
     output: (--output / -o)
     format: (--format) Output format. Long-only: `-f` is taken by `--force` on `template`
-    force: (--force / -f) If true, log template errors and continue instead of aborting. `<bool>`
+    force: (--force / -f) Log template errors and continue instead of aborting (`true` or `yes` in any case)
     errors: (--errors / -e) Write template errors to this file (TSV or CSV)
     external_template: (--external-template / -E) Additional template file(s), treated exactly like `--template`
     ontology_iri: (--ontology-iri / -O) Set the output ontology IRI
     version_iri: (--version-iri / -V) Set the output version IRI
-    merge_before: (--merge-before / -m) Merge the generated axioms into the input ontology before output. owlmake already merges into the input when one is present; this forces that behavior on. `<bool>`
-    merge_after: (--merge-after / -M) Merge the generated axioms into the input ontology after output. Treated like `--merge-before` here. `<bool>`
-    ancestors: (--ancestors / -a) MIREOT the ancestors of generated terms from the input into the results. `<bool>`
-    include_annotations: (--include-annotations / -A) If true, include ontology annotations from the merge input. `<bool>`
-    collapse_import_closure: (--collapse-import-closure / -c) If true, collapse the import closure when merging. Accepted for compatibility. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    merge_before: (--merge-before / -m) Add the generated axioms to the input ontology, and write and go on with the input so merged
+    merge_after: (--merge-after / -M) Write the generated axioms alone, then add them to the input ontology and go on with the input so merged
+    ancestors: (--ancestors / -a) Add the ancestors the input gives the generated axioms' terms, each with its labels: every term the axioms name that the input names too, climbed as `extract --method MIREOT` climbs a lower term
+    include_annotations: (--include-annotations / -A) If true, a merge adds the ontology annotations of the generated axioms' ontology, which has none. `<bool>`
+    collapse_import_closure: (--collapse-import-closure / -c) If true, a merge takes the input ontology's imports out of it: the merged ontology imports nothing, and the imports' axioms stay out. `<bool>`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3328,7 +3595,8 @@ def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, inp
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3341,7 +3609,7 @@ def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, inp
 Chain.template = _chain_template
 
 
-def rename(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, mapping: Optional[Sequence[Sequence[StrOrPath]]] = None, mappings: Optional[StrOrPath] = None, allow_missing_entities: Optional[bool] = None, allow_duplicates: Optional[bool] = None, prefix_mappings: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def rename(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, mapping: Optional[Sequence[Sequence[StrOrPath]]] = None, mappings: Optional[StrOrPath] = None, allow_missing_entities: Optional[bool] = None, allow_duplicates: Optional[bool] = None, prefix_mappings: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Bulk-rename entity IRIs
 
     Flags:
@@ -3349,14 +3617,15 @@ def rename(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     output: (--output / -o)
     format: (--format / -f)
     mapping: (--mapping) A single OLD NEW IRI/CURIE mapping. Repeatable
-    mappings: (--mappings / -m) A TSV file of `old<TAB>new` mappings
+    mappings: (--mappings / -m) A table of `old`, `new` and optional `label` columns under a header row: TSV for a `.tsv` or `.txt` file, CSV for a `.csv` one
     allow_missing_entities: (--allow-missing-entities / -M) Allow mappings for entities that do not appear in the ontology (default false). `<bool>`
-    allow_duplicates: (--allow-duplicates / -d) Allow two or more terms to be renamed to the same full IRI (default false). `<bool>`
-    prefix_mappings: (--prefix-mappings / -r) A TSV file of `oldNamespace<TAB>newNamespace` mappings; every IRI starting with an old namespace has that prefix rewritten to the new one
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    allow_duplicates: (--allow-duplicates / -d) Allow two or more rows of the `--mappings` table to give the same new IRI (default false). `<bool>`
+    prefix_mappings: (--prefix-mappings / -r) A table of `old base`, `new base` columns under a header row: every entity whose IRI starts with an old base gets the IRI with each occurrence of that base replaced by the new one
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3376,7 +3645,8 @@ def rename(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3386,7 +3656,7 @@ def rename(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_rename(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, mapping: Optional[Sequence[Sequence[StrOrPath]]] = None, mappings: Optional[StrOrPath] = None, allow_missing_entities: Optional[bool] = None, allow_duplicates: Optional[bool] = None, prefix_mappings: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_rename(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, mapping: Optional[Sequence[Sequence[StrOrPath]]] = None, mappings: Optional[StrOrPath] = None, allow_missing_entities: Optional[bool] = None, allow_duplicates: Optional[bool] = None, prefix_mappings: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Bulk-rename entity IRIs
 
     Flags:
@@ -3394,14 +3664,15 @@ def _chain_rename(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     output: (--output / -o)
     format: (--format / -f)
     mapping: (--mapping) A single OLD NEW IRI/CURIE mapping. Repeatable
-    mappings: (--mappings / -m) A TSV file of `old<TAB>new` mappings
+    mappings: (--mappings / -m) A table of `old`, `new` and optional `label` columns under a header row: TSV for a `.tsv` or `.txt` file, CSV for a `.csv` one
     allow_missing_entities: (--allow-missing-entities / -M) Allow mappings for entities that do not appear in the ontology (default false). `<bool>`
-    allow_duplicates: (--allow-duplicates / -d) Allow two or more terms to be renamed to the same full IRI (default false). `<bool>`
-    prefix_mappings: (--prefix-mappings / -r) A TSV file of `oldNamespace<TAB>newNamespace` mappings; every IRI starting with an old namespace has that prefix rewritten to the new one
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    allow_duplicates: (--allow-duplicates / -d) Allow two or more rows of the `--mappings` table to give the same new IRI (default false). `<bool>`
+    prefix_mappings: (--prefix-mappings / -r) A table of `old base`, `new base` columns under a header row: every entity whose IRI starts with an old base gets the IRI with each occurrence of that base replaced by the new one
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3421,7 +3692,8 @@ def _chain_rename(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3434,26 +3706,25 @@ def _chain_rename(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.rename = _chain_rename
 
 
-def export(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, header: Optional[StrOrPath] = None, sort: Optional[StrOrPath] = None, include: Optional[StrOrPath] = None, exclude: Optional[StrOrPath] = None, entity_format: Optional[StrOrPath] = None, entity_select: Optional[StrOrPath] = None, export: Optional[StrOrPath] = None, split: Optional[StrOrPath] = None, standalone: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Export ontology entities to a spreadsheet (TSV/CSV)
+def export(*, input: Optional[StrOrPath] = None, export: Optional[StrOrPath] = None, header: Optional[StrOrPath] = None, sort: Optional[StrOrPath] = None, include: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, split: Optional[StrOrPath] = None, entity_format: Optional[StrOrPath] = None, entity_select: Optional[StrOrPath] = None, standalone: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Export ontology entities as a table: TSV, CSV, HTML, JSON or an Excel workbook
 
     Flags:
     input: (--input / -i)
-    output: (--output / -o)
-    format: (--format / -f) Output format: tsv (default) or csv
-    header: (--header / -c) Ordered, `|`-separated list of column names for the header. Supported: `ID`, `LABEL`, `Definition`, `SubClass Of` (anonymous expressions rendered in Manchester syntax), `Equivalent`, `Disjoint`, and any annotation property by CURIE or label. Default: ID, LABEL, Definition, SubClass Of
-    sort: (--sort / -s) Column name to sort rows on. Default: first column
-    include: (--include / -n) Entity types to include: comma/space-separated `classes`, `properties`, `individuals`. Default: classes
-    exclude: (--exclude) Entity types to exclude (owlmake extension): same vocabulary as `--include`. Applied after `--include`
-    entity_format: (--entity-format / -E) How to render entities in cells: one of `ID`/`CURIE` (compressed IRI, default), `IRI`, `LABEL`/`NAME`
-    entity_select: (--entity-select / -l) Which entities to render: `NAMED` (default), `ANONYMOUS`, or `ANY`/`ALL`. Accepted for compatibility; owlmake only renders named entities
-    export: (--export / -e) Alternative output path; alias of `--output`
-    split: (--split / -S) Character to split multi-valued cells on (default `|`)
-    standalone: (--standalone) If true and the output format is HTML, generate a standalone HTML file. Accepted for compatibility; HTML output is not produced
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    export: (--export / -e) The file to write the table to. Required
+    header: (--header / -c) The columns, in order, separated by `|`: e.g. `ID|LABEL|SubClass Of`. Required
+    sort: (--sort / -s) The columns to sort the rows on, separated by `|`, each written as in `--header`; `^` before a column sorts it in reverse. The last one listed orders the rows, and each before it orders the rows the later ones leave tied. Default: the first column
+    include: (--include / -n) The kinds of entity to export, separated by spaces, or else by commas, or else by tabs: `classes`, `properties`, `individuals`. Default: `classes individuals`
+    format: (--format / -f) Output format: `tsv`, `csv`, `html`, `html-list`, `json` or `xlsx`. Default: the export file's extension when it is one of these, else `tsv`
+    split: (--split / -S) The separator between the values of one cell. Default: `|`
+    entity_format: (--entity-format / -E) How a column with no tag renders entities: `NAME` (label, quoted inside expressions, else CURIE), `LABEL`, `ID` (CURIE) or `IRI`. Default: `NAME`
+    entity_select: (--entity-select / -l) Which values a column with no tag holds: `ANY`, `NAMED` or `ANON`/`ANONYMOUS`. Default: `ANY`
+    standalone: (--standalone) For HTML: `true` or `yes` writes a whole page with its stylesheet link; anything else writes the table alone. Default: `true`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3463,21 +3734,20 @@ def export(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     """
     return _rt.run_command('export', {
         "input": input,
-        "output": output,
-        "format": format,
+        "export": export,
         "header": header,
         "sort": sort,
         "include": include,
-        "exclude": exclude,
+        "format": format,
+        "split": split,
         "entity_format": entity_format,
         "entity_select": entity_select,
-        "export": export,
-        "split": split,
         "standalone": standalone,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3487,26 +3757,25 @@ def export(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_export(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, header: Optional[StrOrPath] = None, sort: Optional[StrOrPath] = None, include: Optional[StrOrPath] = None, exclude: Optional[StrOrPath] = None, entity_format: Optional[StrOrPath] = None, entity_select: Optional[StrOrPath] = None, export: Optional[StrOrPath] = None, split: Optional[StrOrPath] = None, standalone: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Export ontology entities to a spreadsheet (TSV/CSV)
+def _chain_export(self, *, input: Optional[StrOrPath] = None, export: Optional[StrOrPath] = None, header: Optional[StrOrPath] = None, sort: Optional[StrOrPath] = None, include: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, split: Optional[StrOrPath] = None, entity_format: Optional[StrOrPath] = None, entity_select: Optional[StrOrPath] = None, standalone: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Export ontology entities as a table: TSV, CSV, HTML, JSON or an Excel workbook
 
     Flags:
     input: (--input / -i)
-    output: (--output / -o)
-    format: (--format / -f) Output format: tsv (default) or csv
-    header: (--header / -c) Ordered, `|`-separated list of column names for the header. Supported: `ID`, `LABEL`, `Definition`, `SubClass Of` (anonymous expressions rendered in Manchester syntax), `Equivalent`, `Disjoint`, and any annotation property by CURIE or label. Default: ID, LABEL, Definition, SubClass Of
-    sort: (--sort / -s) Column name to sort rows on. Default: first column
-    include: (--include / -n) Entity types to include: comma/space-separated `classes`, `properties`, `individuals`. Default: classes
-    exclude: (--exclude) Entity types to exclude (owlmake extension): same vocabulary as `--include`. Applied after `--include`
-    entity_format: (--entity-format / -E) How to render entities in cells: one of `ID`/`CURIE` (compressed IRI, default), `IRI`, `LABEL`/`NAME`
-    entity_select: (--entity-select / -l) Which entities to render: `NAMED` (default), `ANONYMOUS`, or `ANY`/`ALL`. Accepted for compatibility; owlmake only renders named entities
-    export: (--export / -e) Alternative output path; alias of `--output`
-    split: (--split / -S) Character to split multi-valued cells on (default `|`)
-    standalone: (--standalone) If true and the output format is HTML, generate a standalone HTML file. Accepted for compatibility; HTML output is not produced
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    export: (--export / -e) The file to write the table to. Required
+    header: (--header / -c) The columns, in order, separated by `|`: e.g. `ID|LABEL|SubClass Of`. Required
+    sort: (--sort / -s) The columns to sort the rows on, separated by `|`, each written as in `--header`; `^` before a column sorts it in reverse. The last one listed orders the rows, and each before it orders the rows the later ones leave tied. Default: the first column
+    include: (--include / -n) The kinds of entity to export, separated by spaces, or else by commas, or else by tabs: `classes`, `properties`, `individuals`. Default: `classes individuals`
+    format: (--format / -f) Output format: `tsv`, `csv`, `html`, `html-list`, `json` or `xlsx`. Default: the export file's extension when it is one of these, else `tsv`
+    split: (--split / -S) The separator between the values of one cell. Default: `|`
+    entity_format: (--entity-format / -E) How a column with no tag renders entities: `NAME` (label, quoted inside expressions, else CURIE), `LABEL`, `ID` (CURIE) or `IRI`. Default: `NAME`
+    entity_select: (--entity-select / -l) Which values a column with no tag holds: `ANY`, `NAMED` or `ANON`/`ANONYMOUS`. Default: `ANY`
+    standalone: (--standalone) For HTML: `true` or `yes` writes a whole page with its stylesheet link; anything else writes the table alone. Default: `true`
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3516,21 +3785,20 @@ def _chain_export(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     """
     return self._add('export', {
         "input": input,
-        "output": output,
-        "format": format,
+        "export": export,
         "header": header,
         "sort": sort,
         "include": include,
-        "exclude": exclude,
+        "format": format,
+        "split": split,
         "entity_format": entity_format,
         "entity_select": entity_select,
-        "export": export,
-        "split": split,
         "standalone": standalone,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3543,16 +3811,16 @@ def _chain_export(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.export = _chain_export
 
 
-def export_prefixes(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def export_prefixes(*, output: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Dump the prefix map as a JSON-LD context
 
     Flags:
-    input: (--input / -i)
     output: (--output / -o)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3561,12 +3829,12 @@ def export_prefixes(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
     verbose: (--verbose / --very-verbose / --very-very-verbose / -v) Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable
     """
     return _rt.run_command('export-prefixes', {
-        "input": input,
         "output": output,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3576,16 +3844,16 @@ def export_prefixes(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_export_prefixes(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_export_prefixes(self, *, output: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Dump the prefix map as a JSON-LD context
 
     Flags:
-    input: (--input / -i)
     output: (--output / -o)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3594,12 +3862,12 @@ def _chain_export_prefixes(self, *, input: Optional[StrOrPath] = None, output: O
     verbose: (--verbose / --very-verbose / --very-very-verbose / -v) Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable
     """
     return self._add('export-prefixes', {
-        "input": input,
         "output": output,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3612,7 +3880,7 @@ def _chain_export_prefixes(self, *, input: Optional[StrOrPath] = None, output: O
 Chain.export_prefixes = _chain_export_prefixes
 
 
-def release(*, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, config: Optional[StrOrPath] = None, base_prefix: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def release(*, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, config: Optional[StrOrPath] = None, base_prefix: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Run the release pipeline (relax→reason→reduce) and emit artefacts
 
     Flags:
@@ -3623,10 +3891,11 @@ def release(*, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath
     config: (--config) REMOVED. A project config (`*-odk.yaml`) to read the ontology id (and other settings) from — compatibility with existing repositories
     base_prefix: (--base-prefix) IRI prefix considered "internal"; axioms over other namespaces are treated as imported and dropped from the `-base` product. Defaults to `http://purl.obolibrary.org/obo/<ID>_`
     allow_incoherent: (--allow-incoherent) Continue even if the ontology is incoherent (unsatisfiable classes)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3645,7 +3914,8 @@ def release(*, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3655,7 +3925,7 @@ def release(*, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_release(self, *, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, config: Optional[StrOrPath] = None, base_prefix: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_release(self, *, input: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, config: Optional[StrOrPath] = None, base_prefix: Optional[StrOrPath] = None, allow_incoherent: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Run the release pipeline (relax→reason→reduce) and emit artefacts
 
     Flags:
@@ -3666,10 +3936,11 @@ def _chain_release(self, *, input: Optional[StrOrPath] = None, output_dir: Optio
     config: (--config) REMOVED. A project config (`*-odk.yaml`) to read the ontology id (and other settings) from — compatibility with existing repositories
     base_prefix: (--base-prefix) IRI prefix considered "internal"; axioms over other namespaces are treated as imported and dropped from the `-base` product. Defaults to `http://purl.obolibrary.org/obo/<ID>_`
     allow_incoherent: (--allow-incoherent) Continue even if the ontology is incoherent (unsatisfiable classes)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3688,7 +3959,8 @@ def _chain_release(self, *, input: Optional[StrOrPath] = None, output_dir: Optio
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3701,7 +3973,7 @@ def _chain_release(self, *, input: Optional[StrOrPath] = None, output_dir: Optio
 Chain.release = _chain_release
 
 
-def ubergraph(*, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Optional[StrOrPath] = None, ontologies: Optional[StrOrPath] = None, unmerge: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, offline: bool = False, graph_prefix: Optional[StrOrPath] = None, annotate_defined_by: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def ubergraph(*, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Optional[StrOrPath] = None, ontologies: Optional[StrOrPath] = None, unmerge: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, offline: bool = False, graph_prefix: Optional[StrOrPath] = None, annotate_defined_by: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Build the Ubergraph data product (merged + redundant/non-redundant relation graphs + IC) as named-graph N-Quads
 
     Flags:
@@ -3714,10 +3986,11 @@ def ubergraph(*, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Option
     offline: (--offline) Skip products that need network access (biolink, opposites, prefixes)
     graph_prefix: (--graph-prefix) Base IRI for the ubergraph named graphs: `<prefix>/ontology`, `<prefix>/redundant`, `<prefix>/nonredundant`. Defaults to owlmake's own namespace; set e.g. `--graph-prefix http://reasoner.renci.org` to match the upstream ubergraph graphs
     annotate_defined_by: (--annotate-defined-by) Annotate every term with `rdfs:isDefinedBy = <its source ontology IRI>` during the merge, so each term is attributed to the ontology it actually came from (works for any IRI scheme, including non-OBO like EFO). Default true. Pass `--annotate-defined-by false` to fall back to the legacy post-hoc OBO-PURL heuristic (which silently drops non-OBO terms)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3738,7 +4011,8 @@ def ubergraph(*, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Option
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3748,7 +4022,7 @@ def ubergraph(*, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Option
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_ubergraph(self, *, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Optional[StrOrPath] = None, ontologies: Optional[StrOrPath] = None, unmerge: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, offline: bool = False, graph_prefix: Optional[StrOrPath] = None, annotate_defined_by: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_ubergraph(self, *, input: Optional[Sequence[StrOrPath]] = None, mirror_dir: Optional[StrOrPath] = None, ontologies: Optional[StrOrPath] = None, unmerge: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, output_dir: Optional[StrOrPath] = None, offline: bool = False, graph_prefix: Optional[StrOrPath] = None, annotate_defined_by: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Build the Ubergraph data product (merged + redundant/non-redundant relation graphs + IC) as named-graph N-Quads
 
     Flags:
@@ -3761,10 +4035,11 @@ def _chain_ubergraph(self, *, input: Optional[Sequence[StrOrPath]] = None, mirro
     offline: (--offline) Skip products that need network access (biolink, opposites, prefixes)
     graph_prefix: (--graph-prefix) Base IRI for the ubergraph named graphs: `<prefix>/ontology`, `<prefix>/redundant`, `<prefix>/nonredundant`. Defaults to owlmake's own namespace; set e.g. `--graph-prefix http://reasoner.renci.org` to match the upstream ubergraph graphs
     annotate_defined_by: (--annotate-defined-by) Annotate every term with `rdfs:isDefinedBy = <its source ontology IRI>` during the merge, so each term is attributed to the ontology it actually came from (works for any IRI scheme, including non-OBO like EFO). Default true. Pass `--annotate-defined-by false` to fall back to the legacy post-hoc OBO-PURL heuristic (which silently drops non-OBO terms)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3785,7 +4060,8 @@ def _chain_ubergraph(self, *, input: Optional[Sequence[StrOrPath]] = None, mirro
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3798,27 +4074,31 @@ def _chain_ubergraph(self, *, input: Optional[Sequence[StrOrPath]] = None, mirro
 Chain.ubergraph = _chain_ubergraph
 
 
-def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, jobs: Optional[StrOrPath] = None, assume_new: Optional[Sequence[StrOrPath]] = None, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, regenerate: bool = False, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Build an ontology's release artefacts: resolve the repo's plan (a committed `owlmake.yaml`, or one regenerated from its build configuration), then run the requested targets. Defaults to the current directory
 
     Flags:
     targets: Targets to build: e.g. `owlmake oba.owl oba-base.owl oba.obo`. As well as release artefacts (matched by filename `oba.owl`, artefact name `base`, or export format `obo`), the standard build targets are accepted here too (`refresh-imports`, `prepare-release`, `test`, …), as is any other target the repository defines. With no targets, every artefact configured in the repo is built
     always_make: (--always-make / -B) `-B`/`--always-make`: run every target's recipe even when its output is newer than its prerequisites. Execution applies the up-to-date test to recipe targets, so without this there is no way to force a rebuild (MONDO's CI passes `-B`)
     keep_going: (--keep-going / -k) `-k`/`--keep-going`: when a target fails, carry on with the targets that do not depend on it, then exit non-zero. A release with one unbuildable artefact still produces the rest
+    jobs: (--jobs / -j) `-j`/`--jobs`: build up to this many targets at once. A target starts once everything it needs is built, and targets that need nothing of each other run side by side; with one job, targets are built one after another in plan order
+    assume_new: (--assume-new / -W) `-W`/`--assume-new`: pretend the named file was just modified. Targets that depend on it run their recipes; the file itself is neither rebuilt nor touched. This is how `recreate-components` forces the component recipes over their stamps
     directory: (--directory / --repo / -C) Directory of the ontology repo to build (its root, the `src/ontology` directory, or the `<id>-odk.yaml` file). Defaults to the current directory
     rebuild: (--rebuild) Rebuild these target groups even where their outputs are present, e.g. `--rebuild imports --rebuild mirrors`
     keep: (--keep) Reuse these groups' existing outputs instead of rebuilding them
     list_targets: (--list-targets) Print every target this repo can build, one per line, and exit
     plan_only: (--plan-only) Only print the plan; do not build anything. (Still writes the plan file when it is being generated, so the plan can be checked in.)
     plan_format: (--plan-format) Serialization of the generated plan: `yaml` (default, `owlmake.yaml`) or `json` (`owlmake.json`). Both are accepted when building; if a repo commits both they must describe the same build
+    regenerate: (--regenerate) Rewrite the committed plan from the repository's build configuration
     imports: (--imports) How to obtain import modules: `cached` (reuse committed mirror/import files; default) or `fresh` (rebuild them)
     patterns: (--patterns) How to obtain `patterns/definitions.owl`: `regenerate` (rebuild from the DOSDP patterns with owlmake's dosdp engine, `PAT=true`; default) or `cached` (reuse the committed file, `PAT=false`)
     output_dir: (--output-dir / -o) Output directory for built artefacts (default: the ontology directory)
     artefact: (--artefact / -a) Restrict to specific release artefacts (repeatable). The flag form of the positional targets above — matched by artefact name (e.g. `full`), target filename (e.g. `oba.owl`), or export format (e.g. `obo`); combined with any positional targets
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3830,12 +4110,15 @@ def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = F
         "targets": targets,
         "always_make": always_make,
         "keep_going": keep_going,
+        "jobs": jobs,
+        "assume_new": assume_new,
         "repo": directory,
         "rebuild": rebuild,
         "keep": keep,
         "list_targets": list_targets,
         "plan_only": plan_only,
         "plan_format": plan_format,
+        "regenerate": regenerate,
         "imports": imports,
         "patterns": patterns,
         "output_dir": output_dir,
@@ -3843,7 +4126,8 @@ def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = F
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3853,27 +4137,31 @@ def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = F
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, jobs: Optional[StrOrPath] = None, assume_new: Optional[Sequence[StrOrPath]] = None, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, regenerate: bool = False, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Build an ontology's release artefacts: resolve the repo's plan (a committed `owlmake.yaml`, or one regenerated from its build configuration), then run the requested targets. Defaults to the current directory
 
     Flags:
     targets: Targets to build: e.g. `owlmake oba.owl oba-base.owl oba.obo`. As well as release artefacts (matched by filename `oba.owl`, artefact name `base`, or export format `obo`), the standard build targets are accepted here too (`refresh-imports`, `prepare-release`, `test`, …), as is any other target the repository defines. With no targets, every artefact configured in the repo is built
     always_make: (--always-make / -B) `-B`/`--always-make`: run every target's recipe even when its output is newer than its prerequisites. Execution applies the up-to-date test to recipe targets, so without this there is no way to force a rebuild (MONDO's CI passes `-B`)
     keep_going: (--keep-going / -k) `-k`/`--keep-going`: when a target fails, carry on with the targets that do not depend on it, then exit non-zero. A release with one unbuildable artefact still produces the rest
+    jobs: (--jobs / -j) `-j`/`--jobs`: build up to this many targets at once. A target starts once everything it needs is built, and targets that need nothing of each other run side by side; with one job, targets are built one after another in plan order
+    assume_new: (--assume-new / -W) `-W`/`--assume-new`: pretend the named file was just modified. Targets that depend on it run their recipes; the file itself is neither rebuilt nor touched. This is how `recreate-components` forces the component recipes over their stamps
     directory: (--directory / --repo / -C) Directory of the ontology repo to build (its root, the `src/ontology` directory, or the `<id>-odk.yaml` file). Defaults to the current directory
     rebuild: (--rebuild) Rebuild these target groups even where their outputs are present, e.g. `--rebuild imports --rebuild mirrors`
     keep: (--keep) Reuse these groups' existing outputs instead of rebuilding them
     list_targets: (--list-targets) Print every target this repo can build, one per line, and exit
     plan_only: (--plan-only) Only print the plan; do not build anything. (Still writes the plan file when it is being generated, so the plan can be checked in.)
     plan_format: (--plan-format) Serialization of the generated plan: `yaml` (default, `owlmake.yaml`) or `json` (`owlmake.json`). Both are accepted when building; if a repo commits both they must describe the same build
+    regenerate: (--regenerate) Rewrite the committed plan from the repository's build configuration
     imports: (--imports) How to obtain import modules: `cached` (reuse committed mirror/import files; default) or `fresh` (rebuild them)
     patterns: (--patterns) How to obtain `patterns/definitions.owl`: `regenerate` (rebuild from the DOSDP patterns with owlmake's dosdp engine, `PAT=true`; default) or `cached` (reuse the committed file, `PAT=false`)
     output_dir: (--output-dir / -o) Output directory for built artefacts (default: the ontology directory)
     artefact: (--artefact / -a) Restrict to specific release artefacts (repeatable). The flag form of the positional targets above — matched by artefact name (e.g. `full`), target filename (e.g. `oba.owl`), or export format (e.g. `obo`); combined with any positional targets
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3885,12 +4173,15 @@ def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_m
         "targets": targets,
         "always_make": always_make,
         "keep_going": keep_going,
+        "jobs": jobs,
+        "assume_new": assume_new,
         "repo": directory,
         "rebuild": rebuild,
         "keep": keep,
         "list_targets": list_targets,
         "plan_only": plan_only,
         "plan_format": plan_format,
+        "regenerate": regenerate,
         "imports": imports,
         "patterns": patterns,
         "output_dir": output_dir,
@@ -3898,7 +4189,8 @@ def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_m
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3911,8 +4203,8 @@ def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_m
 Chain.make = _chain_make
 
 
-def prepare_release(*, directory: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Build every release artefact (`prepare_release`)
+def prepare_release(*, directory: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, patterns: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Build what the release needs — its checks, reports and artefacts, and whatever the repository adds to it — then publish it (`prepare_release`)
 
     Aliases: prepare_release, all
 
@@ -3920,11 +4212,13 @@ def prepare_release(*, directory: Optional[StrOrPath] = None, output_dir: Option
     directory: (--directory / --repo / -C)
     output_dir: (--output-dir / -o) Output directory for built artefacts (default: the ontology directory)
     imports: (--imports) How to obtain import modules: `cached` (default) or `fresh`
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=true`, `PAT=false`)
     patterns: (--patterns) How to obtain `patterns/definitions.owl`: `regenerate` (`PAT=true`; default) or `cached` (`PAT=false`)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3936,11 +4230,13 @@ def prepare_release(*, directory: Optional[StrOrPath] = None, output_dir: Option
         "repo": directory,
         "output_dir": output_dir,
         "imports": imports,
+        "assignments": assignments,
         "patterns": patterns,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3950,8 +4246,8 @@ def prepare_release(*, directory: Optional[StrOrPath] = None, output_dir: Option
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_prepare_release(self, *, directory: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Build every release artefact (`prepare_release`)
+def _chain_prepare_release(self, *, directory: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, imports: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, patterns: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Build what the release needs — its checks, reports and artefacts, and whatever the repository adds to it — then publish it (`prepare_release`)
 
     Aliases: prepare_release, all
 
@@ -3959,11 +4255,13 @@ def _chain_prepare_release(self, *, directory: Optional[StrOrPath] = None, outpu
     directory: (--directory / --repo / -C)
     output_dir: (--output-dir / -o) Output directory for built artefacts (default: the ontology directory)
     imports: (--imports) How to obtain import modules: `cached` (default) or `fresh`
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=true`, `PAT=false`)
     patterns: (--patterns) How to obtain `patterns/definitions.owl`: `regenerate` (`PAT=true`; default) or `cached` (`PAT=false`)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -3975,11 +4273,13 @@ def _chain_prepare_release(self, *, directory: Optional[StrOrPath] = None, outpu
         "repo": directory,
         "output_dir": output_dir,
         "imports": imports,
+        "assignments": assignments,
         "patterns": patterns,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -3992,7 +4292,7 @@ def _chain_prepare_release(self, *, directory: Optional[StrOrPath] = None, outpu
 Chain.prepare_release = _chain_prepare_release
 
 
-def refresh_imports(*, directory: Optional[StrOrPath] = None, exclude_large: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def refresh_imports(*, directory: Optional[StrOrPath] = None, exclude_large: bool = False, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Rebuild the import modules from upstream (`refresh-imports`)
 
     Aliases: refresh_imports
@@ -4000,10 +4300,12 @@ def refresh_imports(*, directory: Optional[StrOrPath] = None, exclude_large: boo
     Flags:
     directory: (--directory / --repo / -C)
     exclude_large: (--exclude-large) Skip imports flagged `is_large_import` (`refresh-imports-excluding-large`)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    assignments: `VAR=value` assignments, as `om make` takes them (`MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4014,10 +4316,12 @@ def refresh_imports(*, directory: Optional[StrOrPath] = None, exclude_large: boo
     return _rt.run_command('refresh-imports', {
         "repo": directory,
         "exclude_large": exclude_large,
+        "assignments": assignments,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4027,7 +4331,7 @@ def refresh_imports(*, directory: Optional[StrOrPath] = None, exclude_large: boo
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_refresh_imports(self, *, directory: Optional[StrOrPath] = None, exclude_large: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_refresh_imports(self, *, directory: Optional[StrOrPath] = None, exclude_large: bool = False, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Rebuild the import modules from upstream (`refresh-imports`)
 
     Aliases: refresh_imports
@@ -4035,10 +4339,12 @@ def _chain_refresh_imports(self, *, directory: Optional[StrOrPath] = None, exclu
     Flags:
     directory: (--directory / --repo / -C)
     exclude_large: (--exclude-large) Skip imports flagged `is_large_import` (`refresh-imports-excluding-large`)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    assignments: `VAR=value` assignments, as `om make` takes them (`MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4049,10 +4355,12 @@ def _chain_refresh_imports(self, *, directory: Optional[StrOrPath] = None, exclu
     return self._add('refresh-imports', {
         "repo": directory,
         "exclude_large": exclude_large,
+        "assignments": assignments,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4065,17 +4373,19 @@ def _chain_refresh_imports(self, *, directory: Optional[StrOrPath] = None, exclu
 Chain.refresh_imports = _chain_refresh_imports
 
 
-def all_imports(*, directory: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def all_imports(*, directory: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Rebuild every individual import module from upstream (`all_imports`)
 
     Aliases: all_imports
 
     Flags:
     directory: (--directory / --repo / -C)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4085,10 +4395,12 @@ def all_imports(*, directory: Optional[StrOrPath] = None, input_iri: Optional[St
     """
     return _rt.run_command('all-imports', {
         "repo": directory,
+        "assignments": assignments,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4098,17 +4410,19 @@ def all_imports(*, directory: Optional[StrOrPath] = None, input_iri: Optional[St
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_all_imports(self, *, directory: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_all_imports(self, *, directory: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Rebuild every individual import module from upstream (`all_imports`)
 
     Aliases: all_imports
 
     Flags:
     directory: (--directory / --repo / -C)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4118,10 +4432,12 @@ def _chain_all_imports(self, *, directory: Optional[StrOrPath] = None, input_iri
     """
     return self._add('all-imports', {
         "repo": directory,
+        "assignments": assignments,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4134,15 +4450,17 @@ def _chain_all_imports(self, *, directory: Optional[StrOrPath] = None, input_iri
 Chain.all_imports = _chain_all_imports
 
 
-def test(*, directory: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def test(*, directory: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Run the repository's QC checks (`test`)
 
     Flags:
     directory: (--directory / --repo / -C)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4152,10 +4470,12 @@ def test(*, directory: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath
     """
     return _rt.run_command('test', {
         "repo": directory,
+        "assignments": assignments,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4165,15 +4485,17 @@ def test(*, directory: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_test(self, *, directory: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_test(self, *, directory: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Run the repository's QC checks (`test`)
 
     Flags:
     directory: (--directory / --repo / -C)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4183,10 +4505,12 @@ def _chain_test(self, *, directory: Optional[StrOrPath] = None, input_iri: Optio
     """
     return self._add('test', {
         "repo": directory,
+        "assignments": assignments,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4197,6 +4521,83 @@ def _chain_test(self, *, directory: Optional[StrOrPath] = None, input_iri: Optio
 
 
 Chain.test = _chain_test
+
+
+def update_repo(*, directory: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Bring the repository's files into step with the options in its `owlmake.yaml`: the edit file's imports, the XML catalog, and the files the build reads (`update_repo`)
+
+    Aliases: update_repo
+
+    Flags:
+    directory: (--directory / --repo / -C)
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
+    input_format: (--input-format) Override the input parser format
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
+    add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
+    noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
+    xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
+    catalog: (--catalog) XML catalog used to resolve imports
+    strict: (--strict) Use strict parsing when loading
+    verbose: (--verbose / --very-verbose / --very-very-verbose / -v) Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable
+    """
+    return _rt.run_command('update-repo', {
+        "repo": directory,
+        "assignments": assignments,
+        "input_iri": input_iri,
+        "input_format": input_format,
+        "prefixes": prefixes,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
+        "add_prefixes": add_prefixes,
+        "noprefixes": noprefixes,
+        "xml_entities": xml_entities,
+        "catalog": catalog,
+        "strict": strict,
+        "verbose": verbose,
+    }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
+
+
+def _chain_update_repo(self, *, directory: Optional[StrOrPath] = None, assignments: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Bring the repository's files into step with the options in its `owlmake.yaml`: the edit file's imports, the XML catalog, and the files the build reads (`update_repo`)
+
+    Aliases: update_repo
+
+    Flags:
+    directory: (--directory / --repo / -C)
+    assignments: `VAR=value` assignments, as `om make` takes them (`IMP=false`, `MIR=false`)
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
+    input_format: (--input-format) Override the input parser format
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
+    add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
+    noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
+    xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
+    catalog: (--catalog) XML catalog used to resolve imports
+    strict: (--strict) Use strict parsing when loading
+    verbose: (--verbose / --very-verbose / --very-very-verbose / -v) Increase logging verbosity (`-v`/`-vv`/`-vvv`); repeatable
+    """
+    return self._add('update-repo', {
+        "repo": directory,
+        "assignments": assignments,
+        "input_iri": input_iri,
+        "input_format": input_format,
+        "prefixes": prefixes,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
+        "add_prefixes": add_prefixes,
+        "noprefixes": noprefixes,
+        "xml_entities": xml_entities,
+        "catalog": catalog,
+        "strict": strict,
+        "verbose": verbose,
+    })
+
+
+Chain.update_repo = _chain_update_repo
 
 
 def seed(*, id: Optional[StrOrPath] = None, edit: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, force: bool = False, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
@@ -4261,25 +4662,26 @@ def _chain_schema(self, *, output: Optional[StrOrPath] = None) -> 'Chain':
 Chain.schema = _chain_schema
 
 
-def explain(*, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = None, sub: Optional[StrOrPath] = None, sup: Optional[StrOrPath] = None, mode: Optional[StrOrPath] = None, unsatisfiable: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, max: Optional[StrOrPath] = None, explanation: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def explain(*, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = None, sub: Optional[StrOrPath] = None, sup: Optional[StrOrPath] = None, mode: Optional[StrOrPath] = None, unsatisfiable: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, max: Optional[StrOrPath] = None, explanation: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Explain why a subsumption is entailed (compute a justification)
 
     Flags:
     input: (--input / -i)
-    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax. Only `<SUBCLASS> SubClassOf <SUPERCLASS>` axioms are supported; this is the ROBOT-style alternative to owlmake's --sub/--sup pair
+    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax: `<SUBCLASS> SubClassOf <SUPERCLASS>` between two named classes, each named by a label, the short form of its IRI, a CURIE or an IRI. An axiom the ontology does not entail has no explanation
     sub: (--sub) The subclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom. Required unless --axiom/--mode is given
     sup: (--sup) The superclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom
-    mode: (--mode / -M) What to explain: `entailment` (default), or `inconsistency`/`unsatisfiability` (explain why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing)
-    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability/inconsistency mode, which class(es) to explain: `all`, `root`, or a specific CLASS IRI/CURIE. Default `all`
-    reasoner: (--reasoner / -r) Reasoner to use: `elk`/`structural`/`emr`/ `owlmake` use the built-in EL reasoner
+    mode: (--mode / -M) What to explain: `entailment` (default), `unsatisfiability` (why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing), or `inconsistency` (why the ontology is inconsistent, i.e. owl:Thing ⊑ owl:Nothing)
+    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability mode, which unsatisfiable classes to explain: `all`; `root`, those no other unsatisfiable class's told definition explains; `most_general`, those with no unsatisfiable told superclass; `random:N`, the first N by IRI (all of them when N is not positive); a class's IRI or CURIE; or `list`, which explains none and writes their CURIEs to --explanation, one per line. Without it nothing is explained
+    reasoner: (--reasoner / -r) Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake` use the built-in EL reasoner (`owlmake` with union-elimination), `hermit`/`jfact` the hermit-rs OWL 2 DL reasoner, `whelk` the whelk-rs EL reasoner. The same reasoner decides the entailment, finds the unsatisfiable classes and minimizes the justifications. An unknown name is an error, as it is for `reason`
     max: (--max / -m) Maximum number of justifications (distinct minimal explanations) to retrieve. Default 1
-    explanation: (--explanation / -e) Write the justification(s) to this file. Same content as --output; provided for compatibility with existing invocations
-    output: (--output / -o) Output file for the justification. With `--format` (or an ontology file extension) this is an ontology of the union of justification axioms, as in `robot explain`; otherwise the human-readable report is written. Defaults to stdout (the report)
-    format: (--format / -f) Serialization format for the `--output` ontology of justification axioms: owl/owx/ofn/obo/omn/ttl/json. When omitted the format is inferred from the `--output` extension
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    explanation: (--explanation / -e) Write the markdown report of the explanations to this file
+    output: (--output / -o) Save the ontology this command was given, as it was given. The ontology of the justifications is what the next command in a chain receives. With neither this nor `--explanation`, the human-readable report goes to stdout
+    format: (--format / -f) Serialization format for `--output`; inferred from its extension when omitted
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4302,7 +4704,8 @@ def explain(*, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4312,25 +4715,26 @@ def explain(*, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_explain(self, *, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = None, sub: Optional[StrOrPath] = None, sup: Optional[StrOrPath] = None, mode: Optional[StrOrPath] = None, unsatisfiable: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, max: Optional[StrOrPath] = None, explanation: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_explain(self, *, input: Optional[StrOrPath] = None, axiom: Optional[StrOrPath] = None, sub: Optional[StrOrPath] = None, sup: Optional[StrOrPath] = None, mode: Optional[StrOrPath] = None, unsatisfiable: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, max: Optional[StrOrPath] = None, explanation: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Explain why a subsumption is entailed (compute a justification)
 
     Flags:
     input: (--input / -i)
-    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax. Only `<SUBCLASS> SubClassOf <SUPERCLASS>` axioms are supported; this is the ROBOT-style alternative to owlmake's --sub/--sup pair
+    axiom: (--axiom / -a) The axiom to explain, in Manchester syntax: `<SUBCLASS> SubClassOf <SUPERCLASS>` between two named classes, each named by a label, the short form of its IRI, a CURIE or an IRI. An axiom the ontology does not entail has no explanation
     sub: (--sub) The subclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom. Required unless --axiom/--mode is given
     sup: (--sup) The superclass of the entailment to explain (IRI/CURIE). owlmake extension; alternative to --axiom
-    mode: (--mode / -M) What to explain: `entailment` (default), or `inconsistency`/`unsatisfiability` (explain why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing)
-    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability/inconsistency mode, which class(es) to explain: `all`, `root`, or a specific CLASS IRI/CURIE. Default `all`
-    reasoner: (--reasoner / -r) Reasoner to use: `elk`/`structural`/`emr`/ `owlmake` use the built-in EL reasoner
+    mode: (--mode / -M) What to explain: `entailment` (default), `unsatisfiability` (why class(es) are unsatisfiable, i.e. C ⊑ owl:Nothing), or `inconsistency` (why the ontology is inconsistent, i.e. owl:Thing ⊑ owl:Nothing)
+    unsatisfiable: (--unsatisfiable / -u) For unsatisfiability mode, which unsatisfiable classes to explain: `all`; `root`, those no other unsatisfiable class's told definition explains; `most_general`, those with no unsatisfiable told superclass; `random:N`, the first N by IRI (all of them when N is not positive); a class's IRI or CURIE; or `list`, which explains none and writes their CURIEs to --explanation, one per line. Without it nothing is explained
+    reasoner: (--reasoner / -r) Reasoner that decides the entailment: `elk`/`emr`/`structural`/`owlmake` use the built-in EL reasoner (`owlmake` with union-elimination), `hermit`/`jfact` the hermit-rs OWL 2 DL reasoner, `whelk` the whelk-rs EL reasoner. The same reasoner decides the entailment, finds the unsatisfiable classes and minimizes the justifications. An unknown name is an error, as it is for `reason`
     max: (--max / -m) Maximum number of justifications (distinct minimal explanations) to retrieve. Default 1
-    explanation: (--explanation / -e) Write the justification(s) to this file. Same content as --output; provided for compatibility with existing invocations
-    output: (--output / -o) Output file for the justification. With `--format` (or an ontology file extension) this is an ontology of the union of justification axioms, as in `robot explain`; otherwise the human-readable report is written. Defaults to stdout (the report)
-    format: (--format / -f) Serialization format for the `--output` ontology of justification axioms: owl/owx/ofn/obo/omn/ttl/json. When omitted the format is inferred from the `--output` extension
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    explanation: (--explanation / -e) Write the markdown report of the explanations to this file
+    output: (--output / -o) Save the ontology this command was given, as it was given. The ontology of the justifications is what the next command in a chain receives. With neither this nor `--explanation`, the human-readable report goes to stdout
+    format: (--format / -f) Serialization format for `--output`; inferred from its extension when omitted
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4353,7 +4757,8 @@ def _chain_explain(self, *, input: Optional[StrOrPath] = None, axiom: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4366,22 +4771,23 @@ def _chain_explain(self, *, input: Optional[StrOrPath] = None, axiom: Optional[S
 Chain.explain = _chain_explain
 
 
-def repair(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, invalid_references: bool = False, merge_axiom_annotations: Optional[bool] = None, annotation_property: Optional[Sequence[StrOrPath]] = None, annotation_properties_file: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Fix common mechanical problems (duplicates, dangling references)
+def repair(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, invalid_references: Optional[bool] = None, merge_axiom_annotations: Optional[bool] = None, annotation_property: Optional[Sequence[StrOrPath]] = None, annotation_properties_file: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Migrate references to deprecated entities to their replacements, and merge the annotations of axioms that are otherwise the same
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    invalid_references: (--invalid-references / -r) Remove annotation assertions whose subject IRI is never declared or used in a logical axiom (dangling references)
-    merge_axiom_annotations: (--merge-axiom-annotations / -m) If true, merge the annotation sets of axioms that are otherwise identical. `<bool>`
-    annotation_property: (--annotation-property / -a) An annotation property whose assertions should be migrated/retained. Repeatable. Accepted for compatibility; currently only recorded, not used to drive a migration
-    annotation_properties_file: (--annotation-properties-file / -A) File listing annotation properties to migrate, one IRI/CURIE per line; unioned with `--annotation-property`
-    output_iri: (--output-iri / -O) Set the OntologyIRI for the output
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    invalid_references: (--invalid-references / -r) Migrate every reference to a deprecated entity to its replacement. Without `--merge-axiom-annotations true` this repair is made whatever this says. `<bool>`
+    merge_axiom_annotations: (--merge-axiom-annotations / -m) Merge the annotations of axioms that are otherwise the same, before any reference is migrated. `<bool>`
+    annotation_property: (--annotation-property / -a) An annotation property whose assertions on a deprecated entity move to its replacement; the deprecated entity keeps its other annotations. Repeatable
+    annotation_properties_file: (--annotation-properties-file / -A) A file listing more such annotation properties, one per line; a blank line and a line starting `#` list none
+    output_iri: (--output-iri / -O) Read and not used: the ontology keeps its IRI
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4401,7 +4807,8 @@ def repair(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4411,22 +4818,23 @@ def repair(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_repair(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, invalid_references: bool = False, merge_axiom_annotations: Optional[bool] = None, annotation_property: Optional[Sequence[StrOrPath]] = None, annotation_properties_file: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Fix common mechanical problems (duplicates, dangling references)
+def _chain_repair(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, invalid_references: Optional[bool] = None, merge_axiom_annotations: Optional[bool] = None, annotation_property: Optional[Sequence[StrOrPath]] = None, annotation_properties_file: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Migrate references to deprecated entities to their replacements, and merge the annotations of axioms that are otherwise the same
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    invalid_references: (--invalid-references / -r) Remove annotation assertions whose subject IRI is never declared or used in a logical axiom (dangling references)
-    merge_axiom_annotations: (--merge-axiom-annotations / -m) If true, merge the annotation sets of axioms that are otherwise identical. `<bool>`
-    annotation_property: (--annotation-property / -a) An annotation property whose assertions should be migrated/retained. Repeatable. Accepted for compatibility; currently only recorded, not used to drive a migration
-    annotation_properties_file: (--annotation-properties-file / -A) File listing annotation properties to migrate, one IRI/CURIE per line; unioned with `--annotation-property`
-    output_iri: (--output-iri / -O) Set the OntologyIRI for the output
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    invalid_references: (--invalid-references / -r) Migrate every reference to a deprecated entity to its replacement. Without `--merge-axiom-annotations true` this repair is made whatever this says. `<bool>`
+    merge_axiom_annotations: (--merge-axiom-annotations / -m) Merge the annotations of axioms that are otherwise the same, before any reference is migrated. `<bool>`
+    annotation_property: (--annotation-property / -a) An annotation property whose assertions on a deprecated entity move to its replacement; the deprecated entity keeps its other annotations. Repeatable
+    annotation_properties_file: (--annotation-properties-file / -A) A file listing more such annotation properties, one per line; a blank line and a line starting `#` list none
+    output_iri: (--output-iri / -O) Read and not used: the ontology keeps its IRI
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4446,7 +4854,8 @@ def _chain_repair(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4459,7 +4868,7 @@ def _chain_repair(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.repair = _chain_repair
 
 
-def collapse(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, precious: Optional[Sequence[StrOrPath]] = None, precious_terms: Optional[Sequence[StrOrPath]] = None, threshold: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def collapse(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, precious: Optional[Sequence[StrOrPath]] = None, precious_terms: Optional[Sequence[StrOrPath]] = None, threshold: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Collapse the hierarchy to a set of precious terms
 
     Flags:
@@ -4470,11 +4879,12 @@ def collapse(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] =
     term_file: (--term-file) File(s) listing precious terms. (owlmake alias of `--precious-terms`.)
     precious: (--precious / -r) CURIE or IRI of a class to keep. Repeatable
     precious_terms: (--precious-terms / -R) File(s) listing CURIEs/IRIs of classes to keep
-    threshold: (--threshold / -t) Minimum number of named subclasses an intermediate class must have to be kept (default 2). Non-precious intermediates with fewer named subclasses are collapsed and their hierarchy is bridged
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    threshold: (--threshold / -t) Number of named subclasses an intermediate class needs to be kept (default 2, at least 2). One with fewer, but at least one, is collapsed and the hierarchy is bridged across it
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4494,7 +4904,8 @@ def collapse(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] =
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4504,7 +4915,7 @@ def collapse(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] =
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_collapse(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, precious: Optional[Sequence[StrOrPath]] = None, precious_terms: Optional[Sequence[StrOrPath]] = None, threshold: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_collapse(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, precious: Optional[Sequence[StrOrPath]] = None, precious_terms: Optional[Sequence[StrOrPath]] = None, threshold: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Collapse the hierarchy to a set of precious terms
 
     Flags:
@@ -4515,11 +4926,12 @@ def _chain_collapse(self, *, input: Optional[StrOrPath] = None, output: Optional
     term_file: (--term-file) File(s) listing precious terms. (owlmake alias of `--precious-terms`.)
     precious: (--precious / -r) CURIE or IRI of a class to keep. Repeatable
     precious_terms: (--precious-terms / -R) File(s) listing CURIEs/IRIs of classes to keep
-    threshold: (--threshold / -t) Minimum number of named subclasses an intermediate class must have to be kept (default 2). Non-precious intermediates with fewer named subclasses are collapsed and their hierarchy is bridged
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    threshold: (--threshold / -t) Number of named subclasses an intermediate class needs to be kept (default 2, at least 2). One with fewer, but at least one, is collapsed and the hierarchy is bridged across it
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4539,7 +4951,8 @@ def _chain_collapse(self, *, input: Optional[StrOrPath] = None, output: Optional
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4552,8 +4965,8 @@ def _chain_collapse(self, *, input: Optional[StrOrPath] = None, output: Optional
 Chain.collapse = _chain_collapse
 
 
-def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, expand_term: Optional[Sequence[StrOrPath]] = None, expand_term_file: Optional[Sequence[StrOrPath]] = None, no_expand_term: Optional[Sequence[StrOrPath]] = None, no_expand_term_file: Optional[Sequence[StrOrPath]] = None, create_new_ontology: Optional[bool] = None, annotate_expansion_axioms: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Expand OBO/OWL macros (IAO:0000424 expandExpressionTo)
+def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, expand_term: Optional[Sequence[StrOrPath]] = None, expand_term_file: Optional[Sequence[StrOrPath]] = None, no_expand_term: Optional[Sequence[StrOrPath]] = None, no_expand_term_file: Optional[Sequence[StrOrPath]] = None, create_new_ontology: Optional[bool] = None, annotate_expansion_axioms: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Expand `OMO:0002000` (defined by construct) macros
 
     Flags:
     input: (--input / -i)
@@ -4565,10 +4978,11 @@ def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     no_expand_term_file: (--no-expand-term-file / -N) File(s) listing macro properties to NOT expand
     create_new_ontology: (--create-new-ontology / -c) If true, output ontology will only contain the expansions. `<bool>`
     annotate_expansion_axioms: (--annotate-expansion-axioms / -a) If true, annotate each expansion axiom with `dct:source <expansion property>`. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4589,7 +5003,8 @@ def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4599,8 +5014,8 @@ def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_expand(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, expand_term: Optional[Sequence[StrOrPath]] = None, expand_term_file: Optional[Sequence[StrOrPath]] = None, no_expand_term: Optional[Sequence[StrOrPath]] = None, no_expand_term_file: Optional[Sequence[StrOrPath]] = None, create_new_ontology: Optional[bool] = None, annotate_expansion_axioms: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Expand OBO/OWL macros (IAO:0000424 expandExpressionTo)
+def _chain_expand(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, expand_term: Optional[Sequence[StrOrPath]] = None, expand_term_file: Optional[Sequence[StrOrPath]] = None, no_expand_term: Optional[Sequence[StrOrPath]] = None, no_expand_term_file: Optional[Sequence[StrOrPath]] = None, create_new_ontology: Optional[bool] = None, annotate_expansion_axioms: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Expand `OMO:0002000` (defined by construct) macros
 
     Flags:
     input: (--input / -i)
@@ -4612,10 +5027,11 @@ def _chain_expand(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     no_expand_term_file: (--no-expand-term-file / -N) File(s) listing macro properties to NOT expand
     create_new_ontology: (--create-new-ontology / -c) If true, output ontology will only contain the expansions. `<bool>`
     annotate_expansion_axioms: (--annotate-expansion-axioms / -a) If true, annotate each expansion axiom with `dct:source <expansion property>`. `<bool>`
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4636,7 +5052,8 @@ def _chain_expand(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4649,7 +5066,7 @@ def _chain_expand(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.expand = _chain_expand
 
 
-def subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, query: Optional[Sequence[StrOrPath]] = None, ancestors: Optional[bool] = None, reasoner: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, fill_gaps: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, query: Optional[Sequence[StrOrPath]] = None, ancestors: Optional[bool] = None, reasoner: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, fill_gaps: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Extract an `oboInOwl:inSubset` slice (`odk:subset`)
 
     Flags:
@@ -4663,10 +5080,11 @@ def subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     term: (--term / -t) Seed term(s) added to the subset directly (CURIE/IRI, repeatable)
     term_file: (--term-file / -T) File(s) of seed terms (repeatable)
     fill_gaps: (--fill-gaps) Bridge the hierarchy across dropped classes (`<bool>`). Defaults to true in inSubset mode, false in query mode
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4688,7 +5106,8 @@ def subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4698,7 +5117,7 @@ def subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, query: Optional[Sequence[StrOrPath]] = None, ancestors: Optional[bool] = None, reasoner: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, fill_gaps: Optional[bool] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, query: Optional[Sequence[StrOrPath]] = None, ancestors: Optional[bool] = None, reasoner: Optional[StrOrPath] = None, term: Optional[Sequence[StrOrPath]] = None, term_file: Optional[Sequence[StrOrPath]] = None, fill_gaps: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Extract an `oboInOwl:inSubset` slice (`odk:subset`)
 
     Flags:
@@ -4712,10 +5131,11 @@ def _chain_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[S
     term: (--term / -t) Seed term(s) added to the subset directly (CURIE/IRI, repeatable)
     term_file: (--term-file / -T) File(s) of seed terms (repeatable)
     fill_gaps: (--fill-gaps) Bridge the hierarchy across dropped classes (`<bool>`). Defaults to true in inSubset mode, false in query mode
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4737,7 +5157,8 @@ def _chain_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[S
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4750,7 +5171,7 @@ def _chain_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.subset = _chain_subset
 
 
-def extract_ontology_subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, fill_gaps: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def extract_ontology_subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, fill_gaps: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Extract a named `oboInOwl:inSubset` slice, optionally extended to its full graph-ancestor closure (`--fill-gaps`; UBERON `common-anatomy.owl`)
 
     Flags:
@@ -4759,10 +5180,11 @@ def extract_ontology_subset(*, input: Optional[StrOrPath] = None, output: Option
     format: (--format)
     subset: (--subset / -s) [required] The named `oboInOwl:inSubset` slice (e.g. `common_anatomy`)
     fill_gaps: (--fill-gaps) Extend the subset to its full graph-ancestor closure before slicing
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4779,7 +5201,8 @@ def extract_ontology_subset(*, input: Optional[StrOrPath] = None, output: Option
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4789,7 +5212,7 @@ def extract_ontology_subset(*, input: Optional[StrOrPath] = None, output: Option
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_extract_ontology_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, fill_gaps: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_extract_ontology_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, subset: Optional[StrOrPath] = None, fill_gaps: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Extract a named `oboInOwl:inSubset` slice, optionally extended to its full graph-ancestor closure (`--fill-gaps`; UBERON `common-anatomy.owl`)
 
     Flags:
@@ -4798,10 +5221,11 @@ def _chain_extract_ontology_subset(self, *, input: Optional[StrOrPath] = None, o
     format: (--format)
     subset: (--subset / -s) [required] The named `oboInOwl:inSubset` slice (e.g. `common_anatomy`)
     fill_gaps: (--fill-gaps) Extend the subset to its full graph-ancestor closure before slicing
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4818,7 +5242,8 @@ def _chain_extract_ontology_subset(self, *, input: Optional[StrOrPath] = None, o
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4831,17 +5256,18 @@ def _chain_extract_ontology_subset(self, *, input: Optional[StrOrPath] = None, o
 Chain.extract_ontology_subset = _chain_extract_ontology_subset
 
 
-def extract_mingraph(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def extract_mingraph(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Reduce to the class hierarchy + labels + property ontology (UBERON composite `-basic`)
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4856,7 +5282,8 @@ def extract_mingraph(*, input: Optional[StrOrPath] = None, output: Optional[StrO
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4866,17 +5293,18 @@ def extract_mingraph(*, input: Optional[StrOrPath] = None, output: Optional[StrO
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_extract_mingraph(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_extract_mingraph(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Reduce to the class hierarchy + labels + property ontology (UBERON composite `-basic`)
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4891,7 +5319,8 @@ def _chain_extract_mingraph(self, *, input: Optional[StrOrPath] = None, output: 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4904,17 +5333,18 @@ def _chain_extract_mingraph(self, *, input: Optional[StrOrPath] = None, output: 
 Chain.extract_mingraph = _chain_extract_mingraph
 
 
-def remove_axiom_annotations(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def remove_axiom_annotations(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Strip annotations from every axiom
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4929,7 +5359,8 @@ def remove_axiom_annotations(*, input: Optional[StrOrPath] = None, output: Optio
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4939,17 +5370,18 @@ def remove_axiom_annotations(*, input: Optional[StrOrPath] = None, output: Optio
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_remove_axiom_annotations(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_remove_axiom_annotations(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Strip annotations from every axiom
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -4964,7 +5396,8 @@ def _chain_remove_axiom_annotations(self, *, input: Optional[StrOrPath] = None, 
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -4977,7 +5410,7 @@ def _chain_remove_axiom_annotations(self, *, input: Optional[StrOrPath] = None, 
 Chain.remove_axiom_annotations = _chain_remove_axiom_annotations
 
 
-def make_subset_by_properties(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: bool = False, props: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def make_subset_by_properties(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: bool = False, props: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Keep only axioms whose object properties are in the given list (UBERON composite `-basic`)
 
     Flags:
@@ -4986,10 +5419,11 @@ def make_subset_by_properties(*, input: Optional[StrOrPath] = None, output: Opti
     format: (--format)
     force: (--force / -f) Force-remove dangling axioms; always on in owlmake
     props: The object-property keep-list (CURIE / IRI / label / shorthand)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5006,7 +5440,8 @@ def make_subset_by_properties(*, input: Optional[StrOrPath] = None, output: Opti
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5016,7 +5451,7 @@ def make_subset_by_properties(*, input: Optional[StrOrPath] = None, output: Opti
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_make_subset_by_properties(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: bool = False, props: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_make_subset_by_properties(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: bool = False, props: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Keep only axioms whose object properties are in the given list (UBERON composite `-basic`)
 
     Flags:
@@ -5025,10 +5460,11 @@ def _chain_make_subset_by_properties(self, *, input: Optional[StrOrPath] = None,
     format: (--format)
     force: (--force / -f) Force-remove dangling axioms; always on in owlmake
     props: The object-property keep-list (CURIE / IRI / label / shorthand)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5045,7 +5481,8 @@ def _chain_make_subset_by_properties(self, *, input: Optional[StrOrPath] = None,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5058,7 +5495,7 @@ def _chain_make_subset_by_properties(self, *, input: Optional[StrOrPath] = None,
 Chain.make_subset_by_properties = _chain_make_subset_by_properties
 
 
-def merge_species(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, batch_file: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, property: Optional[Sequence[StrOrPath]] = None, suffix: Optional[StrOrPath] = None, include_property: Optional[Sequence[StrOrPath]] = None, extended_translation: bool = False, translate_gcas: bool = False, remove_gcas: bool = False, remove_declarations: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def merge_species(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, batch_file: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, property: Optional[Sequence[StrOrPath]] = None, suffix: Optional[StrOrPath] = None, include_property: Optional[Sequence[StrOrPath]] = None, extended_translation: bool = False, translate_gcas: bool = False, remove_gcas: bool = False, remove_declarations: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Fold species-specific classes into a composite ontology (`uberon:merge-species`)
 
     Flags:
@@ -5074,10 +5511,11 @@ def merge_species(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPa
     translate_gcas: (--translate-gcas / -g)
     remove_gcas: (--remove-gcas / -G)
     remove_declarations: (--remove-declarations / -d)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5101,7 +5539,8 @@ def merge_species(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPa
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5111,7 +5550,7 @@ def merge_species(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPa
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_merge_species(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, batch_file: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, property: Optional[Sequence[StrOrPath]] = None, suffix: Optional[StrOrPath] = None, include_property: Optional[Sequence[StrOrPath]] = None, extended_translation: bool = False, translate_gcas: bool = False, remove_gcas: bool = False, remove_declarations: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_merge_species(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, batch_file: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, property: Optional[Sequence[StrOrPath]] = None, suffix: Optional[StrOrPath] = None, include_property: Optional[Sequence[StrOrPath]] = None, extended_translation: bool = False, translate_gcas: bool = False, remove_gcas: bool = False, remove_declarations: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Fold species-specific classes into a composite ontology (`uberon:merge-species`)
 
     Flags:
@@ -5127,10 +5566,11 @@ def _chain_merge_species(self, *, input: Optional[StrOrPath] = None, output: Opt
     translate_gcas: (--translate-gcas / -g)
     remove_gcas: (--remove-gcas / -G)
     remove_declarations: (--remove-declarations / -d)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5154,7 +5594,8 @@ def _chain_merge_species(self, *, input: Optional[StrOrPath] = None, output: Opt
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5167,7 +5608,7 @@ def _chain_merge_species(self, *, input: Optional[StrOrPath] = None, output: Opt
 Chain.merge_species = _chain_merge_species
 
 
-def create_species_subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, strategy: Optional[StrOrPath] = None, root: Optional[Sequence[StrOrPath]] = None, subset_name: Optional[StrOrPath] = None, only_tag_in: Optional[Sequence[StrOrPath]] = None, write_tags_to: Optional[StrOrPath] = None, no_remove: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def create_species_subset(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, strategy: Optional[StrOrPath] = None, root: Optional[Sequence[StrOrPath]] = None, subset_name: Optional[StrOrPath] = None, only_tag_in: Optional[Sequence[StrOrPath]] = None, write_tags_to: Optional[StrOrPath] = None, no_remove: bool = False, prune_taxa: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Compute a taxon-specific subset, tagging/removing classes (`uberon:create-species-subset`)
 
     Flags:
@@ -5182,10 +5623,12 @@ def create_species_subset(*, input: Optional[StrOrPath] = None, output: Optional
     only_tag_in: (--only-tag-in) Only tag classes whose IRI starts with one of these (CURIE) prefixes
     write_tags_to: (--write-tags-to) Write the inSubset tag axioms to this file instead of the main ontology
     no_remove: (--no-remove) Keep non-subset classes in the output (default: remove them)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    prune_taxa: (--prune-taxa) When removing, also remove every taxon under cellular organisms that is neither the taxon nor one of its ancestors or descendants
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5205,10 +5648,12 @@ def create_species_subset(*, input: Optional[StrOrPath] = None, output: Optional
         "only_tag_in": only_tag_in,
         "write_tags_to": write_tags_to,
         "no_remove": no_remove,
+        "prune_taxa": prune_taxa,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5218,7 +5663,7 @@ def create_species_subset(*, input: Optional[StrOrPath] = None, output: Optional
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_create_species_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, strategy: Optional[StrOrPath] = None, root: Optional[Sequence[StrOrPath]] = None, subset_name: Optional[StrOrPath] = None, only_tag_in: Optional[Sequence[StrOrPath]] = None, write_tags_to: Optional[StrOrPath] = None, no_remove: bool = False, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_create_species_subset(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, taxon: Optional[StrOrPath] = None, reasoner: Optional[StrOrPath] = None, strategy: Optional[StrOrPath] = None, root: Optional[Sequence[StrOrPath]] = None, subset_name: Optional[StrOrPath] = None, only_tag_in: Optional[Sequence[StrOrPath]] = None, write_tags_to: Optional[StrOrPath] = None, no_remove: bool = False, prune_taxa: bool = False, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Compute a taxon-specific subset, tagging/removing classes (`uberon:create-species-subset`)
 
     Flags:
@@ -5233,10 +5678,12 @@ def _chain_create_species_subset(self, *, input: Optional[StrOrPath] = None, out
     only_tag_in: (--only-tag-in) Only tag classes whose IRI starts with one of these (CURIE) prefixes
     write_tags_to: (--write-tags-to) Write the inSubset tag axioms to this file instead of the main ontology
     no_remove: (--no-remove) Keep non-subset classes in the output (default: remove them)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    prune_taxa: (--prune-taxa) When removing, also remove every taxon under cellular organisms that is neither the taxon nor one of its ancestors or descendants
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5256,10 +5703,12 @@ def _chain_create_species_subset(self, *, input: Optional[StrOrPath] = None, out
         "only_tag_in": only_tag_in,
         "write_tags_to": write_tags_to,
         "no_remove": no_remove,
+        "prune_taxa": prune_taxa,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5272,7 +5721,7 @@ def _chain_create_species_subset(self, *, input: Optional[StrOrPath] = None, out
 Chain.create_species_subset = _chain_create_species_subset
 
 
-def dosdp(*, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def dosdp(*, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Generate OWL from a DOSDP pattern + TSV data table
 
     Flags:
@@ -5281,10 +5730,11 @@ def dosdp(*, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = No
     input: (--input / -i) Optional ontology to source filler labels from for name/def text
     output: (--output / -o)
     format: (--format / -f)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5301,7 +5751,8 @@ def dosdp(*, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = No
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5311,7 +5762,7 @@ def dosdp(*, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = No
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_dosdp(self, *, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[StrOrPath] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_dosdp(self, *, pattern: Optional[StrOrPath] = None, data: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Generate OWL from a DOSDP pattern + TSV data table
 
     Flags:
@@ -5320,10 +5771,11 @@ def _chain_dosdp(self, *, pattern: Optional[StrOrPath] = None, data: Optional[St
     input: (--input / -i) Optional ontology to source filler labels from for name/def text
     output: (--output / -o)
     format: (--format / -f)
-    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file
+    input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
-    prefixes: (--prefixes / -P) Use prefixes from a JSON-LD context file
-    prefix: (--prefix / --add-prefix) Add a single prefix `"foo: http://bar"` (also spelled `--add-prefix`; repeatable). The `-p` short is bound per-command, where it is free
+    prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
+    prefix: (--prefix) Bind a prefix `"foo: http://bar"` for reading CURIEs (repeatable). The `-p` short is bound per-command, where it is free
+    add_prefix: (--add-prefix) Bind a prefix as `--prefix` does, and declare it in the output as well (repeatable)
     add_prefixes: (--add-prefixes) Add prefixes from a JSON-LD context file (repeatable)
     noprefixes: (--noprefixes) Drop the standard built-in prefixes, keeping only those given explicitly
     xml_entities: (--xml-entities) Emit `&prefix;` XML entities in RDF/XML output
@@ -5340,7 +5792,8 @@ def _chain_dosdp(self, *, pattern: Optional[StrOrPath] = None, data: Optional[St
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
-        "add_prefix": prefix,
+        "prefix": prefix,
+        "add_prefix": add_prefix,
         "add_prefixes": add_prefixes,
         "noprefixes": noprefixes,
         "xml_entities": xml_entities,
@@ -5402,6 +5855,7 @@ __all__ = [
     'all_imports',
     'annotate',
     'babelon',
+    'check_align',
     'check_rdfxml',
     'collapse',
     'comm',
@@ -5455,6 +5909,7 @@ __all__ = [
     'schema',
     'sed',
     'seed',
+    'semsql',
     'sha256sum',
     'subset',
     'template',
@@ -5462,6 +5917,7 @@ __all__ = [
     'text_tagger',
     'ubergraph',
     'unmerge',
+    'update_repo',
     'validate_id_ranges',
     'validate_patterns',
     'validate_profile',

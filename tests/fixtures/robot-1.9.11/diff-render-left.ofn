@@ -1,0 +1,4 @@
+Prefix(:=<http://example.org/diff-render#>)
+Ontology(<http://example.org/diff-render> <http://example.org/diff-render/v1>
+Declaration(Class(:Z))
+)

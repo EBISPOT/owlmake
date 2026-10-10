@@ -1,0 +1,49 @@
+format-version: 1.2
+ontology: q
+
+[Term]
+id: Q:1
+is_a: Q:2 {gci_relation="R:1", gci_filler="Q:3"}
+is_a: Q:4 {gci_relation="R:2", gci_filler="Q:5"}
+disjoint_from: Q:6 {gci_relation="R:1", gci_filler="Q:3"}
+relationship: R:1 Q:2 {cardinality="2"}
+relationship: R:1 Q:3 {cardinality="2", source="s"}
+relationship: R:1 Q:4 {cardinality="0"}
+relationship: R:1 Q:5 {maxCardinality="0"}
+relationship: R:1 Q:6 {minCardinality="1", maxCardinality="3"}
+relationship: R:1 Q:7 {minCardinality="1"}
+relationship: R:1 Q:8 {maxCardinality="2"}
+relationship: R:1 Q:9 {all_some="true", all_only="true"}
+relationship: R:1 Q:10 {all_only="true"}
+relationship: R:2 Q:11
+relationship: R:1 Q:12 {cardinality="-1"}
+relationship: R:1 Q:13 {cardinality="+2"}
+relationship: R:1 Q:14 {all_only="TRUE"}
+relationship: R:1 Q:15 {cardinality="2", cardinality="3"}
+relationship: R:1 Q:16 {gci_relation="R:2", gci_filler="Q:17"}
+relationship: R:1 Q:18 {min_cardinality="1"}
+relationship: R:1 Q:19 {gci_relation="R:1", gci_filler="Q:17", source="g"}
+relationship: R:1 Q:21 {minCardinality="2", all_only="true"}
+relationship: R:1 Q:22 {maxCardinality="1", source="m"}
+relationship: R:1 Q:23 {all_some="true"}
+relationship: R:1 Q:24 {gci_relation="", gci_filler="Q:3"}
+
+[Term]
+id: Q:20
+intersection_of: Q:1
+intersection_of: R:1 Q:2 {cardinality="0"}
+intersection_of: R:1 Q:3 {minCardinality="1", maxCardinality="2"}
+intersection_of: R:2 Q:4
+intersection_of: R:1 Q:5 {all_only="true"}
+intersection_of: R:1 Q:6 {all_some="true", all_only="true"}
+
+[Term]
+id: Q:30
+equivalent_to: Q:7 {gci_relation="R:1", gci_filler="Q:3", source="e"}
+
+[Typedef]
+id: R:1
+
+[Typedef]
+id: R:2
+is_class_level: true

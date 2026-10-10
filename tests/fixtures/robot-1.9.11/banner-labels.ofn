@@ -1,0 +1,15 @@
+Prefix(:=<http://purl.obolibrary.org/obo/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://purl.obolibrary.org/obo/banner-labels.owl>
+Import(<http://purl.obolibrary.org/obo/banner-labels-child.owl>)
+Declaration(Class(:EX_1))
+Declaration(Class(:EX_2))
+Declaration(Class(:EX_3))
+SubClassOf(:EX_1 :EX_9)
+SubClassOf(:EX_2 :EX_1)
+SubClassOf(:EX_3 :EX_2)
+AnnotationAssertion(rdfs:label :EX_1 "one")
+AnnotationAssertion(rdfs:label :EX_2 "two")
+AnnotationAssertion(rdfs:label :EX_3 "three
+lines")
+)

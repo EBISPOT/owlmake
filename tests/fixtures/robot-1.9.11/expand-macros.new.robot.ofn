@@ -1,0 +1,46 @@
+Prefix(:=<http://example.org/x/expand-macros.owl#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/x/expand-macros.owl>
+
+Declaration(Class(<http://example.org/x#A>))
+Declaration(Class(<http://example.org/x#B>))
+Declaration(Class(<http://example.org/x#T>))
+Declaration(Class(<http://example.org/x#U>))
+Declaration(Class(<http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07>))
+Declaration(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002171) ObjectProperty(obo:BFO_0000050))
+Declaration(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002161) ObjectProperty(obo:RO_0002162))
+Declaration(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002175) ObjectProperty(obo:RO_0002162))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/source>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/x#A> (<http://example.org/x#A>)
+
+SubClassOf(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002161) <http://example.org/x#A> ObjectSomeValuesFrom(obo:RO_0002162 ObjectComplementOf(<http://example.org/x#T>)))
+DisjointClasses(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002161) <http://example.org/x#A> ObjectSomeValuesFrom(obo:RO_0002162 <http://example.org/x#T>))
+
+# Class: <http://example.org/x#B> (<http://example.org/x#B>)
+
+SubClassOf(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002161) <http://example.org/x#B> ObjectSomeValuesFrom(obo:RO_0002162 ObjectComplementOf(<http://example.org/x#U>)))
+DisjointClasses(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002161) <http://example.org/x#B> ObjectSomeValuesFrom(obo:RO_0002162 <http://example.org/x#U>))
+
+# Class: <http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> (http://example.org/x#B in taxon http://example.org/x#T)
+
+AnnotationAssertion(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002175) rdfs:label <http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> "http://example.org/x#B in taxon http://example.org/x#T")
+SubClassOf(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002175) <http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> <http://example.org/x#B>)
+SubClassOf(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002175) <http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> ObjectSomeValuesFrom(obo:RO_0002162 <http://example.org/x#T>))
+
+
+DisjointClasses(Annotation(<http://purl.org/dc/terms/source> obo:RO_0002171) ObjectSomeValuesFrom(obo:BFO_0000050 <http://example.org/x#A>) ObjectSomeValuesFrom(obo:BFO_0000050 <http://example.org/x#B>))
+)

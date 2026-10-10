@@ -1,0 +1,350 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/keys#"
+     xml:base="http://example.org/keys"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/keys"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/keys#r -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/keys#r"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/keys#d -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/keys#d"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/keys#A1 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A1"/>
+    
+
+
+    <!-- http://example.org/keys#A10 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A10"/>
+    
+
+
+    <!-- http://example.org/keys#A11 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A11">
+        <owl:hasKey rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/keys#A12 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A12"/>
+    
+
+
+    <!-- http://example.org/keys#A13 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A13"/>
+    
+
+
+    <!-- http://example.org/keys#A14 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A14">
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+            <rdf:Description rdf:about="http://example.org/keys#d"/>
+        </owl:hasKey>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/keys#A4 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A4"/>
+    
+
+
+    <!-- http://example.org/keys#A5 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A5"/>
+    
+
+
+    <!-- http://example.org/keys#A6 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A6"/>
+    
+
+
+    <!-- http://example.org/keys#A8 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A8"/>
+    
+
+
+    <!-- http://example.org/keys#A9 -->
+
+    <owl:Class rdf:about="http://example.org/keys#A9"/>
+    
+
+
+    <!-- http://example.org/keys#B1 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B1"/>
+    
+
+
+    <!-- http://example.org/keys#B10 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B10"/>
+    
+
+
+    <!-- http://example.org/keys#B12 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B12"/>
+    
+
+
+    <!-- http://example.org/keys#B13 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B13"/>
+    
+
+
+    <!-- http://example.org/keys#B6 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B6"/>
+    
+
+
+    <!-- http://example.org/keys#B8 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B8"/>
+    
+
+
+    <!-- http://example.org/keys#B9 -->
+
+    <owl:Class rdf:about="http://example.org/keys#B9"/>
+    
+
+
+    <!-- http://example.org/keys#C12 -->
+
+    <owl:Class rdf:about="http://example.org/keys#C12">
+        <rdfs:subClassOf>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/keys#A12"/>
+                    <rdf:Description rdf:about="http://example.org/keys#B12"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/keys#i7 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/keys#i7"/>
+    
+
+
+    <!-- http://example.org/keys#j7 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/keys#j7"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A8"/>
+            <rdf:Description rdf:about="http://example.org/keys#B8"/>
+        </owl:unionOf>
+        <rdfs:subClassOf rdf:resource="http://example.org/keys#A8"/>
+    </owl:Class>
+    <owl:Class>
+        <owl:intersectionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#d"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/keys#A6"/>
+                    <rdf:Description rdf:about="http://example.org/keys#B6"/>
+                </owl:intersectionOf>
+                <owl:hasKey rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/keys#r"/>
+                </owl:hasKey>
+            </owl:Class>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#hasKey"/>
+        <owl:annotatedTarget rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:annotatedTarget>
+        <rdfs:comment>annotated key</rdfs:comment>
+    </owl:Axiom>
+    <owl:Class>
+        <owl:unionOf rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A1"/>
+            <rdf:Description rdf:about="http://example.org/keys#B1"/>
+        </owl:unionOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A10"/>
+            <rdf:Description rdf:about="http://example.org/keys#B10"/>
+        </owl:unionOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A10"/>
+            <rdf:Description rdf:about="http://example.org/keys#B10"/>
+        </owl:unionOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#d"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A12"/>
+            <rdf:Description rdf:about="http://example.org/keys#B12"/>
+        </owl:unionOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/keys#A13"/>
+                    <rdf:Description rdf:about="http://example.org/keys#B13"/>
+                </owl:unionOf>
+                <owl:hasKey rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </owl:Class>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2002/07/owl#hasKey"/>
+        <owl:annotatedTarget rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+        <rdfs:comment>empty key</rdfs:comment>
+    </owl:Axiom>
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A8"/>
+            <rdf:Description rdf:about="http://example.org/keys#B8"/>
+        </owl:unionOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Class>
+        <owl:unionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#A9"/>
+            <rdf:Description rdf:about="http://example.org/keys#B9"/>
+        </owl:unionOf>
+        <owl:hasKey rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+    </owl:Class>
+    <owl:Class>
+        <owl:complementOf rdf:resource="http://example.org/keys#A5"/>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#d"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Class>
+        <owl:oneOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#i7"/>
+            <rdf:Description rdf:about="http://example.org/keys#j7"/>
+        </owl:oneOf>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+        </owl:hasKey>
+    </owl:Class>
+    <owl:Restriction>
+        <owl:onProperty rdf:resource="http://example.org/keys#r"/>
+        <owl:someValuesFrom rdf:resource="http://example.org/keys#A4"/>
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/keys#r"/>
+            <rdf:Description rdf:about="http://example.org/keys#d"/>
+        </owl:hasKey>
+    </owl:Restriction>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

@@ -7,6 +7,7 @@
 
 pub use crate::plan::step::*;
 use crate::build::recipe::FileOp;
+use crate::cmd::Switch;
 use std::path::Path;
 
 const SUBCOMMANDS: &[&str] = &[
@@ -251,6 +252,10 @@ fn runs_without_a_shell(s: &Step) -> bool {
     match s {
         Step::Op(_) | Step::Partial { .. } | Step::Boundary { .. } => true,
         Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::OwlmakeCli { .. } => true,
+        // ROBOT's refusal fails the step as the command line would, and an
+        // option owlmake does not read refuses it in the plan; neither needs a
+        // shell.
+        Step::Refused { .. } | Step::UnsupportedOptions { .. } => true,
         Step::MayFail(inner) => runs_without_a_shell(inner),
         // `Shell`/`Fallback` are command lines by definition; an unsupported
         // subcommand is one owlmake has no implementation for, and `Branch`/`Oort`
@@ -405,7 +410,9 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
             if toks.iter().any(|t| t.starts_with("sssom:")) {
                 steps.push(shell_step(sub.to_string()));
             } else {
-                let mut chain = parse_robot_chain(&toks, robot_prefix);
+                let words = program_words(sub);
+                let skip = words.iter().take_while(|t| is_env_assignment(t)).count();
+                let mut chain = parse_robot_chain(&words[skip..], robot_prefix);
                 if saw_robot_part && !chain.is_empty() {
                     if let Some(input) = super::planner::first_robot_input(sub, robot_prefix) {
                         chain.insert(0, Step::Boundary { input: Some(input) });
@@ -698,12 +705,14 @@ fn parse_owltools(toks: &[String], sub: &str) -> Vec<Step> {
         match t.as_str() {
             "--merge-imports-closure" | "--merge-import-closure" => {
                 // Resolve and inline the import closure (then drop the imports).
-                steps.push(Step::Op(Op::Merge { inputs: vec![], collapse_import_closure: None }));
+                steps.push(Step::Op(Op::plain_merge(vec![])));
             }
             "--merge-axiom-annotations" => {
                 steps.push(Step::Op(Op::Repair {
                     invalid_references: false,
                     merge_axiom_annotations: true,
+                    annotation_properties: vec![],
+                    annotation_properties_file: None,
                 }));
             }
             "--extract-ontology-subset" => {
@@ -910,127 +919,248 @@ fn launcher_len(toks: &[String], robot_prefix: &str) -> usize {
     i
 }
 
+/// The prefix options a command line states, as [`Op::Prefixes`] records them.
+#[derive(Clone, Default, PartialEq)]
+struct PrefixOptions {
+    prefixes: Option<String>,
+    noprefixes: bool,
+    add_prefixes: Vec<String>,
+    prefix: Vec<String>,
+    add_prefix: Vec<String>,
+}
+
+impl PrefixOptions {
+    /// Record `option`, with the `value` after it, when it is one of the prefix
+    /// options of `command` (`""` before any command); whether it was. A ROBOT
+    /// command's options come by their long names ([`super::robot_cli`]).
+    /// Before any command `-p` and `-P` are `--prefix` and `--prefixes`, and on
+    /// a plugin's command `-P` is.
+    fn take(&mut self, command: &str, option: &str, value: Option<&String>) -> bool {
+        fn push(list: &mut Vec<String>, value: &str) {
+            if !list.iter().any(|v| v == value) {
+                list.push(value.to_string());
+            }
+        }
+        match (option, value) {
+            ("--noprefixes", _) => self.noprefixes = true,
+            ("--prefixes" | "-P", Some(v)) => {
+                self.prefixes.get_or_insert_with(|| v.clone());
+            }
+            ("--add-prefixes", Some(v)) => push(&mut self.add_prefixes, v),
+            ("--prefix", Some(v)) => push(&mut self.prefix, v),
+            ("-p", Some(v)) if command.is_empty() => push(&mut self.prefix, v),
+            ("--add-prefix", Some(v)) => push(&mut self.add_prefix, v),
+            _ => return false,
+        }
+        true
+    }
+
+    /// These options with `own` after them, as a command given both reads them:
+    /// the first `--prefixes` file, and every binding of each.
+    fn then(&self, own: &PrefixOptions) -> PrefixOptions {
+        let mut out = self.clone();
+        if out.prefixes.is_none() {
+            out.prefixes = own.prefixes.clone();
+        }
+        out.noprefixes |= own.noprefixes;
+        for (list, more) in [
+            (&mut out.add_prefixes, &own.add_prefixes),
+            (&mut out.prefix, &own.prefix),
+            (&mut out.add_prefix, &own.add_prefix),
+        ] {
+            for v in more {
+                if !list.contains(v) {
+                    list.push(v.clone());
+                }
+            }
+        }
+        out
+    }
+
+    fn step(&self) -> Step {
+        Step::Op(Op::Prefixes {
+            prefixes: self.prefixes.clone(),
+            noprefixes: self.noprefixes,
+            add_prefixes: self.add_prefixes.clone(),
+            prefix: self.prefix.clone(),
+            add_prefix: self.add_prefix.clone(),
+        })
+    }
+}
+
 fn parse_robot_chain(toks: &[String], robot_prefix: &str) -> Vec<Step> {
-    // Skip the launcher prefix: drop tokens until the first subcommand.
+    // Skip the launcher prefix: drop tokens until the first subcommand…
     let mut i = launcher_len(toks, robot_prefix);
     let mut steps = Vec::new();
-    // …but not its PREFIX BINDINGS. A `--prefix`/`--add-prefix` stated before any
-    // subcommand binds for the whole chain, and the document written at the end
-    // declares it whether or not an axiom uses it. Dropping it with the rest of
-    // the launcher left CL's `components/hra_subset.owl` — built by
-    // `robot --add-prefix "obo: …" annotate …` — without its `xmlns:obo`.
+    // …but not its PREFIX OPTIONS. What is stated before any subcommand is given
+    // to every command of the chain, and each command reads its CURIEs with those
+    // and its own ([`Op::Prefixes`]): CL's `components/hra_subset.owl` is
+    // `robot --add-prefix "obo: …" annotate …` and declares `xmlns:obo`, and a
+    // repository that uses its context runs every command as
+    // `robot --add-prefixes config/context.json …`.
+    let mut chain = PrefixOptions::default();
     {
         let mut launcher: Vec<String> = tokenize(robot_prefix);
         launcher.extend(toks[..i].iter().cloned());
-        let mut prefixes: Vec<String> = Vec::new();
         let mut k = 0;
         while k < launcher.len() {
-            if launcher[k] == "--prefix" || launcher[k] == "--add-prefix" {
-                if let Some(v) = launcher.get(k + 1) {
-                    if !prefixes.iter().any(|p| p == v) {
-                        prefixes.push(v.clone());
-                    }
-                }
-                k += 2;
-                continue;
-            }
+            let option = launcher[k].clone();
             k += 1;
-        }
-        if !prefixes.is_empty() {
-            steps.push(Step::Op(Op::AddPrefix { prefixes }));
+            if chain.take("", &option, launcher.get(k)) && option != "--noprefixes" {
+                k += 1;
+            }
         }
     }
-    while i < toks.len() {
-        let name = toks[i].clone();
-        i += 1;
-        // Gather this subcommand's option tokens up to the next subcommand.
+    // The options the model's context is made of as the next command starts.
+    let mut in_force = PrefixOptions::default();
+    // Whether an input has been named yet: the chain's first is the input of
+    // the rule ([`super::planner::first_robot_input`]).
+    let mut input_named = false;
+    // A command named by the rest of a token the previous command read part of.
+    let mut pending: Option<String> = None;
+    // Whether the command is the chain's first, which has an ontology only
+    // when it names an input.
+    let mut first_command = true;
+    while i < toks.len() || pending.is_some() {
+        let name = match pending.take() {
+            Some(name) => name,
+            None => {
+                i += 1;
+                toks[i - 1].clone()
+            }
+        };
+        // Gather this subcommand's option tokens up to the next subcommand. A
+        // ROBOT command reads its own as ROBOT reads them, and runs only when
+        // what follows names the next command.
         let mut opts: Vec<(String, Vec<String>)> = Vec::new();
-        while i < toks.len() && !is_subcommand_token(&toks[i]) {
+        if let Some(options) = super::robot_cli::command(&name) {
+            let parsed = match super::robot_cli::parse(&options, &toks[i..]) {
+                Ok(parsed) => parsed,
+                Err(message) => {
+                    steps.push(Step::Refused { message });
+                    return steps;
+                }
+            };
+            i += parsed.consumed;
+            opts = parsed.options;
+            let next = parsed.next.clone().or_else(|| toks.get(i).cloned());
+            if let Some(next) = next.filter(|n| !is_subcommand_token(n)) {
+                steps.push(Step::Refused { message: format!("UNKNOWN ARG ERROR unknown command or option: {next}") });
+                return steps;
+            }
+            pending = parsed.next;
+        }
+        while super::robot_cli::command(&name).is_none() && i < toks.len() && !is_subcommand_token(&toks[i]) {
             let tok = toks[i].clone();
             i += 1;
-            if tok.starts_with('-') {
-                let arity = option_arity(&name, &tok, toks.get(i));
-                let mut vals = Vec::new();
-                // Consume exactly `arity` tokens. For fixed-arity options the
-                // value may itself look like a subcommand — annotation properties
-                // are CURIEs such as `oboInOwl:date`/`rdfs:comment`, which must NOT
-                // be mistaken for a `prefix:plugin` subcommand — so do not apply
-                // the subcommand guard here (option_arity already returned 0 for a
-                // heuristic option whose next token is a flag/subcommand).
-                if arity == usize::MAX {
-                    // List-valued: take every following token that is neither a
-                    // flag nor a subcommand boundary.
-                    while i < toks.len()
-                        && !toks[i].starts_with('-')
-                        && !is_subcommand_token(&toks[i])
-                    {
-                        vals.push(toks[i].clone());
-                        i += 1;
-                    }
-                } else {
-                    for _ in 0..arity {
-                        if i < toks.len() {
-                            vals.push(toks[i].clone());
-                            i += 1;
-                        }
+            // A token that is no option and no option's value is one more thing
+            // the command is given, which its step has to read.
+            let arity = if tok.starts_with('-') { option_arity(&tok, toks.get(i)) } else { 0 };
+            let vals: Vec<String> = toks[i..(i + arity).min(toks.len())].to_vec();
+            i += vals.len();
+            opts.push((tok, vals));
+        }
+        let (mut step, read) = map_subcommand(&name, &opts);
+        if let Step::Refused { .. } = step {
+            steps.push(step);
+            return steps;
+        }
+        // The options the command is given that the plan cannot carry out.
+        let mut unread: Vec<String> = Vec::new();
+        if let Step::Op(Op::Template { merge, collapse_import_closure, .. }) = &mut step {
+            let given = |key: &str| opts.iter().any(|(k, _)| k == key);
+            // A merge goes into the chain's ontology, which the chain's first
+            // command has only when it names an input.
+            if *merge && first_command && !given("--input") && !given("--input-iri") {
+                let switch = if given("--merge-after") { "--merge-after" } else { "--merge-before" };
+                steps.push(Step::Refused { message: format!("template: {switch} has no input ontology to merge into") });
+                return steps;
+            }
+            // `--merge-after` writes the generated axioms alone where `-o` says,
+            // and goes on with the merge. Ending the chain, what it writes is
+            // what the chain yields, and the merge goes nowhere. Part way
+            // through, it would write one ontology and go on with another, which
+            // no step does.
+            if given("--merge-after") {
+                if let Some((_, out)) = opts.iter().find(|(k, _)| k == "--output") {
+                    if pending.is_some() || i < toks.len() {
+                        unread.push("--merge-after".to_string());
+                        unread.push(std::iter::once("--output".to_string()).chain(out.iter().cloned()).collect::<Vec<_>>().join(" "));
+                    } else {
+                        *merge = false;
+                        *collapse_import_closure = false;
                     }
                 }
-                opts.push((tok, vals));
             }
-            // bare positional tokens: ignored (these subcommands rarely use them)
         }
-        let step = map_subcommand(&name, &opts);
-        // `-O`/`--output-iri` and `-V`/`--version-iri` may appear on many commands,
-        // not just `annotate`: EFO's mondo import is
-        // `extract … -O http://…/imports/mondo_import.owl`. Only `annotate` models
-        // them as part of its own op, so for every other command record the effect
-        // as the `annotate` it is equivalent to — otherwise the IRI lives nowhere
-        // in the plan, and the module comes out still carrying the *source*
-        // ontology's IRI.
-        // On `verify`, `-O` is `--output-dir` (verify has no `-o` at all); on every
-        // other command it is `--output-iri`. Reading verify's directory as an
-        // ontology IRI would record a bogus trailing `annotate --ontology-iri
-        // reports/` on every QC target that uses it.
-        //
-        // `--ontology-iri` is the THIRD spelling, and dropping it was a silent
-        // content loss rather than a naming one: `template` takes that spelling
-        // and no other, so EFO's `components/subclasses.owl` and
-        // `import_replaced_by.owl` — built by `robot template … --ontology-iri
-        // http://www.ebi.ac.uk/efo/components/…` — came out with NO ontology IRI
-        // at all (`<Ontology/>`), and with the default xmlns falling back to the
-        // OWL namespace so every class rendered `<Class>` rather than
-        // `<owl:Class>`. Both files are `owl:imports` targets that
-        // `catalog-v001.xml` resolves by exactly the IRI that went missing.
+        first_command = false;
+        // A command reads its CURIEs with the chain's prefix options and its own,
+        // and the command after it with the chain's alone.
+        let mut own = PrefixOptions::default();
+        for (option, values) in &opts {
+            own.take(&name, option, values.first());
+        }
+        let wanted = chain.then(&own);
+        if wanted != in_force {
+            steps.push(wanted.step());
+            in_force = wanted;
+        }
+        // `-O`/`--output-iri`, `--ontology-iri` and `-V`/`--version-iri` name the
+        // IRIs of the ontology a command writes, on many commands besides
+        // `annotate`: `extract … -O …`, `template … --ontology-iri …`. One the
+        // step does not read itself is recorded as the `annotate` it is
+        // equivalent to, after the step; `annotate` reads its own, and `repair`
+        // reads `--output-iri` and keeps the ontology's IRI. On `verify`, `-O` is
+        // `--output-dir` and names no IRI.
         let o_is_output_dir = name == "verify";
-        let sets_iri = !matches!(step, Step::Op(Op::Annotate(_))) && !o_is_output_dir;
+        let sets_iri = |option: &str| {
+            !o_is_output_dir && matches!(option, "--output-iri" | "-O" | "--ontology-iri" | "--version-iri" | "-V")
+        };
         // `convert` models its own `--output`; every other command's `-o` is a
         // process boundary (see below).
         let models_own_output = matches!(step, Step::Op(Op::Convert { .. }));
+        // An option the command is given that neither its step nor the chain
+        // reads is something the plan cannot do: it refuses the step by name.
+        for ((option, values), read) in opts.iter().zip(&read) {
+            let input = matches!(option.as_str(), "--input" | "-i" | "--input-iri" | "-I");
+            let read_by_chain = PrefixOptions::default().take(&name, option, values.first())
+                || matches!(
+                    option.as_str(),
+                    "--output" | "-o" | "--verbose" | "-v" | "--very-verbose" | "-vv" | "--very-very-verbose" | "-vvv"
+                )
+                || (input && !input_named)
+                || sets_iri(option);
+            input_named |= input;
+            if !read && !read_by_chain {
+                unread.push(std::iter::once(option.clone()).chain(values.iter().cloned()).collect::<Vec<_>>().join(" "));
+            }
+        }
+        if !unread.is_empty() {
+            steps.push(Step::UnsupportedOptions { command: name.clone(), options: unread });
+        }
         steps.push(step);
         let find = |a: &str, b: &str| -> Option<String> {
             opts.iter().find(|(k, _)| k == a || k == b).and_then(|(_, v)| v.first().cloned())
         };
-        if sets_iri {
-            let (ontology_iri, version_iri) = (
-                find("--output-iri", "-O").or_else(|| find("--ontology-iri", "--ontology-iri")),
-                find("--version-iri", "-V"),
-            );
-            if ontology_iri.is_some() || version_iri.is_some() {
-                steps.push(Step::Op(Op::Annotate(AnnotateSpec {
-                    ontology_iri,
-                    version_iri,
-                    ..Default::default()
-                })));
-            }
+        let unread_value = |keys: &[&str]| -> Option<String> {
+            opts.iter()
+                .zip(&read)
+                .find(|((k, _), read)| !**read && sets_iri(k) && keys.contains(&k.as_str()))
+                .and_then(|((_, v), _)| v.first().cloned())
+        };
+        let (ontology_iri, version_iri) = (
+            unread_value(&["--output-iri", "-O"]).or_else(|| unread_value(&["--ontology-iri"])),
+            unread_value(&["--version-iri", "-V"]),
+        );
+        if ontology_iri.is_some() || version_iri.is_some() {
+            steps.push(Step::Op(Op::Annotate(AnnotateSpec { ontology_iri, version_iri, ..Default::default() })));
         }
-        // `-o` ends a command in the recipe: whatever reads the file next sees it
-        // through a serialize/parse round trip. Record that so the pipeline — which
-        // otherwise threads the model in memory — performs the round trip too.
-        // (The rule's final `-o $@` is dropped by the caller — the pipeline's
-        // closing write already is that write.)
+        // `-o` writes the file where the command stands, and the chain goes on
+        // with the model. (The rule's final `-o $@` is dropped by the caller —
+        // the pipeline's closing write already is that write.)
         if !models_own_output {
             if let Some(out) = find("--output", "-o") {
-                steps.push(Step::Op(Op::RoundTrip { path: out }));
+                steps.push(Step::Op(Op::Write { path: out }));
             }
         }
     }
@@ -1092,51 +1222,16 @@ fn sparql_query_kind(path: &str) -> QueryKind {
     QueryKind::Table
 }
 
-/// Options that take an unbounded list of values. `option_arity` gives an
-/// unrecognised flag exactly one value, and `argv()` rebuilds argv from the
-/// parsed pairs — so an undeclared list option loses every token after the first.
-/// EFO's `sparql_test` passes eleven `--queries` paths; recording one would leave
-/// `om sparql_test` running 1 of 11 violation checks and passing.
-const MULTI_VALUE: &[(&str, &str)] = &[
-    ("verify", "--queries"),
-    ("query", "--queries"),
-];
-
-fn option_arity(cmd: &str, opt: &str, next: Option<&String>) -> usize {
-    // `query --query/--select/--construct FILE OUTPUT` take a file plus a
-    // positional output file (ODK always supplies the output).
-    if cmd == "query" && matches!(opt, "--query" | "-q" | "--select" | "-s" | "--construct" | "-c") {
-        return 2;
-    }
-    // `annotate` short flags: `-a`/`--annotation` and `-l`/`--link-annotation`
-    // each take a property + value pair (`-t`/`--typed-annotation` takes a third
-    // datatype, but ODK builds don't use it). `-a` means something else for other
-    // commands (`reason --annotate-inferred-axioms`), so gate on the subcommand.
-    if cmd == "annotate" && matches!(opt, "-a" | "-l") {
-        return 2;
-    }
-    // A list-valued option consumes every following token that is neither a flag
-    // nor a subcommand boundary.
-    if MULTI_VALUE.iter().any(|(c, o)| *c == cmd && *o == opt) {
-        return usize::MAX;
-    }
-    // `-O` always takes one value, whatever it means for this subcommand (see
-    // `o_is_output_dir` in `parse_robot_chain`).
-    if opt == "-O" {
-        return 1;
-    }
-    // `extract --method subset` names a method, not the `subset` subcommand.
-    if cmd == "extract" && matches!(opt, "--method" | "-m") {
-        return 1;
-    }
+/// How many values option `opt` of a command ROBOT does not have takes — a
+/// plugin's, whose options only the plugin knows: one, the token after it,
+/// unless that is another option or names a command. `-O` always takes one.
+fn option_arity(opt: &str, next: Option<&String>) -> usize {
     match opt {
-        "--annotation" | "--link-annotation" | "--typed-annotation" => 2,
-        "--remove-annotations" => 0,
-        // A flag's value is the next token unless it is a *known* subcommand (a
-        // real segment boundary). Crucially, do NOT treat a
-        // plugin-shaped CURIE here — `--term rdfs:label`, `--term SO:0000704`,
-        // `--prefix "oio: …"` — as a boundary; those are values. (Plugin
-        // commands only start a segment, which the delimiter in
+        "-O" => 1,
+        "--remove-annotations" | "--noprefixes" => 0,
+        // Do NOT treat a plugin-shaped CURIE here — `--term rdfs:label`,
+        // `--term SO:0000704`, `--prefix "oio: …"` — as a boundary; those are
+        // values. (Plugin commands only start a segment, which the delimiter in
         // `parse_robot_chain` still recognises via `is_subcommand_token`.)
         _ => match next {
             Some(n) if !n.starts_with('-') && !SUBCOMMANDS.contains(&n.as_str()) => 1,
@@ -1145,26 +1240,90 @@ fn option_arity(cmd: &str, opt: &str, next: Option<&String>) -> usize {
     }
 }
 
-fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
-    let val = |key: &str| -> Option<String> {
-        opts.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.first().cloned())
+/// The step a command's options map to, and which of `opts` the mapping read.
+fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> (Step, Vec<bool>) {
+    let read = std::cell::RefCell::new(vec![false; opts.len()]);
+    // The values of every occurrence of the options `keys` names, in recipe
+    // order, each marked as read.
+    let take = |keys: &[&str]| -> Vec<&Vec<String>> {
+        let mut out = Vec::new();
+        for (i, (k, v)) in opts.iter().enumerate() {
+            if keys.contains(&k.as_str()) {
+                read.borrow_mut()[i] = true;
+                out.push(v);
+            }
+        }
+        out
     };
-    let val2 = |a: &str, b: &str| -> Option<String> { val(a).or_else(|| val(b)) };
-    let all = |key: &str| -> Vec<String> {
-        opts.iter().filter(|(k, _)| k == key).filter_map(|(_, v)| v.first().cloned()).collect()
-    };
+    let has = |key: &str| !take(&[key]).is_empty();
+    let val = |key: &str| -> Option<String> { take(&[key]).first().and_then(|v| v.first().cloned()) };
+    // An option spelt long or short: its first value in recipe order, as the
+    // command reads one value, and every value in recipe order.
+    let val2 = |a: &str, b: &str| -> Option<String> { take(&[a, b]).first().and_then(|v| v.first().cloned()) };
+    let all = |key: &str| -> Vec<String> { take(&[key]).into_iter().filter_map(|v| v.first().cloned()).collect() };
     let boolv = |key: &str| -> Option<bool> { val(key).map(|s| s == "true") };
+    // The message of the first switch the command reads that is neither `true`
+    // nor `false`: the command fails on it.
+    let refusal: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+    // Switch `long`, read where the command reads it: its value, `None` when
+    // it is not given or is refused. The step reads it when `used`, and one it
+    // does not use is read all the same when it asks for `default`, which is
+    // what the step does without it.
+    let switch = |long: &str, used: bool, default: bool| -> Option<bool> {
+        let value = opts.iter().find(|(k, _)| k == long).and_then(|(_, v)| v.first().cloned())?;
+        match crate::cmd::read_bool(long.trim_start_matches('-'), &value) {
+            Ok(on) => {
+                if used || on == default {
+                    take(&[long]);
+                }
+                Some(on)
+            }
+            Err(message) => {
+                refusal.borrow_mut().get_or_insert(message);
+                None
+            }
+        }
+    };
+    // A switch the command reads as on for `true` or `yes` in any case and
+    // off for anything else, as [`switch`] reads it otherwise.
+    let lenient = |long: &str, used: bool, default: bool| -> Option<bool> {
+        let value = opts.iter().find(|(k, _)| k == long).and_then(|(_, v)| v.first().cloned())?;
+        let on = crate::cmd::option_is_true(&value);
+        if used || on == default {
+            take(&[long]);
+        }
+        Some(on)
+    };
     // Every option token of this invocation, flattened back to argv order, for the
     // `OwlmakeCli` steps that are executed by re-invoking the owlmake binary.
     let argv = || -> Vec<String> {
+        read.borrow_mut().fill(true);
         opts.iter()
             .flat_map(|(k, v)| std::iter::once(k.clone()).chain(v.iter().cloned()))
             .collect()
     };
     let all2 = |a: &str, b: &str| -> Vec<String> {
-        let mut v = all(a);
-        v.extend(all(b));
-        v
+        take(&[a, b]).into_iter().filter_map(|v| v.first().cloned()).collect()
+    };
+    // The options `remove` and `filter` share.
+    let selection = || SelectionSpec {
+        terms: all2("--term", "-t"),
+        term_files: all2("--term-file", "-T"),
+        include_terms: all2("--include-term", "-n"),
+        include_term_files: all2("--include-terms", "-N"),
+        exclude_terms: all2("--exclude-term", "-e"),
+        exclude_term_files: all2("--exclude-terms", "-E"),
+        selects: all2("--select", "-s"),
+        axioms: all2("--axioms", "-a"),
+        base_iri: all("--base-iri"),
+        // Each switch as the recipe gives it: the step reads it where the
+        // command does, which for all but `--allow-punning` is only once
+        // something is selected.
+        trim: val2("--trim", "-r").map(|s| Switch::parse(&s)),
+        signature: val2("--signature", "-S").map(|s| Switch::parse(&s)),
+        preserve_structure: val2("--preserve-structure", "-p").map(|s| Switch::parse(&s)),
+        allow_punning: val("--allow-punning").map(|s| Switch::parse(&s)),
+        drop_axiom_annotations: all2("--drop-axiom-annotations", "-d"),
     };
 
     // `odk:` is a plugin namespace a recipe can spell; owlmake serves those
@@ -1176,8 +1335,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
     // matching generic built-in (un-prefixed). Unknown plugin commands remain
     // uncovered.
     if let Some((_, bare)) = name.split_once(':') {
-        let has = |key: &str| opts.iter().any(|(k, _)| k == key);
-        return match bare {
+        let step = match bare {
             // uPheno chains this between `merge` and `remove` on the way to
             // `mirror/merged.owl`, so it threads the model rather than running as
             // its own command.
@@ -1237,9 +1395,10 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             }
             _ => Step::UnsupportedSubcommand(name.to_string()),
         };
+        return (step, read.into_inner());
     }
 
-    match name {
+    let step = match name {
         "normalize" => Step::Op(Op::Normalize {
             base_iris: all("--base-iri"),
             subset_decls: boolv("--subset-decls").unwrap_or(true),
@@ -1254,34 +1413,62 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
         "template" => {
             let mut templates = all2("--template", "-t");
             templates.extend(all("--external-template"));
-            let merge = opts
-                .iter()
-                .any(|(k, _)| k == "--merge-before" || k == "--merge-after");
-            // ROBOT's `--prefix "foo: http://bar"` binds a CURIE prefix for the
-            // template's own header directives. UBERON's HRA components pass
-            // `--prefix "dcterms: http://purl.org/dc/terms/"` and their headers say
-            // `AI dcterms:contributor`; dropping the binding left `dcterms:` to the
-            // OBO fallback, so 56 assertions per component came out as
-            // `obo/dcterms_contributor` instead of `purl.org/dc/terms/contributor`
-            // — a different IRI, not a different spelling. The binding is a build
-            // input, so it belongs in the plan.
-            let prefixes = all2("--prefix", "--add-prefix");
-            Step::Op(Op::Template { templates, merge, prefixes })
+            let (before, after) = (has("--merge-before"), has("--merge-after"));
+            let merge = before || after;
+            let force = lenient("--force", true, false).unwrap_or(false);
+            // A merge's input keeps its own IRIs: the ones the command names are
+            // read and set nothing. `--include-annotations` adds the ontology
+            // annotations of the generated axioms' ontology, which has none.
+            if merge {
+                take(&["--ontology-iri", "--version-iri"]);
+            }
+            switch("--include-annotations", true, false);
+            let collapse_import_closure = switch("--collapse-import-closure", true, false).unwrap_or(false) && merge;
+            let ancestors = has("--ancestors");
+            if before && after {
+                Step::Refused { message: "MERGE ERROR merge-before and merge-after cannot be combined".into() }
+            } else {
+                Step::Op(Op::Template { templates, merge, collapse_import_closure, ancestors, force })
+            }
         }
         "rename" => Step::Op(Op::Rename {
             mappings: val2("--mappings", "-m"),
+            mapping: take(&["--mapping"])
+                .into_iter()
+                .filter_map(|v| match v.as_slice() {
+                    [old, new] => Some((old.clone(), new.clone())),
+                    _ => None,
+                })
+                .collect(),
             prefix_mappings: val2("--prefix-mappings", "-r"),
-            allow_missing: boolv("--allow-missing-entities").or(boolv("-M")).unwrap_or(false),
+            allow_missing: switch("--allow-missing-entities", true, false).unwrap_or(false),
+            allow_duplicates: switch("--allow-duplicates", true, false).unwrap_or(false),
         }),
-        "extract" => Step::Op(Op::Extract {
-            method: val2("--method", "-m").unwrap_or_else(|| "BOT".into()),
-            terms: all2("--term", "-t"),
-            term_files: all2("--term-file", "-T"),
-            copy_ontology_annotations: boolv("--copy-ontology-annotations").unwrap_or(false),
-            individuals: val("--individuals"),
-            branch_from_terms: all("--branch-from-term"),
-            branch_from_term_files: all("--branch-from-terms"),
-        }),
+        "extract" => {
+            let method = val2("--method", "-m").unwrap_or_else(|| "BOT".into());
+            // MIREOT names no module IRI and neither trims nor annotates its
+            // module as a locality module's options do: given, they are read
+            // and set nothing.
+            if method.eq_ignore_ascii_case("MIREOT") {
+                take(&["--output-iri", "--annotate-with-source", "--sources", "--imports"]);
+            }
+            Step::Op(Op::Extract {
+                method,
+                terms: all2("--term", "-t"),
+                term_files: all2("--term-file", "-T"),
+                copy_ontology_annotations: switch("--copy-ontology-annotations", true, false).unwrap_or(false),
+                individuals: val("--individuals"),
+                branch_from_terms: all("--branch-from-term"),
+                branch_from_term_files: all("--branch-from-terms"),
+                lower_terms: all("--lower-term"),
+                lower_term_files: all("--lower-terms"),
+                upper_terms: all("--upper-term"),
+                upper_term_files: all("--upper-terms"),
+                intermediates: val("--intermediates"),
+                // Read as ROBOT reads it: `true` or `yes`, in any case.
+                force: val2("--force", "-f").is_some_and(|v| crate::cmd::option_is_true(&v)),
+            })
+        }
         "collapse" => Step::Op(Op::Collapse {
             precious: {
                 let mut v = all2("-r", "--precious");
@@ -1293,7 +1480,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
                 v.extend(all("--term-file"));
                 v
             },
-            threshold: val2("--threshold", "-t").and_then(|t| t.parse().ok()),
+            threshold: val2("--threshold", "-t"),
         }),
         "expand" => Step::Op(Op::Expand {
             expand_terms: all2("--expand-term", "-t"),
@@ -1322,12 +1509,18 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
         // with no inputs: an inert step that wrote a 658-byte empty ontology, and
         // MONDO's OMIM-gene QC check then grepped `mondo-edit.obo` for the one
         // word its empty report left behind.
+        //
+        // `--inputs` names the files a pattern matches when the command runs, and
+        // a plan names every file it reads, so it stays an option no step reads.
         "merge" => Step::Op(Op::Merge {
             inputs: all2("--input", "-i")
                 .into_iter()
                 .chain(all2("--input-iri", "-I"))
                 .collect(),
-            collapse_import_closure: boolv("--collapse-import-closure"),
+            collapse_import_closure: switch("--collapse-import-closure", true, true),
+            include_annotations: switch("--include-annotations", true, false) == Some(true),
+            annotate_derived_from: switch("--annotate-derived-from", true, false) == Some(true),
+            annotate_defined_by: switch("--annotate-defined-by", true, false) == Some(true),
         }),
         // As with `merge`, `-I/--input-iri` names an input: CL subtracts the taxon
         // disjointness axioms with `unmerge -I <url>`, and reading only `-i` left
@@ -1340,95 +1533,102 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             reasoner: val2("--reasoner", "-r"),
             equivalent_classes_allowed: val2("--equivalent-classes-allowed", "-e"),
             exclude_tautologies: val2("--exclude-tautologies", "-t"),
-            annotate_inferred_axioms: val2("--annotate-inferred-axioms", "-a").map(|s| s == "true"),
+            annotate_inferred_axioms: lenient("--annotate-inferred-axioms", true, false),
             allow_incoherent: boolv("--allow-incoherent"),
-            exclude_external_entities: val2("--exclude-external-entities", "-X").map(|s| s == "true"),
-            exclude_owl_thing: val2("--exclude-owl-thing", "-T").map(|s| s == "true"),
-            remove_redundant_subclass_axioms: val2("--remove-redundant-subclass-axioms", "-s")
-                .map(|s| s == "true"),
-            create_new_ontology: val2("--create-new-ontology", "-n").map(|s| s == "true"),
-            create_new_ontology_with_annotations: val2(
-                "--create-new-ontology-with-annotations",
-                "-m",
-            )
-            .map(|s| s == "true"),
-            exclude_duplicate_axioms: val2("--exclude-duplicate-axioms", "-x").map(|s| s == "true"),
+            exclude_external_entities: lenient("--exclude-external-entities", true, false),
+            exclude_owl_thing: lenient("--exclude-owl-thing", true, false),
+            remove_redundant_subclass_axioms: lenient("--remove-redundant-subclass-axioms", true, false),
+            create_new_ontology: lenient("--create-new-ontology", true, false),
+            create_new_ontology_with_annotations: lenient("--create-new-ontology-with-annotations", true, false),
+            exclude_duplicate_axioms: {
+                lenient("--include-indirect", false, false);
+                lenient("--preserve-annotated-axioms", false, false);
+                lenient("--exclude-duplicate-axioms", true, false)
+            },
             axiom_generators: { let mut g = all("--axiom-generators"); g.extend(all("-A")); g },
             properties: all("--properties"),
         }),
         "relax" => Step::Op(Op::Relax {
-            include_subclass_of: boolv("--include-subclass-of").unwrap_or(false),
+            include_subclass_of: {
+                switch("--enforce-obo-format", false, false);
+                switch("--exclude-named-classes", false, true);
+                switch("--include-subclass-of", true, false).unwrap_or(false)
+            },
         }),
-        "reduce" => Step::Op(Op::Reduce {
-            reasoner: val2("--reasoner", "-r"),
-            include_subproperties: boolv("--include-subproperties").or_else(|| boolv("-s")),
-        }),
+        "reduce" => {
+            let on = |long: &str, short: &str| val2(long, short).is_some_and(|v| crate::cmd::option_is_true(&v));
+            Step::Op(Op::Reduce {
+                reasoner: val2("--reasoner", "-r"),
+                include_subproperties: val2("--include-subproperties", "-s").map(|v| crate::cmd::option_is_true(&v)),
+                preserve_annotated_axioms: on("--preserve-annotated-axioms", "-p"),
+                named_classes_only: on("--named-classes-only", "-c"),
+            })
+        }
         "materialize" => Step::Op(Op::Materialize {
+            reasoner: {
+                // ROBOT's materialize takes these and reads neither.
+                take(&["--annotate-inferred-axioms", "-a", "--remove-redundant-subclass-axioms", "-s"]);
+                val2("--reasoner", "-r")
+            },
+            create_new_ontology: lenient("--create-new-ontology", true, false),
             properties: { let mut p = all("--term"); p.extend(all("-t")); p },
             term_files: { let mut f = all("--term-file"); f.extend(all("-T")); f },
         }),
-        "remove" => remove_step(RemoveSpec {
-            terms: { let mut t = all("--term"); t.extend(all("-t")); t },
-            term_files: { let mut f = all("--term-file"); f.extend(all("-T")); f },
-            axioms: all("--axioms"),
-            selects: all("--select"),
-            base_iri: all("--base-iri"),
-            trim: boolv("--trim"),
-            preserve_structure: boolv("--preserve-structure"),
-            exclude_terms: { let mut e = all("--exclude-term"); e.extend(all("-e")); e },
-            exclude_term_files: { let mut e = all("--exclude-terms"); e.extend(all("-E")); e },
-            signature: boolv("--signature"),
-            drop_axiom_annotations: val("--drop-axiom-annotations").or_else(|| val("-d")),
-        }),
-        "filter" => filter_step(FilterSpec {
-            terms: { let mut t = all("--term"); t.extend(all("-t")); t },
-            term_files: { let mut f = all("--term-file"); f.extend(all("-T")); f },
-            selects: all("--select"),
-            signature: boolv("--signature"),
-            trim: boolv("--trim"),
-            axioms: all("--axioms"),
-            base_iri: all("--base-iri"),
-            prefixes: { let mut p = all("--prefix"); p.extend(all("--add-prefix")); p },
-        }),
+        "remove" => remove_step(selection()),
+        // `-O`/`--ontology-iri` is recorded as the `annotate` that follows (below).
+        "filter" => filter_step(selection()),
         "annotate" => {
-            // Collect the property/value pairs for any of the given option
-            // spellings (long + short) in recipe order.
-            let pairs = |keys: &[&str]| -> Vec<(String, String)> {
-                opts.iter()
-                    .filter(|(k, _)| keys.contains(&k.as_str()))
-                    .filter_map(|(_, v)| {
-                        if v.len() == 2 { Some((v[0].clone(), v[1].clone())) } else { None }
+            // The values of every occurrence of an option, spelt long or short, in
+            // recipe order.
+            let values = |long: &str, short: &str| -> Vec<&Vec<String>> { take(&[long, short]) };
+            let pairs = |long: &str, short: &str| -> Vec<(String, String)> {
+                values(long, short)
+                    .into_iter()
+                    .filter_map(|v| match v.as_slice() {
+                        [p, x] => Some((p.clone(), x.clone())),
+                        _ => None,
                     })
                     .collect()
             };
+            let triples = |long: &str, short: &str| -> Vec<(String, String, String)> {
+                values(long, short)
+                    .into_iter()
+                    .filter_map(|v| match v.as_slice() {
+                        [p, x, y] => Some((p.clone(), x.clone(), y.clone())),
+                        _ => None,
+                    })
+                    .collect()
+            };
+            let remove_annotations = !take(&["--remove-annotations", "-R"]).is_empty();
+            let interpolate = switch("--interpolate", true, false).unwrap_or(false);
+            let annotate_derived_from = switch("--annotate-derived-from", true, false).unwrap_or(false);
+            let annotate_defined_by = switch("--annotate-defined-by", true, false).unwrap_or(false);
             Step::Op(Op::Annotate(AnnotateSpec {
                 ontology_iri: val2("--ontology-iri", "-O"),
                 version_iri: val2("--version-iri", "-V"),
-                annotations: pairs(&["--annotation", "-a"]),
-                link_annotations: pairs(&["--link-annotation", "-l"]),
-                remove_annotations: opts
-                    .iter()
-                    .any(|(k, _)| k == "--remove-annotations" || k == "-R"),
+                annotations: pairs("--annotation", "-a"),
+                link_annotations: pairs("--link-annotation", "-k"),
+                language_annotations: triples("--language-annotation", "-l"),
+                typed_annotations: triples("--typed-annotation", "-t"),
+                axiom_annotations: values("--axiom-annotation", "-x").into_iter().flatten().cloned().collect(),
+                annotation_files: all2("--annotation-file", "-A"),
+                remove_annotations,
+                interpolate,
+                annotate_defined_by,
+                annotate_derived_from,
             }))
         }
         "convert" => Step::Op(Op::Convert {
             format: val2("--format", "-f"),
             clean_obo: val("--clean-obo"),
             output: val2("--output", "-o"),
-            add_prefixes: all("--add-prefixes"),
-            check: val("--check").map(|v| crate::plan::is_on(&v)),
+            check: switch("--check", true, true),
         }),
         "query" => {
             let pairs = |keys: &[&str]| -> Vec<(String, String)> {
-                opts.iter()
-                    .filter(|(k, _)| keys.contains(&k.as_str()))
-                    .filter_map(|(_, v)| {
-                        if v.len() >= 2 {
-                            Some((v[0].clone(), v[1].clone()))
-                        } else {
-                            None
-                        }
-                    })
+                take(keys)
+                    .into_iter()
+                    .filter_map(|v| if v.len() >= 2 { Some((v[0].clone(), v[1].clone())) } else { None })
                     .collect()
             };
             // `--queries Q…` names no output: each query's result goes to
@@ -1443,11 +1643,7 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             {
                 let out_dir = val2("--output-dir", "-O").unwrap_or_default();
                 let fmt_opt = val2("--format", "-f");
-                let listed: Vec<String> = opts
-                    .iter()
-                    .filter(|(k, _)| k == "--queries" || k == "-Q")
-                    .flat_map(|(_, v)| v.iter().cloned())
-                    .collect();
+                let listed: Vec<String> = take(&["--queries", "-Q"]).into_iter().flatten().cloned().collect();
                 for q in listed {
                     let kind = sparql_query_kind(&q);
                     let fmt = fmt_opt.clone().unwrap_or_else(|| kind.default_format().to_string());
@@ -1467,6 +1663,31 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
                     }
                 }
             }
+            // The switches as the command reads them: with an update,
+            // `--temporary-file` alone; otherwise `--create-tdb`, then unless
+            // that is on `--tdb`, then `--keep-tdb-mappings` on disk (`--tdb` or
+            // a `--tdb-directory`) or `--use-graphs` in memory. A switch it does
+            // not read is left alone, whatever it says. `tdb` records any
+            // on-disk dataset, which decides an unordered `SELECT`'s row order
+            // (see `Op::Query::tdb`).
+            let given = |key: &str| opts.iter().any(|(k, _)| k == key);
+            let ignored = |keys: &[&str]| {
+                take(keys);
+            };
+            let (use_graphs, tdb) = if given("--update") {
+                ignored(&["--create-tdb", "--tdb", "--keep-tdb-mappings", "--use-graphs"]);
+                (false, switch("--temporary-file", true, false) == Some(true))
+            } else if switch("--create-tdb", true, false) == Some(true) {
+                ignored(&["--tdb", "--keep-tdb-mappings", "--use-graphs", "--temporary-file"]);
+                (false, true)
+            } else if switch("--tdb", true, false) == Some(true) || given("--tdb-directory") {
+                switch("--keep-tdb-mappings", false, false);
+                ignored(&["--use-graphs", "--temporary-file"]);
+                (false, true)
+            } else {
+                ignored(&["--keep-tdb-mappings", "--temporary-file"]);
+                (switch("--use-graphs", true, false) == Some(true), false)
+            };
             Step::Op(Op::Query {
                 updates: all2("--update", "-u"),
                 selects: {
@@ -1480,27 +1701,24 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
                     v
                 },
                 format: val2("--format", "-f"),
-                use_graphs: val2("--use-graphs", "-g")
-                    .is_some_and(|v| v.eq_ignore_ascii_case("true")),
-                // `--tdb`/`--create-tdb`/`--temporary-file` all ask for an on-disk
-                // dataset, so any of them sets the same flag: what matters is the
-                // on-disk choice, not which spelling requested it, because that is
-                // what decides an unordered `SELECT`'s row order (see
-                // `Op::Query::tdb`).
-                tdb: ["--tdb", "-t", "--create-tdb", "-C", "--temporary-file"]
-                    .iter()
-                    .any(|k| {
-                        val2(k, k).is_some_and(|v| v.eq_ignore_ascii_case("true"))
-                            || opts.iter().any(|(o, v)| o == k && v.is_empty())
-                    }),
+                use_graphs,
+                tdb,
             })
         }
-        "repair" => Step::Op(Op::Repair {
-            invalid_references: opts.iter().any(|(k, _)| k == "--invalid-references"),
-            merge_axiom_annotations: opts
-                .iter()
-                .any(|(k, _)| k == "--merge-axiom-annotations" || k == "-m"),
-        }),
+        "repair" => {
+            // Read and not used: the ontology keeps its IRI.
+            take(&["--output-iri"]);
+            let repairs = crate::cmd::repair::RepairOptions::from_switches(
+                switch("--invalid-references", true, false),
+                switch("--merge-axiom-annotations", true, false),
+            );
+            Step::Op(Op::Repair {
+                invalid_references: repairs.invalid_references,
+                merge_axiom_annotations: repairs.merge_axiom_annotations,
+                annotation_properties: all2("--annotation-property", "-a"),
+                annotation_properties_file: val2("--annotation-properties-file", "-A"),
+            })
+        }
         // …and the same set on the non-chained path.
         // Terminal commands: each reads its own inputs and writes a non-ontology
         // output (a report, a table, a prefix map, a mirror directory), leaving
@@ -1510,7 +1728,11 @@ fn map_subcommand(name: &str, opts: &[(String, Vec<String>)]) -> Step {
             Step::OwlmakeCli { name: name.to_string(), args: argv() }
         }
         other => Step::UnsupportedSubcommand(other.to_string()),
+    };
+    if let Some(message) = refusal.into_inner() {
+        return (Step::Refused { message }, read.into_inner());
     }
+    (step, read.into_inner())
 }
 
 /// The shell operator that separates two commands.
@@ -2052,6 +2274,26 @@ pub(crate) fn chain_stdout_file(cmd: &str, robot_prefix: &str) -> Option<String>
     Some(dst)
 }
 
+/// The words of a command line as the program it runs is given them: the
+/// shell takes the redirections (`2>/dev/null`, `2>&1`, `> $@`) for itself.
+fn program_words(cmd: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut target = false;
+    for (word, quoted) in tokenize_quoted(cmd) {
+        if std::mem::take(&mut target) {
+            continue;
+        }
+        let operator = word.trim_start_matches(|c: char| c.is_ascii_digit());
+        if !quoted && (operator.starts_with(['<', '>']) || operator.starts_with("&>")) {
+            // A bare operator takes the next word as its target.
+            target = operator.trim_start_matches(['<', '>', '&', '|']).is_empty();
+            continue;
+        }
+        words.push(word);
+    }
+    words
+}
+
 /// Quote-aware whitespace tokenizer.
 pub(crate) fn tokenize(s: &str) -> Vec<String> {
     tokenize_quoted(s).into_iter().map(|(t, _)| t).collect()
@@ -2217,19 +2459,281 @@ mod tests {
              --select 'oboInOwl:inSubset=uberon:cumbo' -o y.owl",
             "robot",
         );
-        let spec = steps
+        let filter = steps
+            .iter()
+            .position(|s| matches!(s, Step::Op(Op::Filter(_)) | Step::Partial { op: Op::Filter(_), .. }))
+            .expect("a filter step");
+        assert!(
+            matches!(
+                &steps[..filter],
+                [.., Step::Op(Op::Prefixes { prefix, .. })]
+                    if prefix == &["uberon: http://purl.obolibrary.org/obo/uberon/core#"]
+            ),
+            "the --prefix binding must reach the plan, before the filter: {steps:?}"
+        );
+    }
+
+    /// Every option of an `annotate` command line reaches its step, each with as
+    /// many values as ROBOT reads for it: `-k` is the link annotation and `-l`
+    /// the language annotation, and `-x` takes three values, read in pairs
+    /// across its occurrences.
+    #[test]
+    fn annotate_records_every_option() {
+        let steps = parse_command(
+            "robot annotate -i in.owl -a rdfs:comment c -k rdfs:seeAlso ex:y -l rdfs:label chien fr \
+             -t rdfs:comment 5 xsd:integer -x rdfs:comment x rdfs:comment -x y dc:source s \
+             -A extra.owl -e true -d true -f true -R -O http://example.org/x.owl -o out.owl",
+            "robot",
+        );
+        let a = steps
             .iter()
             .find_map(|s| match s {
-                Step::Op(Op::Filter(f)) => Some(f),
-                Step::Partial { op: Op::Filter(f), .. } => Some(f),
+                Step::Op(Op::Annotate(a)) => Some(a.clone()),
                 _ => None,
             })
-            .expect("a filter step");
-        assert_eq!(spec.selects, vec!["oboInOwl:inSubset=uberon:cumbo"]);
+            .expect("an annotate step");
+        let pair = |p: &str, v: &str| (p.to_string(), v.to_string());
+        let triple = |p: &str, v: &str, x: &str| (p.to_string(), v.to_string(), x.to_string());
+        assert_eq!(a.annotations, vec![pair("rdfs:comment", "c")]);
+        assert_eq!(a.link_annotations, vec![pair("rdfs:seeAlso", "ex:y")]);
+        assert_eq!(a.language_annotations, vec![triple("rdfs:label", "chien", "fr")]);
+        assert_eq!(a.typed_annotations, vec![triple("rdfs:comment", "5", "xsd:integer")]);
+        assert_eq!(a.axiom_annotations, ["rdfs:comment", "x", "rdfs:comment", "y", "dc:source", "s"]);
+        assert_eq!(a.annotation_files, ["extra.owl"]);
+        assert!(a.interpolate && a.annotate_defined_by && a.annotate_derived_from && a.remove_annotations);
+        assert_eq!(a.ontology_iri.as_deref(), Some("http://example.org/x.owl"));
+    }
+
+    /// A template's `--force true` reaches the plan, and its absence does too.
+    #[test]
+    fn template_records_whether_it_is_forced() {
+        let forced = |cmd: &str| {
+            parse_command(cmd, "robot")
+                .iter()
+                .find_map(|s| match s {
+                    Step::Op(Op::Template { force, .. }) => Some(*force),
+                    _ => None,
+                })
+                .expect("a template step")
+        };
+        assert!(forced("robot template --template t.tsv --force true -o x.owl"));
+        assert!(forced("robot template --template t.tsv -f true -o x.owl"));
+        assert!(!forced("robot template --template t.tsv -o x.owl"));
+        assert!(!forced("robot template --template t.tsv --force false -o x.owl"));
+    }
+
+    /// A template's merge switches reach the plan as ROBOT 1.9.11 runs them.
+    /// `--merge-before`, and a `--merge-after` that writes nothing, merge, and
+    /// the IRIs the command names set nothing then. A `--merge-after` that
+    /// ends its chain writes the generated axioms alone; part way through one,
+    /// it would write one ontology and go on with another, which the plan
+    /// refuses by name. The two switches together, a merge with no input and a
+    /// value after a switch fail as ROBOT's do.
+    #[test]
+    fn mireot_and_ancestors_are_recorded_as_robot_reads_them() {
+        let extract = |cmd: &str| -> Op {
+            parse_command(cmd, "robot")
+                .iter()
+                .find_map(|s| match s {
+                    Step::Op(op @ Op::Extract { .. }) => Some(op.clone()),
+                    _ => None,
+                })
+                .expect("an extract step")
+        };
+        let cmd = "robot extract -i i.owl --method MIREOT --lower-terms l.txt --lower-term X:1 --upper-term X:2 \
+                   --upper-terms u.txt -b X:3 -B b.txt --intermediates none -O http://x/o --annotate-with-source true \
+                   --sources s.txt --imports exclude -o x.owl";
+        let Op::Extract {
+            lower_terms, lower_term_files, upper_terms, upper_term_files, branch_from_terms, branch_from_term_files,
+            intermediates, ..
+        } = extract(cmd)
+        else {
+            unreachable!()
+        };
         assert_eq!(
-            spec.prefixes,
-            vec!["uberon: http://purl.obolibrary.org/obo/uberon/core#"],
-            "the --prefix binding must reach the plan"
+            (lower_terms, lower_term_files, upper_terms, upper_term_files, branch_from_terms, branch_from_term_files),
+            (
+                vec!["X:1".to_string()],
+                vec!["l.txt".to_string()],
+                vec!["X:2".to_string()],
+                vec!["u.txt".to_string()],
+                vec!["X:3".to_string()],
+                vec!["b.txt".to_string()]
+            )
+        );
+        assert_eq!(intermediates.as_deref(), Some("none"));
+        // MIREOT names no module IRI, and the options that trim or annotate a
+        // locality module set nothing: read, and nothing left over.
+        let steps = parse_command(cmd, "robot");
+        assert!(steps.iter().all(|s| s.unrunnable_gaps().is_empty()), "{steps:?}");
+        assert!(!steps.iter().any(|s| matches!(s, Step::Op(Op::Annotate(_)))), "{steps:?}");
+        let bot = parse_command("robot extract -i i.owl --method BOT -T t.txt -O http://x/o --imports exclude -o x.owl", "robot");
+        assert!(bot.iter().any(|s| matches!(s, Step::Op(Op::Annotate(_)))), "{bot:?}");
+        assert!(bot.iter().any(|s| matches!(s, Step::UnsupportedOptions { .. })), "{bot:?}");
+        let ancestors = |cmd: &str| {
+            parse_command(cmd, "robot").iter().find_map(|s| match s {
+                Step::Op(Op::Template { ancestors, .. }) => Some(*ancestors),
+                _ => None,
+            })
+        };
+        assert_eq!(ancestors("robot template -i i.owl -t t.tsv --ancestors -o x.owl"), Some(true));
+        assert_eq!(ancestors("robot template -i i.owl -t t.tsv -a -o x.owl"), Some(true));
+        assert_eq!(ancestors("robot template -i i.owl -t t.tsv -o x.owl"), Some(false));
+        assert!(
+            parse_command("robot template -i i.owl -t t.tsv --ancestors true -o x.owl", "robot")
+                .iter()
+                .any(|s| matches!(s, Step::Refused { message } if message.contains("UNKNOWN ARG ERROR"))),
+            "--ancestors true was read"
+        );
+    }
+
+    #[test]
+    fn template_records_its_merge_as_robot_runs_it() {
+        let template = |cmd: &str| -> (bool, bool) {
+            parse_command(cmd, "robot")
+                .iter()
+                .find_map(|s| match s {
+                    Step::Op(Op::Template { merge, collapse_import_closure, .. }) => {
+                        Some((*merge, *collapse_import_closure))
+                    }
+                    _ => None,
+                })
+                .expect("a template step")
+        };
+        assert_eq!(template("robot template -i i.owl -t t.tsv --merge-before -o x.owl"), (true, false));
+        assert_eq!(template("robot template -i i.owl -t t.tsv -m --collapse-import-closure true -o x.owl"), (true, true));
+        assert_eq!(
+            template("robot template -i i.owl -t t.tsv --merge-after annotate --annotation rdfs:comment c -o x.owl"),
+            (true, false)
+        );
+        assert_eq!(
+            template("robot template -i i.owl -t t.tsv --merge-after --collapse-import-closure true -o x.owl"),
+            (false, false)
+        );
+        assert_eq!(template("robot template -i i.owl -t t.tsv --collapse-import-closure true -o x.owl"), (false, false));
+        assert_eq!(template("robot convert -i i.owl template -t t.tsv --merge-before -o x.owl"), (true, false));
+        let annotates = |cmd: &str| parse_command(cmd, "robot").iter().any(|s| matches!(s, Step::Op(Op::Annotate(_))));
+        assert!(!annotates("robot template -i i.owl -t t.tsv --merge-before -O http://x/o -V http://x/v -o x.owl"));
+        assert!(!annotates("robot template -i i.owl -t t.tsv -M -O http://x/o -o x.owl"));
+        assert!(annotates("robot template -i i.owl -t t.tsv -O http://x/o -o x.owl"));
+        let steps = parse_command(
+            "robot template -i i.owl -t t.tsv -m --include-annotations true --collapse-import-closure false -o x.owl",
+            "robot",
+        );
+        assert!(steps.iter().all(|s| s.unrunnable_gaps().is_empty()), "{steps:?}");
+        let refused = |cmd: &str| -> String {
+            parse_command(cmd, "robot")
+                .iter()
+                .find_map(|s| match s {
+                    Step::Refused { message } => Some(message.clone()),
+                    Step::UnsupportedOptions { options, .. } => Some(options.join(", ")),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            refused("robot template -i i.owl -t t.tsv --merge-before --merge-after -o x.owl"),
+            "MERGE ERROR merge-before and merge-after cannot be combined"
+        );
+        assert_eq!(
+            refused("robot template -t t.tsv --merge-before -o x.owl"),
+            "template: --merge-before has no input ontology to merge into"
+        );
+        assert_eq!(
+            refused("robot template -i i.owl -t t.tsv --merge-before true -o x.owl"),
+            "UNKNOWN ARG ERROR unknown command or option: true"
+        );
+        assert_eq!(
+            refused("robot template -i i.owl -t t.tsv --merge-after -o mid.owl annotate --annotation rdfs:comment c -o x.owl"),
+            "--merge-after, --output mid.owl"
+        );
+    }
+
+    /// A materialize step keeps the reasoner it checks the ontology with, and
+    /// whether it only checks it (`-n/--create-new-ontology`).
+    #[test]
+    fn materialize_records_its_reasoner_and_whether_it_keeps_the_input() {
+        let step = |cmd: &str| {
+            parse_command(cmd, "robot")
+                .iter()
+                .find_map(|s| match s {
+                    Step::Op(Op::Materialize { reasoner, create_new_ontology, properties, .. }) => {
+                        Some((reasoner.clone(), *create_new_ontology, properties.clone()))
+                    }
+                    _ => None,
+                })
+                .expect("a materialize step")
+        };
+        assert_eq!(
+            step("robot materialize --reasoner hermit --create-new-ontology true --term BFO:0000050 -o x.owl"),
+            (Some("hermit".to_string()), Some(true), vec!["BFO:0000050".to_string()])
+        );
+        assert_eq!(step("robot materialize -r WHELK -n false -o x.owl"), (Some("WHELK".to_string()), Some(false), vec![]));
+        assert_eq!(step("robot materialize --term BFO:0000050 -o x.owl").0, None);
+    }
+
+    /// A collapse step records its threshold as the recipe writes it, so one
+    /// that is not an integer of at least 2 fails the step rather than
+    /// collapsing at the default.
+    #[test]
+    fn collapse_records_its_threshold_as_written() {
+        let threshold = |cmd: &str| {
+            parse_command(cmd, "robot")
+                .iter()
+                .find_map(|s| match s {
+                    Step::Op(Op::Collapse { threshold, .. }) => Some(threshold.clone()),
+                    _ => None,
+                })
+                .expect("a collapse step")
+        };
+        assert_eq!(threshold("robot collapse --threshold 3 -o x.owl"), Some("3".to_string()));
+        assert_eq!(threshold("robot collapse -t x -o x.owl"), Some("x".to_string()));
+        assert_eq!(threshold("robot collapse --precious EX:1 -o x.owl"), None);
+    }
+
+    /// Each command of a chain reads its CURIEs with the prefix options stated
+    /// before the first command and its own, and the command after it with the
+    /// first alone. `-p` is `--prefix` only where the command has no `-p` of its
+    /// own: on `remove` it is `--preserve-structure`.
+    #[test]
+    fn each_command_reads_with_the_chains_prefix_options_and_its_own() {
+        let steps = parse_command(
+            "robot --add-prefixes config/context.json template --add-prefixes extra.json \
+             -p 'zz: http://example.org/zz#' --template t.tsv \
+             annotate --ontology-iri http://example.org/t.owl \
+             remove -p false --term zz:A -o t.owl",
+            "robot",
+        );
+        let at = |is: fn(&Op) -> bool| {
+            steps
+                .iter()
+                .position(|s| matches!(s, Step::Op(op) | Step::Partial { op, .. } if is(op)))
+                .expect("the command's step")
+        };
+        let template = at(|op| matches!(op, Op::Template { .. }));
+        let annotate = at(|op| matches!(op, Op::Annotate(_)));
+        let prefixes: Vec<(usize, Vec<String>, Vec<String>)> = steps
+            .iter()
+            .enumerate()
+            .filter_map(|(k, s)| match s {
+                Step::Op(Op::Prefixes { add_prefixes, prefix, .. }) => {
+                    Some((k, add_prefixes.clone(), prefix.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let strings = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            prefixes,
+            vec![
+                (
+                    template - 1,
+                    strings(&["config/context.json", "extra.json"]),
+                    strings(&["zz: http://example.org/zz#"])
+                ),
+                (annotate - 1, strings(&["config/context.json"]), vec![]),
+            ],
+            "{steps:?}"
         );
     }
 
@@ -2254,6 +2758,242 @@ mod tests {
             spec.base_iri,
             vec!["http://purl.obolibrary.org/obo/X_", "http://purl.obolibrary.org/obo/x#"]
         );
+    }
+
+    /// Every option `remove` and `filter` share reaches the step, spelt long or
+    /// short, its values in recipe order; a filter's `-O` is the annotate after
+    /// it.
+    #[test]
+    fn remove_and_filter_record_every_option() {
+        let options = "-t A --term B -T t.txt -n C --include-term D -N i.txt --include-terms j.txt \
+                       -e E --exclude-term F -E e.txt -s parents --select 'self children' -a subclass \
+                       --axioms logical --base-iri http://example.org/x_ -r false -S true -p false \
+                       --allow-punning true -d rdfs:comment --drop-axiom-annotations 'IAO:0000115=~^x'";
+        let want = SelectionSpec {
+            terms: vec!["A".into(), "B".into()],
+            term_files: vec!["t.txt".into()],
+            include_terms: vec!["C".into(), "D".into()],
+            include_term_files: vec!["i.txt".into(), "j.txt".into()],
+            exclude_terms: vec!["E".into(), "F".into()],
+            exclude_term_files: vec!["e.txt".into()],
+            selects: vec!["parents".into(), "self children".into()],
+            axioms: vec!["subclass".into(), "logical".into()],
+            base_iri: vec!["http://example.org/x_".into()],
+            trim: Some(false.into()),
+            signature: Some(true.into()),
+            preserve_structure: Some(false.into()),
+            allow_punning: Some(true.into()),
+            drop_axiom_annotations: vec!["rdfs:comment".into(), "IAO:0000115=~^x".into()],
+        };
+        let steps = parse_command(&format!("robot remove -i x.owl {options} -o y.owl"), "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Remove(spec)) if spec == &want)),
+            "{steps:?}"
+        );
+        let steps = parse_command(&format!("robot filter -i x.owl {options} -O http://example.org/y.owl -o y.owl"), "robot");
+        let filter = steps
+            .iter()
+            .position(|s| matches!(s, Step::Op(Op::Filter(spec)) if spec == &want))
+            .unwrap_or_else(|| panic!("{steps:?}"));
+        assert!(
+            matches!(&steps[filter + 1], Step::Op(Op::Annotate(a))
+                if a.ontology_iri.as_deref() == Some("http://example.org/y.owl")),
+            "{steps:?}"
+        );
+    }
+
+    /// A command reads its options as the line gives them: a token that is no
+    /// option is a value (`--format --csv`), a switch of extract or reduce is on
+    /// for `true` or `yes` in any case and off for anything else, and a
+    /// redirection is the shell's.
+    #[test]
+    fn a_command_reads_its_options_as_the_line_gives_them() {
+        let steps = parse_command("robot query --input x.owl --format --csv --query q.sparql out.csv 2>/dev/null", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Query { format, selects, .. })
+                if format.as_deref() == Some("--csv") && selects == &[("q.sparql".to_string(), "out.csv".to_string())])),
+            "{steps:?}"
+        );
+        for (value, on) in [("Yes", true), (" TRUE ", true), ("on", false)] {
+            let line = format!("robot extract -i x.owl --method BOT -T t.txt --force '{value}' -o y.owl");
+            let steps = parse_command(&line, "robot");
+            assert!(steps.iter().any(|s| matches!(s, Step::Op(Op::Extract { force, .. }) if *force == on)), "{line}: {steps:?}");
+        }
+        let steps = parse_command("robot reduce -i x.owl -p yes --named-classes-only TRUE -s True -o y.owl", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Reduce {
+                preserve_annotated_axioms: true,
+                named_classes_only: true,
+                include_subproperties: Some(true),
+                ..
+            }))),
+            "{steps:?}"
+        );
+        let steps = parse_command("robot reduce -i x.owl -o y.owl", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Reduce {
+                preserve_annotated_axioms: false,
+                named_classes_only: false,
+                include_subproperties: None,
+                ..
+            }))),
+            "{steps:?}"
+        );
+        let steps = parse_command(
+            "robot merge -i a.owl -I http://example.org/b.owl -d true -a true --annotate-derived-from false -o y.owl",
+            "robot",
+        );
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Merge {
+                inputs,
+                collapse_import_closure: None,
+                include_annotations: true,
+                annotate_defined_by: true,
+                annotate_derived_from: false,
+            }) if inputs == &["a.owl", "http://example.org/b.owl"])),
+            "{steps:?}"
+        );
+        // The files a pattern matches are known when the command runs, and the
+        // plan must name them, so the pattern is a gap.
+        let steps = parse_command("robot merge -i a.owl --inputs 'parts/*.owl' -o y.owl", "robot");
+        let gaps: Vec<String> = steps.iter().flat_map(Step::unrunnable_gaps).collect();
+        assert_eq!(gaps, ["unsupported option `merge --inputs parts/*.owl`"], "{steps:?}");
+    }
+
+    /// An option a command is given that its step does not read is a gap that
+    /// names it, and a line its commands cannot read is refused with the
+    /// message that says why.
+    #[test]
+    fn an_option_no_step_reads_is_named_and_an_unreadable_line_refused() {
+        let steps = parse_command("robot reason -i x.owl --include-indirect true -D unsat.txt -o y.owl", "robot");
+        let gaps: Vec<String> = steps.iter().flat_map(Step::unrunnable_gaps).collect();
+        assert_eq!(
+            gaps,
+            [
+                "unsupported option `reason --include-indirect true`",
+                "unsupported option `reason --dump-unsatisfiable unsat.txt`"
+            ],
+            "{steps:?}"
+        );
+        for (line, message) in [
+            ("robot convert -i x.owl --no-check -o y.obo", "UNKNOWN ARG ERROR unknown command or option: --no-check"),
+            ("robot convert -i x.owl y.obo", "UNKNOWN ARG ERROR unknown command or option: y.obo"),
+            ("robot remove -i x.owl --term", "Missing argument for option: t"),
+        ] {
+            let steps = parse_command(line, "robot");
+            assert!(
+                matches!(steps.last(), Some(Step::Refused { message: m }) if m == message),
+                "{line}: {steps:?}"
+            );
+        }
+        // owlmake's own options are read with ROBOT's.
+        let steps = parse_command("robot reason -i x.owl --axiom-generators PropertyAssertion --properties ex:p -o y.owl", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Reason { properties, .. }) if properties == &["ex:p"])),
+            "{steps:?}"
+        );
+        assert!(steps.iter().all(|s| s.unrunnable_gaps().is_empty()), "{steps:?}");
+    }
+
+    /// A switch is read as its command reads it. One the command reads as
+    /// `true` or `false` exactly refuses any other value where the command
+    /// reads it, and the first such switch the command reads names the
+    /// refusal; `remove` and `filter` read theirs only once something is
+    /// selected, so their steps carry the text. One read leniently is on for
+    /// `true` or `yes` in any case and off for anything else.
+    #[test]
+    fn a_switch_is_read_as_its_command_reads_it() {
+        let refused = |line: &str| match parse_command(line, "robot").last() {
+            Some(Step::Refused { message }) => message.clone(),
+            other => panic!("{line}: expected a refusal, got {other:?}"),
+        };
+        for (line, switch) in [
+            ("robot annotate -i x.owl --annotation rdfs:comment c --interpolate yes -o y.owl", "interpolate"),
+            ("robot merge -i a.owl --collapse-import-closure TRUE -o y.owl", "collapse-import-closure"),
+            ("robot merge -i a.owl --annotate-defined-by True --include-annotations 1 -o y.owl", "include-annotations"),
+            ("robot convert -i x.owl --check FALSE -o y.obo", "check"),
+            ("robot extract -i x.owl -m BOT -t ex:A --copy-ontology-annotations yes -o y.owl", "copy-ontology-annotations"),
+            ("robot relax -i x.owl --exclude-named-classes 1 -o y.owl", "exclude-named-classes"),
+            ("robot rename -i x.owl --mappings m.tsv --allow-duplicates yes -o y.owl", "allow-duplicates"),
+            ("robot repair -i x.owl --invalid-references yes -o y.owl", "invalid-references"),
+            ("robot template -t t.tsv --include-annotations nope -o y.owl", "include-annotations"),
+            ("robot query -i x.owl --use-graphs True --query q.rq out.csv", "use-graphs"),
+            ("robot query -i x.owl --update u.ru --temporary-file yes -o y.owl", "temporary-file"),
+            ("robot query -i x.owl --tdb true --keep-tdb-mappings yes --query q.rq out.csv", "keep-tdb-mappings"),
+        ] {
+            assert_eq!(refused(line), format!("BOOLEAN VALUE ERROR arg for {switch} must be true or false"), "{line}");
+        }
+        // Where the command does not read a switch, the switch says nothing.
+        for line in [
+            "robot query -i x.owl --tdb true --use-graphs nope --query q.rq out.csv",
+            "robot query -i x.owl --update u.ru --use-graphs nope --tdb maybe -o y.owl",
+        ] {
+            let steps = parse_command(line, "robot");
+            assert!(steps.iter().all(|s| !matches!(s, Step::Refused { .. }) && s.unrunnable_gaps().is_empty()), "{line}: {steps:?}");
+        }
+        let steps = parse_command("robot query -i x.owl --tdb true --use-graphs true --query q.rq out.csv", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Query { use_graphs: false, tdb: true, .. }))),
+            "{steps:?}"
+        );
+        let steps = parse_command("robot repair -i x.owl --invalid-references false --merge-axiom-annotations true -o y.owl", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Repair { invalid_references: false, merge_axiom_annotations: true, .. }))),
+            "{steps:?}"
+        );
+        // `repair` migrates whenever it does not merge, carries the annotation
+        // properties it moves, and keeps the ontology's IRI whatever
+        // `--output-iri` says.
+        let steps = parse_command(
+            "robot repair -i x.owl -r false -a oboInOwl:hasDbXref --annotation-property rdfs:comment -A props.txt \
+             -O http://example.org/y.owl -o y.owl",
+            "robot",
+        );
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Repair {
+                invalid_references: true,
+                merge_axiom_annotations: false,
+                annotation_properties,
+                annotation_properties_file: Some(file),
+            }) if annotation_properties == &["oboInOwl:hasDbXref", "rdfs:comment"] && file == "props.txt")),
+            "{steps:?}"
+        );
+        assert!(
+            !steps.iter().any(|s| matches!(s, Step::Op(Op::Annotate(_)) | Step::UnsupportedOptions { .. })),
+            "{steps:?}"
+        );
+        // `remove` and `filter` carry the text to where they read it.
+        let steps = parse_command("robot remove -i x.owl --term ex:A --trim TRUE --allow-punning yes -o y.owl", "robot");
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Remove(spec))
+                if spec.trim == Some(Switch::Text("TRUE".into())) && spec.allow_punning == Some(Switch::Text("yes".into())))),
+            "{steps:?}"
+        );
+        // Read leniently.
+        let steps = parse_command(
+            "robot reason -i x.owl --exclude-owl-thing Yes --annotate-inferred-axioms nope --create-new-ontology TRUE -o y.owl",
+            "robot",
+        );
+        assert!(
+            steps.iter().any(|s| matches!(s, Step::Op(Op::Reason {
+                exclude_owl_thing: Some(true),
+                annotate_inferred_axioms: Some(false),
+                create_new_ontology: Some(true),
+                ..
+            }))),
+            "{steps:?}"
+        );
+        let steps = parse_command("robot template -t t.tsv --force YES -o y.owl", "robot");
+        assert!(steps.iter().any(|s| matches!(s, Step::Op(Op::Template { force: true, .. }))), "{steps:?}");
+        // A switch no step reads is no gap when it asks for what the step does
+        // without it.
+        let steps = parse_command("robot relax -i x.owl --exclude-named-classes true --enforce-obo-format false -o y.owl", "robot");
+        assert!(steps.iter().all(|s| s.unrunnable_gaps().is_empty()), "{steps:?}");
+        let gaps: Vec<String> = parse_command("robot relax -i x.owl --enforce-obo-format true -o y.owl", "robot")
+            .iter()
+            .flat_map(Step::unrunnable_gaps)
+            .collect();
+        assert_eq!(gaps, ["unsupported option `relax --enforce-obo-format true`"]);
     }
 
     /// A tolerated ontology command is an op that may fail, not a command line.

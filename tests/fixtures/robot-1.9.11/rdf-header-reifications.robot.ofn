@@ -1,0 +1,30 @@
+Prefix(:=<http://example.org/header-reifications#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/header-reifications>
+Annotation(Annotation(rdfs:label "on the definition") obo:IAO_0000115 "d")
+Annotation(Annotation(rdfs:label "block b") rdfs:comment "c")
+Annotation(rdfs:comment "c")
+Annotation(rdfs:seeAlso <http://example.org/see>)
+Annotation(owl:versionInfo "1.0")
+
+Declaration(Class(:A))
+Declaration(AnnotationProperty(obo:IAO_0000115))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (alpha)
+
+AnnotationAssertion(Annotation(Annotation(rdfs:label "nested") rdfs:comment "on the label") rdfs:label :A "alpha")
+
+
+)

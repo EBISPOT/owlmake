@@ -1,0 +1,51 @@
+Prefix(:=<http://example.org/loops.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/loops.owl>
+
+Declaration(Class(<http://example.org/A>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(AnnotationProperty(<http://example.org/x>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/x> (<http://example.org/x>)
+
+SubAnnotationPropertyOf(<http://example.org/x> <http://example.org/x>)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/p> (<http://example.org/p>)
+
+SubObjectPropertyOf(<http://example.org/p> <http://example.org/p>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/d> (<http://example.org/d>)
+
+SubDataPropertyOf(<http://example.org/d> <http://example.org/d>)
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (<http://example.org/A>)
+
+SubClassOf(<http://example.org/A> <http://example.org/A>)
+
+
+)

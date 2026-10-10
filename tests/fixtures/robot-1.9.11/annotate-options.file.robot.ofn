@@ -1,0 +1,64 @@
+Prefix(:=<http://example.org/in.owl#>)
+Prefix(dc:=<http://purl.org/dc/elements/1.1/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(prov:=<http://www.w3.org/ns/prov#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/in.owl>
+<http://example.org/releases/1/in.owl>
+Annotation(rdfs:comment "header")
+Annotation(rdfs:seeAlso "from extra")
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/B>))
+Declaration(Class(<http://example.org/C>))
+Declaration(Class(<http://example.org/X>))
+Declaration(Class(owl:Thing))
+Declaration(ObjectProperty(<http://example.org/op>))
+Declaration(DataProperty(<http://example.org/dp>))
+Declaration(NamedIndividual(<http://example.org/i>))
+Declaration(AnnotationProperty(dc:title))
+Declaration(AnnotationProperty(prov:wasDerivedFrom))
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (a)
+
+AnnotationAssertion(rdfs:label <http://example.org/A> "a")
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/other>) <http://example.org/A> <http://example.org/B>)
+
+# Class: <http://example.org/B> (<http://example.org/B>)
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/B> <http://example.org/elsewhere>)
+SubClassOf(Annotation(rdfs:comment "c") <http://example.org/B> owl:Thing)
+
+# Class: <http://example.org/C> (<http://example.org/C>)
+
+SubClassOf(<http://example.org/C> <http://example.org/A>)
+
+# Class: <http://example.org/X> (<http://example.org/X>)
+
+SubClassOf(<http://example.org/X> <http://example.org/A>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/i> (<http://example.org/i>)
+
+AnnotationAssertion(dc:title <http://example.org/i> "eye")
+ClassAssertion(<http://example.org/A> <http://example.org/i>)
+DataPropertyAssertion(<http://example.org/dp> <http://example.org/i> "1"^^xsd:integer)
+
+
+)

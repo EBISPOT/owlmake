@@ -1,0 +1,159 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/all-disjoint-inverse.owl#"
+     xml:base="http://example.org/all-disjoint-inverse.owl"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/all-disjoint-inverse.owl"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/all-disjoint-inverse#a -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/all-disjoint-inverse#a"/>
+    
+
+
+    <!-- http://example.org/all-disjoint-inverse#b -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/all-disjoint-inverse#b"/>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#b"/>
+        <rdfs:subPropertyOf rdf:resource="http://example.org/all-disjoint-inverse#d"/>
+    </rdf:Description>
+    <owl:Axiom>
+        <owl:annotatedSource>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#b"/>
+                <rdfs:subPropertyOf rdf:resource="http://example.org/all-disjoint-inverse#e"/>
+            </rdf:Description>
+        </owl:annotatedSource>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subPropertyOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/all-disjoint-inverse#e"/>
+        <rdfs:comment>sub</rdfs:comment>
+    </owl:Axiom>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointProperties"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#a"/>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#b"/>
+            </rdf:Description>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#c"/>
+            </rdf:Description>
+        </owl:members>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/all-disjoint-inverse#c -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/all-disjoint-inverse#c"/>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#c"/>
+        <rdfs:domain>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/all-disjoint-inverse#a"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/all-disjoint-inverse#K"/>
+            </owl:Restriction>
+        </rdfs:domain>
+    </rdf:Description>
+    <owl:Annotation>
+        <owl:annotatedSource rdf:nodeID="genid12"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#seeAlso"/>
+        <owl:annotatedTarget>x</owl:annotatedTarget>
+        <rdfs:comment>nested</rdfs:comment>
+    </owl:Annotation>
+    <rdf:Description rdf:nodeID="genid12">
+        <rdfs:comment>annotated</rdfs:comment>
+        <rdfs:seeAlso>x</rdfs:seeAlso>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointProperties"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#a"/>
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#d"/>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#c"/>
+            </rdf:Description>
+        </owl:members>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/all-disjoint-inverse#d -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/all-disjoint-inverse#d"/>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointProperties"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#a"/>
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#c"/>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#d"/>
+            </rdf:Description>
+            <rdf:Description>
+                <owl:inverseOf rdf:resource="http://example.org/all-disjoint-inverse#e"/>
+            </rdf:Description>
+        </owl:members>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/all-disjoint-inverse#e -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/all-disjoint-inverse#e"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/all-disjoint-inverse#K -->
+
+    <owl:Class rdf:about="http://example.org/all-disjoint-inverse#K"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointProperties"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#a"/>
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#b"/>
+            <rdf:Description rdf:about="http://example.org/all-disjoint-inverse#e"/>
+        </owl:members>
+    </rdf:Description>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

@@ -1,0 +1,52 @@
+Prefix(:=<http://example.org/o#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/o>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(DataProperty(:d))
+Declaration(NamedIndividual(:a))
+Declaration(NamedIndividual(:i))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A owl:Thing)
+
+# Class: :B (:B)
+
+SubClassOf(:B owl:Thing)
+
+# Class: :C (:C)
+
+SubClassOf(:C owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :a (:a)
+
+ClassAssertion(:A :a)
+ClassAssertion(:B :a)
+
+# Individual: :i (:i)
+
+ClassAssertion(:C :i)
+DataPropertyAssertion(:d :i "5")
+
+
+DLSafeRule(Body(ClassAtom(:A Variable(:x)) DataPropertyAtom(:d :i Variable(:y)))Head(ClassAtom(:B Variable(:x))))
+)

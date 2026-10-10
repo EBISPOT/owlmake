@@ -1,0 +1,11 @@
+format-version: 1.2
+ontology: ex
+
+[Term]
+id: A
+is_a: B
+relationship: r C
+
+[Typedef]
+id: p
+equivalent_to: q

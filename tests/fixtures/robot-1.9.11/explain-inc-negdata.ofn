@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/inc-negdata#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/inc-negdata>
+Declaration(DataProperty(:f))
+Declaration(NamedIndividual(:i))
+DataPropertyAssertion(:f :i "a")
+NegativeDataPropertyAssertion(:f :i "a")
+)

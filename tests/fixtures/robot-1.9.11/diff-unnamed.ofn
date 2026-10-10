@@ -1,0 +1,4 @@
+Prefix(:=<http://example.org/diff-unnamed#>)
+Ontology(
+Declaration(Class(:U))
+)

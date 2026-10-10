@@ -1,0 +1,12 @@
+format-version: 1.2
+ontology: http://example.org/set-axioms-of-one
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/set-axioms-of-one#B>))\nDeclaration(Class(<http://example.org/set-axioms-of-one#V>))\nDeclaration(ObjectProperty(<http://example.org/set-axioms-of-one#p>))\nDeclaration(ObjectProperty(<http://example.org/set-axioms-of-one#q>))\nDeclaration(DataProperty(<http://example.org/set-axioms-of-one#d>))\n\n############################\n#   Object Properties\n############################\n\n# Object Property: <http://example.org/set-axioms-of-one#p> (<http://example.org/set-axioms-of-one#p>)\n\n\n\n\n\n############################\n#   Data Properties\n############################\n\n# Data Property: <http://example.org/set-axioms-of-one#d> (<http://example.org/set-axioms-of-one#d>)\n\n\n\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/set-axioms-of-one#V> (<http://example.org/set-axioms-of-one#V>)\n\nDisjointUnion(<http://example.org/set-axioms-of-one#V> <http://example.org/set-axioms-of-one#B>)\n\n\n\n)
+
+[Term]
+id: A
+relationship: p B {comment="x"}
+
+[Term]
+id: B
+relationship: q A {comment="y"}
+

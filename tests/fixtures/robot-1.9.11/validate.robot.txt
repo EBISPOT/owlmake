@@ -1,0 +1,334 @@
+# validate-unsat.ofn | reason
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | reason -D DUMP
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | reason -r hermit
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | reason -r whelk
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | reason -r structural
+exit 0
+# validate-unsat.ofn | reason -r emr
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | reason -r jfact
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize -n true
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize -r hermit
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize -r whelk
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize -r structural
+exit 0
+# validate-unsat.ofn | materialize -r jfact
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize -r elk
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/A
+# validate-unsat.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr
+# validate-inconsistent.ofn | reason
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | reason -D DUMP
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+Unfortunately, robot is not able to generate an unsatisfiable minimal model for inconsistent ontologies at this time.\n
+TIP: remove individuals from ontology and try again
+# validate-inconsistent.ofn | reason -r hermit
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | reason -r whelk
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | reason -r structural
+exit 0
+# validate-inconsistent.ofn | reason -r emr
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | reason -r jfact
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize -n true
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize -r hermit
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize -r whelk
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize -r structural
+exit 0
+# validate-inconsistent.ofn | materialize -r jfact
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize -r elk
+exit 1
+The ontology is inconsistent. TIP: use a tool like Protege to find explanations
+# validate-inconsistent.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr
+# validate-prop-domain.ofn | reason
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-domain.ofn | reason -D DUMP
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-domain.ofn | reason -r hermit
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-domain.ofn | reason -r whelk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-domain.ofn | reason -r structural
+exit 0
+# validate-prop-domain.ofn | reason -r emr
+exit 0
+# validate-prop-domain.ofn | reason -r jfact
+exit 0
+# validate-prop-domain.ofn | materialize
+exit 0
+# validate-prop-domain.ofn | materialize -n true
+exit 0
+# validate-prop-domain.ofn | materialize -r hermit
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-domain.ofn | materialize -r whelk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-domain.ofn | materialize -r structural
+exit 0
+# validate-prop-domain.ofn | materialize -r jfact
+exit 0
+# validate-prop-domain.ofn | materialize -r elk
+exit 0
+# validate-prop-domain.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr
+# validate-prop-bottom.ofn | reason
+exit 0
+# validate-prop-bottom.ofn | reason -D DUMP
+exit 0
+# validate-prop-bottom.ofn | reason -r hermit
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | reason -r whelk
+exit 0
+# validate-prop-bottom.ofn | reason -r structural
+exit 0
+# validate-prop-bottom.ofn | reason -r emr
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+varies: 13 of 20 runs as above; 2 of 20 runs: exit 1 / There are 1 unsatisfiable properties in the ontology. / unsatisfiable property: http://example.org/p; 5 of 20 runs: exit 1 / There are 1 unsatisfiable properties in the ontology. / unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | reason -r jfact
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | materialize
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+varies: 18 of 20 runs as above; 2 of 20 runs: exit 1 / There are 1 unsatisfiable properties in the ontology. / unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | materialize -n true
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | materialize -r hermit
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | materialize -r whelk
+exit 0
+# validate-prop-bottom.ofn | materialize -r structural
+exit 0
+# validate-prop-bottom.ofn | materialize -r jfact
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+# validate-prop-bottom.ofn | materialize -r elk
+exit 1
+There are 2 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+    unsatisfiable property: http://example.org/r
+varies: 17 of 20 runs as above; 1 of 20 runs: exit 1 / There are 1 unsatisfiable properties in the ontology. / unsatisfiable property: http://example.org/r; 2 of 20 runs: exit 1 / There are 1 unsatisfiable properties in the ontology. / unsatisfiable property: http://example.org/p
+# validate-prop-bottom.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr
+# validate-prop-gci.ofn | reason
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-gci.ofn | reason -D DUMP
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-gci.ofn | reason -r hermit
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-gci.ofn | reason -r whelk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-gci.ofn | reason -r structural
+exit 0
+# validate-prop-gci.ofn | reason -r emr
+exit 0
+# validate-prop-gci.ofn | reason -r jfact
+exit 0
+# validate-prop-gci.ofn | materialize
+exit 0
+# validate-prop-gci.ofn | materialize -n true
+exit 0
+# validate-prop-gci.ofn | materialize -r hermit
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-gci.ofn | materialize -r whelk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-gci.ofn | materialize -r structural
+exit 0
+# validate-prop-gci.ofn | materialize -r jfact
+exit 0
+# validate-prop-gci.ofn | materialize -r elk
+exit 0
+# validate-prop-gci.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr
+# validate-prop-range.ofn | reason
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-range.ofn | reason -D DUMP
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-range.ofn | reason -r hermit
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-range.ofn | reason -r whelk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-range.ofn | reason -r structural
+exit 0
+# validate-prop-range.ofn | reason -r emr
+exit 0
+# validate-prop-range.ofn | reason -r jfact
+exit 0
+# validate-prop-range.ofn | materialize
+exit 0
+# validate-prop-range.ofn | materialize -n true
+exit 0
+# validate-prop-range.ofn | materialize -r hermit
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-range.ofn | materialize -r whelk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-range.ofn | materialize -r structural
+exit 0
+# validate-prop-range.ofn | materialize -r jfact
+exit 0
+# validate-prop-range.ofn | materialize -r elk
+exit 0
+# validate-prop-range.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr
+# validate-prop-bottom-used.ofn | reason
+exit 0
+# validate-prop-bottom-used.ofn | reason -D DUMP
+exit 0
+# validate-prop-bottom-used.ofn | reason -r hermit
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/D
+# validate-prop-bottom-used.ofn | reason -r whelk
+exit 0
+# validate-prop-bottom-used.ofn | reason -r structural
+exit 0
+# validate-prop-bottom-used.ofn | reason -r emr
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-bottom-used.ofn | reason -r jfact
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/D
+# validate-prop-bottom-used.ofn | materialize
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-bottom-used.ofn | materialize -n true
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-bottom-used.ofn | materialize -r hermit
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/D
+# validate-prop-bottom-used.ofn | materialize -r whelk
+exit 0
+# validate-prop-bottom-used.ofn | materialize -r structural
+exit 0
+# validate-prop-bottom-used.ofn | materialize -r jfact
+exit 1
+There are 1 unsatisfiable classes in the ontology.
+    unsatisfiable: http://example.org/D
+# validate-prop-bottom-used.ofn | materialize -r elk
+exit 1
+There are 1 unsatisfiable properties in the ontology.
+    unsatisfiable property: http://example.org/p
+# validate-prop-bottom-used.ofn | materialize -r emr
+exit 1
+error: INVALID REASONER ERROR unknown reasoner: emr

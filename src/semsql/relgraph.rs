@@ -83,7 +83,11 @@ fn prefix_map(prefixes: &[(String, String)]) -> Vec<(String, String)> {
 /// edge — not ⊤, not ⊥, not an anonymous expression.
 fn named_class<'a>(state: &'a ReasonerState, id: ConceptId) -> Option<&'a str> {
     match state.interner.concept_data(id) {
-        ConceptData::AtomicConcept(iri) if iri != OWL_THING && iri != OWL_NOTHING => Some(iri),
+        ConceptData::AtomicConcept(iri)
+            if iri != OWL_THING && iri != OWL_NOTHING && !crate::reason::whelk::is_atom(iri) =>
+        {
+            Some(iri)
+        }
         _ => None,
     }
 }
@@ -174,8 +178,8 @@ fn narrowed_targets(
 pub fn write_tsv(min_owl: &Path, prefixes: &[(String, String)], out: &Path) -> Result<()> {
     let ranked = prefix_map(prefixes);
     let model = crate::io::load(min_owl)?;
-    let translated = whelk::whelk::owl::translate_ontology(&model.ont);
-    let state = whelk::whelk::reasoner::assert(&translated);
+    let translated = crate::reason::whelk::translate(&model);
+    let state = crate::reason::whelk::saturate(&translated);
 
     let mut edges: BTreeSet<(String, String, String)> = BTreeSet::new();
     let subclass = curie(&ranked, RDFS_SUBCLASS_OF);

@@ -542,6 +542,9 @@ pub struct Genids {
     pub anon_reif: HashMap<u64, Vec<u64>>,
     /// Whether any axiom names an anonymous individual.
     anon_present: bool,
+    /// The natural order of the document's objects, in which the axioms whose
+    /// hashes order the pairs of a sameness store their sets.
+    order: crate::io::natural_order::NaturalOrder,
     /// The graph being numbered: an entity's IRI, [`HEADER_GRAPH`],
     /// [`ANON_GRAPH`] and an individual, [`GENERAL_GRAPH`] and an axiom's
     /// identity, or [`RULES_GRAPH`].
@@ -554,6 +557,9 @@ pub struct Genids {
     /// The first node of each general axiom, by its `axiom_identity`: the
     /// root of its graph.
     pub general_root: HashMap<u64, u64>,
+    /// The node of each `owl:AllDisjointProperties` axiom, by its
+    /// `axiom_identity`.
+    pub all_disjoint_node: HashMap<u64, u64>,
     /// The node of the class expression of each annotated class assertion of
     /// an anonymous class about an anonymous individual, by its
     /// `axiom_identity`.
@@ -1374,6 +1380,7 @@ pub fn compute(model: &Model, debug_lo: u64, debug_hi: u64) -> Genids {
         span_shared: model.span_shared.clone(),
         cross_shared: model.cross_shared.clone(),
         shared_occurrences: model.shared_occurrences.clone(),
+        order: model.natural_order(),
         subtree_debug: std::env::var("OM_SUBTREE_DEBUG").is_ok(),
         span_pending: None,
         debug_lo,
@@ -2185,7 +2192,7 @@ impl Genids {
                             let pair = Component::EquivalentDataProperties(horned_owl::model::EquivalentDataProperties(
                                 vec![w[0].clone(), w[1].clone()],
                             ));
-                            crate::owlapi_hash::axiom_hash(&pair, &ac.ann).unwrap_or(0)
+                            crate::owlapi_hash::axiom_hash(&pair, &ac.ann, self.order).unwrap_or(0)
                         })
                         .collect();
                     let mut first = None;
@@ -2501,9 +2508,11 @@ impl Genids {
                     self.translate_node_annotations(rid, &ac.ann);
                 }
             }
-            // `AllDisjointProperties`: the axiom's node, then its members list.
-            Component::DisjointObjectProperties(ax) if ax.0.len() > 2 => {
+            // `AllDisjointProperties`, for any number of members but two: the
+            // axiom's node, then its members list.
+            Component::DisjointObjectProperties(ax) if ax.0.len() != 2 => {
                 let node = self.fresh();
+                self.all_disjoint_node.insert(axiom_identity(ac), node);
                 let mut members: Vec<&OPE<RcStr>> = ax.0.iter().collect();
                 members.sort_by(|a, b| crate::io::owlfunc::cmp_ope(a, b));
                 for m in members.iter().rev() {
@@ -2512,8 +2521,9 @@ impl Genids {
                 }
                 self.translate_node_annotations(node, &ac.ann);
             }
-            Component::DisjointDataProperties(ax) if ax.0.len() > 2 => {
+            Component::DisjointDataProperties(ax) if ax.0.len() != 2 => {
                 let node = self.fresh();
+                self.all_disjoint_node.insert(axiom_identity(ac), node);
                 for _ in &ax.0 {
                     self.fresh_cell();
                 }
@@ -2719,7 +2729,7 @@ impl Genids {
         consecutive: bool,
         pred: &str,
     ) {
-        let pairs = individual_pair_list(members, anns, consecutive);
+        let pairs = individual_pair_list(members, anns, consecutive, self.order);
         let mut first = None;
         for (a, b) in pairs {
             self.translate_individual(a);
@@ -2790,7 +2800,7 @@ impl Genids {
                 iarg(self, &args.0);
                 iarg(self, &args.1);
             }
-            Atom::DataPropertyAtom { .. } => {}
+            Atom::DataPropertyAtom { args, .. } => iarg(self, &args.0),
             Atom::BuiltInAtom { args, .. } => {
                 // `swrl:arguments` is an RDF list, one cell per argument.
                 for a in args.iter().rev() {
@@ -3077,6 +3087,7 @@ fn owner_iri(c: &Component<RcStr>) -> Option<String> {
         Component::InverseObjectProperties(ax) => nary_ope_owner(&[ax.0.clone(), ax.1.clone()]),
         Component::EquivalentObjectProperties(ax) => nary_ope_owner(&ax.0),
         Component::DisjointObjectProperties(ax) if ax.0.len() <= 2 => nary_ope_owner(&ax.0),
+        Component::DisjointObjectProperties(ax) => all_disjoint_owner(&ax.0),
         Component::SubAnnotationPropertyOf(ax) => Some(ax.sub.0.as_ref().to_string()),
         Component::AnnotationPropertyDomain(ax) => Some(ax.ap.0.as_ref().to_string()),
         Component::AnnotationPropertyRange(ax) => Some(ax.ap.0.as_ref().to_string()),
@@ -3201,6 +3212,26 @@ pub(crate) fn nary_ope_owner(members: &[OPE<RcStr>]) -> Option<String> {
             OPE::InverseObjectProperty(p) => Some(p.0.as_ref().to_string()),
             OPE::ObjectProperty(_) => None,
         }))
+        .min_by(|a, b| iri_order(a, b))
+}
+
+/// The property whose frame states a disjointness its `owl:propertyDisjointWith`
+/// edge cannot. A disjointness of one property is stated in that property's
+/// frame, or in the frame of the property its inverse names. One of three or
+/// more is stated in the frame of the first, in frame order, of the properties
+/// its inverse members name: a property's frame holds every axiom of its
+/// inverse, and none of the disjointness its named members are in. With no
+/// inverse member it is a general axiom.
+pub(crate) fn all_disjoint_owner(members: &[OPE<RcStr>]) -> Option<String> {
+    if let [OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p)] = members {
+        return Some(p.0.as_ref().to_string());
+    }
+    members
+        .iter()
+        .filter_map(|m| match m {
+            OPE::InverseObjectProperty(p) => Some(p.0.as_ref().to_string()),
+            OPE::ObjectProperty(_) => None,
+        })
         .min_by(|a, b| iri_order(a, b))
 }
 
@@ -3571,11 +3602,13 @@ pub(crate) fn reached_individuals(c: &Component<RcStr>) -> Vec<String> {
 /// The statements a sameness (`consecutive`) or a difference of `members` is
 /// written as: the consecutive pairs of its members in order, or, for a
 /// difference, its two members; a sameness of three or more takes its pairs in
-/// the order of a hash set of them.
+/// the order of a hash set of them, each pair an axiom of the document whose
+/// natural order is `order`.
 pub(crate) fn individual_pair_list<'a>(
     members: &'a [Individual<RcStr>],
     anns: &std::collections::BTreeSet<Annotation<RcStr>>,
     consecutive: bool,
+    order: crate::io::natural_order::NaturalOrder,
 ) -> Vec<(&'a Individual<RcStr>, &'a Individual<RcStr>)> {
     let mut sorted: Vec<&Individual<RcStr>> = members.iter().collect();
     sorted.sort_by(|a, b| cmp_individual(a, b));
@@ -3590,7 +3623,7 @@ pub(crate) fn individual_pair_list<'a>(
             .iter()
             .map(|(a, b)| {
                 let pair = Component::SameIndividual(horned_owl::model::SameIndividual(vec![(*a).clone(), (*b).clone()]));
-                crate::owlapi_hash::axiom_hash(&pair, anns).unwrap_or(0)
+                crate::owlapi_hash::axiom_hash(&pair, anns, order).unwrap_or(0)
             })
             .collect();
         let order = crate::owlapi_hash::hashset_order(&hashes);

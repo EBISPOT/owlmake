@@ -24,6 +24,7 @@ pub mod builtin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod update;
 pub(crate) mod robot;
+pub(crate) mod robot_cli;
 pub(crate) mod workflows;
 
 // The executor lives in `crate::build`: a plan is executed the same way whatever

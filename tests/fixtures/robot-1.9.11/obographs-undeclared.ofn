@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(prov:=<http://www.w3.org/ns/prov#>)
+Ontology(<http://example.org/u.owl>
+Annotation(<http://purl.org/dc/terms/creator> "me")
+Declaration(Class(:A))
+Declaration(Class(:B))
+SubClassOf(:A ObjectSomeValuesFrom(:partOf :B))
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/src>) :B :A)
+AnnotationAssertion(:note :A "n")
+DataPropertyAssertion(:dp :i "1")
+)

@@ -1,0 +1,44 @@
+Prefix(:=<http://example.org/select-objects#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/select-objects>
+
+Declaration(Class(<http://example.org/B>))
+Declaration(Class(<http://example.org/D>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(NamedIndividual(<http://example.org/A>))
+Declaration(NamedIndividual(<http://example.org/i>))
+Declaration(AnnotationProperty(<http://example.org/ap>))
+Declaration(AnnotationProperty(<http://example.org/ap2>))
+
+
+
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/A> (A)
+
+AnnotationAssertion(rdfs:label <http://example.org/A> "A")
+ClassAssertion(<http://example.org/B> <http://example.org/A>)
+
+# Individual: <http://example.org/i> (<http://example.org/i>)
+
+ClassAssertion(<http://example.org/D> <http://example.org/i>)
+ObjectPropertyAssertion(<http://example.org/p> <http://example.org/i> <http://example.org/A>)
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "5"^^xsd:integer)
+
+
+ClassAssertion(ObjectOneOf(<http://example.org/A> _:genid2147483648) _:genid2147483649)
+SameIndividual(_:genid2147483649 _:genid2147483648)
+AnnotationAssertion(<http://example.org/ap> <http://example.org/C> <http://example.org/A>)
+AnnotationAssertion(<http://example.org/ap2> _:genid2147483648 "anon")
+)

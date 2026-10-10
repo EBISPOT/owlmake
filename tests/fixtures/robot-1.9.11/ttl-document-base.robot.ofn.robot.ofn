@@ -1,0 +1,38 @@
+Prefix(:=<urn:absolute:{fixtures}/ttl-document-base.ttl#{fixtures}/ttl-document-base.ttl>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<urn:absolute:{fixtures}/ttl-document-base.ttl#{fixtures}/ttl-document-base.ttl>
+
+Declaration(Class(<{fixtures}/ttl-document-base.ttl#A>))
+Declaration(Class(<{fixtures}/ttl-document-base.ttl#B>))
+Declaration(ObjectProperty(<{fixtures}/ttl-document-base.ttl#p>))
+Declaration(NamedIndividual(<{fixtures}/ttl-document-base.ttl#i>))
+Declaration(NamedIndividual(<{fixtures}/ttl-document-base.ttl#j>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <{fixtures}/ttl-document-base.ttl#A> (<{fixtures}/ttl-document-base.ttl#A>)
+
+AnnotationAssertion(rdfs:seeAlso <{fixtures}/ttl-document-base.ttl#A> <{fixtures}/ttl-document-base.ttl#{fixtures}/other.owl#C>)
+SubClassOf(<{fixtures}/ttl-document-base.ttl#A> <{fixtures}/ttl-document-base.ttl#B>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <{fixtures}/ttl-document-base.ttl#i> (<{fixtures}/ttl-document-base.ttl#i>)
+
+ClassAssertion(<{fixtures}/ttl-document-base.ttl#A> <{fixtures}/ttl-document-base.ttl#i>)
+ObjectPropertyAssertion(<{fixtures}/ttl-document-base.ttl#p> <{fixtures}/ttl-document-base.ttl#i> <{fixtures}/ttl-document-base.ttl#j>)
+
+
+)

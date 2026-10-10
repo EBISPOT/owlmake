@@ -1,0 +1,10 @@
+format-version: 1.2
+ontology: http://example.org/source.owl
+property_value: p "x" xsd:string
+property_value: q "y" xsd:string
+property_value: r "z" xsd:string
+
+[Term]
+id: http://example.org/A
+name: a thing
+

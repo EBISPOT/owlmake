@@ -171,9 +171,9 @@ fn phenotype_set(
     root_file: &[PathBuf],
 ) -> Result<HashSet<String>> {
     let mut out: HashSet<String> = HashSet::new();
-    out.extend(select::collect_terms(model, term, term_file)?);
+    out.extend(select::collect_terms_with_document_prefixes(model, term, term_file)?);
 
-    let roots = select::collect_terms(model, root, root_file)?;
+    let roots = select::collect_terms_with_document_prefixes(model, root, root_file)?;
     if roots.is_empty() {
         return Ok(out);
     }

@@ -44,7 +44,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 
 use super::parse::{self, Sink};
-use crate::owlapi_hash::{iri_split, java_hashset_capacity, java_string_hash};
+use crate::owlapi_hash::{iri_split, java_hashset_capacity, java_string_hash, literal_parts_hash};
 
 pub(crate) type Term = u32;
 type Lit = u32;
@@ -320,6 +320,46 @@ impl<V> JMap<V> {
 
 type Objects = JMap<()>;
 
+/// The literal objects of one subject and predicate: a `java.util.HashSet`,
+/// iterated by bucket over the table it grew to at its largest, and in
+/// insertion order within a bucket.
+#[derive(Clone, Default)]
+struct Lits {
+    items: Vec<Lit>,
+    max: usize,
+}
+
+impl Lits {
+    fn insert(&mut self, l: Lit) {
+        if !self.items.contains(&l) {
+            self.items.push(l);
+            self.max = self.max.max(self.items.len());
+        }
+    }
+
+    fn remove(&mut self, l: Lit) {
+        self.items.retain(|x| *x != l);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    fn order(&self, hashes: &[i32]) -> Vec<Lit> {
+        let mask = java_hashset_capacity(self.max) as u32 - 1;
+        let mut live: Vec<(u32, Lit)> = self
+            .items
+            .iter()
+            .map(|&l| {
+                let h = hashes[l as usize] as u32;
+                ((h ^ (h >> 16)) & mask, l)
+            })
+            .collect();
+        live.sort_by_key(|(bucket, _)| *bucket);
+        live.into_iter().map(|(_, l)| l).collect()
+    }
+}
+
 /// The type handlers the reader dispatches `rdf:type` statements to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TypeKind {
@@ -416,6 +456,17 @@ struct LitKey {
 /// qualified, and the predicate naming its filler.
 type Cardinality = (Term, bool, Term);
 
+/// A bare copy of an annotation of an ontology. The reader reads every
+/// annotation of the ontology at the first of its literal statements it
+/// handles, and gives the ontology a bare copy of each later one it handles,
+/// a statement's or an `owl:Axiom` block's naming one.
+pub(crate) enum HeaderCopy {
+    /// The literal statement, by subject, predicate and literal.
+    Statement(Term, Term, Lit),
+    /// The `owl:Axiom` block, by its node's name: its property and its target.
+    Block(String),
+}
+
 /// What reading a document made of its anonymous individuals and axiom nodes.
 pub(crate) struct Names {
     /// Each anonymous individual's blank node, with the number its name takes.
@@ -424,6 +475,9 @@ pub(crate) struct Names {
     pub axiom_nodes: Vec<String>,
     /// The `owl:Annotation` nodes, in the order the reader translated them.
     pub annotation_nodes: Vec<String>,
+    /// The bare copies of its annotations the reader gives an ontology after
+    /// those it reads, in order.
+    pub header_copies: Vec<HeaderCopy>,
     /// The count after the document: the next blank node's number.
     pub next: u64,
 }
@@ -433,6 +487,8 @@ pub(crate) struct Order {
     v: Vocab,
     lits: Vec<LitKey>,
     lit_ids: HashMap<LitKey, Lit>,
+    /// Each literal's hash, as a hash set of literals hashes it.
+    lit_hashes: Vec<i32>,
     synonyms: HashMap<Term, Term>,
     builtin_types: HashMap<Term, TypeKind>,
     axiom_types: HashMap<Term, AxiomKind>,
@@ -444,7 +500,7 @@ pub(crate) struct Order {
 
     // what the reader has filed
     res: JMap<JMap<Objects>>,
-    lit: JMap<JMap<Vec<Lit>>>,
+    lit: JMap<JMap<Lits>>,
     single: HashMap<Term, HashMap<Term, Term>>,
     first_res: HashMap<Term, Term>,
     first_lit: HashMap<Term, Lit>,
@@ -485,6 +541,11 @@ pub(crate) struct Order {
     next: u64,
     named: HashMap<Term, u64>,
     axiom_nodes: Vec<Term>,
+    /// The ontologies whose annotations the reader has read.
+    annotated_ontologies: HashSet<Term>,
+    /// The `owl:Axiom` block whose statement the reader is handling.
+    block: Option<Term>,
+    header_copies: Vec<HeaderCopy>,
     trace: bool,
 }
 
@@ -497,6 +558,7 @@ impl Order {
             v,
             lits: Vec::new(),
             lit_ids: HashMap::new(),
+            lit_hashes: Vec::new(),
             synonyms: HashMap::new(),
             builtin_types: HashMap::new(),
             axiom_types: HashMap::new(),
@@ -542,6 +604,9 @@ impl Order {
             next: first_id,
             named: HashMap::new(),
             axiom_nodes: Vec::new(),
+            annotated_ontologies: HashSet::new(),
+            block: None,
+            header_copies: Vec::new(),
             trace,
         };
         o.setup();
@@ -791,7 +856,16 @@ impl Order {
         self.stream_resource(s, p, o);
     }
 
-    pub(crate) fn literal(&mut self, s: &str, p: &str, value: &str, lang: Option<&str>, datatype: Option<&str>) {
+    /// File the statement `s p` of the literal: by the subject the reader
+    /// takes, the predicate, and the literal, as returned.
+    pub(crate) fn literal(
+        &mut self,
+        s: &str,
+        p: &str,
+        value: &str,
+        lang: Option<&str>,
+        datatype: Option<&str>,
+    ) -> (Term, Term, Lit) {
         let s = self.terms.id(s);
         let s = self.remap_subject(s);
         let p = self.terms.id(p);
@@ -802,6 +876,7 @@ impl Order {
         } else {
             self.add_lit(s, p, l);
         }
+        (s, p, l)
     }
 
     fn lit(&mut self, value: &str, lang: Option<&str>, datatype: Option<&str>) -> Lit {
@@ -814,6 +889,12 @@ impl Order {
             return l;
         }
         let l = self.lits.len() as Lit;
+        let hash = match (&*key.lang, key.datatype == self.v.xsd_string) {
+            ("", true) => literal_parts_hash(value, None, None),
+            ("", false) => literal_parts_hash(value, Some(self.name(key.datatype)), None),
+            (lang, _) => literal_parts_hash(value, None, Some(lang)),
+        };
+        self.lit_hashes.push(hash);
         self.lits.push(key.clone());
         self.lit_ids.insert(key, l);
         l
@@ -1205,10 +1286,7 @@ impl Order {
     }
 
     fn add_lit(&mut self, s: Term, p: Term, l: Lit) {
-        let objects = self.lit.insert_with(s, JMap::default).insert_with(p, Vec::new);
-        if !objects.contains(&l) {
-            objects.push(l);
-        }
+        self.lit.insert_with(s, JMap::default).insert_with(p, Lits::default).insert(l);
     }
 
     /// The first object of `s p`, consumed when `consume` says so.
@@ -1232,9 +1310,9 @@ impl Order {
     fn literal_object(&mut self, s: Term, p: Term, consume: bool) -> Option<Lit> {
         let map = self.lit.get_mut(s)?;
         let objects = map.get_mut(p)?;
-        let l = *objects.first()?;
+        let l = *objects.order(&self.lit_hashes).first()?;
         if consume {
-            objects.remove(0);
+            objects.remove(l);
             if objects.is_empty() {
                 map.remove(p);
             }
@@ -1256,8 +1334,8 @@ impl Order {
     fn consume_literal(&mut self, s: Term, p: Term, l: Lit) {
         let Some(map) = self.lit.get_mut(s) else { return };
         let Some(objects) = map.get_mut(p) else { return };
-        if let Some(i) = objects.iter().position(|x| *x == l) {
-            objects.remove(i);
+        if objects.items.contains(&l) {
+            objects.remove(l);
             if objects.is_empty() {
                 map.remove(p);
                 if map.is_empty() {
@@ -1426,7 +1504,15 @@ impl Order {
     fn annotation_literal(&mut self, s: Term, p: Term, l: Lit) {
         self.individual(s);
         if self.ontologies.contains(&s) {
+            let first = self.annotated_ontologies.insert(s);
             self.translate_annotations(s);
+            if !first {
+                let copy = match self.block {
+                    Some(b) => HeaderCopy::Block(self.name(b).to_string()),
+                    None => HeaderCopy::Statement(s, p, l),
+                };
+                self.header_copies.push(copy);
+            }
         }
         self.consume_literal(s, p, l);
     }
@@ -1707,6 +1793,7 @@ impl Order {
             individuals: self.named.iter().map(|(t, n)| (self.name(*t).to_string(), *n)).collect(),
             axiom_nodes: self.axiom_nodes.iter().map(|t| self.name(*t).to_string()).collect(),
             annotation_nodes: self.annotation_order.iter().map(|t| self.name(*t).to_string()).collect(),
+            header_copies: std::mem::take(&mut self.header_copies),
             next: self.next,
         }
     }
@@ -1740,7 +1827,8 @@ impl Order {
                 None => continue,
             };
             for p in predicates {
-                let objects: Vec<Lit> = self.lit.get(s).and_then(|m| m.get(p)).cloned().unwrap_or_default();
+                let objects: Vec<Lit> =
+                    self.lit.get(s).and_then(|m| m.get(p)).map(|o| o.order(&self.lit_hashes)).unwrap_or_default();
                 for l in objects {
                     f(self, s, p, l);
                 }
@@ -1770,7 +1858,9 @@ impl Order {
                     if let Some(target) = target {
                         self.handle_resource(source, property, target);
                     } else if let Some(l) = target_literal {
+                        self.block = Some(s);
                         self.handle_literal(source, property, l);
+                        self.block = None;
                     }
                 }
                 self.consume(s, p, o);

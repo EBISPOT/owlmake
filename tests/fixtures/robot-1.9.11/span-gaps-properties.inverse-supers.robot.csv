@@ -1,0 +1,4 @@
+sub,inverse
+http://example.org/q,http://example.org/u
+http://example.org/r,http://example.org/u
+http://example.org/r,http://example.org/v

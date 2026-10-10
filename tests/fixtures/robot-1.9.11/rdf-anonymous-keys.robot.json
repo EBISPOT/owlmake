@@ -1,0 +1,23 @@
+{
+  "graphs" : [ {
+    "id" : "http://example.org/keys",
+    "nodes" : [ {
+      "id" : "http://example.org/keys#A11",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/keys#A14",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/keys#C12",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/keys#r",
+      "type" : "PROPERTY",
+      "propertyType" : "OBJECT"
+    }, {
+      "id" : "http://example.org/keys#d",
+      "type" : "PROPERTY",
+      "propertyType" : "DATA"
+    } ]
+  } ]
+}

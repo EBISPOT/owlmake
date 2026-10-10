@@ -1006,7 +1006,7 @@ fn resolve_property(model: &Model, token: &str) -> Option<String> {
         return Some(token.to_string());
     }
     if token.contains(':') && !token.contains(' ') {
-        let iri = crate::cmd::select::expand(model, token);
+        let iri = crate::cmd::select::expand_with_document_prefixes(model, token);
         if iri != token {
             return Some(iri);
         }
@@ -1903,8 +1903,13 @@ fn owltools_labels(model: &Model) -> HashMap<String, String> {
             continue;
         }
         let (val, dt, lang, is_iri) = crate::io::obo::av_lit_parts(&aa.ann.av);
-        let axiom_hash =
-            crate::owlapi_hash::annotation_assertion_hash(&subj, RDFS_LABEL, &aa.ann.av, &ac.ann);
+        let axiom_hash = crate::owlapi_hash::annotation_assertion_hash(
+            &subj,
+            RDFS_LABEL,
+            &aa.ann.av,
+            &ac.ann,
+            model.natural_order(),
+        );
         let ann_hash =
             crate::io::obo::owlapi_annotation_hash_full(RDFS_LABEL, &val, dt.as_deref(), lang.as_deref(), is_iri);
         cands.entry(subj).or_default().push((axiom_hash, ann_hash, (!is_iri).then_some(val)));

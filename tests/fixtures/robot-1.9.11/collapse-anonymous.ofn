@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/onto#>)
+Prefix(ex:=<http://example.org/>)
+Ontology(
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(Class(ex:C))
+SubClassOf(ex:A ex:B)
+SubClassOf(ex:B ex:C)
+SubClassOf(ex:C ex:D)
+)

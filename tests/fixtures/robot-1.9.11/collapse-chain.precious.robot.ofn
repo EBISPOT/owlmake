@@ -1,0 +1,57 @@
+Prefix(:=<http://example.org/collapse.owl#>)
+Prefix(ex:=<http://example.org/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/collapse.owl>
+
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(Class(ex:D))
+Declaration(Class(ex:E))
+Declaration(Class(ex:F))
+Declaration(Class(ex:G))
+Declaration(Class(ex:H))
+Declaration(ObjectProperty(ex:p))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: ex:A (a)
+
+AnnotationAssertion(rdfs:label ex:A "a")
+SubClassOf(ex:A ex:B)
+
+# Class: ex:B (b)
+
+AnnotationAssertion(rdfs:label ex:B "b")
+SubClassOf(ex:B ex:D)
+
+# Class: ex:D (d)
+
+AnnotationAssertion(rdfs:label ex:D "d")
+SubClassOf(ex:D ex:E)
+
+# Class: ex:F (ex:F)
+
+SubClassOf(ex:F ex:D)
+
+# Class: ex:G (ex:G)
+
+SubClassOf(ex:G ex:F)
+SubClassOf(Annotation(rdfs:comment "kept edge") ex:G ex:F)
+SubClassOf(ex:G ObjectSomeValuesFrom(ex:p ex:B))
+
+# Class: ex:H (ex:H)
+
+SubClassOf(ex:H ex:F)
+
+
+)

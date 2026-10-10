@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/prop-bottom-used.owl>
+Declaration(Class(:B))
+Declaration(Class(:D))
+Declaration(ObjectProperty(:p))
+SubObjectPropertyOf(:p owl:bottomObjectProperty)
+SubClassOf(:D ObjectSomeValuesFrom(:p :B))
+)

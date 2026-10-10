@@ -1,0 +1,185 @@
+{
+  "graphs" : [ {
+    "id" : "http://purl.obolibrary.org/obo/uberon/components/mappings.owl",
+    "nodes" : [ {
+      "id" : "http://purl.org/pav/authoredBy",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#hasDbXref",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "https://w3id.org/sssom/mapping_justification",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://purl.obolibrary.org/obo/UBERON_0000220",
+      "meta" : {
+        "xrefs" : [ {
+          "val" : "MESH:D001269",
+          "meta" : {
+            "basicPropertyValues" : [ {
+              "pred" : "http://purl.org/pav/authoredBy",
+              "val" : "https://orcid.org/0000-0001-9439-5346"
+            }, {
+              "pred" : "https://w3id.org/sssom/mapping_justification",
+              "val" : "https://w3id.org/semapv/vocab/ManualMappingCuration"
+            } ]
+          }
+        } ]
+      }
+    } ]
+  }, {
+    "id" : "http://purl.obolibrary.org/obo/uberon/core.owl",
+    "meta" : {
+      "basicPropertyValues" : [ {
+        "pred" : "http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion",
+        "val" : "1.2"
+      } ]
+    },
+    "nodes" : [ {
+      "id" : "http://purl.obolibrary.org/obo/UBERON_0000220",
+      "lbl" : "atlanto-occipital joint",
+      "type" : "CLASS",
+      "meta" : {
+        "definition" : {
+          "val" : "The Atlanto-occipital joint (articulation between the atlas and the occipital bone) consists of a pair of condyloid joints. The atlanto-occipital joint is a synovial joint. The ligaments connecting the bones are: Two Articular capsules; Posterior atlantoöccipital membrane; Anterior atlantoöccipital membrane; Lateral atlantoöccipital.",
+          "xrefs" : [ "Wikipedia:Atlanto-occipital_joint" ]
+        },
+        "synonyms" : [ {
+          "pred" : "hasExactSynonym",
+          "val" : "articulatio atlanto-occipitalis",
+          "xrefs" : [ "FMA:24939" ]
+        }, {
+          "pred" : "hasExactSynonym",
+          "val" : "atlanto occipital joint"
+        }, {
+          "pred" : "hasExactSynonym",
+          "val" : "atlantooccipital joint"
+        }, {
+          "pred" : "hasExactSynonym",
+          "val" : "craniovertebral joint",
+          "xrefs" : [ "FMA:24939" ]
+        }, {
+          "pred" : "hasExactSynonym",
+          "val" : "occipito atlantal joint"
+        }, {
+          "pred" : "hasExactSynonym",
+          "val" : "occipito-atlantal joint"
+        }, {
+          "synonymType" : "http://purl.obolibrary.org/obo/OMO_0003011",
+          "pred" : "hasRelatedSynonym",
+          "val" : "articulatio atlantooccipitalis",
+          "xrefs" : [ "Wikipedia:Atlanto-occipital_joint" ]
+        } ],
+        "xrefs" : [ {
+          "val" : "FMA:24939"
+        }, {
+          "val" : "MESH:D001269"
+        }, {
+          "val" : "NCIT:C32158"
+        }, {
+          "val" : "SCTID:361831006"
+        }, {
+          "val" : "UMLS:C0004169",
+          "meta" : {
+            "basicPropertyValues" : [ {
+              "pred" : "http://www.geneontology.org/formats/oboInOwl#source",
+              "val" : "ncithesaurus:Atlanto-occipital_Joint"
+            } ]
+          }
+        }, {
+          "val" : "Wikipedia:Atlanto-occipital_joint"
+        }, {
+          "val" : "ncithesaurus:Atlanto-occipital_Joint-Atlanto"
+        } ],
+        "basicPropertyValues" : [ {
+          "pred" : "http://purl.obolibrary.org/obo/uberon/core#depiction",
+          "val" : "http://upload.wikimedia.org/wikipedia/commons/d/d4/Gray304.png"
+        } ]
+      }
+    }, {
+      "id" : "http://purl.obolibrary.org/obo/UBERON_0001092",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://purl.obolibrary.org/obo/UBERON_0001676",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://purl.obolibrary.org/obo/UBERON_0006072",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://purl.obolibrary.org/obo/UBERON_0011138",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://purl.obolibrary.org/obo/IAO_0000115",
+      "lbl" : "definition",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#hasDbXref",
+      "lbl" : "database_cross_reference",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#hasExactSynonym",
+      "lbl" : "has_exact_synonym",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion",
+      "lbl" : "has_obo_format_version",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym",
+      "lbl" : "has_related_synonym",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#hasSynonymType",
+      "lbl" : "has_synonym_type",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#id",
+      "lbl" : "id",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.geneontology.org/formats/oboInOwl#source",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    }, {
+      "id" : "http://www.w3.org/2000/01/rdf-schema#label",
+      "type" : "PROPERTY",
+      "propertyType" : "ANNOTATION"
+    } ],
+    "edges" : [ {
+      "sub" : "http://purl.obolibrary.org/obo/UBERON_0000220",
+      "pred" : "http://purl.obolibrary.org/obo/uberon/core#in_lateral_side_of",
+      "obj" : "http://purl.obolibrary.org/obo/UBERON_0006072",
+      "meta" : {
+        "basicPropertyValues" : [ {
+          "pred" : "http://www.geneontology.org/formats/oboInOwl#source",
+          "val" : "FMA-abduced-lr"
+        } ]
+      }
+    }, {
+      "sub" : "http://purl.obolibrary.org/obo/UBERON_0000220",
+      "pred" : "http://purl.obolibrary.org/obo/uberon/core#part_of",
+      "obj" : "http://purl.obolibrary.org/obo/UBERON_0011138"
+    } ],
+    "logicalDefinitionAxioms" : [ {
+      "definedClassId" : "http://purl.obolibrary.org/obo/UBERON_0000220",
+      "genusIds" : [ "http://purl.obolibrary.org/obo/UBERON_0002217" ],
+      "restrictions" : [ {
+        "propertyId" : "http://purl.obolibrary.org/obo/uberon/core#connects",
+        "fillerId" : "http://purl.obolibrary.org/obo/UBERON_0001092"
+      }, {
+        "propertyId" : "http://purl.obolibrary.org/obo/uberon/core#connects",
+        "fillerId" : "http://purl.obolibrary.org/obo/UBERON_0001676"
+      } ]
+    } ]
+  } ]
+}

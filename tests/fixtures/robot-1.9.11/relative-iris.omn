@@ -1,0 +1,18 @@
+Prefix: : <http://example.org/relative-iris#>
+Prefix: ex: <rel/>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Ontology: <rel/o.owl> <rel/v.owl>
+AnnotationProperty: rdfs:seeAlso
+AnnotationProperty: dc:title
+Class: :A
+    Annotations: rdfs:seeAlso <a.owl#C>, rdfs:seeAlso <http://example.org/{z}>
+Class: :B
+Class: <http://example.org/{x}>
+Class: <{y}>
+Class: <a/b:c>
+Class: ex:D
+    Annotations: dc:title "d"
+Rule: :A(?x) -> :B(?x)
+Rule: :A(?<urn:swrl#y>) -> :B(?<urn:swrl#y>)
+Rule: :A(?<w>) -> :B(?<w>)
+Rule: :A(?ex:v) -> :B(?ex:v)

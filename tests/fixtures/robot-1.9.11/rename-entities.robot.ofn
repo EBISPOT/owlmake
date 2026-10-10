@@ -1,0 +1,66 @@
+Prefix(:=<http://example.org/rename-entities#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/rename-entities>
+Annotation(Annotation(rdfs:seeAlso :Z) rdfs:comment "an ontology annotation on an annotation")
+Annotation(rdfs:seeAlso :Z)
+
+Declaration(Class(:C))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
+Declaration(ObjectProperty(:q))
+Declaration(DataProperty(:d))
+Declaration(NamedIndividual(:i))
+Declaration(AnnotationProperty(:aq))
+Declaration(Datatype(:dt2))
+
+
+
+############################
+#   Datatypes
+############################
+
+# Datatype: :dt2 (:dt2)
+
+DatatypeDefinition(:dt2 xsd:integer)
+
+
+############################
+#   Classes
+############################
+
+# Class: :C (:C)
+
+AnnotationAssertion(:aq :C "a value of the property")
+AnnotationAssertion(Annotation(rdfs:seeAlso :A) rdfs:comment :C "an IRI value in an annotation")
+
+# Class: :Y (b)
+
+AnnotationAssertion(rdfs:label :Y "b")
+AnnotationAssertion(rdfs:seeAlso :Y :A)
+SubClassOf(Annotation(rdfs:seeAlso :A) :Y :C)
+
+# Class: :Z (zed)
+
+AnnotationAssertion(rdfs:label :Z "zed")
+SubClassOf(:Z ObjectSomeValuesFrom(:q :Y))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+DataPropertyAssertion(:d :i "1"^^:dt2)
+
+
+ClassAssertion(:Z _:genid2147483648)
+ObjectPropertyAssertion(:q _:genid2147483648 :i)
+AnnotationAssertion(rdfs:comment :undeclared "about an IRI no entity has")
+)

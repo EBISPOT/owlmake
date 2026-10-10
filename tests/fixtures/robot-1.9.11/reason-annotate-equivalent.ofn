@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/>)
+Ontology(<http://example.org/eq.owl>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+SubClassOf(:A :B)
+SubClassOf(:B :A)
+SubClassOf(:C :A)
+)

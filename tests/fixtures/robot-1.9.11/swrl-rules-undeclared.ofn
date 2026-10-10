@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/rule#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/rule4>
+Declaration(Class(:A))
+Declaration(NamedIndividual(:a))
+ClassAssertion(:A :a)
+SubClassOf(:A :E)
+DLSafeRule(Body(ClassAtom(:A Variable(<urn:swrl:var#x>))) Head(ClassAtom(:D Variable(<urn:swrl:var#x>))))
+)

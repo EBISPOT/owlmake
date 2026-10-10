@@ -1,0 +1,39 @@
+Prefix(:=<http://example.org/slme-intermediates#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/slme-intermediates>
+
+Declaration(Class(:S))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
+
+
+############################
+#   Classes
+############################
+
+# Class: :S (:S)
+
+SubClassOf(:S :Z)
+
+# Class: :X (:X)
+
+SubClassOf(:X :Y)
+
+# Class: :Y (why)
+
+AnnotationAssertion(rdfs:label :Y "why")
+SubClassOf(:Y :Z)
+
+# Class: :Z (zed)
+
+AnnotationAssertion(rdfs:label :Z "zed")
+
+
+)

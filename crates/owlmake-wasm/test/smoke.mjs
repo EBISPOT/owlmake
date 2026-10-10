@@ -122,9 +122,9 @@ const SCQ = "SELECT ?s ?o WHERE { ?s <http://www.w3.org/2000/01/rdf-schema#subCl
 assert.equal(eqOnt.queryRecords(SCQ).length, 0);
 assert.ok(eqOnt.queryRecords(SCQ, "elk").length > 0);   // reasoner adds inferred edges
 
-// --- template table (first data row = directives) ---
+// --- template table (first data row = directives); its CURIEs are the built-in map's ---
 const tont = new Ontology();
-tont.template("ID\tLabel\tParent\nID\tLABEL\tSC %\nex:1\tThing One\tex:0\nex:2\tThing Two\tex:1\n");
+tont.template("ID\tLabel\tParent\nID\tLABEL\tSC %\nUBERON:1\tThing One\tUBERON:0\nUBERON:2\tThing Two\tUBERON:1\n");
 assert.ok(tont.classes().length >= 2);
 
 // --- DOSDP from a pattern + TSV data ---

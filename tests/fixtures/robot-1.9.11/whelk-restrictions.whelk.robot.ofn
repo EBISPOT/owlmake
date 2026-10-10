@@ -1,0 +1,1976 @@
+Prefix(:=<http://example.org/w#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/w>
+
+Declaration(Class(:d01_A))
+Declaration(Class(:d01_B))
+Declaration(Class(:d02_A))
+Declaration(Class(:d02_B))
+Declaration(Class(:d03_A))
+Declaration(Class(:d03_B))
+Declaration(Class(:d04_A))
+Declaration(Class(:d04_B))
+Declaration(Class(:d04_B2))
+Declaration(Class(:d04_B3))
+Declaration(Class(:d05_A))
+Declaration(Class(:d05_B))
+Declaration(Class(:d06_A))
+Declaration(Class(:d06_B))
+Declaration(Class(:d07_A))
+Declaration(Class(:d07_B))
+Declaration(Class(:d07_B2))
+Declaration(Class(:d08_A))
+Declaration(Class(:d08_B))
+Declaration(Class(:d10_A))
+Declaration(Class(:d10_B))
+Declaration(Class(:d10_C))
+Declaration(Class(:d11_A))
+Declaration(Class(:d11_B))
+Declaration(Class(:d12_A))
+Declaration(Class(:d12_B))
+Declaration(Class(:d14_A))
+Declaration(Class(:d14_B))
+Declaration(Class(:d15_A))
+Declaration(Class(:d15_B))
+Declaration(Class(:d15_C))
+Declaration(Class(:d16_A))
+Declaration(Class(:d16_B))
+Declaration(Class(:d17_A))
+Declaration(Class(:d17_B))
+Declaration(Class(:d17_B2))
+Declaration(Class(:d18_A))
+Declaration(Class(:d18_B))
+Declaration(Class(:d19_A))
+Declaration(Class(:d19_B))
+Declaration(Class(:d20_A))
+Declaration(Class(:d20_K))
+Declaration(Class(:d21_B))
+Declaration(Class(:d21_C))
+Declaration(Class(:d21_E))
+Declaration(Class(:d22_A))
+Declaration(Class(:d22_B))
+Declaration(Class(:d24_A))
+Declaration(Class(:d24_B))
+Declaration(Class(:d26_A))
+Declaration(Class(:d26_B))
+Declaration(Class(:d27_A))
+Declaration(Class(:d27_B))
+Declaration(Class(:d28_A))
+Declaration(Class(:d28_B))
+Declaration(Class(:d29_A))
+Declaration(Class(:d29_B))
+Declaration(Class(:d29_E))
+Declaration(Class(:data_abox_K))
+Declaration(Class(:f01_A))
+Declaration(Class(:f01_C))
+Declaration(Class(:f02_A))
+Declaration(Class(:f02_C))
+Declaration(Class(:f02_D))
+Declaration(Class(:f02_E))
+Declaration(Class(:f02_E2))
+Declaration(Class(:f03_A))
+Declaration(Class(:f03_C))
+Declaration(Class(:f03b_A))
+Declaration(Class(:f03b_C))
+Declaration(Class(:f04_A))
+Declaration(Class(:f04_C))
+Declaration(Class(:f05_C))
+Declaration(Class(:f06_B))
+Declaration(Class(:f06_C))
+Declaration(Class(:f06_D))
+Declaration(Class(:f07_B))
+Declaration(Class(:f07_C))
+Declaration(Class(:f07_D))
+Declaration(Class(:f08_C))
+Declaration(Class(:f09_A))
+Declaration(Class(:f09_B))
+Declaration(Class(:f09_C))
+Declaration(Class(:f09_D))
+Declaration(Class(:f09_E))
+Declaration(Class(:f11_C))
+Declaration(Class(:f11_D))
+Declaration(Class(:f11_E))
+Declaration(Class(:f12_C))
+Declaration(Class(:f13_C))
+Declaration(Class(:f14_A))
+Declaration(Class(:f14_B))
+Declaration(Class(:f14_C))
+Declaration(Class(:f14_D))
+Declaration(Class(:f15_C))
+Declaration(Class(:f15_D))
+Declaration(Class(:f15_E))
+Declaration(Class(:f16_C))
+Declaration(Class(:f20_A))
+Declaration(Class(:f20_C))
+Declaration(Class(:f22_C))
+Declaration(Class(:f23_A))
+Declaration(Class(:f23_B))
+Declaration(Class(:f23_C))
+Declaration(Class(:f23_E))
+Declaration(Class(:f24_A))
+Declaration(Class(:f24_A2))
+Declaration(Class(:f24_C))
+Declaration(Class(:f25_A))
+Declaration(Class(:f25_C))
+Declaration(Class(:f28_C))
+Declaration(Class(:f29_C))
+Declaration(Class(:f30_C))
+Declaration(Class(:f31_A))
+Declaration(Class(:f31_C))
+Declaration(Class(:f31_D))
+Declaration(Class(:f31_E))
+Declaration(Class(:f31_F))
+Declaration(Class(:f32_A))
+Declaration(Class(:f32_C))
+Declaration(Class(:f32_F))
+Declaration(Class(:f33_A))
+Declaration(Class(:f33_C))
+Declaration(Class(:f34_C))
+Declaration(Class(:f37_A))
+Declaration(Class(:f37_C))
+Declaration(Class(:f39_A))
+Declaration(Class(:f39_B))
+Declaration(Class(:f39_C))
+Declaration(Class(:f40_B))
+Declaration(Class(:f41_C))
+Declaration(Class(:f41_D))
+Declaration(Class(:f41_E))
+Declaration(Class(:f43_C))
+Declaration(Class(:f44_C))
+Declaration(Class(:f45_A))
+Declaration(Class(:f45_C))
+Declaration(Class(:forall_abox_B))
+Declaration(Class(:m03_B))
+Declaration(Class(:m03_C))
+Declaration(Class(:m05_A))
+Declaration(Class(:m05_B))
+Declaration(Class(:m06_B))
+Declaration(Class(:m09_A))
+Declaration(Class(:m09_C))
+Declaration(Class(:m09_D))
+Declaration(Class(:m09_E))
+Declaration(Class(:m12_B))
+Declaration(Class(:m12_D))
+Declaration(Class(:m14_B))
+Declaration(Class(:m16_A))
+Declaration(Class(:m16_E))
+Declaration(Class(:m17_A))
+Declaration(Class(:m17_C))
+Declaration(Class(:m17_C2))
+Declaration(Class(:m17_E))
+Declaration(Class(:m21_B))
+Declaration(Class(:m21_C))
+Declaration(Class(:m22_A))
+Declaration(Class(:m22_C))
+Declaration(Class(:m22_D))
+Declaration(Class(:n01_A))
+Declaration(Class(:n01_B))
+Declaration(Class(:n03_B))
+Declaration(Class(:n03_C))
+Declaration(Class(:n04_B))
+Declaration(Class(:n04_C))
+Declaration(Class(:n04_D))
+Declaration(Class(:n09_B))
+Declaration(Class(:n12_A))
+Declaration(Class(:n12_A2))
+Declaration(Class(:n12_B))
+Declaration(Class(:n12_C))
+Declaration(Class(:q2_B))
+Declaration(Class(:q2_C))
+Declaration(Class(:q5_B))
+Declaration(Class(:q5_C))
+Declaration(ObjectProperty(:d08_r))
+Declaration(ObjectProperty(:d21_r))
+Declaration(ObjectProperty(:d29_r))
+Declaration(ObjectProperty(:f01_r))
+Declaration(ObjectProperty(:f02_r))
+Declaration(ObjectProperty(:f03_r))
+Declaration(ObjectProperty(:f03b_r))
+Declaration(ObjectProperty(:f04_r))
+Declaration(ObjectProperty(:f04_s))
+Declaration(ObjectProperty(:f05_r))
+Declaration(ObjectProperty(:f06_r))
+Declaration(ObjectProperty(:f07_r))
+Declaration(ObjectProperty(:f08_r))
+Declaration(ObjectProperty(:f09_r))
+Declaration(ObjectProperty(:f09_s))
+Declaration(ObjectProperty(:f11_r))
+Declaration(ObjectProperty(:f11_s))
+Declaration(ObjectProperty(:f12_r))
+Declaration(ObjectProperty(:f12_t))
+Declaration(ObjectProperty(:f13_r))
+Declaration(ObjectProperty(:f14_r))
+Declaration(ObjectProperty(:f15_r))
+Declaration(ObjectProperty(:f16_r))
+Declaration(ObjectProperty(:f20_r))
+Declaration(ObjectProperty(:f22_r))
+Declaration(ObjectProperty(:f22_s))
+Declaration(ObjectProperty(:f22_t))
+Declaration(ObjectProperty(:f23_r))
+Declaration(ObjectProperty(:f24_r))
+Declaration(ObjectProperty(:f25_r))
+Declaration(ObjectProperty(:f28_r))
+Declaration(ObjectProperty(:f28_s))
+Declaration(ObjectProperty(:f29_r))
+Declaration(ObjectProperty(:f29_s))
+Declaration(ObjectProperty(:f30_r))
+Declaration(ObjectProperty(:f30_s))
+Declaration(ObjectProperty(:f31_r))
+Declaration(ObjectProperty(:f32_r))
+Declaration(ObjectProperty(:f33_r))
+Declaration(ObjectProperty(:f34_r))
+Declaration(ObjectProperty(:f37_r))
+Declaration(ObjectProperty(:f39_r))
+Declaration(ObjectProperty(:f40_r))
+Declaration(ObjectProperty(:f41_r))
+Declaration(ObjectProperty(:f42_r))
+Declaration(ObjectProperty(:f42_s))
+Declaration(ObjectProperty(:f43_r))
+Declaration(ObjectProperty(:f44_r))
+Declaration(ObjectProperty(:f45_r))
+Declaration(ObjectProperty(:forall_abox_q))
+Declaration(ObjectProperty(:m03_r))
+Declaration(ObjectProperty(:m05_r))
+Declaration(ObjectProperty(:m06_r))
+Declaration(ObjectProperty(:m09_r))
+Declaration(ObjectProperty(:m12_r))
+Declaration(ObjectProperty(:m14_r))
+Declaration(ObjectProperty(:m15_r))
+Declaration(ObjectProperty(:m16_r))
+Declaration(ObjectProperty(:m16_s))
+Declaration(ObjectProperty(:m17_r))
+Declaration(ObjectProperty(:m19_r))
+Declaration(ObjectProperty(:m21_r))
+Declaration(ObjectProperty(:m22_r))
+Declaration(ObjectProperty(:m22_s))
+Declaration(ObjectProperty(:n01_r))
+Declaration(ObjectProperty(:n03_r))
+Declaration(ObjectProperty(:n04_r))
+Declaration(ObjectProperty(:n09_r))
+Declaration(ObjectProperty(:n12_r))
+Declaration(ObjectProperty(:q5_r))
+Declaration(DataProperty(:d01_dp))
+Declaration(DataProperty(:d02_dp))
+Declaration(DataProperty(:d03_dp))
+Declaration(DataProperty(:d04_dp))
+Declaration(DataProperty(:d05_dp))
+Declaration(DataProperty(:d05_dp2))
+Declaration(DataProperty(:d06_dp))
+Declaration(DataProperty(:d07_dp))
+Declaration(DataProperty(:d08_dp))
+Declaration(DataProperty(:d10_dp))
+Declaration(DataProperty(:d11_dp))
+Declaration(DataProperty(:d12_dp))
+Declaration(DataProperty(:d14_dp))
+Declaration(DataProperty(:d15_dp))
+Declaration(DataProperty(:d16_dp))
+Declaration(DataProperty(:d16_dp2))
+Declaration(DataProperty(:d17_dp))
+Declaration(DataProperty(:d18_dp))
+Declaration(DataProperty(:d19_dp))
+Declaration(DataProperty(:d20_dp))
+Declaration(DataProperty(:d21_dp))
+Declaration(DataProperty(:d22_dp))
+Declaration(DataProperty(:d24_dp))
+Declaration(DataProperty(:d24_dp2))
+Declaration(DataProperty(:d26_dp))
+Declaration(DataProperty(:d27_dp))
+Declaration(DataProperty(:d28_dp))
+Declaration(DataProperty(:d29_dp))
+Declaration(DataProperty(:data_abox_dp))
+Declaration(NamedIndividual(:d07_b))
+Declaration(NamedIndividual(:d07_c))
+Declaration(NamedIndividual(:d12_b))
+Declaration(NamedIndividual(:d19_b))
+Declaration(NamedIndividual(:d19_c))
+Declaration(NamedIndividual(:d20_a))
+Declaration(NamedIndividual(:d29_a))
+Declaration(NamedIndividual(:data_abox_w2))
+Declaration(NamedIndividual(:data_abox_w3))
+Declaration(NamedIndividual(:f01_a))
+Declaration(NamedIndividual(:f01_b))
+Declaration(NamedIndividual(:f03_a))
+Declaration(NamedIndividual(:f03_b))
+Declaration(NamedIndividual(:f03b_b))
+Declaration(NamedIndividual(:f04_a))
+Declaration(NamedIndividual(:f04_b))
+Declaration(NamedIndividual(:f05_a))
+Declaration(NamedIndividual(:f05_b))
+Declaration(NamedIndividual(:f05_c))
+Declaration(NamedIndividual(:f06_b))
+Declaration(NamedIndividual(:f07_b))
+Declaration(NamedIndividual(:f07_d))
+Declaration(NamedIndividual(:f07_e))
+Declaration(NamedIndividual(:f08_a))
+Declaration(NamedIndividual(:f08_b))
+Declaration(NamedIndividual(:f11_a))
+Declaration(NamedIndividual(:f11_b))
+Declaration(NamedIndividual(:f12_a))
+Declaration(NamedIndividual(:f12_b))
+Declaration(NamedIndividual(:f13_a))
+Declaration(NamedIndividual(:f13_b))
+Declaration(NamedIndividual(:f15_a))
+Declaration(NamedIndividual(:f15_b))
+Declaration(NamedIndividual(:f16_a))
+Declaration(NamedIndividual(:f16_b))
+Declaration(NamedIndividual(:f20_a))
+Declaration(NamedIndividual(:f20_b))
+Declaration(NamedIndividual(:f22_a))
+Declaration(NamedIndividual(:f22_b))
+Declaration(NamedIndividual(:f22_c))
+Declaration(NamedIndividual(:f23_a))
+Declaration(NamedIndividual(:f24_a))
+Declaration(NamedIndividual(:f24_b))
+Declaration(NamedIndividual(:f25_a))
+Declaration(NamedIndividual(:f25_b))
+Declaration(NamedIndividual(:f28_a))
+Declaration(NamedIndividual(:f28_b))
+Declaration(NamedIndividual(:f28_c))
+Declaration(NamedIndividual(:f29_a))
+Declaration(NamedIndividual(:f29_b))
+Declaration(NamedIndividual(:f29_c))
+Declaration(NamedIndividual(:f30_a))
+Declaration(NamedIndividual(:f30_b))
+Declaration(NamedIndividual(:f30_c))
+Declaration(NamedIndividual(:f33_a))
+Declaration(NamedIndividual(:f33_b))
+Declaration(NamedIndividual(:f33_b2))
+Declaration(NamedIndividual(:f34_a))
+Declaration(NamedIndividual(:f34_a2))
+Declaration(NamedIndividual(:f34_b))
+Declaration(NamedIndividual(:f37_b))
+Declaration(NamedIndividual(:f40_a))
+Declaration(NamedIndividual(:f40_b))
+Declaration(NamedIndividual(:f40_c))
+Declaration(NamedIndividual(:f41_a))
+Declaration(NamedIndividual(:f41_b))
+Declaration(NamedIndividual(:f42_a))
+Declaration(NamedIndividual(:f42_b))
+Declaration(NamedIndividual(:f42_c))
+Declaration(NamedIndividual(:f43_a))
+Declaration(NamedIndividual(:f44_a))
+Declaration(NamedIndividual(:forall_abox_f))
+Declaration(NamedIndividual(:forall_abox_x))
+Declaration(NamedIndividual(:m03_a))
+Declaration(NamedIndividual(:m03_b))
+Declaration(NamedIndividual(:m03_c))
+Declaration(NamedIndividual(:m05_b))
+Declaration(NamedIndividual(:m06_a))
+Declaration(NamedIndividual(:m06_b))
+Declaration(NamedIndividual(:m06_c))
+Declaration(NamedIndividual(:m06_d))
+Declaration(NamedIndividual(:m12_b))
+Declaration(NamedIndividual(:m14_a))
+Declaration(NamedIndividual(:m14_b))
+Declaration(NamedIndividual(:m14_c))
+Declaration(NamedIndividual(:m15_a))
+Declaration(NamedIndividual(:m19_a))
+Declaration(NamedIndividual(:m21_a))
+Declaration(NamedIndividual(:m21_b))
+Declaration(NamedIndividual(:m21_c))
+Declaration(NamedIndividual(:n01_b))
+Declaration(NamedIndividual(:n01_c))
+Declaration(NamedIndividual(:n03_a))
+Declaration(NamedIndividual(:n03_b))
+Declaration(NamedIndividual(:n03_c))
+Declaration(NamedIndividual(:n04_a))
+Declaration(NamedIndividual(:n04_b))
+Declaration(NamedIndividual(:n04_c))
+Declaration(NamedIndividual(:n09_a))
+Declaration(NamedIndividual(:n09_b))
+Declaration(NamedIndividual(:n09_c))
+Declaration(NamedIndividual(:n12_a))
+Declaration(NamedIndividual(:n12_b))
+Declaration(NamedIndividual(:n12_c))
+Declaration(NamedIndividual(:q2_b))
+Declaration(NamedIndividual(:q2_c))
+Declaration(NamedIndividual(:q5_a))
+Declaration(NamedIndividual(:q5_b))
+Declaration(NamedIndividual(:q5_c))
+############################
+#   Object Properties
+############################
+
+# Object Property: :f04_s (:f04_s)
+
+SubObjectPropertyOf(:f04_s :f04_r)
+
+# Object Property: :f05_r (:f05_r)
+
+TransitiveObjectProperty(:f05_r)
+
+# Object Property: :f12_r (:f12_r)
+
+InverseObjectProperties(:f12_r :f12_t)
+
+# Object Property: :f13_r (:f13_r)
+
+SymmetricObjectProperty(:f13_r)
+
+# Object Property: :f29_r (:f29_r)
+
+ObjectPropertyRange(:f29_r ObjectAllValuesFrom(:f29_s :f29_C))
+
+# Object Property: :f30_r (:f30_r)
+
+ObjectPropertyDomain(:f30_r ObjectAllValuesFrom(:f30_s :f30_C))
+
+# Object Property: :f43_r (:f43_r)
+
+ReflexiveObjectProperty(:f43_r)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :d05_dp2 (:d05_dp2)
+
+SubDataPropertyOf(:d05_dp2 :d05_dp)
+
+# Data Property: :d07_dp (:d07_dp)
+
+DataPropertyDomain(:d07_dp :d07_A)
+
+# Data Property: :d16_dp (:d16_dp)
+
+EquivalentDataProperties(:d16_dp :d16_dp2)
+
+# Data Property: :d22_dp (:d22_dp)
+
+FunctionalDataProperty(:d22_dp)
+DataPropertyRange(:d22_dp xsd:integer)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :d01_A (:d01_A)
+
+EquivalentClasses(:d01_A DataSomeValuesFrom(:d01_dp xsd:integer))
+SubClassOf(:d01_A owl:Thing)
+
+# Class: :d01_B (:d01_B)
+
+SubClassOf(:d01_B :d01_A)
+SubClassOf(:d01_B DataSomeValuesFrom(:d01_dp xsd:integer))
+
+# Class: :d02_A (:d02_A)
+
+EquivalentClasses(:d02_A DataSomeValuesFrom(:d02_dp xsd:decimal))
+SubClassOf(:d02_A owl:Thing)
+
+# Class: :d02_B (:d02_B)
+
+SubClassOf(:d02_B owl:Thing)
+SubClassOf(:d02_B DataSomeValuesFrom(:d02_dp xsd:integer))
+
+# Class: :d03_A (:d03_A)
+
+EquivalentClasses(:d03_A DataSomeValuesFrom(:d03_dp xsd:integer))
+SubClassOf(:d03_A owl:Thing)
+
+# Class: :d03_B (:d03_B)
+
+SubClassOf(:d03_B owl:Thing)
+SubClassOf(:d03_B DataHasValue(:d03_dp "5"^^xsd:integer))
+
+# Class: :d04_A (:d04_A)
+
+EquivalentClasses(:d04_A DataHasValue(:d04_dp "5"^^xsd:integer))
+SubClassOf(:d04_A owl:Thing)
+
+# Class: :d04_B (:d04_B)
+
+SubClassOf(:d04_B :d04_A)
+SubClassOf(:d04_B DataHasValue(:d04_dp "5"^^xsd:integer))
+
+# Class: :d04_B2 (:d04_B2)
+
+SubClassOf(:d04_B2 owl:Thing)
+SubClassOf(:d04_B2 DataHasValue(:d04_dp "05"^^xsd:integer))
+
+# Class: :d04_B3 (:d04_B3)
+
+SubClassOf(:d04_B3 owl:Thing)
+SubClassOf(:d04_B3 DataHasValue(:d04_dp "5"^^xsd:int))
+
+# Class: :d05_A (:d05_A)
+
+EquivalentClasses(:d05_A DataSomeValuesFrom(:d05_dp xsd:integer))
+SubClassOf(:d05_A owl:Thing)
+
+# Class: :d05_B (:d05_B)
+
+SubClassOf(:d05_B owl:Thing)
+SubClassOf(:d05_B DataSomeValuesFrom(:d05_dp2 xsd:integer))
+
+# Class: :d06_A (:d06_A)
+
+EquivalentClasses(:d06_A DataSomeValuesFrom(:d06_dp rdfs:Literal))
+SubClassOf(:d06_A owl:Thing)
+
+# Class: :d06_B (:d06_B)
+
+SubClassOf(:d06_B owl:Thing)
+SubClassOf(:d06_B DataSomeValuesFrom(:d06_dp xsd:integer))
+
+# Class: :d07_A (:d07_A)
+
+SubClassOf(:d07_A owl:Thing)
+
+# Class: :d07_B (:d07_B)
+
+SubClassOf(:d07_B owl:Thing)
+SubClassOf(:d07_B DataSomeValuesFrom(:d07_dp xsd:integer))
+
+# Class: :d07_B2 (:d07_B2)
+
+SubClassOf(:d07_B2 owl:Thing)
+SubClassOf(:d07_B2 DataSomeValuesFrom(:d07_dp rdfs:Literal))
+
+# Class: :d08_A (:d08_A)
+
+EquivalentClasses(:d08_A ObjectSomeValuesFrom(:d08_r DataSomeValuesFrom(:d08_dp xsd:integer)))
+SubClassOf(:d08_A owl:Thing)
+
+# Class: :d08_B (:d08_B)
+
+SubClassOf(:d08_B :d08_A)
+SubClassOf(:d08_B ObjectSomeValuesFrom(:d08_r DataSomeValuesFrom(:d08_dp xsd:integer)))
+
+# Class: :d10_A (:d10_A)
+
+EquivalentClasses(:d10_A DataSomeValuesFrom(:d10_dp DataOneOf("1")))
+SubClassOf(:d10_A owl:Thing)
+
+# Class: :d10_B (:d10_B)
+
+SubClassOf(:d10_B :d10_A)
+SubClassOf(:d10_B DataSomeValuesFrom(:d10_dp DataOneOf("1")))
+
+# Class: :d10_C (:d10_C)
+
+SubClassOf(:d10_C owl:Thing)
+SubClassOf(:d10_C DataHasValue(:d10_dp "1"))
+
+# Class: :d11_A (:d11_A)
+
+EquivalentClasses(:d11_A DataSomeValuesFrom(:d11_dp DatatypeRestriction(xsd:integer xsd:minInclusive "1"^^xsd:integer)))
+SubClassOf(:d11_A owl:Thing)
+
+# Class: :d11_B (:d11_B)
+
+SubClassOf(:d11_B :d11_A)
+SubClassOf(:d11_B DataSomeValuesFrom(:d11_dp DatatypeRestriction(xsd:integer xsd:minInclusive "1"^^xsd:integer)))
+
+# Class: :d12_A (:d12_A)
+
+EquivalentClasses(:d12_A DataMinCardinality(1 :d12_dp xsd:integer))
+SubClassOf(:d12_A owl:Thing)
+
+# Class: :d12_B (:d12_B)
+
+SubClassOf(:d12_B owl:Thing)
+SubClassOf(:d12_B DataMinCardinality(1 :d12_dp xsd:integer))
+
+# Class: :d14_A (:d14_A)
+
+EquivalentClasses(:d14_A DataSomeValuesFrom(:d14_dp DataIntersectionOf(xsd:decimal xsd:integer)))
+SubClassOf(:d14_A owl:Thing)
+
+# Class: :d14_B (:d14_B)
+
+SubClassOf(:d14_B :d14_A)
+SubClassOf(:d14_B DataSomeValuesFrom(:d14_dp DataIntersectionOf(xsd:decimal xsd:integer)))
+
+# Class: :d15_A (:d15_A)
+
+EquivalentClasses(:d15_A ObjectIntersectionOf(:d15_C DataSomeValuesFrom(:d15_dp xsd:integer)))
+SubClassOf(:d15_A :d15_C)
+
+# Class: :d15_B (:d15_B)
+
+SubClassOf(:d15_B :d15_A)
+SubClassOf(:d15_B DataSomeValuesFrom(:d15_dp xsd:integer))
+
+# Class: :d15_C (:d15_C)
+
+SubClassOf(:d15_C owl:Thing)
+
+# Class: :d16_A (:d16_A)
+
+EquivalentClasses(:d16_A DataSomeValuesFrom(:d16_dp xsd:integer))
+SubClassOf(:d16_A owl:Thing)
+
+# Class: :d16_B (:d16_B)
+
+SubClassOf(:d16_B owl:Thing)
+SubClassOf(:d16_B DataSomeValuesFrom(:d16_dp2 xsd:integer))
+
+# Class: :d17_A (:d17_A)
+
+EquivalentClasses(:d17_A DataHasValue(:d17_dp "1"))
+SubClassOf(:d17_A owl:Thing)
+
+# Class: :d17_B (:d17_B)
+
+SubClassOf(:d17_B :d17_A)
+SubClassOf(:d17_B DataHasValue(:d17_dp "1"))
+
+# Class: :d17_B2 (:d17_B2)
+
+SubClassOf(:d17_B2 owl:Thing)
+SubClassOf(:d17_B2 DataHasValue(:d17_dp "1"@en))
+
+# Class: :d18_A (:d18_A)
+
+EquivalentClasses(:d18_A DataAllValuesFrom(:d18_dp xsd:integer))
+SubClassOf(:d18_A owl:Thing)
+
+# Class: :d18_B (:d18_B)
+
+SubClassOf(:d18_B owl:Thing)
+SubClassOf(:d18_B DataAllValuesFrom(:d18_dp xsd:integer))
+
+# Class: :d19_A (:d19_A)
+
+EquivalentClasses(:d19_A DataMaxCardinality(1 :d19_dp))
+SubClassOf(:d19_A owl:Thing)
+
+# Class: :d19_B (:d19_B)
+
+SubClassOf(:d19_B owl:Thing)
+SubClassOf(:d19_B DataMaxCardinality(1 :d19_dp))
+
+# Class: :d20_A (:d20_A)
+
+EquivalentClasses(:d20_A DataSomeValuesFrom(:d20_dp xsd:integer))
+SubClassOf(:d20_A :d20_K)
+
+# Class: :d20_K (:d20_K)
+
+SubClassOf(:d20_K owl:Thing)
+
+# Class: :d21_B (:d21_B)
+
+SubClassOf(:d21_B :d21_E)
+SubClassOf(:d21_B DataSomeValuesFrom(:d21_dp xsd:integer))
+
+# Class: :d21_C (:d21_C)
+
+SubClassOf(:d21_C owl:Thing)
+
+# Class: :d21_E (:d21_E)
+
+EquivalentClasses(:d21_E ObjectSomeValuesFrom(:d21_r :d21_C))
+SubClassOf(:d21_E owl:Thing)
+
+# Class: :d22_A (:d22_A)
+
+EquivalentClasses(:d22_A DataSomeValuesFrom(:d22_dp xsd:integer))
+SubClassOf(:d22_A owl:Thing)
+
+# Class: :d22_B (:d22_B)
+
+SubClassOf(:d22_B owl:Thing)
+SubClassOf(:d22_B DataSomeValuesFrom(:d22_dp rdfs:Literal))
+
+# Class: :d24_A (:d24_A)
+
+EquivalentClasses(:d24_A DataSomeValuesFrom(:d24_dp xsd:integer) DataSomeValuesFrom(:d24_dp2 xsd:integer))
+SubClassOf(:d24_A owl:Thing)
+
+# Class: :d24_B (:d24_B)
+
+SubClassOf(:d24_B :d24_A)
+SubClassOf(:d24_B DataSomeValuesFrom(:d24_dp2 xsd:integer))
+
+# Class: :d26_A (:d26_A)
+
+EquivalentClasses(:d26_A DataSomeValuesFrom(:d26_dp DataUnionOf(xsd:integer xsd:string)))
+SubClassOf(:d26_A owl:Thing)
+
+# Class: :d26_B (:d26_B)
+
+SubClassOf(:d26_B :d26_A)
+SubClassOf(:d26_B DataSomeValuesFrom(:d26_dp DataUnionOf(xsd:integer xsd:string)))
+
+# Class: :d27_A (:d27_A)
+
+EquivalentClasses(:d27_A DataSomeValuesFrom(:d27_dp DataComplementOf(xsd:integer)))
+SubClassOf(:d27_A owl:Thing)
+
+# Class: :d27_B (:d27_B)
+
+SubClassOf(:d27_B :d27_A)
+SubClassOf(:d27_B DataSomeValuesFrom(:d27_dp DataComplementOf(xsd:integer)))
+
+# Class: :d28_A (:d28_A)
+
+EquivalentClasses(:d28_A DataSomeValuesFrom(:d28_dp DataOneOf("1" "2")))
+SubClassOf(:d28_A owl:Thing)
+
+# Class: :d28_B (:d28_B)
+
+SubClassOf(:d28_B :d28_A)
+SubClassOf(:d28_B DataSomeValuesFrom(:d28_dp DataOneOf("1" "2")))
+
+# Class: :d29_A (:d29_A)
+
+EquivalentClasses(:d29_A DataHasValue(:d29_dp "5"^^xsd:integer))
+SubClassOf(:d29_A owl:Thing)
+
+# Class: :d29_B (:d29_B)
+
+SubClassOf(:d29_B :d29_E)
+SubClassOf(:d29_B ObjectSomeValuesFrom(:d29_r :d29_A))
+
+# Class: :d29_E (:d29_E)
+
+EquivalentClasses(:d29_E ObjectSomeValuesFrom(:d29_r DataHasValue(:d29_dp "5"^^xsd:integer)))
+SubClassOf(:d29_E owl:Thing)
+
+# Class: :data_abox_K (:data_abox_K)
+
+SubClassOf(:data_abox_K owl:Thing)
+
+# Class: :f01_A (:f01_A)
+
+SubClassOf(:f01_A owl:Thing)
+SubClassOf(:f01_A ObjectAllValuesFrom(:f01_r :f01_C))
+
+# Class: :f01_C (:f01_C)
+
+SubClassOf(:f01_C owl:Thing)
+
+# Class: :f02_A (:f02_A)
+
+SubClassOf(:f02_A owl:Thing)
+SubClassOf(:f02_A ObjectSomeValuesFrom(:f02_r :f02_D))
+SubClassOf(:f02_A ObjectAllValuesFrom(:f02_r :f02_C))
+
+# Class: :f02_C (:f02_C)
+
+SubClassOf(:f02_C owl:Thing)
+
+# Class: :f02_D (:f02_D)
+
+SubClassOf(:f02_D owl:Thing)
+
+# Class: :f02_E (:f02_E)
+
+EquivalentClasses(:f02_E ObjectSomeValuesFrom(:f02_r ObjectIntersectionOf(:f02_C :f02_D)))
+SubClassOf(:f02_E :f02_E2)
+
+# Class: :f02_E2 (:f02_E2)
+
+EquivalentClasses(:f02_E2 ObjectSomeValuesFrom(:f02_r :f02_C))
+SubClassOf(:f02_E2 owl:Thing)
+
+# Class: :f03_A (:f03_A)
+
+SubClassOf(:f03_A owl:Thing)
+SubClassOf(:f03_A ObjectSomeValuesFrom(:f03_r ObjectOneOf(:f03_b)))
+SubClassOf(:f03_A ObjectAllValuesFrom(:f03_r :f03_C))
+
+# Class: :f03_C (:f03_C)
+
+SubClassOf(:f03_C owl:Thing)
+
+# Class: :f03b_A (:f03b_A)
+
+SubClassOf(:f03b_A owl:Thing)
+SubClassOf(:f03b_A ObjectSomeValuesFrom(:f03b_r ObjectOneOf(:f03b_b)))
+SubClassOf(:f03b_A ObjectAllValuesFrom(:f03b_r :f03b_C))
+
+# Class: :f03b_C (:f03b_C)
+
+SubClassOf(:f03b_C owl:Thing)
+
+# Class: :f04_A (:f04_A)
+
+SubClassOf(:f04_A owl:Thing)
+SubClassOf(:f04_A ObjectAllValuesFrom(:f04_r :f04_C))
+
+# Class: :f04_C (:f04_C)
+
+SubClassOf(:f04_C owl:Thing)
+
+# Class: :f05_C (:f05_C)
+
+SubClassOf(:f05_C owl:Thing)
+
+# Class: :f06_B (:f06_B)
+
+SubClassOf(:f06_B :f06_D)
+SubClassOf(:f06_B ObjectAllValuesFrom(:f06_r :f06_C))
+
+# Class: :f06_C (:f06_C)
+
+SubClassOf(:f06_C owl:Thing)
+
+# Class: :f06_D (:f06_D)
+
+SubClassOf(:f06_D owl:Thing)
+
+# Class: :f07_B (:f07_B)
+
+SubClassOf(:f07_B :f07_D)
+SubClassOf(:f07_B ObjectAllValuesFrom(:f07_r :f07_C))
+
+# Class: :f07_C (:f07_C)
+
+SubClassOf(:f07_C owl:Thing)
+
+# Class: :f07_D (:f07_D)
+
+EquivalentClasses(:f07_D ObjectAllValuesFrom(:f07_r :f07_C))
+SubClassOf(:f07_D owl:Thing)
+
+# Class: :f08_C (:f08_C)
+
+SubClassOf(:f08_C owl:Thing)
+
+# Class: :f09_A (:f09_A)
+
+SubClassOf(:f09_A owl:Thing)
+SubClassOf(:f09_A ObjectSomeValuesFrom(:f09_s ObjectIntersectionOf(:f09_B ObjectAllValuesFrom(:f09_r :f09_C))))
+
+# Class: :f09_B (:f09_B)
+
+SubClassOf(:f09_B owl:Thing)
+SubClassOf(:f09_B ObjectSomeValuesFrom(:f09_r :f09_D))
+
+# Class: :f09_C (:f09_C)
+
+SubClassOf(:f09_C owl:Thing)
+
+# Class: :f09_D (:f09_D)
+
+SubClassOf(:f09_D owl:Thing)
+
+# Class: :f09_E (:f09_E)
+
+EquivalentClasses(:f09_E ObjectSomeValuesFrom(:f09_s ObjectSomeValuesFrom(:f09_r ObjectIntersectionOf(:f09_C :f09_D))))
+SubClassOf(:f09_E owl:Thing)
+
+# Class: :f11_C (:f11_C)
+
+SubClassOf(:f11_C owl:Thing)
+
+# Class: :f11_D (:f11_D)
+
+SubClassOf(:f11_D owl:Thing)
+
+# Class: :f11_E (:f11_E)
+
+EquivalentClasses(:f11_E ObjectSomeValuesFrom(:f11_s :f11_D))
+SubClassOf(:f11_E owl:Thing)
+
+# Class: :f12_C (:f12_C)
+
+SubClassOf(:f12_C owl:Thing)
+
+# Class: :f13_C (:f13_C)
+
+SubClassOf(:f13_C owl:Thing)
+
+# Class: :f14_A (:f14_A)
+
+SubClassOf(:f14_A owl:Thing)
+SubClassOf(:f14_A ObjectAllValuesFrom(:f14_r :f14_C))
+
+# Class: :f14_B (:f14_B)
+
+EquivalentClasses(:f14_B ObjectAllValuesFrom(:f14_r :f14_D))
+SubClassOf(:f14_B owl:Thing)
+
+# Class: :f14_C (:f14_C)
+
+SubClassOf(:f14_C :f14_D)
+
+# Class: :f14_D (:f14_D)
+
+SubClassOf(:f14_D owl:Thing)
+
+# Class: :f15_C (:f15_C)
+
+SubClassOf(:f15_C owl:Thing)
+
+# Class: :f15_D (:f15_D)
+
+SubClassOf(:f15_D owl:Thing)
+
+# Class: :f15_E (:f15_E)
+
+EquivalentClasses(:f15_E ObjectIntersectionOf(:f15_C :f15_D))
+SubClassOf(:f15_E :f15_C)
+SubClassOf(:f15_E :f15_D)
+
+# Class: :f16_C (:f16_C)
+
+SubClassOf(:f16_C owl:Thing)
+
+# Class: :f20_A (:f20_A)
+
+SubClassOf(:f20_A owl:Thing)
+SubClassOf(:f20_A ObjectAllValuesFrom(:f20_r :f20_C))
+
+# Class: :f20_C (:f20_C)
+
+SubClassOf(:f20_C owl:Thing)
+
+# Class: :f22_C (:f22_C)
+
+SubClassOf(:f22_C owl:Thing)
+
+# Class: :f23_A (:f23_A)
+
+SubClassOf(:f23_A owl:Thing)
+
+# Class: :f23_B (:f23_B)
+
+SubClassOf(:f23_B :f23_E)
+SubClassOf(:f23_B ObjectAllValuesFrom(:f23_r :f23_C))
+
+# Class: :f23_C (:f23_C)
+
+SubClassOf(:f23_C owl:Thing)
+
+# Class: :f23_E (:f23_E)
+
+EquivalentClasses(:f23_E ObjectIntersectionOf(:f23_A ObjectAllValuesFrom(:f23_r :f23_C)))
+SubClassOf(:f23_E :f23_A)
+
+# Class: :f24_A (:f24_A)
+
+SubClassOf(:f24_A owl:Thing)
+SubClassOf(:f24_A ObjectAllValuesFrom(:f24_r :f24_C))
+
+# Class: :f24_A2 (:f24_A2)
+
+SubClassOf(:f24_A2 :f24_A)
+
+# Class: :f24_C (:f24_C)
+
+SubClassOf(:f24_C owl:Thing)
+
+# Class: :f25_A (:f25_A)
+
+EquivalentClasses(:f25_A ObjectOneOf(:f25_a))
+SubClassOf(:f25_A owl:Thing)
+SubClassOf(:f25_A ObjectAllValuesFrom(:f25_r :f25_C))
+
+# Class: :f25_C (:f25_C)
+
+SubClassOf(:f25_C owl:Thing)
+
+# Class: :f28_C (:f28_C)
+
+SubClassOf(:f28_C owl:Thing)
+
+# Class: :f29_C (:f29_C)
+
+SubClassOf(:f29_C owl:Thing)
+
+# Class: :f30_C (:f30_C)
+
+SubClassOf(:f30_C owl:Thing)
+
+# Class: :f31_A (:f31_A)
+
+SubClassOf(:f31_A owl:Thing)
+SubClassOf(:f31_A ObjectSomeValuesFrom(:f31_r :f31_D))
+SubClassOf(:f31_A ObjectAllValuesFrom(:f31_r :f31_C))
+
+# Class: :f31_C (:f31_C)
+
+SubClassOf(:f31_C owl:Thing)
+
+# Class: :f31_D (:f31_D)
+
+SubClassOf(:f31_D owl:Thing)
+
+# Class: :f31_E (:f31_E)
+
+SubClassOf(:f31_E owl:Thing)
+
+# Class: :f31_F (:f31_F)
+
+EquivalentClasses(:f31_F ObjectSomeValuesFrom(:f31_r :f31_E))
+SubClassOf(:f31_F owl:Thing)
+
+# Class: :f32_A (:f32_A)
+
+SubClassOf(:f32_A owl:Thing)
+SubClassOf(:f32_A ObjectSomeValuesFrom(:f32_r owl:Thing))
+SubClassOf(:f32_A ObjectAllValuesFrom(:f32_r :f32_C))
+
+# Class: :f32_C (:f32_C)
+
+SubClassOf(:f32_C owl:Thing)
+
+# Class: :f32_F (:f32_F)
+
+EquivalentClasses(:f32_F ObjectSomeValuesFrom(:f32_r :f32_C))
+SubClassOf(:f32_F owl:Thing)
+
+# Class: :f33_A (:f33_A)
+
+SubClassOf(:f33_A owl:Thing)
+SubClassOf(:f33_A ObjectAllValuesFrom(:f33_r :f33_C))
+
+# Class: :f33_C (:f33_C)
+
+SubClassOf(:f33_C owl:Thing)
+
+# Class: :f34_C (:f34_C)
+
+SubClassOf(:f34_C owl:Thing)
+
+# Class: :f37_A (:f37_A)
+
+SubClassOf(:f37_A owl:Thing)
+SubClassOf(:f37_A ObjectSomeValuesFrom(:f37_r ObjectOneOf(:f37_b)))
+SubClassOf(:f37_A ObjectAllValuesFrom(:f37_r :f37_C))
+
+# Class: :f37_C (:f37_C)
+
+SubClassOf(:f37_C owl:Thing)
+
+# Class: :f39_A (:f39_A)
+
+SubClassOf(:f39_A owl:Thing)
+SubClassOf(:f39_A ObjectAllValuesFrom(ObjectInverseOf(:f39_r) :f39_C))
+
+# Class: :f39_B (:f39_B)
+
+SubClassOf(:f39_B owl:Thing)
+SubClassOf(:f39_B ObjectSomeValuesFrom(:f39_r :f39_A))
+
+# Class: :f39_C (:f39_C)
+
+SubClassOf(:f39_C owl:Thing)
+
+# Class: :f40_B (:f40_B)
+
+SubClassOf(:f40_B owl:Thing)
+
+# Class: :f41_C (:f41_C)
+
+SubClassOf(:f41_C :f41_E)
+
+# Class: :f41_D (:f41_D)
+
+SubClassOf(:f41_D :f41_E)
+
+# Class: :f41_E (:f41_E)
+
+SubClassOf(:f41_E owl:Thing)
+
+# Class: :f43_C (:f43_C)
+
+SubClassOf(:f43_C owl:Thing)
+
+# Class: :f44_C (:f44_C)
+
+SubClassOf(:f44_C owl:Thing)
+
+# Class: :f45_A (:f45_A)
+
+SubClassOf(:f45_A owl:Thing)
+SubClassOf(:f45_A ObjectAllValuesFrom(:f45_r :f45_C))
+SubClassOf(:f45_A ObjectHasSelf(:f45_r))
+
+# Class: :f45_C (:f45_C)
+
+SubClassOf(:f45_C owl:Thing)
+
+# Class: :forall_abox_B (:forall_abox_B)
+
+SubClassOf(:forall_abox_B owl:Thing)
+
+# Class: :m03_B (:m03_B)
+
+SubClassOf(:m03_B owl:Thing)
+
+# Class: :m03_C (:m03_C)
+
+SubClassOf(:m03_C owl:Thing)
+
+# Class: :m05_A (:m05_A)
+
+EquivalentClasses(:m05_A ObjectMaxCardinality(1 :m05_r))
+SubClassOf(:m05_A owl:Thing)
+
+# Class: :m05_B (:m05_B)
+
+SubClassOf(:m05_B :m05_A)
+SubClassOf(:m05_B ObjectMaxCardinality(1 :m05_r))
+
+# Class: :m06_B (:m06_B)
+
+SubClassOf(:m06_B owl:Thing)
+
+# Class: :m09_A (:m09_A)
+
+SubClassOf(:m09_A owl:Thing)
+SubClassOf(:m09_A ObjectSomeValuesFrom(:m09_r :m09_C))
+SubClassOf(:m09_A ObjectSomeValuesFrom(:m09_r :m09_D))
+SubClassOf(:m09_A ObjectMaxCardinality(1 :m09_r))
+
+# Class: :m09_C (:m09_C)
+
+SubClassOf(:m09_C owl:Thing)
+
+# Class: :m09_D (:m09_D)
+
+SubClassOf(:m09_D owl:Thing)
+
+# Class: :m09_E (:m09_E)
+
+EquivalentClasses(:m09_E ObjectSomeValuesFrom(:m09_r ObjectIntersectionOf(:m09_C :m09_D)))
+SubClassOf(:m09_E owl:Thing)
+
+# Class: :m12_B (:m12_B)
+
+SubClassOf(:m12_B :m12_D)
+SubClassOf(:m12_B ObjectMaxCardinality(1 :m12_r))
+
+# Class: :m12_D (:m12_D)
+
+SubClassOf(:m12_D owl:Thing)
+
+# Class: :m14_B (:m14_B)
+
+SubClassOf(:m14_B owl:Thing)
+
+# Class: :m16_A (:m16_A)
+
+SubClassOf(:m16_A :m16_E)
+SubClassOf(:m16_A ObjectMaxCardinality(1 :m16_r))
+SubClassOf(:m16_A ObjectMaxCardinality(1 :m16_s))
+
+# Class: :m16_E (:m16_E)
+
+EquivalentClasses(:m16_E ObjectIntersectionOf(ObjectMaxCardinality(1 :m16_r) ObjectMaxCardinality(1 :m16_s)))
+SubClassOf(:m16_E owl:Thing)
+
+# Class: :m17_A (:m17_A)
+
+SubClassOf(:m17_A owl:Thing)
+SubClassOf(:m17_A ObjectMaxCardinality(1 :m17_r :m17_C))
+
+# Class: :m17_C (:m17_C)
+
+SubClassOf(:m17_C owl:Thing)
+
+# Class: :m17_C2 (:m17_C2)
+
+SubClassOf(:m17_C2 :m17_C)
+
+# Class: :m17_E (:m17_E)
+
+EquivalentClasses(:m17_E ObjectMaxCardinality(1 :m17_r :m17_C2))
+SubClassOf(:m17_E owl:Thing)
+
+# Class: :m21_B (:m21_B)
+
+SubClassOf(:m21_B owl:Thing)
+
+# Class: :m21_C (:m21_C)
+
+SubClassOf(:m21_C owl:Thing)
+
+# Class: :m22_A (:m22_A)
+
+SubClassOf(:m22_A owl:Thing)
+SubClassOf(:m22_A ObjectSomeValuesFrom(:m22_r :m22_C))
+SubClassOf(:m22_A ObjectMaxCardinality(1 :m22_r))
+
+# Class: :m22_C (:m22_C)
+
+SubClassOf(:m22_C owl:Thing)
+SubClassOf(:m22_C ObjectSomeValuesFrom(:m22_s :m22_D))
+
+# Class: :m22_D (:m22_D)
+
+SubClassOf(:m22_D owl:Thing)
+
+# Class: :n01_A (:n01_A)
+
+SubClassOf(:n01_A owl:Thing)
+SubClassOf(:n01_A ObjectSomeValuesFrom(:n01_r ObjectOneOf(:n01_b)))
+SubClassOf(:n01_A ObjectSomeValuesFrom(:n01_r ObjectOneOf(:n01_c)))
+SubClassOf(:n01_A ObjectMaxCardinality(1 :n01_r))
+
+# Class: :n01_B (:n01_B)
+
+SubClassOf(:n01_B owl:Thing)
+
+# Class: :n03_B (:n03_B)
+
+SubClassOf(:n03_B owl:Thing)
+
+# Class: :n03_C (:n03_C)
+
+SubClassOf(:n03_C owl:Thing)
+
+# Class: :n04_B (:n04_B)
+
+SubClassOf(:n04_B owl:Thing)
+
+# Class: :n04_C (:n04_C)
+
+SubClassOf(:n04_C owl:Thing)
+
+# Class: :n04_D (:n04_D)
+
+SubClassOf(:n04_D :n04_C)
+
+# Class: :n09_B (:n09_B)
+
+SubClassOf(:n09_B owl:Thing)
+
+# Class: :n12_A (:n12_A)
+
+SubClassOf(:n12_A owl:Thing)
+SubClassOf(:n12_A ObjectMaxCardinality(1 :n12_r :n12_C))
+
+# Class: :n12_A2 (:n12_A2)
+
+SubClassOf(:n12_A2 :n12_A)
+
+# Class: :n12_B (:n12_B)
+
+SubClassOf(:n12_B owl:Thing)
+
+# Class: :n12_C (:n12_C)
+
+SubClassOf(:n12_C owl:Thing)
+
+# Class: :q2_B (:q2_B)
+
+SubClassOf(:q2_B owl:Thing)
+
+# Class: :q2_C (:q2_C)
+
+SubClassOf(:q2_C owl:Thing)
+
+# Class: :q5_B (:q5_B)
+
+SubClassOf(:q5_B owl:Thing)
+
+# Class: :q5_C (:q5_C)
+
+SubClassOf(:q5_C owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :d07_b (:d07_b)
+
+ClassAssertion(owl:Thing :d07_b)
+ClassAssertion(DataSomeValuesFrom(:d07_dp xsd:integer) :d07_b)
+ObjectPropertyAssertion(:f43_r :d07_b :d07_b)
+
+# Individual: :d07_c (:d07_c)
+
+ClassAssertion(owl:Thing :d07_c)
+DataPropertyAssertion(:d07_dp :d07_c "5"^^xsd:integer)
+
+# Individual: :d12_b (:d12_b)
+
+ClassAssertion(owl:Thing :d12_b)
+ClassAssertion(DataMinCardinality(1 :d12_dp) :d12_b)
+
+# Individual: :d19_b (:d19_b)
+
+ClassAssertion(owl:Thing :d19_b)
+ClassAssertion(DataExactCardinality(1 :d19_dp) :d19_b)
+
+# Individual: :d19_c (:d19_c)
+
+ClassAssertion(owl:Thing :d19_c)
+ClassAssertion(DataMaxCardinality(1 :d19_dp xsd:integer) :d19_c)
+
+# Individual: :d20_a (:d20_a)
+
+ClassAssertion(:d20_A :d20_a)
+ObjectPropertyAssertion(:f43_r :d20_a :d20_a)
+
+# Individual: :d29_a (:d29_a)
+
+ClassAssertion(:d29_A :d29_a)
+ObjectPropertyAssertion(:f43_r :d29_a :d29_a)
+
+# Individual: :data_abox_w2 (:data_abox_w2)
+
+ClassAssertion(:data_abox_K :data_abox_w2)
+ClassAssertion(DataSomeValuesFrom(:data_abox_dp xsd:integer) :data_abox_w2)
+ObjectPropertyAssertion(:f43_r :data_abox_w2 :data_abox_w2)
+
+# Individual: :data_abox_w3 (:data_abox_w3)
+
+ClassAssertion(owl:Thing :data_abox_w3)
+DataPropertyAssertion(:data_abox_dp :data_abox_w3 "5"^^xsd:integer)
+
+# Individual: :f01_a (:f01_a)
+
+ClassAssertion(:f01_A :f01_a)
+ObjectPropertyAssertion(:f01_r :f01_a :f01_b)
+ObjectPropertyAssertion(:f43_r :f01_a :f01_a)
+
+# Individual: :f01_b (:f01_b)
+
+ClassAssertion(:f01_C :f01_b)
+ObjectPropertyAssertion(:f43_r :f01_b :f01_b)
+
+# Individual: :f03_a (:f03_a)
+
+ClassAssertion(:f03_A :f03_a)
+ObjectPropertyAssertion(:f03_r :f03_a :f03_b)
+ObjectPropertyAssertion(:f43_r :f03_a :f03_a)
+
+# Individual: :f03_b (:f03_b)
+
+ClassAssertion(:f03_C :f03_b)
+ObjectPropertyAssertion(:f43_r :f03_b :f03_b)
+
+# Individual: :f03b_b (:f03b_b)
+
+ClassAssertion(owl:Thing :f03b_b)
+ObjectPropertyAssertion(:f43_r :f03b_b :f03b_b)
+
+# Individual: :f04_a (:f04_a)
+
+ClassAssertion(:f04_A :f04_a)
+ObjectPropertyAssertion(:f04_r :f04_a :f04_b)
+ObjectPropertyAssertion(:f04_s :f04_a :f04_b)
+ObjectPropertyAssertion(:f43_r :f04_a :f04_a)
+
+# Individual: :f04_b (:f04_b)
+
+ClassAssertion(:f04_C :f04_b)
+ObjectPropertyAssertion(:f43_r :f04_b :f04_b)
+
+# Individual: :f05_a (:f05_a)
+
+ClassAssertion(owl:Thing :f05_a)
+ClassAssertion(ObjectAllValuesFrom(:f05_r :f05_C) :f05_a)
+ObjectPropertyAssertion(:f05_r :f05_a :f05_b)
+ObjectPropertyAssertion(:f05_r :f05_a :f05_c)
+ObjectPropertyAssertion(:f43_r :f05_a :f05_a)
+
+# Individual: :f05_b (:f05_b)
+
+ClassAssertion(:f05_C :f05_b)
+ObjectPropertyAssertion(:f05_r :f05_b :f05_c)
+ObjectPropertyAssertion(:f43_r :f05_b :f05_b)
+
+# Individual: :f05_c (:f05_c)
+
+ClassAssertion(:f05_C :f05_c)
+ObjectPropertyAssertion(:f43_r :f05_c :f05_c)
+
+# Individual: :f06_b (:f06_b)
+
+ClassAssertion(:f06_D :f06_b)
+ClassAssertion(ObjectAllValuesFrom(:f06_r :f06_C) :f06_b)
+ObjectPropertyAssertion(:f43_r :f06_b :f06_b)
+
+# Individual: :f07_b (:f07_b)
+
+ClassAssertion(:f07_D :f07_b)
+ClassAssertion(ObjectAllValuesFrom(:f07_r :f07_C) :f07_b)
+ObjectPropertyAssertion(:f43_r :f07_b :f07_b)
+
+# Individual: :f07_d (:f07_d)
+
+ClassAssertion(:f07_D :f07_d)
+ObjectPropertyAssertion(:f07_r :f07_d :f07_e)
+ObjectPropertyAssertion(:f43_r :f07_d :f07_d)
+
+# Individual: :f07_e (:f07_e)
+
+ClassAssertion(:f07_C :f07_e)
+ObjectPropertyAssertion(:f43_r :f07_e :f07_e)
+
+# Individual: :f08_a (:f08_a)
+
+ClassAssertion(owl:Thing :f08_a)
+ClassAssertion(ObjectAllValuesFrom(ObjectInverseOf(:f08_r) :f08_C) :f08_a)
+ObjectPropertyAssertion(:f43_r :f08_a :f08_a)
+
+# Individual: :f08_b (:f08_b)
+
+ClassAssertion(owl:Thing :f08_b)
+ObjectPropertyAssertion(:f08_r :f08_b :f08_a)
+ObjectPropertyAssertion(:f43_r :f08_b :f08_b)
+
+# Individual: :f11_a (:f11_a)
+
+ClassAssertion(owl:Thing :f11_a)
+ClassAssertion(ObjectAllValuesFrom(:f11_r ObjectIntersectionOf(:f11_C ObjectSomeValuesFrom(:f11_s :f11_D))) :f11_a)
+ObjectPropertyAssertion(:f11_r :f11_a :f11_b)
+ObjectPropertyAssertion(:f43_r :f11_a :f11_a)
+
+# Individual: :f11_b (:f11_b)
+
+ClassAssertion(:f11_C :f11_b)
+ClassAssertion(:f11_E :f11_b)
+ObjectPropertyAssertion(:f43_r :f11_b :f11_b)
+
+# Individual: :f12_a (:f12_a)
+
+ClassAssertion(owl:Thing :f12_a)
+ClassAssertion(ObjectAllValuesFrom(:f12_r :f12_C) :f12_a)
+ObjectPropertyAssertion(:f12_r :f12_a :f12_b)
+ObjectPropertyAssertion(:f43_r :f12_a :f12_a)
+
+# Individual: :f12_b (:f12_b)
+
+ClassAssertion(:f12_C :f12_b)
+ObjectPropertyAssertion(:f12_t :f12_b :f12_a)
+ObjectPropertyAssertion(:f43_r :f12_b :f12_b)
+
+# Individual: :f13_a (:f13_a)
+
+ClassAssertion(owl:Thing :f13_a)
+ClassAssertion(ObjectAllValuesFrom(:f13_r :f13_C) :f13_a)
+ObjectPropertyAssertion(:f13_r :f13_a :f13_b)
+ObjectPropertyAssertion(:f43_r :f13_a :f13_a)
+
+# Individual: :f13_b (:f13_b)
+
+ClassAssertion(:f13_C :f13_b)
+ObjectPropertyAssertion(:f13_r :f13_b :f13_a)
+ObjectPropertyAssertion(:f43_r :f13_b :f13_b)
+
+# Individual: :f15_a (:f15_a)
+
+ClassAssertion(owl:Thing :f15_a)
+ClassAssertion(ObjectAllValuesFrom(:f15_r :f15_C) :f15_a)
+ClassAssertion(ObjectAllValuesFrom(:f15_r :f15_D) :f15_a)
+ObjectPropertyAssertion(:f15_r :f15_a :f15_b)
+ObjectPropertyAssertion(:f43_r :f15_a :f15_a)
+
+# Individual: :f15_b (:f15_b)
+
+ClassAssertion(:f15_E :f15_b)
+ObjectPropertyAssertion(:f43_r :f15_b :f15_b)
+
+# Individual: :f16_a (:f16_a)
+
+ClassAssertion(owl:Thing :f16_a)
+ObjectPropertyAssertion(:f16_r :f16_a :f16_b)
+ObjectPropertyAssertion(:f43_r :f16_a :f16_a)
+
+# Individual: :f16_b (:f16_b)
+
+ClassAssertion(:f16_C :f16_b)
+ObjectPropertyAssertion(:f43_r :f16_b :f16_b)
+
+# Individual: :f20_a (:f20_a)
+
+ClassAssertion(:f20_A :f20_a)
+ClassAssertion(ObjectSomeValuesFrom(:f20_r ObjectOneOf(:f20_b)) :f20_a)
+ObjectPropertyAssertion(:f20_r :f20_a :f20_b)
+ObjectPropertyAssertion(:f43_r :f20_a :f20_a)
+
+# Individual: :f20_b (:f20_b)
+
+ClassAssertion(:f20_C :f20_b)
+ObjectPropertyAssertion(:f43_r :f20_b :f20_b)
+
+# Individual: :f22_a (:f22_a)
+
+ClassAssertion(owl:Thing :f22_a)
+ClassAssertion(ObjectAllValuesFrom(:f22_t :f22_C) :f22_a)
+ObjectPropertyAssertion(:f22_r :f22_a :f22_b)
+ObjectPropertyAssertion(:f22_t :f22_a :f22_c)
+ObjectPropertyAssertion(:f43_r :f22_a :f22_a)
+
+# Individual: :f22_b (:f22_b)
+
+ClassAssertion(owl:Thing :f22_b)
+ObjectPropertyAssertion(:f22_s :f22_b :f22_c)
+ObjectPropertyAssertion(:f43_r :f22_b :f22_b)
+
+# Individual: :f22_c (:f22_c)
+
+ClassAssertion(:f22_C :f22_c)
+ObjectPropertyAssertion(:f43_r :f22_c :f22_c)
+
+# Individual: :f23_a (:f23_a)
+
+ClassAssertion(:f23_A :f23_a)
+ClassAssertion(:f23_E :f23_a)
+ClassAssertion(ObjectAllValuesFrom(:f23_r :f23_C) :f23_a)
+ObjectPropertyAssertion(:f43_r :f23_a :f23_a)
+
+# Individual: :f24_a (:f24_a)
+
+ClassAssertion(:f24_A2 :f24_a)
+ObjectPropertyAssertion(:f24_r :f24_a :f24_b)
+ObjectPropertyAssertion(:f43_r :f24_a :f24_a)
+
+# Individual: :f24_b (:f24_b)
+
+ClassAssertion(:f24_C :f24_b)
+ObjectPropertyAssertion(:f43_r :f24_b :f24_b)
+
+# Individual: :f25_a (:f25_a)
+
+ClassAssertion(owl:Thing :f25_a)
+ObjectPropertyAssertion(:f25_r :f25_a :f25_b)
+ObjectPropertyAssertion(:f43_r :f25_a :f25_a)
+
+# Individual: :f25_b (:f25_b)
+
+ClassAssertion(:f25_C :f25_b)
+ObjectPropertyAssertion(:f43_r :f25_b :f25_b)
+
+# Individual: :f28_a (:f28_a)
+
+ClassAssertion(owl:Thing :f28_a)
+ClassAssertion(ObjectAllValuesFrom(:f28_r ObjectAllValuesFrom(:f28_s :f28_C)) :f28_a)
+ObjectPropertyAssertion(:f28_r :f28_a :f28_b)
+ObjectPropertyAssertion(:f43_r :f28_a :f28_a)
+
+# Individual: :f28_b (:f28_b)
+
+ClassAssertion(owl:Thing :f28_b)
+ObjectPropertyAssertion(:f28_s :f28_b :f28_c)
+ObjectPropertyAssertion(:f43_r :f28_b :f28_b)
+
+# Individual: :f28_c (:f28_c)
+
+ClassAssertion(:f28_C :f28_c)
+ObjectPropertyAssertion(:f43_r :f28_c :f28_c)
+
+# Individual: :f29_a (:f29_a)
+
+ClassAssertion(owl:Thing :f29_a)
+ObjectPropertyAssertion(:f29_r :f29_a :f29_b)
+ObjectPropertyAssertion(:f43_r :f29_a :f29_a)
+
+# Individual: :f29_b (:f29_b)
+
+ClassAssertion(owl:Thing :f29_b)
+ObjectPropertyAssertion(:f29_s :f29_b :f29_c)
+ObjectPropertyAssertion(:f43_r :f29_b :f29_b)
+
+# Individual: :f29_c (:f29_c)
+
+ClassAssertion(:f29_C :f29_c)
+ObjectPropertyAssertion(:f43_r :f29_c :f29_c)
+
+# Individual: :f30_a (:f30_a)
+
+ClassAssertion(owl:Thing :f30_a)
+ObjectPropertyAssertion(:f30_r :f30_a :f30_b)
+ObjectPropertyAssertion(:f30_s :f30_a :f30_c)
+ObjectPropertyAssertion(:f43_r :f30_a :f30_a)
+
+# Individual: :f30_b (:f30_b)
+
+ClassAssertion(owl:Thing :f30_b)
+ObjectPropertyAssertion(:f43_r :f30_b :f30_b)
+
+# Individual: :f30_c (:f30_c)
+
+ClassAssertion(:f30_C :f30_c)
+ObjectPropertyAssertion(:f43_r :f30_c :f30_c)
+
+# Individual: :f33_a (:f33_a)
+
+ClassAssertion(:f33_A :f33_a)
+ObjectPropertyAssertion(:f33_r :f33_a :f33_b)
+ObjectPropertyAssertion(:f33_r :f33_a :f33_b2)
+ObjectPropertyAssertion(:f43_r :f33_a :f33_a)
+
+# Individual: :f33_b (:f33_b)
+
+ClassAssertion(:f33_C :f33_b)
+SameIndividual(:f33_b :f33_b2)
+ObjectPropertyAssertion(:f43_r :f33_b :f33_b)
+ObjectPropertyAssertion(:f43_r :f33_b :f33_b2)
+
+# Individual: :f33_b2 (:f33_b2)
+
+ClassAssertion(:f33_C :f33_b2)
+ObjectPropertyAssertion(:f43_r :f33_b2 :f33_b)
+ObjectPropertyAssertion(:f43_r :f33_b2 :f33_b2)
+
+# Individual: :f34_a (:f34_a)
+
+ClassAssertion(owl:Thing :f34_a)
+ClassAssertion(ObjectAllValuesFrom(:f34_r :f34_C) :f34_a)
+SameIndividual(:f34_a :f34_a2)
+ObjectPropertyAssertion(:f34_r :f34_a :f34_b)
+ObjectPropertyAssertion(:f43_r :f34_a :f34_a)
+ObjectPropertyAssertion(:f43_r :f34_a :f34_a2)
+
+# Individual: :f34_a2 (:f34_a2)
+
+ClassAssertion(owl:Thing :f34_a2)
+ObjectPropertyAssertion(:f34_r :f34_a2 :f34_b)
+ObjectPropertyAssertion(:f43_r :f34_a2 :f34_a)
+ObjectPropertyAssertion(:f43_r :f34_a2 :f34_a2)
+
+# Individual: :f34_b (:f34_b)
+
+ClassAssertion(:f34_C :f34_b)
+ObjectPropertyAssertion(:f43_r :f34_b :f34_b)
+
+# Individual: :f37_b (:f37_b)
+
+ClassAssertion(owl:Thing :f37_b)
+ClassAssertion(ObjectComplementOf(:f37_C) :f37_b)
+ObjectPropertyAssertion(:f43_r :f37_b :f37_b)
+
+# Individual: :f40_a (:f40_a)
+
+ClassAssertion(owl:Thing :f40_a)
+ClassAssertion(ObjectAllValuesFrom(:f40_r ObjectOneOf(:f40_c)) :f40_a)
+ObjectPropertyAssertion(:f40_r :f40_a :f40_b)
+ObjectPropertyAssertion(:f40_r :f40_a :f40_c)
+ObjectPropertyAssertion(:f43_r :f40_a :f40_a)
+
+# Individual: :f40_b (:f40_b)
+
+ClassAssertion(:f40_B :f40_b)
+ObjectPropertyAssertion(:f43_r :f40_b :f40_b)
+ObjectPropertyAssertion(:f43_r :f40_b :f40_c)
+
+# Individual: :f40_c (:f40_c)
+
+ClassAssertion(:f40_B :f40_c)
+ObjectPropertyAssertion(:f43_r :f40_c :f40_b)
+ObjectPropertyAssertion(:f43_r :f40_c :f40_c)
+
+# Individual: :f41_a (:f41_a)
+
+ClassAssertion(owl:Thing :f41_a)
+ClassAssertion(ObjectAllValuesFrom(:f41_r ObjectUnionOf(:f41_C :f41_D)) :f41_a)
+ObjectPropertyAssertion(:f41_r :f41_a :f41_b)
+ObjectPropertyAssertion(:f43_r :f41_a :f41_a)
+
+# Individual: :f41_b (:f41_b)
+
+ClassAssertion(:f41_E :f41_b)
+ObjectPropertyAssertion(:f43_r :f41_b :f41_b)
+
+# Individual: :f42_a (:f42_a)
+
+ClassAssertion(owl:Thing :f42_a)
+ClassAssertion(ObjectAllValuesFrom(:f42_r ObjectHasValue(:f42_s :f42_c)) :f42_a)
+ObjectPropertyAssertion(:f42_r :f42_a :f42_b)
+ObjectPropertyAssertion(:f43_r :f42_a :f42_a)
+
+# Individual: :f42_b (:f42_b)
+
+ClassAssertion(owl:Thing :f42_b)
+ObjectPropertyAssertion(:f42_s :f42_b :f42_c)
+ObjectPropertyAssertion(:f43_r :f42_b :f42_b)
+
+# Individual: :f42_c (:f42_c)
+
+ClassAssertion(owl:Thing :f42_c)
+ObjectPropertyAssertion(:f43_r :f42_c :f42_c)
+
+# Individual: :f43_a (:f43_a)
+
+ClassAssertion(:f43_C :f43_a)
+ClassAssertion(ObjectAllValuesFrom(:f43_r :f43_C) :f43_a)
+ObjectPropertyAssertion(:f43_r :f43_a :f43_a)
+
+# Individual: :f44_a (:f44_a)
+
+ClassAssertion(:f44_C :f44_a)
+ClassAssertion(ObjectAllValuesFrom(:f44_r :f44_C) :f44_a)
+ClassAssertion(ObjectHasSelf(:f44_r) :f44_a)
+ObjectPropertyAssertion(:f43_r :f44_a :f44_a)
+ObjectPropertyAssertion(:f44_r :f44_a :f44_a)
+
+# Individual: :forall_abox_f (:forall_abox_f)
+
+ClassAssertion(owl:Thing :forall_abox_f)
+ClassAssertion(ObjectAllValuesFrom(:forall_abox_q :forall_abox_B) :forall_abox_f)
+ObjectPropertyAssertion(:f43_r :forall_abox_f :forall_abox_f)
+ObjectPropertyAssertion(:forall_abox_q :forall_abox_f :forall_abox_x)
+
+# Individual: :forall_abox_x (:forall_abox_x)
+
+ClassAssertion(:forall_abox_B :forall_abox_x)
+ObjectPropertyAssertion(:f43_r :forall_abox_x :forall_abox_x)
+
+# Individual: :m03_a (:m03_a)
+
+ClassAssertion(owl:Thing :m03_a)
+ClassAssertion(ObjectMaxCardinality(1 :m03_r :m03_C) :m03_a)
+ObjectPropertyAssertion(:f43_r :m03_a :m03_a)
+ObjectPropertyAssertion(:m03_r :m03_a :m03_b)
+ObjectPropertyAssertion(:m03_r :m03_a :m03_c)
+
+# Individual: :m03_b (:m03_b)
+
+ClassAssertion(:m03_B :m03_b)
+ClassAssertion(:m03_C :m03_b)
+ObjectPropertyAssertion(:f43_r :m03_b :m03_b)
+ObjectPropertyAssertion(:f43_r :m03_b :m03_c)
+
+# Individual: :m03_c (:m03_c)
+
+ClassAssertion(:m03_B :m03_c)
+ClassAssertion(:m03_C :m03_c)
+ObjectPropertyAssertion(:f43_r :m03_c :m03_b)
+ObjectPropertyAssertion(:f43_r :m03_c :m03_c)
+
+# Individual: :m05_b (:m05_b)
+
+ClassAssertion(:m05_A :m05_b)
+ClassAssertion(ObjectMaxCardinality(1 :m05_r) :m05_b)
+ObjectPropertyAssertion(:f43_r :m05_b :m05_b)
+
+# Individual: :m06_a (:m06_a)
+
+ClassAssertion(owl:Thing :m06_a)
+ClassAssertion(ObjectMaxCardinality(2 :m06_r) :m06_a)
+ObjectPropertyAssertion(:f43_r :m06_a :m06_a)
+ObjectPropertyAssertion(:m06_r :m06_a :m06_b)
+ObjectPropertyAssertion(:m06_r :m06_a :m06_c)
+ObjectPropertyAssertion(:m06_r :m06_a :m06_d)
+
+# Individual: :m06_b (:m06_b)
+
+ClassAssertion(:m06_B :m06_b)
+ObjectPropertyAssertion(:f43_r :m06_b :m06_b)
+
+# Individual: :m06_c (:m06_c)
+
+ClassAssertion(owl:Thing :m06_c)
+ObjectPropertyAssertion(:f43_r :m06_c :m06_c)
+
+# Individual: :m06_d (:m06_d)
+
+ClassAssertion(owl:Thing :m06_d)
+ObjectPropertyAssertion(:f43_r :m06_d :m06_d)
+
+# Individual: :m12_b (:m12_b)
+
+ClassAssertion(:m12_D :m12_b)
+ClassAssertion(ObjectMaxCardinality(1 :m12_r) :m12_b)
+ObjectPropertyAssertion(:f43_r :m12_b :m12_b)
+
+# Individual: :m14_a (:m14_a)
+
+ClassAssertion(owl:Thing :m14_a)
+ClassAssertion(ObjectMaxCardinality(1 ObjectInverseOf(:m14_r)) :m14_a)
+ObjectPropertyAssertion(:f43_r :m14_a :m14_a)
+
+# Individual: :m14_b (:m14_b)
+
+ClassAssertion(:m14_B :m14_b)
+ObjectPropertyAssertion(:f43_r :m14_b :m14_b)
+ObjectPropertyAssertion(:m14_r :m14_b :m14_a)
+
+# Individual: :m14_c (:m14_c)
+
+ClassAssertion(owl:Thing :m14_c)
+ObjectPropertyAssertion(:f43_r :m14_c :m14_c)
+ObjectPropertyAssertion(:m14_r :m14_c :m14_a)
+
+# Individual: :m15_a (:m15_a)
+
+ClassAssertion(owl:Thing :m15_a)
+ClassAssertion(ObjectMinCardinality(2 :m15_r) :m15_a)
+ClassAssertion(ObjectMaxCardinality(1 :m15_r) :m15_a)
+ObjectPropertyAssertion(:f43_r :m15_a :m15_a)
+
+# Individual: :m19_a (:m19_a)
+
+ClassAssertion(owl:Thing :m19_a)
+ClassAssertion(ObjectMaxCardinality(3 :m19_r) :m19_a)
+
+# Individual: :m21_a (:m21_a)
+
+ClassAssertion(owl:Thing :m21_a)
+ClassAssertion(ObjectMaxCardinality(1 :m21_r :m21_C) :m21_a)
+ObjectPropertyAssertion(:f43_r :m21_a :m21_a)
+ObjectPropertyAssertion(:m21_r :m21_a :m21_b)
+ObjectPropertyAssertion(:m21_r :m21_a :m21_c)
+
+# Individual: :m21_b (:m21_b)
+
+ClassAssertion(:m21_B :m21_b)
+ClassAssertion(:m21_C :m21_b)
+ObjectPropertyAssertion(:f43_r :m21_b :m21_b)
+ObjectPropertyAssertion(:f43_r :m21_b :m21_c)
+
+# Individual: :m21_c (:m21_c)
+
+ClassAssertion(:m21_B :m21_c)
+ClassAssertion(:m21_C :m21_c)
+ObjectPropertyAssertion(:f43_r :m21_c :m21_b)
+ObjectPropertyAssertion(:f43_r :m21_c :m21_c)
+
+# Individual: :n01_b (:n01_b)
+
+ClassAssertion(:n01_B :n01_b)
+ObjectPropertyAssertion(:f43_r :n01_b :n01_b)
+
+# Individual: :n01_c (:n01_c)
+
+ClassAssertion(owl:Thing :n01_c)
+ObjectPropertyAssertion(:f43_r :n01_c :n01_c)
+
+# Individual: :n03_a (:n03_a)
+
+ClassAssertion(owl:Thing :n03_a)
+ClassAssertion(ObjectAllValuesFrom(:n03_r :n03_C) :n03_a)
+ClassAssertion(ObjectMaxCardinality(1 :n03_r :n03_C) :n03_a)
+ObjectPropertyAssertion(:f43_r :n03_a :n03_a)
+ObjectPropertyAssertion(:n03_r :n03_a :n03_b)
+ObjectPropertyAssertion(:n03_r :n03_a :n03_c)
+
+# Individual: :n03_b (:n03_b)
+
+ClassAssertion(:n03_B :n03_b)
+ClassAssertion(:n03_C :n03_b)
+ObjectPropertyAssertion(:f43_r :n03_b :n03_b)
+ObjectPropertyAssertion(:f43_r :n03_b :n03_c)
+
+# Individual: :n03_c (:n03_c)
+
+ClassAssertion(:n03_B :n03_c)
+ClassAssertion(:n03_C :n03_c)
+ObjectPropertyAssertion(:f43_r :n03_c :n03_b)
+ObjectPropertyAssertion(:f43_r :n03_c :n03_c)
+
+# Individual: :n04_a (:n04_a)
+
+ClassAssertion(owl:Thing :n04_a)
+ClassAssertion(ObjectMaxCardinality(1 :n04_r :n04_C) :n04_a)
+ObjectPropertyAssertion(:f43_r :n04_a :n04_a)
+ObjectPropertyAssertion(:n04_r :n04_a :n04_b)
+ObjectPropertyAssertion(:n04_r :n04_a :n04_c)
+
+# Individual: :n04_b (:n04_b)
+
+ClassAssertion(:n04_B :n04_b)
+ClassAssertion(:n04_C :n04_b)
+ClassAssertion(:n04_D :n04_b)
+ObjectPropertyAssertion(:f43_r :n04_b :n04_b)
+ObjectPropertyAssertion(:f43_r :n04_b :n04_c)
+
+# Individual: :n04_c (:n04_c)
+
+ClassAssertion(:n04_B :n04_c)
+ClassAssertion(:n04_D :n04_c)
+ObjectPropertyAssertion(:f43_r :n04_c :n04_b)
+ObjectPropertyAssertion(:f43_r :n04_c :n04_c)
+
+# Individual: :n09_a (:n09_a)
+
+ClassAssertion(owl:Thing :n09_a)
+ClassAssertion(ObjectMaxCardinality(1 :n09_r ObjectOneOf(:n09_b :n09_c)) :n09_a)
+ObjectPropertyAssertion(:f43_r :n09_a :n09_a)
+ObjectPropertyAssertion(:n09_r :n09_a :n09_b)
+ObjectPropertyAssertion(:n09_r :n09_a :n09_c)
+
+# Individual: :n09_b (:n09_b)
+
+ClassAssertion(:n09_B :n09_b)
+ObjectPropertyAssertion(:f43_r :n09_b :n09_b)
+ObjectPropertyAssertion(:f43_r :n09_b :n09_c)
+
+# Individual: :n09_c (:n09_c)
+
+ClassAssertion(:n09_B :n09_c)
+ObjectPropertyAssertion(:f43_r :n09_c :n09_b)
+ObjectPropertyAssertion(:f43_r :n09_c :n09_c)
+
+# Individual: :n12_a (:n12_a)
+
+ClassAssertion(:n12_A2 :n12_a)
+ObjectPropertyAssertion(:f43_r :n12_a :n12_a)
+ObjectPropertyAssertion(:n12_r :n12_a :n12_b)
+ObjectPropertyAssertion(:n12_r :n12_a :n12_c)
+
+# Individual: :n12_b (:n12_b)
+
+ClassAssertion(:n12_B :n12_b)
+ClassAssertion(:n12_C :n12_b)
+ObjectPropertyAssertion(:f43_r :n12_b :n12_b)
+ObjectPropertyAssertion(:f43_r :n12_b :n12_c)
+
+# Individual: :n12_c (:n12_c)
+
+ClassAssertion(:n12_B :n12_c)
+ClassAssertion(:n12_C :n12_c)
+ObjectPropertyAssertion(:f43_r :n12_c :n12_b)
+ObjectPropertyAssertion(:f43_r :n12_c :n12_c)
+
+# Individual: :q2_b (:q2_b)
+
+ClassAssertion(:q2_B :q2_b)
+ClassAssertion(:q2_C :q2_b)
+ClassAssertion(ObjectOneOf(:q2_c) :q2_b)
+ObjectPropertyAssertion(:f43_r :q2_b :q2_b)
+ObjectPropertyAssertion(:f43_r :q2_b :q2_c)
+
+# Individual: :q2_c (:q2_c)
+
+ClassAssertion(:q2_B :q2_c)
+ClassAssertion(:q2_C :q2_c)
+ObjectPropertyAssertion(:f43_r :q2_c :q2_b)
+ObjectPropertyAssertion(:f43_r :q2_c :q2_c)
+
+# Individual: :q5_a (:q5_a)
+
+ClassAssertion(owl:Thing :q5_a)
+ClassAssertion(ObjectAllValuesFrom(:q5_r ObjectOneOf(:q5_c)) :q5_a)
+ObjectPropertyAssertion(:f43_r :q5_a :q5_a)
+ObjectPropertyAssertion(:q5_r :q5_a :q5_b)
+ObjectPropertyAssertion(:q5_r :q5_a :q5_c)
+
+# Individual: :q5_b (:q5_b)
+
+ClassAssertion(:q5_B :q5_b)
+ClassAssertion(:q5_C :q5_b)
+ObjectPropertyAssertion(:f43_r :q5_b :q5_b)
+ObjectPropertyAssertion(:f43_r :q5_b :q5_c)
+
+# Individual: :q5_c (:q5_c)
+
+ClassAssertion(:q5_B :q5_c)
+ClassAssertion(:q5_C :q5_c)
+ObjectPropertyAssertion(:f43_r :q5_c :q5_b)
+ObjectPropertyAssertion(:f43_r :q5_c :q5_c)
+
+
+SubClassOf(ObjectIntersectionOf(:f31_C :f31_D) :f31_E)
+SubClassOf(ObjectOneOf(:f16_a) ObjectAllValuesFrom(:f16_r :f16_C))
+SubClassOf(ObjectOneOf(:m21_b) :m21_C)
+SubClassOf(ObjectOneOf(:m21_c) :m21_C)
+SubClassOf(ObjectAllValuesFrom(:f06_r :f06_C) :f06_D)
+SubClassOf(ObjectMaxCardinality(1 :m12_r) :m12_D)
+SubClassOf(DataSomeValuesFrom(:d20_dp xsd:integer) :d20_K)
+SubClassOf(DataSomeValuesFrom(:d21_dp xsd:integer) ObjectSomeValuesFrom(:d21_r :d21_C))
+SubClassOf(DataSomeValuesFrom(:data_abox_dp xsd:integer) :data_abox_K)
+DifferentIndividuals(:m06_b :m06_c :m06_d)
+SubObjectPropertyOf(ObjectPropertyChain(:f22_r :f22_s) :f22_t)
+)

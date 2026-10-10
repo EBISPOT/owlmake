@@ -336,7 +336,7 @@ fn query_subset(model: Model, args: &Args) -> Result<Model> {
         // A bare named class (no Manchester operators) is itself a member — the
         // reasoner's Descendants/Equivalent sets never include the query class.
         if !q.trim().contains(char::is_whitespace) {
-            seed.insert(select::expand(&model, q));
+            seed.insert(select::expand_with_document_prefixes(&model, q));
         }
         for kind in ["descendants", "equivalent"] {
             seed.extend(
@@ -352,7 +352,7 @@ fn query_subset(model: Model, args: &Args) -> Result<Model> {
         }
     }
     // Additive seeds: explicit terms and (if given) an inSubset slice.
-    seed.extend(select::collect_terms(&model, &args.term, &args.term_file)?);
+    seed.extend(select::collect_terms_with_document_prefixes(&model, &args.term, &args.term_file)?);
     if let Some(name) = &args.subset {
         seed.extend(inset_seed(&model, name));
     }

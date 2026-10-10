@@ -1,0 +1,47 @@
+Prefix(:=<http://example.org/ext#>)
+Prefix(e:=<http://example.org/other#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/ext>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(e:D))
+Declaration(Class(e:W))
+Declaration(Class(e:Y))
+Declaration(Class(e:Z))
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A owl:Thing)
+
+# Class: :B (:B)
+
+SubClassOf(:B owl:Thing)
+
+# Class: e:D (e:D)
+
+SubClassOf(e:D owl:Thing)
+
+# Class: e:W (e:W)
+
+SubClassOf(e:W :A)
+
+# Class: e:Y (e:Y)
+
+SubClassOf(e:Y owl:Thing)
+
+# Class: e:Z (e:Z)
+
+SubClassOf(e:Z e:Y)
+
+
+)

@@ -1,0 +1,18 @@
+@prefix : <http://example.org/repeat#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<http://example.org/repeat> a owl:Ontology .
+:p a owl:ObjectProperty .
+:d a owl:DatatypeProperty .
+:note a owl:AnnotationProperty .
+:A a owl:Class .
+
+_:a a :A .
+_:b a :A .
+_:a :p _:b .
+_:a :d "1"^^xsd:integer .
+[ a owl:Axiom ; owl:annotatedSource _:a ; owl:annotatedProperty :p ; owl:annotatedTarget _:b ; :note "related" ] .
+_:a :p _:b .
+_:a :d "1"^^xsd:integer .
+[ a owl:Axiom ; owl:annotatedSource _:a ; owl:annotatedProperty :d ; owl:annotatedTarget "1"^^xsd:integer ; :note "valued" ] .

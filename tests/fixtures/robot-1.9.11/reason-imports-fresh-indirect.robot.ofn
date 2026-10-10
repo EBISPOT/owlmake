@@ -1,0 +1,83 @@
+Prefix(:=<http://x.org/root#>)
+Prefix(po:=<http://x.org/po#>)
+Prefix(efo:=<http://x.org/efo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://x.org/root>
+
+Declaration(Class(efo:EFO_0000998))
+Declaration(Class(:LeafComponent))
+Declaration(Class(:ReproSystem))
+############################
+#   Classes
+############################
+
+# Class: efo:EFO_0000998 (efo:EFO_0000998)
+
+SubClassOf(efo:EFO_0000998 owl:Thing)
+SubClassOf(efo:EFO_0000998 po:Structure)
+
+# Class: po:Flower (po:Flower)
+
+SubClassOf(po:Flower owl:Thing)
+SubClassOf(po:Flower po:Structure)
+SubClassOf(po:Flower :ReproSystem)
+
+# Class: po:Leaf (po:Leaf)
+
+SubClassOf(po:Leaf owl:Thing)
+SubClassOf(po:Leaf po:Structure)
+
+# Class: po:Organ (po:Organ)
+
+SubClassOf(po:Organ owl:Thing)
+SubClassOf(po:Organ po:Structure)
+
+# Class: po:Perianth (po:Perianth)
+
+SubClassOf(po:Perianth owl:Thing)
+SubClassOf(po:Perianth po:Organ)
+SubClassOf(po:Perianth po:Structure)
+SubClassOf(po:Perianth :ReproSystem)
+
+# Class: po:Stoma (po:Stoma)
+
+SubClassOf(po:Stoma owl:Thing)
+SubClassOf(po:Stoma po:Structure)
+SubClassOf(po:Stoma po:Tissue)
+SubClassOf(po:Stoma :LeafComponent)
+
+# Class: po:Structure (po:Structure)
+
+SubClassOf(po:Structure owl:Thing)
+
+# Class: po:Tepal (po:Tepal)
+
+SubClassOf(po:Tepal owl:Thing)
+SubClassOf(po:Tepal po:Organ)
+SubClassOf(po:Tepal po:Perianth)
+SubClassOf(po:Tepal po:Structure)
+SubClassOf(po:Tepal :ReproSystem)
+
+# Class: po:Tissue (po:Tissue)
+
+SubClassOf(po:Tissue owl:Thing)
+SubClassOf(po:Tissue po:Structure)
+
+# Class: :LeafComponent (:LeafComponent)
+
+SubClassOf(:LeafComponent owl:Thing)
+SubClassOf(:LeafComponent po:Structure)
+
+# Class: :ReproSystem (:ReproSystem)
+
+SubClassOf(:ReproSystem owl:Thing)
+SubClassOf(:ReproSystem po:Structure)
+
+
+)

@@ -1,0 +1,5 @@
+old	new	label
+http://example.org/rename-entities#A	http://example.org/rename-entities#Z	zed
+http://example.org/rename-entities#p	http://example.org/rename-entities#q	
+http://example.org/rename-entities#ap	http://example.org/rename-entities#aq	
+http://example.org/rename-entities#dt	http://example.org/rename-entities#dt2	

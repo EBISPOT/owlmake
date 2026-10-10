@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/one-class-disjointness#>)
+Ontology(<http://example.org/one-class-disjointness>
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:F))
+DisjointClasses(:E :E)
+SubClassOf(:F :E)
+SubClassOf(:D owl:Thing)
+)

@@ -1,0 +1,58 @@
+Prefix(:=<http://example.org/mireot-cycles#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/mireot-cycles>
+
+Declaration(Class(:K))
+Declaration(Class(:R1))
+Declaration(Class(:R2))
+Declaration(ObjectProperty(:o1))
+Declaration(ObjectProperty(owl:topObjectProperty))
+Declaration(DataProperty(:d1))
+Declaration(DataProperty(owl:topDataProperty))
+Declaration(AnnotationProperty(rdfs:label))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :o1 (:o1)
+
+SubObjectPropertyOf(:o1 owl:topObjectProperty)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :d1 (:d1)
+
+SubDataPropertyOf(:d1 owl:topDataProperty)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :K (:K)
+
+SubClassOf(:K :R1)
+SubClassOf(:K :R2)
+
+# Class: :R1 (r one)
+
+AnnotationAssertion(rdfs:label :R1 "r one")
+SubClassOf(:R1 owl:Thing)
+
+# Class: :R2 (:R2)
+
+SubClassOf(:R2 owl:Thing)
+
+
+)

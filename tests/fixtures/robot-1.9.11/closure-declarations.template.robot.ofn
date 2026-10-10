@@ -1,0 +1,42 @@
+Prefix(:=<http://example.org/closure-declarations.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/closure-declarations.owl>
+Import(<http://example.org/closure-declarations-child.owl>)
+
+Declaration(Class(<http://example.org/c#A>))
+Declaration(Class(<http://example.org/c#B>))
+Declaration(Class(<http://example.org/c#M>))
+Declaration(Class(<http://example.org/c#T1>))
+Declaration(ObjectProperty(<http://example.org/c#p>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/c#A> (a)
+
+AnnotationAssertion(rdfs:label <http://example.org/c#A> "a")
+EquivalentClasses(<http://example.org/c#A> ObjectIntersectionOf(<http://example.org/c#B> ObjectSomeValuesFrom(<http://example.org/c#p> <http://example.org/c#M>)))
+SubClassOf(<http://example.org/c#A> <http://example.org/c#B>)
+SubClassOf(<http://example.org/c#A> <http://example.org/c#M>)
+
+# Class: <http://example.org/c#M> (<http://example.org/c#M>)
+
+SubClassOf(<http://example.org/c#M> <http://example.org/c#B>)
+
+# Class: <http://example.org/c#T1> (t one)
+
+AnnotationAssertion(rdfs:label <http://example.org/c#T1> "t one")
+SubClassOf(<http://example.org/c#T1> <http://example.org/c#A>)
+
+
+ClassAssertion(<http://example.org/c#B> _:genid2147483648)
+)

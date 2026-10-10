@@ -91,9 +91,10 @@ impl CommonArgs {
     ///
     /// Resolution order: an explicit `--catalog`, else an auto-detected sibling
     /// `catalog-v001.xml` (the layout curators and Protégé maintain), else a local
-    /// sibling file, else fetching the import IRI over the network. A network
-    /// failure is non-fatal (the import is left unresolved). `input` is the main
-    /// document's path, used to resolve catalog-relative and default-local paths.
+    /// sibling file, else fetching the import IRI over the network. An import none
+    /// of these resolves fails the command (see [`for_each_import`]). `input` is the
+    /// main document's path, used to resolve catalog-relative and default-local
+    /// paths.
     pub fn apply_catalog(&self, model: &mut Model, input: Option<&Path>) -> Result<()> {
         if let Some(catalog) = self.catalog.as_deref() {
             return merge_import_closure(model, catalog, input);
@@ -131,6 +132,33 @@ impl CommonArgs {
         Ok(out)
     }
 
+    /// Bind this command line's prefixes into `context`, the one a CURIE it is
+    /// given is read with: a `--prefixes` file in place of the built-in map, or
+    /// none under `--noprefixes`, then each `--add-prefixes` file, `--prefix` and
+    /// `--add-prefix`, in that order.
+    pub fn bind(&self, context: &mut crate::context::Context) -> Result<()> {
+        if let Some(file) = &self.prefixes {
+            *context = crate::context::Context::without_builtin();
+            let only = CommonArgs { prefixes: Some(file.clone()), ..Default::default() };
+            for (name, ns) in only.given_prefixes()? {
+                context.bind(&name, &ns);
+            }
+        } else if self.noprefixes {
+            *context = crate::context::Context::without_builtin();
+        }
+        for file in &self.add_prefixes {
+            let only = CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
+            for (name, ns) in only.given_prefixes()? {
+                context.bind(&name, &ns);
+            }
+        }
+        for spec in self.prefix.iter().chain(&self.add_prefix) {
+            let (name, ns) = Self::binding(spec)?;
+            context.bind(&name, &ns);
+        }
+        Ok(())
+    }
+
     fn binding(spec: &str) -> Result<(String, String)> {
         let (name, ns) = spec
             .split_once(':')
@@ -142,13 +170,15 @@ impl CommonArgs {
     /// loading, on top of the document's own prefixes (`--noprefixes` clears the
     /// built-in defaults first).
     ///
-    /// Every prefix given binds a name for reading CURIEs. `--prefix` and
-    /// `--prefixes` do nothing else. An ADDED prefix (`--add-prefix`,
-    /// `--add-prefixes`) is also declared by whatever is written next, used or
-    /// not, even by an ontology built from nothing, which declares no other. An
-    /// OBO document takes added prefixes as idspaces only when it is cleaned
-    /// (see `convert::apply_clean_obo`).
+    /// Every prefix given binds a name for reading the CURIEs this command is
+    /// given ([`CommonArgs::bind`]), and joins the document's own prefix map.
+    /// `--prefix` and `--prefixes` do nothing more: nothing written declares
+    /// them. An ADDED prefix (`--add-prefix`, `--add-prefixes`) is also declared
+    /// by what this command writes, used or not, even by an ontology built from
+    /// nothing, which declares no other. An OBO document takes added prefixes as
+    /// idspaces only when it is cleaned (see `convert::apply_clean_obo`).
     pub fn apply(&self, model: &mut Model) -> Result<()> {
+        self.bind(&mut model.context)?;
         if self.noprefixes {
             model.prefixes = PrefixMapping::default();
         }
@@ -231,35 +261,68 @@ pub fn take_or_load(piped: Option<Model>, input: Option<&Path>, common: &CommonA
 /// imports is written among the ontologies it imports (see
 /// [`crate::model::ImportsClosure`]). The closure is resolved from a scratch
 /// document carrying only the root's `Import(...)`s, so the root's own
-/// signature never counts as the closure's. Best-effort: an unresolvable
-/// closure leaves the entities unknown.
-pub(crate) fn read_imports_closure(model: &mut Model, input: Option<&Path>, common: &CommonArgs) {
-    use horned_owl::model::MutableOntology;
-
+/// signature never counts as the closure's. An import that resolves nowhere
+/// fails, as it fails every load of the document. The documents the closure
+/// reads are ones a functional write's banners draw their labels from, as
+/// they are for a document read with its imports merged.
+pub(crate) fn read_imports_closure(
+    model: &mut Model,
+    input: Option<&Path>,
+    common: &CommonArgs,
+) -> Result<()> {
     if model.imports_closure.is_some() {
-        return;
+        return Ok(());
     }
-    let mut imports_only = Model::new();
-    for ac in model.ont.iter() {
-        if matches!(ac.component, horned_owl::model::Component::Import(_)) {
-            imports_only.ont.insert(ac.clone());
+    if let Some(imports) = read_imports(model, input, None, common)? {
+        if model.banner_docs.is_empty() {
+            model.banner_docs.push(banner_doc_of(model, true));
+            model.banner_docs.extend(imports.banner_docs.into_iter().filter(|d| !d.root));
         }
     }
-    if imports_only.ont.iter().next().is_none() {
-        return;
-    }
-    if common.apply_catalog(&mut imports_only, input).is_ok() {
-        model.imports_closure = imports_only.imports_closure;
-    }
+    Ok(())
 }
 
-/// Like [`take_or_load`] but WITHOUT resolving/merging the `owl:imports` closure.
+/// Read the imports closure of `model`, a document loaded without its imports,
+/// where `catalog` resolves each import, else the command's own catalog, else
+/// the catalog beside `input`, and record its entities on `model` (see
+/// [`read_imports_closure`]). Returns the closure's ontologies merged, with a
+/// banner document for each, or `None` when `model` imports nothing. An import
+/// that resolves nowhere fails.
+pub(crate) fn read_imports(
+    model: &mut Model,
+    input: Option<&Path>,
+    catalog: Option<&Path>,
+    common: &CommonArgs,
+) -> Result<Option<Model>> {
+    use horned_owl::model::MutableOntology;
+
+    let mut imports = Model::new();
+    for ac in model.ont.iter() {
+        if matches!(ac.component, horned_owl::model::Component::Import(_)) {
+            imports.ont.insert(ac.clone());
+        }
+    }
+    if imports.ont.iter().next().is_none() {
+        return Ok(None);
+    }
+    match catalog {
+        Some(catalog) => merge_import_closure(&mut imports, catalog, input)?,
+        None => common.apply_catalog(&mut imports, input)?,
+    }
+    model.imports_closure = imports.imports_closure.clone();
+    Ok(Some(imports))
+}
+
+/// Like [`take_or_load`] but WITHOUT merging the `owl:imports` closure.
 ///
 /// For commands that operate only on a document's own axioms and must keep its
 /// `Import(...)` declarations rather than inline the imported ontologies — e.g.
-/// `kgcl:mint … convert`, where no import document is read at all and only the
-/// root is serialised, so the edit file keeps its import declarations instead of
-/// being flattened into its whole closure.
+/// `kgcl:mint … convert`, where only the root is serialised, so the edit file
+/// keeps its import declarations instead of being flattened into its whole
+/// closure. The document is still read with its imports closure
+/// ([`read_imports_closure`]): an import that resolves nowhere fails the load,
+/// and the closure decides what the root writes of an entity it only names. A
+/// piped model is used as the command before it left it.
 pub fn take_or_load_no_imports(
     piped: Option<Model>,
     input: Option<&Path>,
@@ -269,21 +332,9 @@ pub fn take_or_load_no_imports(
     if let Some(model) = piped {
         return Ok(model);
     }
-    single_input(input, common).map(|(model, _)| model)
-}
-
-/// Collect `entity IRI → rdfs:label` across the input's whole import closure, for
-/// the functional-syntax banner comments. Best-effort: a load failure (offline,
-/// missing catalog, no input when piped) yields an empty map and banners fall
-/// back to the CURIE, so this never fails the command.
-pub(crate) fn closure_labels(input: Option<&std::path::Path>, common: &crate::cmd::CommonArgs) -> std::collections::HashMap<String, String> {
-    // `take_or_load` merges the import closure (via the catalog), which is exactly
-    // the label set the banners need; only the labels are read, then it is
-    // discarded.
-    match take_or_load(None, input, common) {
-        Ok(m) => rdfs_labels(&m),
-        Err(_) => std::collections::HashMap::new(),
-    }
+    let (mut model, _) = single_input(input, common)?;
+    read_imports_closure(&mut model, input, common)?;
+    Ok(model)
 }
 
 /// Return every process-wide option to its default, so one invocation cannot
@@ -315,6 +366,123 @@ impl std::fmt::Display for Reported {
 }
 
 impl std::error::Error for Reported {}
+
+/// Whether an option's value switches it on: `true` or `yes`, in any case and
+/// with white space around it. Any other value switches it off.
+pub fn option_is_true(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "true" | "yes")
+}
+
+/// [`option_is_true`] as an argument parser: such an option takes any value.
+pub fn parse_option_true(value: &str) -> Result<bool, std::convert::Infallible> {
+    Ok(option_is_true(value))
+}
+
+/// The message refusing a value of switch `name` that is neither `true` nor
+/// `false`.
+pub fn boolean_value_error(name: &str) -> String {
+    format!("BOOLEAN VALUE ERROR arg for {name} must be true or false")
+}
+
+/// `value` read as switch `name` (named without hyphens): `true` or `false`,
+/// exactly.
+pub fn read_bool(name: &str, value: &str) -> std::result::Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(boolean_value_error(name)),
+    }
+}
+
+/// A switch as a command line gives it. Text that is neither `true` nor
+/// `false` is kept as written, and fails the command where the command reads
+/// the switch.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum Switch {
+    Bool(bool),
+    Text(String),
+}
+
+impl Switch {
+    pub fn parse(text: &str) -> Switch {
+        match read_bool("", text) {
+            Ok(on) => Switch::Bool(on),
+            Err(_) => Switch::Text(text.to_string()),
+        }
+    }
+
+    /// The value of switch `name` (named without hyphens) given as `switch`,
+    /// or `default` when it is not given.
+    pub fn read(switch: Option<&Switch>, name: &str, default: bool) -> Result<bool> {
+        match switch {
+            None => Ok(default),
+            Some(Switch::Bool(on)) => Ok(*on),
+            Some(Switch::Text(_)) => bail!(boolean_value_error(name)),
+        }
+    }
+}
+
+impl From<bool> for Switch {
+    fn from(on: bool) -> Switch {
+        Switch::Bool(on)
+    }
+}
+
+impl std::fmt::Display for Switch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Switch::Bool(on) => write!(f, "{on}"),
+            Switch::Text(text) => write!(f, "{text:?}"),
+        }
+    }
+}
+
+/// The argument parser for a switch the command reads later: it takes any
+/// text ([`Switch::parse`]).
+#[derive(Clone, Copy, Debug)]
+pub struct SwitchParser;
+
+impl clap::builder::TypedValueParser for SwitchParser {
+    type Value = Switch;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> std::result::Result<Switch, clap::Error> {
+        Ok(Switch::parse(&value.to_string_lossy()))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(["true", "false"].into_iter().map(clap::builder::PossibleValue::new)))
+    }
+}
+
+/// The argument parser for a switch: `true` or `false`, exactly, and any other
+/// value refused with the message naming the option ([`read_bool`]).
+#[derive(Clone, Copy, Debug)]
+pub struct BoolParser;
+
+impl clap::builder::TypedValueParser for BoolParser {
+    type Value = bool;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> std::result::Result<bool, clap::Error> {
+        let name = arg.and_then(|a| a.get_long()).unwrap_or_default();
+        read_bool(name, &value.to_string_lossy())
+            .map_err(|message| clap::Error::raw(clap::error::ErrorKind::InvalidValue, format!("{message}\n")).with_cmd(cmd))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(["true", "false"].into_iter().map(clap::builder::PossibleValue::new)))
+    }
+}
 
 /// Resolve an output format from an explicit `--format` name, else the output
 /// path's extension.
@@ -423,36 +591,81 @@ pub(crate) fn merge_import_closure(
         .or_else(|| input.and_then(|p| p.parent().map(Path::to_path_buf)))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    resolve_import_closure(model, &map, &base)
+    let rule = command_import_rule(&map, &base);
+    resolve_import_closure(model, &rule)
 }
 
-/// Resolve and inline the `owl:imports` transitive closure using `map` (a
-/// catalog mapping, possibly empty) with a `default_local` fallback under `base`.
-/// Inlined imports are dropped so the result is self-contained. Used by both the
-/// `--catalog` path and `merge`'s implicit closure following.
-pub(crate) fn resolve_import_closure(
-    model: &mut Model,
-    map: &std::collections::BTreeMap<String, std::path::PathBuf>,
-    base: &Path,
+/// Resolve and inline the `owl:imports` transitive closure, each import where
+/// `resolve` finds it (see [`for_each_import`]). Inlined imports are dropped so
+/// the result is self-contained. Used by both the `--catalog` path and `merge`'s
+/// implicit closure following.
+pub(crate) fn resolve_import_closure(model: &mut Model, resolve: &ImportRule) -> Result<()> {
+    let queue: Vec<String> = imports_of(model);
+    // Every document opened with this one is one more a functional write's
+    // banners draw their labels from; the document itself gives the labels it
+    // has when it is written.
+    if !queue.is_empty() && model.banner_docs.is_empty() {
+        model.banner_docs.push(crate::cmd::banner_doc_of(model, true));
+    }
+    let mut merged_any = false;
+    for_each_import(queue, resolve, |source, imported, from| {
+        let iri = source.iri.clone();
+        lend_import(model, source, &imported);
+        merged_any = true;
+        if crate::progress::verbosity() >= 1 {
+            status!("imports: merged import <{iri}> from {from}");
+        }
+        Ok(())
+    })?;
+    if merged_any {
+        finish_lending(model);
+    }
+    Ok(())
+}
+
+/// Where an import IRI is read from: the file `Ok(Some(..))` names, or with
+/// `Ok(None)` the IRI itself, fetched over the network.
+pub(crate) type ImportRule<'a> = dyn Fn(&str) -> Result<Option<std::path::PathBuf>> + 'a;
+
+/// A command's rule for an import: through `map`, else the file a `file:` IRI
+/// names, else a document of its name beside the importer under `base`, else the
+/// IRI over the network.
+pub(crate) fn command_import_rule<'a>(
+    map: &'a std::collections::BTreeMap<String, std::path::PathBuf>,
+    base: &'a Path,
+) -> impl Fn(&str) -> Result<Option<std::path::PathBuf>> + 'a {
+    move |iri| {
+        Ok(catalog_resolve(map, iri)
+            .or_else(|| io::file_iri_path(iri))
+            .or_else(|| default_local(iri, base)))
+    }
+}
+
+/// Read each ontology of an imports closure, starting from the imports `iris`
+/// names, in the order they are followed, and hand each to `each` with where it
+/// was read from (a path, or the IRI fetched). Each import is read where
+/// `resolve` finds it.
+pub(crate) fn for_each_import(
+    iris: Vec<String>,
+    resolve: &ImportRule,
+    mut each: impl FnMut(crate::model::ImportSource, Model, String) -> Result<()>,
 ) -> Result<()> {
-    let opts = crate::cmd::merge::MergeOptions::default();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut queue: Vec<String> = imports_of(model);
-    let direct: std::collections::HashSet<String> = queue.iter().cloned().collect();
+    let direct: std::collections::HashSet<String> = iris.iter().cloned().collect();
     // Say that this ran, and with how many imports, BEFORE resolving any. The
     // per-import lines below are printed only when there is something to print,
     // so their absence would otherwise be ambiguous between "this path resolves
     // no closure" and "this path was never asked to" — and a reader cannot tell
     // which. Silence must not be the answer to a question the flag was asked.
     if std::env::var("OM_IMPORT_DEBUG").is_ok() {
-        eprintln!("[import] resolving closure: {} direct import(s)", queue.len());
+        eprintln!("[import] resolving closure: {} direct import(s)", iris.len());
     }
-    let mut merged_any = false;
+    let mut queue = iris;
     while let Some(iri) = queue.pop() {
         if !seen.insert(iri.clone()) {
             continue;
         }
-        let path = catalog_resolve(map, &iri).or_else(|| default_local(&iri, base));
+        let path = resolve(&iri)?;
         // …and dedupe on the DOCUMENT too, not only on the name that reached it.
         // Two import IRIs a catalog maps to one file must be parsed once and
         // advance the blank-node counter once. Keyed on the IRI alone, the same
@@ -465,20 +678,20 @@ pub(crate) fn resolve_import_closure(
                 continue;
             }
         }
-        model.import_sources.push(crate::model::ImportSource {
+        let source = crate::model::ImportSource {
             iri: iri.clone(),
             path: path.clone(),
             direct: direct.contains(&iri),
-        });
-        let (imported, source) = match path {
+        };
+        let (imported, from) = match path {
             Some(path) => {
                 let m = crate::io::load(&path)
                     .with_context(|| format!("loading import <{iri}> from {}", path.display()))?;
                 (m, path.display().to_string())
             }
             None => {
-                // Neither a catalog mapping nor a local sibling resolved the import,
-                // so fall back to fetching the import IRI over the network.
+                // No file resolved the import, so fall back to fetching the import
+                // IRI over the network.
                 //
                 // A failure here is FATAL. A command is handed the whole closure
                 // precisely so that it reasons, filters and serialises over the
@@ -500,7 +713,7 @@ pub(crate) fn resolve_import_closure(
                     })?
             }
         };
-        // Follow nested imports too: `merge_into` drops them, so collect first.
+        // Follow nested imports too.
         for nested in imports_of(&imported) {
             if !seen.contains(&nested) {
                 queue.push(nested);
@@ -508,178 +721,152 @@ pub(crate) fn resolve_import_closure(
         }
         if std::env::var("OM_IMPORT_DEBUG").is_ok() {
             eprintln!(
-                "[import] <{iri}> -> {source} ({} components)",
+                "[import] <{iri}> -> {from} ({} components)",
                 imported.ont.iter().count()
             );
         }
-        // What this import LENDS the root: the components the merge is about to
-        // add and the root does not already assert. Taken as the difference the
-        // merge actually makes — candidates checked for membership before and
-        // after — so which components a merge carries stays `merge_into`'s
-        // business alone (it drops the secondary's identity and imports, and
-        // gates its ontology annotations), and this cannot fall out of step with
-        // it. An axiom the root asserts itself is not borrowed and stays.
-        let borrowed: Vec<_> = imported
-            .ont
-            .iter()
-            .filter(|c| !model.ont.i().contains(c))
-            .cloned()
-            .collect();
-        // The closure's entities decide what the root, written among its
-        // imports, states of an entity it only names. The save drops the
-        // borrowed axioms again, which is exactly when this record is the only
-        // thing left that knows.
-        model.imports_closure.get_or_insert_with(Default::default).add(&imported);
-        // A closure member was opened with the document, so a functional
-        // write's banners draw on its labels too.
-        if !model.banner_docs.is_empty() {
-            model.banner_docs.push(crate::cmd::banner_doc_of(&imported, false));
-        }
-        crate::cmd::merge::merge_into(model, &imported, &opts);
-        for c in borrowed {
-            if model.ont.i().contains(&c) {
-                model.imported_components.insert(c);
-            }
-        }
-        merged_any = true;
-        if crate::progress::verbosity() >= 1 {
-            status!("imports: merged import <{iri}> from {source}");
-        }
-    }
-    if merged_any {
-        // The closure is now inlined, so the import declarations are dropped from
-        // the working ontology and every command reasons over the whole closure.
-        //
-        // A save, however, WRITES the root ontology with its `Import(…)`
-        // declarations intact: `om reason -i x.owl -o y.owl` gives a y.owl that
-        // still imports rather than a self-contained document. The IRIs are
-        // recorded on the model so a save can put them back — see
-        // `Model::inlined_imports`.
-        use horned_owl::model::{Component, MutableOntology};
-        let decls: Vec<_> = model
-            .ont
-            .iter()
-            .filter(|ac| matches!(ac.component, Component::Import(_)))
-            .cloned()
-            .collect();
-        for ac in &decls {
-            if let Component::Import(i) = &ac.component {
-                let iri = i.0.to_string();
-                if !model.inlined_imports.contains(&iri) {
-                    model.inlined_imports.push(iri);
-                }
-            }
-        }
-        for ac in decls {
-            model.ont.remove(&ac);
-        }
-        // A functional-syntax banner names its entity `# Class: <IRI> (label)`,
-        // and the label is the one anywhere in the closure — an edit file that
-        // only DECLARES a class still banners it with the label its imported
-        // pattern module asserts. The closure is inlined right now and is dropped
-        // again on save, so this is the one moment the whole label set is in hand.
-        if model.banner_labels.is_empty() {
-            model.banner_labels = rdfs_labels(model);
-        }
+        each(source, imported, from)?;
     }
     Ok(())
 }
 
-/// Every `entity IRI → rdfs:label` the model asserts, for the functional-syntax
-/// banner comments.
-///
-/// An entity may carry several labels, and which one it is named by is decided
-/// by the iteration order of its own annotation-assertion set — by the axioms'
-/// hashes, that is, not by document order and not by the values. `oboInOwl:hasDbXref`
-/// carries both "database_cross_reference" and "has cross-reference", and picking
-/// the wrong one is a one-line difference in every artefact that banners it.
-///
-/// Deciding it by anything else is not merely wrong but UNSTABLE: an arbitrary
-/// tie-break follows the model's insertion history, so a change with nothing to
-/// do with labels can silently flip a previously-identical artefact either way.
-///
-/// The set is the SUBJECT's own, and its table is sized by how many annotation
-/// assertions that subject carries — measured: giving `hasDbXref` twenty further
-/// annotations, touching neither label, moves the table from 16 slots to 32 and
-/// changes which label wins.
-///
-/// Where two labels land in the SAME slot this cannot settle it, and neither can
-/// anything else, because there is no stable answer to match. Two runs of the
-/// reference over one unchanged tree, minutes apart, write
-/// `imports/merged_import.owl` with `database_cross_reference` and then with
-/// `has cross-reference`, the two 41 MB documents otherwise byte-identical. Both
-/// values have been seen twice. A Java bucket holds its members in insertion
-/// order, and the pipeline does not add its axioms in a fixed one.
-///
-/// So this is reference non-determinism, measured, and belongs beside a SELECT
-/// whose row order differs between runs. owlmake is deterministic here and
-/// always writes the same value; whether that value matches is a coin toss per
-/// run, and no amount of reproducing insertion order would change that.
-pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, String> {
-    use horned_owl::model::{AnnotationSubject, AnnotationValue, Component, Literal};
-
-    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-    // Candidate labels per subject, each with the hash of the axiom carrying it,
-    // and the size of the set that axiom lives in.
-    let mut cands: std::collections::HashMap<String, Vec<(i32, String)>> = Default::default();
-    let mut subject_ann_count: std::collections::HashMap<String, usize> = Default::default();
-    let mut assertions = 0usize;
-    for ac in model.ont.iter() {
-        let Component::AnnotationAssertion(aa) = &ac.component else { continue };
-        assertions += 1;
-        let AnnotationSubject::IRI(subj) = &aa.subject else { continue };
-        let subj = subj.as_ref().to_string();
-        *subject_ann_count.entry(subj.clone()).or_insert(0) += 1;
-        if aa.ann.ap.0.as_ref() != RDFS_LABEL {
-            continue;
+/// Lend `model` the content of an ontology it imports, read from `source`,
+/// recording what was lent so that a save of the root can take it back out.
+pub(crate) fn lend_import(model: &mut Model, source: crate::model::ImportSource, imported: &Model) {
+    // What this import LENDS the root: the components the merge is about to
+    // add and the root does not already assert. Taken as the difference the
+    // merge actually makes — candidates checked for membership before and
+    // after — so which components a merge carries stays `merge_into`'s
+    // business alone (it drops the secondary's identity and imports, and
+    // gates its ontology annotations), and this cannot fall out of step with
+    // it. An axiom the root asserts itself is not borrowed and stays.
+    let borrowed: Vec<_> = imported
+        .ont
+        .iter()
+        .filter(|c| !model.ont.i().contains(c))
+        .cloned()
+        .collect();
+    // The closure's entities decide what the root, written among its
+    // imports, states of an entity it only names. The save drops the
+    // borrowed axioms again, which is exactly when this record is the only
+    // thing left that knows.
+    model.import_sources.push(source.clone());
+    model.imports_closure.get_or_insert_with(Default::default).add(source, imported);
+    model.banner_docs.push(crate::cmd::banner_doc_of(imported, false));
+    crate::cmd::merge::merge_into(model, imported, &crate::cmd::merge::MergeOptions::default());
+    for c in borrowed {
+        if model.ont.i().contains(&c) {
+            model.imported_components.insert(c);
         }
-        let AnnotationValue::Literal(lit) = &aa.ann.av else { continue };
-        let text = match lit {
-            Literal::Simple { literal }
-            | Literal::Language { literal, .. }
-            | Literal::Datatype { literal, .. } => literal.clone(),
-        };
-        let h = crate::owlapi_hash::annotation_assertion_hash(
-            &subj,
-            aa.ann.ap.0.as_ref(),
-            &aa.ann.av,
-            &ac.ann,
-        );
-        cands.entry(subj).or_default().push((h, text));
     }
-    cands
+}
+
+/// Close the lending of a model's imports: its import declarations stand for
+/// content it now holds, and the labels its imports give are gathered.
+pub(crate) fn finish_lending(model: &mut Model) {
+    // The closure is now inlined, so the import declarations are dropped from
+    // the working ontology and every command reasons over the whole closure.
+    //
+    // A save, however, WRITES the root ontology with its `Import(…)`
+    // declarations intact: `om reason -i x.owl -o y.owl` gives a y.owl that
+    // still imports rather than a self-contained document. The IRIs are
+    // recorded on the model so a save can put them back — see
+    // `Model::inlined_imports`.
+    use horned_owl::model::{Component, MutableOntology};
+    let decls: Vec<_> = model
+        .ont
+        .iter()
+        .filter(|ac| matches!(ac.component, Component::Import(_)))
+        .cloned()
+        .collect();
+    for ac in &decls {
+        if let Component::Import(i) = &ac.component {
+            let iri = i.0.to_string();
+            if !model.inlined_imports.contains(&iri) {
+                model.inlined_imports.push(iri);
+            }
+        }
+    }
+    for ac in decls {
+        model.ont.remove(&ac);
+    }
+    fold_import_labels(model);
+}
+
+/// Gather the labels a model's imports give, for a writer naming an entity the
+/// document does not label itself: an edit file that only DECLARES a class is
+/// still commented with the label its imported pattern module asserts.
+pub(crate) fn fold_import_labels(model: &mut Model) {
+    if model.banner_labels.is_empty() {
+        let (iri, version) = crate::build::model_ontology_id(model);
+        let none = std::collections::HashMap::new();
+        model.banner_labels = fold_banner_docs(&model.banner_docs, iri.as_deref(), version.as_deref(), &none);
+    }
+}
+
+/// Every `entity IRI → label` the model asserts, as a functional write's banner
+/// and a report name the entity by: the label
+/// [`held_labels`](crate::io::entities::held_labels) picks, a literal's text or
+/// an IRI value's short form.
+///
+/// Where two labels land in the same slot of the entity's set, no order can
+/// settle which one names it, because the reference has no stable answer to
+/// match. Two runs of the reference over one unchanged tree, minutes apart,
+/// write `imports/merged_import.owl` with `database_cross_reference` and then
+/// with `has cross-reference`, the two 41 MB documents otherwise
+/// byte-identical, and both values have been seen twice: a Java bucket holds
+/// its members in insertion order, and the pipeline does not add its axioms in
+/// a fixed one. owlmake always writes the same value.
+pub(crate) fn rdfs_labels(model: &Model) -> std::collections::HashMap<String, String> {
+    crate::io::entities::held_labels(model).into_iter().map(|(s, l)| (s.to_string(), l.short_form())).collect()
+}
+
+/// Every `entity IRI → label` the model asserts, with the label's kind, as a
+/// document among several gives it (see [`fold_labels`]).
+pub(crate) fn doc_labels(model: &Model) -> std::collections::HashMap<String, crate::model::DocLabel> {
+    use crate::io::entities::HeldLabel;
+    use crate::model::DocLabel;
+    crate::io::entities::held_labels(model)
         .into_iter()
-        .map(|(subj, mut c)| {
-            // Two candidates that fall in one bucket at both levels stand in
-            // the order the document holds them, which the document does not
-            // record; the lexically smaller comes first, so the pick is the
-            // same from one run to the next.
-            c.sort_by(|a, b| a.1.cmp(&b.1));
-            let text = if c.len() == 1 {
-                c[0].1.clone()
-            } else {
-                let hashes: Vec<i32> = c.iter().map(|(h, _)| *h).collect();
-                let total = subject_ann_count.get(&subj).copied().unwrap_or(c.len());
-                if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == subj) {
-                    eprintln!("[labels] {subj} subject_total={total} assertions={assertions} cands={:?}", c);
-                }
-                c[crate::owlapi_hash::subject_assertion_order(&hashes, total, assertions)[0]].1.clone()
+        .map(|(s, l)| {
+            let label = match l {
+                HeldLabel::Literal(text) => DocLabel::Literal(text.to_string()),
+                HeldLabel::Iri(iri) => DocLabel::Iri(iri.to_string()),
             };
-            (subj, text)
+            (s.to_string(), label)
         })
         .collect()
+}
+
+/// The labels several documents give, in the order they are consulted: an
+/// entity takes the first literal label any of them gives it, and failing one,
+/// the last IRI.
+pub(crate) fn fold_labels<'d>(
+    docs: impl IntoIterator<Item = &'d std::collections::HashMap<String, crate::model::DocLabel>>,
+) -> std::collections::HashMap<String, crate::model::DocLabel> {
+    use crate::model::DocLabel;
+    let mut out: std::collections::HashMap<String, DocLabel> = std::collections::HashMap::new();
+    for labels in docs {
+        for (subj, label) in labels {
+            let taken = matches!(out.get(subj), Some(DocLabel::Literal(_)));
+            if !taken {
+                out.insert(subj.clone(), label.clone());
+            }
+        }
+    }
+    out
 }
 
 /// The banner-label document for `model` as it stands.
 pub(crate) fn banner_doc_of(model: &Model, root: bool) -> crate::model::BannerDoc {
     let (iri, version) = crate::build::model_ontology_id(model);
-    crate::model::BannerDoc { iri, version, labels: std::sync::Arc::new(rdfs_labels(model)), root }
+    crate::model::BannerDoc { iri, version, labels: std::sync::Arc::new(doc_labels(model)), root }
 }
 
 /// The label a functional write banners each entity with, over every loaded
 /// document: the documents stand in the order a set of them is iterated in,
-/// keyed on each one's identity, and the first document with a label for an
-/// entity supplies it. The document being written is the root, under the
+/// keyed on each one's identity, and [`fold_labels`] settles each entity's
+/// label over them. The document being written is the root, under the
 /// identity it is written with (`root_iri`/`root_version`), and its labels are
 /// the ones it carries as written (`root_labels`): an entity's set of
 /// annotation assertions is sized by what the entity holds when the write
@@ -689,7 +876,7 @@ pub(crate) fn fold_banner_docs(
     docs: &[crate::model::BannerDoc],
     root_iri: Option<&str>,
     root_version: Option<&str>,
-    root_labels: &std::collections::HashMap<String, String>,
+    root_labels: &std::collections::HashMap<String, crate::model::DocLabel>,
 ) -> std::collections::HashMap<String, String> {
     let root_id = (root_iri.map(str::to_string), root_version.map(str::to_string));
     let mut seen: std::collections::HashSet<(Option<String>, Option<String>)> = Default::default();
@@ -701,21 +888,10 @@ pub(crate) fn fold_banner_docs(
         .collect();
     let mut hashes: Vec<i32> = vec![crate::owlapi_hash::ontology_id_hash(root_iri, root_version)];
     hashes.extend(others.iter().map(|d| crate::owlapi_hash::ontology_id_hash(d.iri.as_deref(), d.version.as_deref())));
-    let mut out = std::collections::HashMap::new();
-    for i in crate::owlapi_hash::ontology_set_order(&hashes) {
-        let labels: &std::collections::HashMap<String, String> =
-            if i == 0 { root_labels } else { &others[i - 1].labels };
-        if std::env::var("OM_BANNER_DEBUG").is_ok() {
-            eprintln!("[banner] doc#{i} id-hash={} labels={} root={}", hashes[i], labels.len(), i == 0);
-        }
-        for (subj, label) in labels.iter() {
-            if std::env::var("OM_BANNER_DEBUG").is_ok_and(|v| v == *subj) && !out.contains_key(subj) {
-                eprintln!("[banner] {subj} ← doc#{i}: {label}");
-            }
-            out.entry(subj.clone()).or_insert_with(|| label.clone());
-        }
-    }
-    out
+    let ordered = crate::owlapi_hash::ontology_set_order(&hashes)
+        .into_iter()
+        .map(|i| if i == 0 { root_labels } else { &*others[i - 1].labels });
+    fold_labels(ordered).into_iter().map(|(subj, label)| (subj, label.short_form())).collect()
 }
 
 /// Resolve the `owl:imports` closure with no catalog named on the command line.
@@ -732,6 +908,19 @@ pub(crate) fn resolve_imports_auto(
     catalog: Option<&Path>,
     input: Option<&Path>,
 ) -> Result<()> {
+    let (map, base) = import_resolution(catalog, input)?;
+    let rule = command_import_rule(&map, &base);
+    resolve_import_closure(model, &rule)
+}
+
+/// The catalog mapping and the base directory a document's imports resolve
+/// against: the `catalog` named, else the `catalog-v001.xml` beside the
+/// document at `input`, and the directory of whichever catalog that is, else
+/// of the document.
+pub(crate) fn import_resolution(
+    catalog: Option<&Path>,
+    input: Option<&Path>,
+) -> Result<(std::collections::BTreeMap<String, std::path::PathBuf>, std::path::PathBuf)> {
     let auto = input
         .and_then(Path::parent)
         .map(|dir| dir.join("catalog-v001.xml"))
@@ -746,7 +935,7 @@ pub(crate) fn resolve_imports_auto(
         .and_then(|c| c.parent().map(Path::to_path_buf))
         .or_else(|| input.and_then(|p| p.parent().map(Path::to_path_buf)))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    resolve_import_closure(model, &map, &base)
+    Ok((map, base))
 }
 
 /// An on-disk dataset [`materialize_tdb`] wrote, and exactly which of its paths
@@ -919,8 +1108,11 @@ fn attr(frag: &str, key: &str) -> Option<String> {
 }
 
 pub mod annotate;
+pub mod explain_axiom;
 pub mod explain_blackbox;
 pub mod explain_markdown;
+pub(crate) mod manchester_markdown;
+pub mod explain_unsat;
 pub mod babelon;
 pub mod babelon_tsv;
 pub mod collapse;
@@ -972,6 +1164,7 @@ pub mod merge_equivalent_sets;
 pub mod merge_species;
 pub mod create_species_subset;
 pub mod mint;
+pub mod objects;
 pub mod mirror;
 pub mod make;
 pub mod oort;
@@ -1025,5 +1218,46 @@ mod catalog_tests {
         let map = super::parse_catalog(&catalog).unwrap();
         assert_eq!(map["http://example.org/cafe.owl"], dir.join("imports/café_import.owl"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::*;
+
+    /// A switch read leniently is on for `true` or `yes`, in any case and with
+    /// white space around it, and off for anything else.
+    #[test]
+    fn a_lenient_switch_is_on_for_true_or_yes() {
+        for value in ["true", "TRUE", " True ", "yes", "Yes"] {
+            assert!(option_is_true(value), "{value:?}");
+        }
+        for value in ["false", "False", "no", "1", "on", "", "nope"] {
+            assert!(!option_is_true(value), "{value:?}");
+        }
+    }
+
+    /// A switch read strictly is `true` or `false` exactly; anything else is
+    /// refused with the message naming the switch.
+    #[test]
+    fn a_strict_switch_is_true_or_false_exactly() {
+        assert_eq!(read_bool("trim", "true"), Ok(true));
+        assert_eq!(read_bool("trim", "false"), Ok(false));
+        for value in ["TRUE", "False", " true", "yes", ""] {
+            assert_eq!(
+                read_bool("trim", value),
+                Err("BOOLEAN VALUE ERROR arg for trim must be true or false".to_string()),
+                "{value:?}"
+            );
+        }
+        assert_eq!(Switch::parse("true"), Switch::Bool(true));
+        assert_eq!(Switch::parse("TRUE"), Switch::Text("TRUE".into()));
+        assert!(!Switch::read(None, "trim", false).unwrap());
+        assert!(Switch::read(None, "trim", true).unwrap());
+        assert!(!Switch::read(Some(&Switch::Bool(false)), "trim", true).unwrap());
+        assert_eq!(
+            Switch::read(Some(&Switch::parse("TRUE")), "preserve-structure", true).unwrap_err().to_string(),
+            "BOOLEAN VALUE ERROR arg for preserve-structure must be true or false"
+        );
     }
 }

@@ -30,10 +30,30 @@ pub type CmOnto = ComponentMappedOntology<RcStr, RcAnnotatedComponent>;
 pub struct BannerDoc {
     pub iri: Option<String>,
     pub version: Option<String>,
-    pub labels: std::sync::Arc<std::collections::HashMap<String, String>>,
+    pub labels: std::sync::Arc<std::collections::HashMap<String, DocLabel>>,
     /// The document that opened the pipeline, whose identity is the one it
     /// carries when written.
     pub root: bool,
+}
+
+/// The label a document gives an entity (see [`crate::io::entities::HeldLabel`]):
+/// a literal's text, or an IRI value, which names the entity until a literal
+/// does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DocLabel {
+    Literal(String),
+    Iri(String),
+}
+
+impl DocLabel {
+    /// The label as a label provider shows it: a literal's text, or the short
+    /// form of an IRI.
+    pub fn short_form(&self) -> String {
+        match self {
+            DocLabel::Literal(text) => text.clone(),
+            DocLabel::Iri(iri) => crate::owlapi_hash::iri_short_form(iri),
+        }
+    }
 }
 
 /// An import of the closure inlined into a model: its IRI, the document it was
@@ -67,18 +87,35 @@ pub struct ImportsClosure {
     pub signature: std::collections::HashSet<String>,
     /// The entities an imported ontology declares.
     pub declared: std::collections::HashSet<String>,
+    /// Where each ontology of the closure was read from, in the order they were
+    /// read — what a writer that renders every ontology of the closure on its
+    /// own reads them back from.
+    pub documents: Vec<ImportSource>,
+    /// Whether the ontology is still written among the closure although it
+    /// imports nothing: its imports were taken out of it and the closure was
+    /// kept, as `reason --create-new-ontology` takes them out. Otherwise
+    /// functional syntax and OWL/XML write an ontology that imports nothing
+    /// among no closure.
+    pub outlives_imports: bool,
 }
 
 impl ImportsClosure {
-    /// The closure whose ontologies are merged in `imported`.
+    /// The closure whose ontologies are merged in `imported`, read from where
+    /// `imported` records.
     pub fn of(imported: &Model) -> Self {
         let mut closure = ImportsClosure::default();
-        closure.add(imported);
+        closure.add_entities(imported);
+        closure.documents = imported.import_sources.clone();
         closure
     }
 
-    /// Add the entities of an imported ontology.
-    pub fn add(&mut self, imported: &Model) {
+    /// Add an imported ontology, read from `source`.
+    pub fn add(&mut self, source: ImportSource, imported: &Model) {
+        self.add_entities(imported);
+        self.documents.push(source);
+    }
+
+    fn add_entities(&mut self, imported: &Model) {
         use crate::io::entities::{closure_key, declared, signature};
         self.signature.extend(signature(imported).into_iter().map(|(kind, iri)| closure_key(kind, &iri)));
         self.declared.extend(declared(imported).into_iter().map(|(kind, iri)| closure_key(kind, &iri)));
@@ -283,6 +320,13 @@ pub struct Model {
     /// decide how this one is written (see [`ImportsClosure`]); `None` until
     /// they have been read.
     pub imports_closure: Option<ImportsClosure>,
+    /// The digest of the ontology's own content as it was read
+    /// ([`Model::root_digest`]), taken for a document that imports; `None` for
+    /// one built rather than read, and once a command has changed it in the way
+    /// that counts whatever its content ([`Model::mark_root_changed`]). A
+    /// functional-syntax or OWL/XML write of an ontology whose content is no
+    /// longer as read declares none of the entities only its imports name.
+    pub root_as_read: Option<u64>,
     /// Anonymous-individual node labels in the order the SOURCE DOCUMENT first
     /// mentions them. An anonymous individual is re-minted the first time it is
     /// asked for and the set renders sorted by the minted id, so for a
@@ -317,20 +361,10 @@ pub struct Model {
     /// ([`crate::cmd::owltools_ops`]) saves under this profile; every other save
     /// shares blank nodes between an annotated edge and its reification.
     pub owlapi_456: bool,
-    /// Declarations owlmake SYNTHESISED at read time rather than ones the source
-    /// document states, keyed `kind\0IRI` (`class`, `op`, `ap`, …).
-    ///
-    /// Only the OBO reader fills this. OBO has no declaration syntax, so
-    /// `declare_referenced_entities` invents one for every referenced entity: those
-    /// are writer-side materialisation, not statements the source document makes.
-    /// Recording which they are lets them be withdrawn once the import closure is
-    /// known to declare the entity (see `withdraw_materialised_declarations`), so
-    /// `filtered.owl`'s `IAO_0000231`, `RO_0002175`, `dc:title`, `foaf:homepage` and
-    /// friends — used only as `property_value:` predicates, and all declared in
-    /// `omo_import.owl` / `merged_import.owl` — get no stub of the form
-    /// `<owl:AnnotationProperty rdf:about="…"/>`. A genuine declaration read from an
-    /// OWL document is NOT in this set and is always rendered.
-    pub materialised_declarations: std::collections::HashSet<String>,
+    /// The prefixes a CURIE the command line gives is read with
+    /// ([`crate::context`]): never this document's own, which say only how it
+    /// writes its IRIs.
+    pub context: crate::context::Context,
     /// `owner\u{1}signature -> group` for superclass expressions that are ONE
     /// object asserted for several owners, rendered inline at each.
     ///
@@ -397,6 +431,12 @@ pub struct Model {
 }
 
 impl Model {
+    /// The natural order of this document's objects, in which its sets are
+    /// stored: how its untyped literals key is [`Model::plain_literals_typed`].
+    pub fn natural_order(&self) -> crate::io::natural_order::NaturalOrder {
+        crate::io::natural_order::NaturalOrder::new(self.plain_literals_typed)
+    }
+
     pub fn new() -> Self {
         Model {
             ont: SetOntology::new(),
@@ -421,10 +461,11 @@ impl Model {
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             imports_closure: None,
+            root_as_read: None,
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
-            materialised_declarations: std::collections::HashSet::new(),
+            context: Default::default(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
@@ -458,10 +499,11 @@ impl Model {
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             imports_closure: None,
+            root_as_read: None,
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
-            materialised_declarations: std::collections::HashSet::new(),
+            context: Default::default(),
             span_shared: std::collections::HashMap::new(),
             cross_shared: std::collections::HashMap::new(),
             shared_occurrences: std::collections::HashMap::new(),
@@ -498,10 +540,11 @@ impl Model {
         self.owl_genid_refs = other.owl_genid_refs.clone();
         self.owl_label_order = other.owl_label_order.clone();
         self.imports_closure = other.imports_closure.clone();
+        self.root_as_read = other.root_as_read;
         self.anon_doc_order = other.anon_doc_order.clone();
         self.plain_literals_typed = other.plain_literals_typed;
         self.owlapi_456 = other.owlapi_456;
-        self.materialised_declarations = other.materialised_declarations.clone();
+        self.context = other.context.clone();
         self.span_shared = other.span_shared.clone();
         self.cross_shared = other.cross_shared.clone();
         self.shared_occurrences = other.shared_occurrences.clone();
@@ -528,6 +571,56 @@ impl Model {
         // closure declared is declared HERE, and suppressing its stub or its
         // annotations hides content the document now carries.
         self.imports_closure = None;
+    }
+
+    /// A digest of the ontology's own content: every component but its import
+    /// declarations, its document IRI and what its imports lent it, and the IRIs
+    /// it imports, whether stated or set aside for a save to restore. The
+    /// components are taken in no order, so the same content has the same
+    /// digest however it was arrived at.
+    pub fn root_digest(&self) -> u64 {
+        use horned_owl::model::Component;
+        use std::hash::{Hash, Hasher};
+        let mut sum = 0u64;
+        let mut count = 0u64;
+        let mut imports: std::collections::BTreeSet<String> = self.inlined_imports.iter().cloned().collect();
+        for ac in self.ont.iter() {
+            match &ac.component {
+                Component::Import(i) => {
+                    imports.insert(i.0.to_string());
+                }
+                Component::DocIRI(_) => {}
+                _ if self.imported_components.contains(ac) => {}
+                _ => {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    ac.hash(&mut h);
+                    sum = sum.wrapping_add(h.finish());
+                    count += 1;
+                }
+            }
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (sum, count, imports).hash(&mut h);
+        h.finish()
+    }
+
+    /// Whether the ontology's own content is no longer as it was read: a
+    /// command changed it, or it was never read.
+    pub fn root_changed(&self) -> bool {
+        self.root_as_read != Some(self.root_digest())
+    }
+
+    /// Take the ontology's content as read, as the document it was read from
+    /// states it.
+    pub fn mark_root_as_read(&mut self) {
+        self.root_as_read = Some(self.root_digest());
+    }
+
+    /// Count the ontology as changed whatever its content: `reason`, `merge` and
+    /// `repair --merge-axiom-annotations true` do, even where they leave it as
+    /// it was.
+    pub fn mark_root_changed(&mut self) {
+        self.root_as_read = None;
     }
 
     /// Whether an ontology this one imports has the entity keyed `key`
@@ -577,10 +670,11 @@ impl Clone for Model {
         m.owl_genid_refs = self.owl_genid_refs.clone();
         m.owl_label_order = self.owl_label_order.clone();
         m.imports_closure = self.imports_closure.clone();
+        m.root_as_read = self.root_as_read;
         m.anon_doc_order = self.anon_doc_order.clone();
         m.plain_literals_typed = self.plain_literals_typed;
         m.owlapi_456 = self.owlapi_456;
-        m.materialised_declarations = self.materialised_declarations.clone();
+        m.context = self.context.clone();
         m.span_shared = self.span_shared.clone();
         m.cross_shared = self.cross_shared.clone();
         m.shared_occurrences = self.shared_occurrences.clone();
@@ -619,9 +713,9 @@ pub fn default_prefixes() -> PrefixMapping {
     let _ = p.add_prefix("xsd", "http://www.w3.org/2001/XMLSchema#");
     let _ = p.add_prefix("owl", "http://www.w3.org/2002/07/owl#");
     // `dc` is dc/elements/1.1/ HERE, which is what documents declare and what the
-    // OBO writer's `idspace:` table and the RDF/XML xmlns block need. Template
-    // CURIEs expand against a separate context map that binds `dc` to dc/TERMS/
-    // instead — see `template::robot_context_prefixes`.
+    // OBO writer's `idspace:` table and the RDF/XML xmlns block need. A CURIE a
+    // command is given is read with the command line's context, which binds `dc`
+    // to dc/TERMS/ instead — see [`crate::context`].
     // The two are genuinely different maps: binding this one to dc/terms/ would
     // shadow the elements/1.1/ namespace, dropping MONDO's `idspace: dc` line and
     // every `dc:date`/`dc:title` abbreviation in `mondo.obo`.
@@ -665,6 +759,44 @@ pub fn asserts_deprecated(av: &horned_owl::model::AnnotationValue<Str>) -> bool 
             if literal == "true"
                 && datatype_iri.as_ref() == "http://www.w3.org/2001/XMLSchema#boolean"
     )
+}
+
+/// An ontology or version IRI as an ontology's ID holds it. One that is not
+/// absolute is made so by prefixing `urn:absolute:`, and logged as an error;
+/// one that labels a blank node, `_:` with `genid` somewhere after it, names no
+/// IRI.
+pub(crate) fn ontology_iri_as_made(build: &Build<RcStr>, iri: &str) -> Option<horned_owl::model::IRI<RcStr>> {
+    if iri.starts_with("_:") && iri.contains("genid") {
+        return None;
+    }
+    if horned_owl::model::is_absolute_iri(iri) {
+        return Some(build.iri(iri));
+    }
+    crate::cmd::reason::log_error(
+        "org.semanticweb.owlapi.model.OWLOntologyID",
+        &format!(
+            "Ontology IRIs must be absolute; IRI {iri} is relative and will be made absolute by prefixing urn:absolute: to it"
+        ),
+    );
+    Some(build.iri(format!("urn:absolute:{iri}")))
+}
+
+/// The ID of an ontology with the given IRI and version IRI, each as
+/// [`ontology_iri_as_made`] makes it. A version IRI with no ontology IRI is
+/// refused.
+pub(crate) fn ontology_id(
+    build: &Build<RcStr>,
+    iri: Option<&str>,
+    viri: Option<&str>,
+) -> anyhow::Result<horned_owl::model::OntologyID<RcStr>> {
+    let id = horned_owl::model::OntologyID {
+        iri: iri.and_then(|iri| ontology_iri_as_made(build, iri)),
+        viri: viri.and_then(|viri| ontology_iri_as_made(build, viri)),
+    };
+    if id.iri.is_none() && id.viri.is_some() {
+        anyhow::bail!("If the ontology IRI is null then it is not possible to specify a version IRI");
+    }
+    Ok(id)
 }
 
 /// A literal as an ontology holds it once made: `l` itself, or what

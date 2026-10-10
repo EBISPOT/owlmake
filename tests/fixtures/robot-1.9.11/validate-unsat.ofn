@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/>)
+Ontology(<http://example.org/unsat.owl>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:E))
+Declaration(ObjectProperty(:p))
+SubClassOf(:A :B)
+SubClassOf(:A :C)
+DisjointClasses(:B :C)
+SubClassOf(:E ObjectSomeValuesFrom(:p :B))
+)

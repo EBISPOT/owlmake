@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/inc-same2#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/inc-same2>
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:k))
+SameIndividual(:i :j)
+DifferentIndividuals(:i :j :k)
+)

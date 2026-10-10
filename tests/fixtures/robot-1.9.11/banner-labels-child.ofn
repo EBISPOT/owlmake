@@ -1,0 +1,8 @@
+Prefix(:=<http://purl.obolibrary.org/obo/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://purl.obolibrary.org/obo/banner-labels-child.owl>
+Declaration(Class(:EX_9))
+Declaration(Class(:EX_1))
+AnnotationAssertion(rdfs:label :EX_9 "nine from child")
+AnnotationAssertion(rdfs:label :EX_1 "one from child")
+)

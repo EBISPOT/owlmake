@@ -15,6 +15,7 @@ use oxigraph::io::{RdfFormat, RdfParser};
 use oxigraph::model::GraphNameRef;
 use oxigraph::store::Store;
 
+use crate::cmd::Switch;
 use crate::io::Format;
 use crate::sparql::{query_prefixes, QueryOutput, QueryTable, Queryable};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,28 +97,28 @@ pub struct Args {
     /// them all, so the query sees the root ontology plus its whole import
     /// closure; without the flag it sees only the root's own axioms. CL, UBERON
     /// and OBA all use `query -f tsv --use-graphs true` for their SPARQL exports.
-    #[arg(short = 'g', long = "use-graphs", num_args = 1, default_missing_value = "true")]
-    pub use_graphs: Option<bool>,
+    #[arg(short = 'g', long = "use-graphs", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub use_graphs: Option<Switch>,
     /// Load RDF onto disk via TDB. Accepted for compatibility; owlmake
     /// always evaluates in memory.
-    #[arg(short = 't', long = "tdb", num_args = 1, default_missing_value = "true")]
-    pub tdb: Option<bool>,
+    #[arg(short = 't', long = "tdb", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub tdb: Option<Switch>,
     /// Keep the TDB directory. No-op (no TDB).
-    #[arg(short = 'k', long = "keep-tdb-mappings", num_args = 1, default_missing_value = "true")]
-    pub keep_tdb_mappings: Option<bool>,
+    #[arg(short = 'k', long = "keep-tdb-mappings", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub keep_tdb_mappings: Option<Switch>,
     /// TDB directory. No-op (no TDB).
     #[arg(short = 'd', long = "tdb-directory")]
     pub tdb_directory: Option<PathBuf>,
     /// Create a TDB directory without querying. Accepted for compatibility;
     /// owlmake always evaluates in memory and never creates a TDB store, so
     /// this is a no-op.
-    #[arg(short = 'C', long = "create-tdb", num_args = 1, default_missing_value = "true")]
-    pub create_tdb: Option<bool>,
+    #[arg(short = 'C', long = "create-tdb", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub create_tdb: Option<Switch>,
     /// Store intermediate --update results in a temporary file to reduce heap
     /// usage. TDB-only; accepted for compatibility and a no-op in the in-
     /// memory engine.
-    #[arg(short = 'y', long = "temporary-file", num_args = 1, default_missing_value = "true")]
-    pub temporary_file: Option<bool>,
+    #[arg(short = 'y', long = "temporary-file", num_args = 1, default_missing_value = "true", value_parser = crate::cmd::SwitchParser)]
+    pub temporary_file: Option<Switch>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -1226,7 +1227,7 @@ fn finish_table(
             let cols = concat_columns(sparql, &table.columns);
             if !cols.is_empty() {
                 apply_jena_concat_order(table, q, &cols);
-            } else if !grouped {
+            } else if !grouped && !has_order_by(sparql) {
                 // A plain SELECT has no order of its own: the rows come out in the
                 // order the graph answers the pattern in.
                 if !apply_jena_union_scan_order(table, q, sparql)
@@ -2246,11 +2247,31 @@ pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
+    // The switches as the command reads them: with an update
+    // `--temporary-file` alone; otherwise `--create-tdb`, then unless that is
+    // on `--tdb`, then `--keep-tdb-mappings` on disk (`--tdb` or a
+    // `--tdb-directory`) or `--use-graphs` in memory. A switch it does not
+    // read is left alone, whatever it says.
+    let read = |switch: &Option<Switch>, name: &str| Switch::read(switch.as_ref(), name, false);
+    let (mut temporary_file, mut create_tdb, mut on_disk, mut keep_tdb_mappings, mut use_graphs) =
+        (false, false, false, false, false);
+    if !args.update.is_empty() {
+        temporary_file = read(&args.temporary_file, "temporary-file")?;
+    } else {
+        create_tdb = read(&args.create_tdb, "create-tdb")?;
+        if !create_tdb {
+            on_disk = read(&args.tdb, "tdb")? || args.tdb_directory.is_some();
+            if on_disk {
+                keep_tdb_mappings = read(&args.keep_tdb_mappings, "keep-tdb-mappings")?;
+            } else {
+                use_graphs = read(&args.use_graphs, "use-graphs")?;
+            }
+        }
+    }
     // `-g,--use-graphs true` resolves the `owl:imports` closure and MERGES it into
     // the model before the store is loaded, so the single graph the query sees is
     // the root ontology unioned with everything it imports. Without the flag the
     // root document is loaded on its own and only its own axioms are visible.
-    let use_graphs = args.use_graphs.unwrap_or(false);
     let mut model = if use_graphs {
         crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?
     } else {
@@ -2264,14 +2285,12 @@ pub fn step(
     if use_graphs && crate::progress::verbosity() >= 1 {
         status!("query: --use-graphs: querying the root ontology unioned with its import closure");
     }
-    let want_tdb = args.tdb.unwrap_or(false)
-        || args.create_tdb.unwrap_or(false)
-        || args.temporary_file.unwrap_or(false);
+    let want_tdb = on_disk || create_tdb || temporary_file;
     let tdb = if want_tdb {
         crate::cmd::materialize_tdb(
             &model,
             args.tdb_directory.as_deref(),
-            args.temporary_file.unwrap_or(false),
+            temporary_file,
         )?
     } else {
         None
@@ -2286,10 +2305,10 @@ pub fn step(
     // passed along the chain / saved by --output. We round-trip through an
     // oxigraph store: load triples, apply updates, dump back, reparse.
     if !args.update.is_empty() {
-        let mut rdf = Vec::new();
-        crate::io::write_to_ref(&model, &mut rdf, Format::RdfXml)?;
+        let rdf = crate::io::rendering(&model)?;
         let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
         load_preserving_literals(&store, &rdf)?;
+        crate::sparql::type_list_cells(&store)?;
         for upath in &args.update {
             let sparql = std::fs::read_to_string(upath)?;
             store
@@ -2343,6 +2362,8 @@ pub fn step(
             crate::model::clone_prefixes(&model.prefixes),
         );
         out.carry_meta_from(&model);
+        // The updated ontology is read back, as a document is: it is as read.
+        out.mark_root_as_read();
         // The round trip retypes every untyped literal: a literal with no datatype
         // comes back out of the store as `xsd:string`, where an OFN / RDF-XML parse
         // gives `rdf:PlainLiteral`. That reorders a subject's triples, because
@@ -2452,7 +2473,7 @@ pub fn step(
     // Only built when `--tdb true` is actually given, so no other query is
     // re-ordered.
     let tdb_order: Option<std::collections::HashMap<String, usize>> =
-        if args.tdb == Some(true) { args.input.as_deref().and_then(first_appearance_order) } else { None };
+        if on_disk { args.input.as_deref().and_then(first_appearance_order) } else { None };
 
     let mut ran_any = false;
 
@@ -2608,7 +2629,7 @@ pub fn step(
     }
 
     // Remove the on-disk TDB dataset unless --keep-tdb-mappings was given.
-    crate::cmd::cleanup_tdb(tdb, args.keep_tdb_mappings.unwrap_or(false));
+    crate::cmd::cleanup_tdb(tdb, keep_tdb_mappings);
 
     Ok(Some(model))
 }

@@ -1,0 +1,14 @@
+format-version: 1.2
+ontology: q
+remark: c {name="x"}
+remark: c
+saved-by: m
+saved-by: m {comment="y"}
+property_value: rdfs:comment "d" xsd:string
+remark: d {name="y"}
+owl-axioms: Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>) Ontology(<http://x/o> Annotation(rdfs:comment "z") SubClassOf(<http://x/A> <http://x/B>))
+
+[Term]
+id: Q:1
+comment: k {source="s"}
+comment: k
