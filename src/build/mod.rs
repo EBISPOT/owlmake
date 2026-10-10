@@ -1761,8 +1761,8 @@ fn staged_writes(steps: &[crate::plan::step::Step]) -> Vec<String> {
                 out.extend(staged_writes(then_steps));
                 out.extend(staged_writes(else_steps));
             }
-            Step::Op(Op::RoundTrip { path, .. })
-            | Step::Partial { op: Op::RoundTrip { path, .. }, .. } => {
+            Step::Op(Op::Write { path, .. })
+            | Step::Partial { op: Op::Write { path, .. }, .. } => {
                 out.push(path.clone())
             }
             _ => {}
@@ -2593,7 +2593,7 @@ fn build_imports_fresh(
             None => status!("import: warning: unknown slme_individuals `{spec}`, using include"),
         }
     }
-    let mut module = extract::extract_with(&merged, &seed, Method::Bot, &opts);
+    let mut module = extract::extract_with(&merged, &seed, Method::Bot, &opts)?;
     drop(merged);
 
     // Drop excluded IRIs (the plan's `exclude_iri_patterns`, e.g. `<…/GOCHE_*>`)
@@ -2631,20 +2631,11 @@ fn build_imports_fresh(
             ..Default::default()
         },
     );
-    // 3. `repair --merge-axiom-annotations true` — and NOTHING else.
-    //    `--invalid-references` defaults to FALSE and the rule does not pass it,
-    //    so no reference repair runs at all; and even when it does, repair
-    //    ignores dangling references, so one is never a violation it acts on.
-    //    Removing dangling annotation assertions here would drop the three that
-    //    carry ENVO_01001862 into the module — they belong there, under no entity
-    //    banner, because their subject is an annotation subject and not a
-    //    declared entity.
+    // 3. `repair --merge-axiom-annotations true` — and nothing else: given the
+    //    merge to make, repair migrates no reference.
     module = crate::cmd::repair::repair_with(
         module,
-        &crate::cmd::repair::RepairOptions {
-            invalid_references: false,
-            merge_axiom_annotations: true,
-        },
+        &crate::cmd::repair::RepairOptions::from_switches(None, Some(true)),
     );
 
     // The plan NAMES the merged import; `imports/merged_import.owl` is only the
@@ -3085,7 +3076,7 @@ fn build_one_import(
     // one step to the next and nothing reads them again; the built tree holds the
     // module, not the ⊥-module it was filtered from.
     for step in &steps {
-        if let Step::Op(Op::RoundTrip { path }) = step {
+        if let Step::Op(Op::Write { path }) = step {
             remove_transient(repo, path);
         }
     }
@@ -3963,23 +3954,13 @@ fn inject_editsig_seed(steps: &[Step], editsig: &str) -> Vec<Step> {
             continue;
         }
         match step {
-            Step::Op(Op::Extract {
-                method, terms, term_files, copy_ontology_annotations, individuals,
-                branch_from_terms, branch_from_term_files, force,
-            }) => {
+            Step::Op(op @ Op::Extract { .. }) => {
                 injected = true;
-                let mut tf = term_files.clone();
-                tf.push(editsig.to_string());
-                out.push(Step::Op(Op::Extract {
-                    method: method.clone(),
-                    terms: terms.clone(),
-                    term_files: tf,
-                    copy_ontology_annotations: *copy_ontology_annotations,
-                    individuals: individuals.clone(),
-                    branch_from_terms: branch_from_terms.clone(),
-                    branch_from_term_files: branch_from_term_files.clone(),
-                    force: *force,
-                }));
+                let mut op = op.clone();
+                if let Op::Extract { term_files, .. } = &mut op {
+                    term_files.push(editsig.to_string());
+                }
+                out.push(Step::Op(op));
             }
             Step::Op(Op::Filter(spec)) => {
                 injected = true;
@@ -4740,7 +4721,7 @@ fn step_built_paths(steps: &[Step]) -> Vec<String> {
     let mut out = Vec::new();
     for s in steps {
         match s.effective() {
-            Step::Op(Op::RoundTrip { path, .. }) | Step::Partial { op: Op::RoundTrip { path, .. }, .. } => {
+            Step::Op(Op::Write { path, .. }) | Step::Partial { op: Op::Write { path, .. }, .. } => {
                 out.push(path.clone());
             }
             Step::Op(Op::Query { constructs, selects, .. })
@@ -4922,6 +4903,9 @@ fn run_artefact(
             );
             crate::io::set_anon_counter(mark);
         }
+        // A file a step writes in functional syntax on the way is bannered from
+        // the same documents.
+        prime_banner_docs(repo, &mut model, catalog, &a.target, &a.steps)?;
         // Named the way `Op::Merge` will name it, so `merge -i $<` recognises the
         // file the model already holds however either side spelled the token.
         let threaded_from = input_path
@@ -5035,6 +5019,9 @@ fn run_artefact(
             );
             crate::io::set_anon_counter(mark);
         }
+        // A file a step writes in functional syntax on the way is bannered from
+        // the same documents.
+        prime_banner_docs(repo, &mut m, catalog, &a.target, &a.steps)?;
         threaded_from = a.input.as_deref().and_then(|t| resolve_repo_file(repo, t, work)).or(Some(input));
         m
     };
@@ -5437,68 +5424,6 @@ fn run_artefact(
 ///
 /// Two axioms annotated DIFFERENTLY are untouched: each keeps its own
 /// reification, so both survive the round-trip.
-/// Put back the literal datatypes an RDF/XML round trip erases.
-///
-/// Only `xsd:string` is affected: every other datatype is written out explicitly
-/// and survives. Keyed on the axiom with its literals normalised away, so an
-/// axiom that is otherwise unchanged gets its original literal forms back.
-fn restore_literal_datatypes(back: &mut crate::model::Model, before: &crate::model::Model) {
-    use horned_owl::model::{AnnotationValue, Component, Literal, MutableOntology};
-    const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
-    // Subject+property+text of every annotation assertion that carried an explicit
-    // `xsd:string` before the write.
-    let mut typed: std::collections::HashSet<(String, String, String)> = Default::default();
-    for ac in before.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if let (horned_owl::model::AnnotationSubject::IRI(s), AnnotationValue::Literal(l)) =
-                (&aa.subject, &aa.ann.av)
-            {
-                if matches!(l, Literal::Datatype { datatype_iri, .. } if datatype_iri.as_ref() == XSD_STRING)
-                {
-                    typed.insert((
-                        s.as_ref().to_string(),
-                        aa.ann.ap.0.as_ref().to_string(),
-                        l.literal().clone(),
-                    ));
-                }
-            }
-        }
-    }
-    if typed.is_empty() {
-        return;
-    }
-    let build = horned_owl::model::Build::new_rc();
-    let mut fixed = Vec::new();
-    for ac in back.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if let (horned_owl::model::AnnotationSubject::IRI(s), AnnotationValue::Literal(l)) =
-                (&aa.subject, &aa.ann.av)
-            {
-                if matches!(l, Literal::Simple { .. })
-                    && typed.contains(&(
-                        s.as_ref().to_string(),
-                        aa.ann.ap.0.as_ref().to_string(),
-                        l.literal().clone(),
-                    ))
-                {
-                    let mut new_ac = ac.clone();
-                    if let Component::AnnotationAssertion(a) = &mut new_ac.component {
-                        a.ann.av = AnnotationValue::Literal(Literal::Datatype {
-                            literal: l.literal().clone(),
-                            datatype_iri: build.iri(XSD_STRING),
-                        });
-                    }
-                    fixed.push((ac.clone(), new_ac));
-                }
-            }
-        }
-    }
-    for (old, new) in fixed {
-        back.ont.remove(&old);
-        back.ont.insert(new);
-    }
-}
-
 fn collapse_rdf_roundtrip(model: &mut crate::model::Model) {
     use horned_owl::model::{AnnotatedComponent, Component, MutableOntology, RcStr};
     use std::collections::HashSet;
@@ -6194,14 +6119,14 @@ fn reduce_with_closure(
     root: crate::model::Model,
     closure: &crate::model::Model,
     opts: &cmd::reduce::ReduceOptions,
-) -> crate::model::Model {
+) -> Result<crate::model::Model> {
     use horned_owl::model::MutableOntology;
     let mut union = union_with_closure(&root, closure);
     let root_set: std::collections::HashSet<_> = root.ont.iter().cloned().collect();
     // What the closure lends is classified with the root, but is not the
     // root's to reduce.
     union.imported_components = union.ont.iter().filter(|ac| !root_set.contains(*ac)).cloned().collect();
-    let reduced = cmd::reduce::reduce_with_options(&union, opts);
+    let reduced = cmd::reduce::reduce_with_options(&union, opts)?;
     let mut out = empty_model();
     out.prefixes = root.prefixes.clone();
     // The root's document state — blank-node sharing recorded by relax above
@@ -6213,7 +6138,7 @@ fn reduce_with_closure(
             out.ont.insert(ac.clone());
         }
     }
-    out
+    Ok(out)
 }
 
 /// Remove inferred subsumption axioms ALL of whose entities are external to the
@@ -6437,14 +6362,21 @@ fn write_step_output(
     if target.is_some_and(|t| same_file(t, path)) || is_planned_target(path) {
         return Ok(());
     }
+    write_part_way(repo, model, path, format.as_deref())
+}
+
+/// Write the model to `path`, part way through a pipeline that goes on with
+/// it, as the document a closing write would make of it there.
+///
+/// `format` names the format; without one the path's extension does, as it
+/// does for the `convert` command: OBA writes functional syntax to a `.owl`
+/// path.
+fn write_part_way(repo: &Repo, model: &mut crate::model::Model, path: &str, format: Option<&str>) -> Result<()> {
     let out = repo.dir.join(path);
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    // The step's `--format` wins over the name, exactly as it does for the
-    // `convert` command: OBA writes functional syntax to a `.owl` path.
     let fmt = format
-        .as_deref()
         .and_then(|f| crate::io::Format::from_name(f).ok())
         .or_else(|| crate::io::Format::from_path(&out).ok());
     // What the closure declares decides what this document must stub, exactly as
@@ -6472,7 +6404,7 @@ fn write_step_output(
         Some(f) => crate::io::save_as(model, &out, f),
         None => crate::io::save(model, &out),
     }
-    .with_context(|| format!("writing step output {}", out.display()))
+    .with_context(|| format!("writing {}", out.display()))
 }
 
 /// Run `op` on `model`. The prefixes a command reads its CURIEs with, and the
@@ -6577,7 +6509,7 @@ fn run_op(
                 && !opts.include_annotations
                 && !opts.annotate_defined_by
                 && !opts.annotate_derived_from;
-            if plain {
+            let mut merged = if plain {
                 // Merge each explicit `--input` file's own axioms into the model.
                 for (path, inp) in &sources {
                     match path {
@@ -6646,7 +6578,9 @@ fn run_op(
                 let imports = read_closure(&model)?;
                 let target = crate::cmd::merge::Input::new(model, imports, read_here);
                 crate::cmd::merge::merge_inputs(target, rest, &opts)?.0
-            }
+            };
+            merged.mark_root_changed();
+            merged
         }
         Op::Unmerge { second_input } => {
             match second_input.as_deref() {
@@ -6720,10 +6654,12 @@ fn run_op(
                 properties: properties.clone(),
                 ..Default::default()
             };
-            match closure {
+            let mut reasoned = match closure {
                 None => cmd::reason::reason_with(model, reasoner, &ropts)?,
                 Some(c) => reason_with_closure(model, c, reasoner, &ropts)?,
-            }
+            };
+            reasoned.mark_root_changed();
+            reasoned
         }
         Op::Relax { include_subclass_of } => cmd::relax::relax_with(
             model,
@@ -6742,8 +6678,8 @@ fn run_op(
                 include_subproperties: include_subproperties.unwrap_or(false),
             };
             match closure {
-                None => cmd::reduce::reduce_with_options(&model, &opts),
-                Some(c) => reduce_with_closure(model, c, &opts),
+                None => cmd::reduce::reduce_with_options(&model, &opts)?,
+                Some(c) => reduce_with_closure(model, c, &opts)?,
             }
         }
         Op::Materialize { reasoner, create_new_ontology, properties, term_files } => {
@@ -6799,14 +6735,27 @@ fn run_op(
                 },
             )?
         }
-        Op::Repair { invalid_references, merge_axiom_annotations } => cmd::repair::repair_with(
-            model,
-            &cmd::repair::RepairOptions {
-                invalid_references: *invalid_references,
-                merge_axiom_annotations: *merge_axiom_annotations,
-            },
-        ),
-        Op::Template { templates, merge, force } => {
+        Op::Repair { invalid_references, merge_axiom_annotations, annotation_properties, annotation_properties_file } => {
+            let mut properties = annotation_properties.clone();
+            for file in resolve_term_files(repo, annotation_properties_file.as_slice(), work)? {
+                properties.extend(cmd::repair::read_annotation_properties(&file)?);
+            }
+            cmd::repair::repair_with(
+                model,
+                &cmd::repair::RepairOptions {
+                    invalid_references: *invalid_references,
+                    merge_axiom_annotations: *merge_axiom_annotations,
+                    annotation_properties: properties,
+                },
+            )
+        }
+        Op::Template { templates, merge, collapse_import_closure, ancestors, force } => {
+            // The ancestors of the generated terms are read over the input's
+            // imports closure too.
+            let mut model = model;
+            if *ancestors {
+                closure_for_rendering(repo, &mut model, catalog, closure)?;
+            }
             let rp = |s: &str| repo.dir.join(s);
             let targs = cmd::template::Args {
                 template: templates.iter().map(|t| rp(t)).collect(),
@@ -6818,14 +6767,21 @@ fn run_op(
                 external_template: vec![],
                 ontology_iri: None,
                 version_iri: None,
-                merge_before: Some(*merge),
-                merge_after: None,
-                ancestors: None,
+                merge_before: *merge,
+                merge_after: false,
+                ancestors: *ancestors,
                 include_annotations: None,
-                collapse_import_closure: None,
+                collapse_import_closure: Some(*collapse_import_closure),
                 common: Default::default(),
             };
-            cmd::template::step(Some(model), &targs)?.unwrap_or_else(crate::model::Model::new)
+            let mut out = cmd::template::step(Some(model), &targs)?.unwrap_or_else(crate::model::Model::new);
+            // Unmerged, the generated axioms are a new document, on its own: a
+            // functional write of it banners each entity from its own labels.
+            if !*merge {
+                out.banner_docs = vec![crate::cmd::banner_doc_of(&out, true)];
+                out.banner_labels.clear();
+            }
+            out
         }
         Op::Rename { mappings, mapping, prefix_mappings, allow_missing, allow_duplicates } => {
             let rp = |s: &String| repo.dir.join(s);
@@ -6844,8 +6800,14 @@ fn run_op(
         }
         Op::Extract {
             method, terms, term_files, copy_ontology_annotations, individuals,
-            branch_from_terms, branch_from_term_files, force,
+            branch_from_terms, branch_from_term_files, lower_terms, lower_term_files,
+            upper_terms, upper_term_files, intermediates, force,
         } => {
+            // A MIREOT climbs the input's imports closure too.
+            let mut model = model;
+            if method.eq_ignore_ascii_case("MIREOT") {
+                closure_for_rendering(repo, &mut model, catalog, closure)?;
+            }
             let rp = |s: &String| repo.dir.join(s);
             let eargs = cmd::extract::Args {
                 input: None,
@@ -6854,17 +6816,17 @@ fn run_op(
                 method: method.clone(),
                 term: terms.clone(),
                 term_file: term_files.iter().map(rp).collect(),
-                upper_term: vec![],
-                upper_terms: vec![],
-                lower_term: vec![],
-                lower_terms: vec![],
+                upper_term: upper_terms.clone(),
+                upper_terms: upper_term_files.iter().map(rp).collect(),
+                lower_term: lower_terms.clone(),
+                lower_terms: lower_term_files.iter().map(rp).collect(),
                 branch_from_term: branch_from_terms.clone(),
                 branch_from_terms: branch_from_term_files.iter().map(rp).collect(),
                 copy_ontology_annotations: Some(*copy_ontology_annotations),
                 annotate_with_source: None,
                 individuals: individuals.clone().unwrap_or_else(|| "include".into()),
                 imports: "include".into(),
-                intermediates: "all".into(),
+                intermediates: intermediates.clone().unwrap_or_else(|| "all".into()),
                 sources: None,
                 force: Some(*force),
                 output_iri: None,
@@ -7205,47 +7167,18 @@ fn run_op(
             }
             m
         }
+        // A command's `-o` part way through a chain writes the ontology there,
+        // and the chain goes on with the ontology it wrote: nothing the next
+        // command sees comes from the file.
+        Op::Write { path, .. } => {
+            let mut model = model;
+            write_part_way(repo, &mut model, path, None)?;
+            model
+        }
         // Format is applied by the final write. `--clean-obo` transforms the
         // model up-front (drop GCI/untranslatable axioms, merge comments) when
         // the artefact is written as OBO — CL's cl.obo uses
         // `--clean-obo 'simple merge-comments'`.
-        // Write the model out and read it straight back, reproducing the round trip
-        // a recipe's `-o` performs between two processes. The write is the point —
-        // an RDF/XML round trip is not identity.
-        Op::RoundTrip { path, .. } => {
-            let out = repo.dir.join(path);
-            if let Some(parent) = out.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let mut model = model;
-            crate::io::save(&mut model, &out)
-                .with_context(|| format!("round-tripping through {}", out.display()))?;
-            let mut back = crate::io::load(&out)
-                .with_context(|| format!("re-reading {}", out.display()))?;
-            // An RDF/XML write drops an explicit `^^xsd:string` (it is the implicit
-            // datatype), so re-reading turns every `Datatype{xsd:string}` literal
-            // into a plain one — and a subject's annotations are ordered by their
-            // literals' DATATYPE first, with one subject's triples otherwise kept
-            // in insertion order. A recipe that never re-parses keeps the
-            // `xsd:string` an OBO-sourced literal carries and orders it AFTER a
-            // plain one from an RDF/XML import. Restore the literal
-            // forms from the model that was written: OBA:1000001's two
-            // `hasExactSynonym`s are the case, and ~1030 of `oba-full.owl`'s 1048
-            // differing lines are this.
-            restore_literal_datatypes(&mut back, &model);
-            // The re-read is here to model what the NEXT process would see of the
-            // axioms (see `collapse_rdf_roundtrip`), not to restart the pipeline: a
-            // recipe's `-o $@.tmp.owl && mv` never re-parses at all, so everything
-            // owlmake tracks ALONGSIDE the axioms has to survive it.
-            // `plain_literals_typed` is the one that shows: MONDO's
-            // `mondo-simple.owl` chain ends `… query --update … annotate`, and that
-            // `--update` is what makes an untyped literal `xsd:string` rather than
-            // `rdf:PlainLiteral` — which decides whether the typed or the untyped
-            // `IAO_0000233` sorts first. Re-reading RDF/XML resets the flag and
-            // would put the pair back the wrong way round.
-            back.carry_meta_from(&model);
-            back
-        }
         Op::Convert { clean_obo, format, check, .. } => {
             let mut model = model;
             // `--check false` writes the OBO document however its frames repeat
@@ -7326,9 +7259,29 @@ fn writes_functional_syntax(target: &str, steps: &[Step]) -> bool {
     matches!(format, Some(crate::io::Format::Functional))
 }
 
+/// Does a step of this recipe write functional syntax on the way to its target:
+/// a command's `-o` part way through a chain, or a convert step's own output?
+fn stages_functional_syntax(steps: &[Step]) -> bool {
+    use crate::io::Format;
+    steps.iter().any(|step| match step.effective() {
+        Step::Branch { then_steps, else_steps, .. } => {
+            stages_functional_syntax(then_steps) || stages_functional_syntax(else_steps)
+        }
+        Step::Op(Op::Write { path }) | Step::Partial { op: Op::Write { path }, .. } => {
+            matches!(Format::from_path(Path::new(path)), Ok(Format::Functional))
+        }
+        Step::Op(Op::Convert { format, output: Some(path), .. })
+        | Step::Partial { op: Op::Convert { format, output: Some(path), .. }, .. } => matches!(
+            format.as_deref().and_then(|f| Format::from_name(f).ok()).or_else(|| Format::from_path(Path::new(path)).ok()),
+            Some(Format::Functional)
+        ),
+        _ => false,
+    })
+}
+
 /// Give a model the documents its banners draw on — itself and its import
-/// closure — when the target it is bound for is written in functional syntax
-/// and it does not have them yet.
+/// closure — when the recipe writes functional syntax, at its target or on the
+/// way, and it does not have them yet.
 fn prime_banner_docs(
     repo: &Repo,
     model: &mut crate::model::Model,
@@ -7336,7 +7289,7 @@ fn prime_banner_docs(
     target: &str,
     steps: &[Step],
 ) -> Result<()> {
-    if model.banner_docs.is_empty() && writes_functional_syntax(target, steps) {
+    if model.banner_docs.is_empty() && (writes_functional_syntax(target, steps) || stages_functional_syntax(steps)) {
         let mark = crate::io::anon_counter();
         model.banner_docs = closure_banner_docs(model, &repo.dir, catalog)?;
         crate::io::set_anon_counter(mark);

@@ -523,6 +523,307 @@ fn a_planned_annotate_does_what_every_option_says() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A planned repair does everything its options say, as ROBOT 1.9.11 does: it
+/// moves the annotations of the properties a step names and of those its file
+/// lists, and merges axiom annotations before it migrates. A file it names that
+/// is not there fails the build.
+#[test]
+fn a_planned_repair_does_what_every_option_says() {
+    let root = workdir("repair-options");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["repair-deprecated.ofn", "repair-deprecated.properties.txt"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    let target = |name: &str, file: &str, options: &str| {
+        format!(
+            "  - target: {name}\n    input: repair-deprecated.ofn\n    needs: [repair-deprecated.ofn{file}]\n\
+             \x20   steps:\n      - op: repair\n{options}"
+        )
+    };
+    let targets = [
+        target("migrate.ofn", "", "        invalid_references: true\n        annotation_properties: ['oboInOwl:hasDbXref']\n"),
+        target(
+            "file.ofn",
+            ", repair-deprecated.properties.txt",
+            "        invalid_references: true\n        annotation_properties_file: repair-deprecated.properties.txt\n",
+        ),
+        target("both.ofn", "", "        invalid_references: true\n        merge_axiom_annotations: true\n"),
+        target("missing.ofn", "", "        invalid_references: true\n        annotation_properties_file: absent.txt\n"),
+    ]
+    .concat();
+    let built = ["migrate.ofn", "file.ofn", "both.ofn"];
+    let (ok, err) = make_own_plan(&root, &targets, &built);
+    assert!(ok, "the build failed:\n{err}");
+    for target in built {
+        let robot = format!("repair-deprecated.{}.robot.ofn", target.trim_end_matches(".ofn"));
+        assert_eq!(
+            std::fs::read_to_string(root.join(target)).unwrap(),
+            std::fs::read_to_string(fixtures.join(&robot)).unwrap(),
+            "{target}"
+        );
+    }
+    let (ok, err) = make_own_plan(&root, &targets, &["missing.ofn"]);
+    assert!(!ok && err.contains("absent.txt"), "the build should fail on the missing file:\n{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A command's `-o` part way through a chain writes the ontology there as a
+/// closing write would, and the chain goes on with the ontology itself rather
+/// than with what the file reads back as: the anonymous individual keeps its
+/// label. The file declares what its imports decide, and a functional one
+/// written on the way to a target in another format banners each entity with
+/// the label its imports give it. As ROBOT 1.9.11 writes
+/// `closure-declarations.ofn` with `convert -o mid.owl convert -o mid.ofn
+/// convert -o onwards.ofn`, and `diff-imports.ofn` with `convert -o
+/// labelled.ofn convert -o onwards.owl`.
+#[test]
+fn a_write_part_way_through_a_chain_goes_on_with_the_ontology() {
+    let root = workdir("write-part-way");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in [
+        "closure-declarations.ofn",
+        "closure-declarations-child.ofn",
+        "diff-imports.ofn",
+        "diff-imports-child.ofn",
+    ] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    std::fs::write(
+        root.join("catalog-v001.xml"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
+         <catalog prefer=\"public\" xmlns=\"urn:oasis:names:tc:entity:xmlns:xml:catalog\">\n\
+         \x20 <uri name=\"http://example.org/closure-declarations-child.owl\" uri=\"closure-declarations-child.ofn\"/>\n\
+         \x20 <uri name=\"http://example.org/diff-imports-child\" uri=\"diff-imports-child.ofn\"/>\n\
+         </catalog>\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+         use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n\
+         \x20 - target: onwards.ofn\n    input: closure-declarations.ofn\n\
+         \x20   needs: [closure-declarations.ofn, closure-declarations-child.ofn]\n    steps:\n\
+         \x20     - op: write\n        output: mid.owl\n\
+         \x20     - op: write\n        output: mid.ofn\n\
+         \x20 - target: onwards.owl\n    input: diff-imports.ofn\n\
+         \x20   needs: [diff-imports.ofn, diff-imports-child.ofn]\n    steps:\n\
+         \x20     - op: write\n        output: labelled.ofn\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "onwards.ofn", "onwards.owl"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for (built, robot) in [
+        ("mid.owl", "closure-declarations.robot.owl"),
+        ("mid.ofn", "closure-declarations.robot.ofn"),
+        ("onwards.ofn", "closure-declarations.robot.ofn"),
+        ("labelled.ofn", "diff-imports.robot.ofn"),
+        ("onwards.owl", "diff-imports.robot.owl"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(built)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{built}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned write, part way through a chain or closing it, declares as the
+/// ontology stands where it is written: once a step has changed it, none of the
+/// entities only its import names and nothing declares; while none has, those
+/// too. A `reason` and a `merge` change it whatever they do, and a step that
+/// fails where the recipe lets it leaves it as it was. As ROBOT 1.9.11 writes
+/// `closure-declarations.ofn` with `remove --term … -o changed-mid.ofn convert
+/// -o changed.ofn`, with `convert -o unchanged-mid.ofn convert -o
+/// unchanged.ofn`, and with a `reason` and a `merge` that add nothing.
+#[test]
+fn a_planned_write_declares_as_the_ontology_stands() {
+    let root = workdir("closure-declarations");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["closure-declarations.ofn", "closure-declarations-child.ofn"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    std::fs::copy(fixtures.join("closure-declarations-catalog.xml"), root.join("catalog-v001.xml")).unwrap();
+    let target = |name: &str, steps: &str| {
+        format!(
+            "  - target: {name}\n    input: closure-declarations.ofn\n\
+             \x20   needs: [closure-declarations.ofn, closure-declarations-child.ofn]\n    steps:\n{steps}"
+        )
+    };
+    let targets = target(
+        "changed.ofn",
+        "      - op: remove-terms\n        terms: ['http://example.org/c#A']\n\
+         \x20     - op: write\n        output: changed-mid.ofn\n",
+    ) + &target("unchanged.ofn", "      - op: write\n        output: unchanged-mid.ofn\n")
+        + &target(
+            "reasoned.ofn",
+            "      - op: reason\n        reasoner: elk\n        axiom_generators: [ClassAssertion]\n\
+             \x20       remove_redundant_subclass_axioms: false\n",
+        )
+        + &target("merged.ofn", "      - op: merge\n        collapse_import_closure: false\n")
+        + &target(
+            "tolerated.ofn",
+            "      - op: reason\n        reasoner: no-such-reasoner\n        may_fail: true\n\
+             \x20     - op: convert\n",
+        );
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        format!(
+            "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+             use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n{targets}"
+        ),
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "changed.ofn", "unchanged.ofn", "reasoned.ofn", "merged.ofn", "tolerated.ofn"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for (built, robot) in [
+        ("changed-mid.ofn", "closure-declarations.remove.robot.ofn"),
+        ("changed.ofn", "closure-declarations.remove.robot.ofn"),
+        ("unchanged-mid.ofn", "closure-declarations.robot.ofn"),
+        ("unchanged.ofn", "closure-declarations.robot.ofn"),
+        ("reasoned.ofn", "closure-declarations.as-changed.robot.ofn"),
+        ("merged.ofn", "closure-declarations.as-changed.robot.ofn"),
+        ("tolerated.ofn", "closure-declarations.robot.ofn"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(built)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{built}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned template step that merges adds the generated axioms to its
+/// input, which keeps its header and prefixes and counts as changed whatever
+/// they add, and under `collapse_import_closure` its imports come out of it;
+/// one that does not merge yields the generated axioms alone. As ROBOT 1.9.11's
+/// `template` writes each over `closure-declarations.ofn`, with
+/// `--merge-before`, `--collapse-import-closure true` or neither.
+#[test]
+fn a_planned_template_merges_as_robot_merges() {
+    let root = workdir("template-merge");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in [
+        "closure-declarations.ofn",
+        "closure-declarations-child.ofn",
+        "closure-declarations-template.tsv",
+        "closure-declarations-template-same.tsv",
+    ] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    std::fs::copy(fixtures.join("closure-declarations-catalog.xml"), root.join("catalog-v001.xml")).unwrap();
+    let target = |name: &str, table: &str, fields: &str| {
+        format!(
+            "  - target: {name}\n    input: closure-declarations.ofn\n\
+             \x20   needs: [closure-declarations.ofn, closure-declarations-child.ofn, {table}]\n    steps:\n\
+             \x20     - op: template\n        templates: [{table}]\n{fields}"
+        )
+    };
+    let table = "closure-declarations-template.tsv";
+    let targets = target("merged.ofn", table, "        merge: true\n")
+        + &target("same.ofn", "closure-declarations-template-same.tsv", "        merge: true\n")
+        + &target("collapsed.ofn", table, "        merge: true\n        collapse_import_closure: true\n")
+        + &target("alone.ofn", table, "");
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        format!(
+            "id: ex\nversion: '2026-10-05'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+             use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n{targets}"
+        ),
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "merged.ofn", "same.ofn", "collapsed.ofn", "alone.ofn"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for (built, robot) in [
+        ("merged.ofn", "closure-declarations.template.robot.ofn"),
+        ("same.ofn", "closure-declarations.as-changed.robot.ofn"),
+        ("collapsed.ofn", "closure-declarations.template-collapse.robot.ofn"),
+        ("alone.ofn", "closure-declarations.template-alone.robot.ofn"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(built)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{built}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A planned MIREOT extract and a planned template with its ancestors write
+/// what ROBOT 1.9.11 writes over `mireot.ofn` and the ontology it imports:
+/// lower terms from a file with the input's header annotations, lower, upper
+/// and branch terms collapsed to the minimal hierarchy, and a table's terms
+/// with the ancestors the input gives them.
+#[test]
+fn a_planned_mireot_extracts_as_robot_extracts() {
+    let root = workdir("mireot");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/robot-1.9.11");
+    for f in ["mireot.ofn", "mireot-child.ofn", "mireot-lower.txt", "mireot-template.tsv"] {
+        std::fs::copy(fixtures.join(f), root.join(f)).unwrap();
+    }
+    std::fs::copy(fixtures.join("mireot-catalog.xml"), root.join("catalog-v001.xml")).unwrap();
+    let target = |name: &str, needs: &str, step: &str| {
+        format!("  - target: {name}\n    input: mireot.ofn\n    needs: [mireot.ofn, mireot-child.ofn{needs}]\n    steps:\n{step}")
+    };
+    let m = "http://example.org/mireot#";
+    let targets = target(
+        "copy.ofn",
+        ", mireot-lower.txt",
+        "      - op: extract\n        method: MIREOT\n        lower_term_files: [mireot-lower.txt]\n\
+         \x20       copy_ontology_annotations: true\n",
+    ) + &target(
+        "minimal.ofn",
+        "",
+        &format!(
+            "      - op: extract\n        method: MIREOT\n        lower_terms: ['{m}X', '{m}H']\n\
+             \x20       upper_terms: ['{m}Z']\n        branch_from_terms: ['{m}Br']\n        intermediates: minimal\n"
+        ),
+    ) + &target(
+        "template.ofn",
+        ", mireot-template.tsv",
+        "      - op: template\n        templates: [mireot-template.tsv]\n        ancestors: true\n",
+    );
+    std::fs::write(
+        root.join("owlmake.yaml"),
+        format!(
+            "id: ex\nversion: '2026-10-10'\nreasoner: elk\nontology_iri: http://example.org/ex.owl\n\
+             use_builtin_rules: false\ncatalog_file: catalog-v001.xml\ntargets:\n{targets}"
+        ),
+    )
+    .unwrap();
+    let out = std::process::Command::new(BIN)
+        .args(["make", "-B", "copy.ofn", "minimal.ofn", "template.ofn"])
+        .current_dir(&root)
+        .output()
+        .expect("running om");
+    assert!(out.status.success(), "the build failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    for (built, robot) in [
+        ("copy.ofn", "mireot.copy.robot.ofn"),
+        ("minimal.ofn", "mireot.minimal.robot.ofn"),
+        ("template.ofn", "mireot.template.robot.ofn"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(root.join(built)).unwrap(),
+            std::fs::read_to_string(fixtures.join(robot)).unwrap(),
+            "{built}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// A planned remove and filter do everything their options say, as ROBOT 1.9.11
 /// does: a punned term selects both its entities, include and exclude terms
 /// and files change the selection, the hierarchy is not re-linked across what

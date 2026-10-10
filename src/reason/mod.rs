@@ -15,10 +15,12 @@ pub mod dl;
 pub mod el;
 pub mod elk_order;
 pub mod entail;
+pub mod told;
 pub mod whelk;
+pub mod whelk_individuals;
 pub mod whelk_order;
 
-pub use dl::{Datatypes, DlReasoner};
+pub use dl::{Datatypes, DlReasoner, Rules};
 pub use el::Reasoner;
 pub use entail::{entails, instances, is_instance, types};
 pub use whelk::WhelkClassification;

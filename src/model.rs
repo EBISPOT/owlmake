@@ -91,6 +91,12 @@ pub struct ImportsClosure {
     /// read — what a writer that renders every ontology of the closure on its
     /// own reads them back from.
     pub documents: Vec<ImportSource>,
+    /// Whether the ontology is still written among the closure although it
+    /// imports nothing: its imports were taken out of it and the closure was
+    /// kept, as `reason --create-new-ontology` takes them out. Otherwise
+    /// functional syntax and OWL/XML write an ontology that imports nothing
+    /// among no closure.
+    pub outlives_imports: bool,
 }
 
 impl ImportsClosure {
@@ -314,6 +320,13 @@ pub struct Model {
     /// decide how this one is written (see [`ImportsClosure`]); `None` until
     /// they have been read.
     pub imports_closure: Option<ImportsClosure>,
+    /// The digest of the ontology's own content as it was read
+    /// ([`Model::root_digest`]), taken for a document that imports; `None` for
+    /// one built rather than read, and once a command has changed it in the way
+    /// that counts whatever its content ([`Model::mark_root_changed`]). A
+    /// functional-syntax or OWL/XML write of an ontology whose content is no
+    /// longer as read declares none of the entities only its imports name.
+    pub root_as_read: Option<u64>,
     /// Anonymous-individual node labels in the order the SOURCE DOCUMENT first
     /// mentions them. An anonymous individual is re-minted the first time it is
     /// asked for and the set renders sorted by the minted id, so for a
@@ -448,6 +461,7 @@ impl Model {
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             imports_closure: None,
+            root_as_read: None,
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
@@ -485,6 +499,7 @@ impl Model {
             owl_genid_refs: std::collections::HashMap::new(),
             owl_label_order: std::collections::HashMap::new(),
             imports_closure: None,
+            root_as_read: None,
             anon_doc_order: Vec::new(),
             plain_literals_typed: false,
             owlapi_456: false,
@@ -525,6 +540,7 @@ impl Model {
         self.owl_genid_refs = other.owl_genid_refs.clone();
         self.owl_label_order = other.owl_label_order.clone();
         self.imports_closure = other.imports_closure.clone();
+        self.root_as_read = other.root_as_read;
         self.anon_doc_order = other.anon_doc_order.clone();
         self.plain_literals_typed = other.plain_literals_typed;
         self.owlapi_456 = other.owlapi_456;
@@ -555,6 +571,56 @@ impl Model {
         // closure declared is declared HERE, and suppressing its stub or its
         // annotations hides content the document now carries.
         self.imports_closure = None;
+    }
+
+    /// A digest of the ontology's own content: every component but its import
+    /// declarations, its document IRI and what its imports lent it, and the IRIs
+    /// it imports, whether stated or set aside for a save to restore. The
+    /// components are taken in no order, so the same content has the same
+    /// digest however it was arrived at.
+    pub fn root_digest(&self) -> u64 {
+        use horned_owl::model::Component;
+        use std::hash::{Hash, Hasher};
+        let mut sum = 0u64;
+        let mut count = 0u64;
+        let mut imports: std::collections::BTreeSet<String> = self.inlined_imports.iter().cloned().collect();
+        for ac in self.ont.iter() {
+            match &ac.component {
+                Component::Import(i) => {
+                    imports.insert(i.0.to_string());
+                }
+                Component::DocIRI(_) => {}
+                _ if self.imported_components.contains(ac) => {}
+                _ => {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    ac.hash(&mut h);
+                    sum = sum.wrapping_add(h.finish());
+                    count += 1;
+                }
+            }
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (sum, count, imports).hash(&mut h);
+        h.finish()
+    }
+
+    /// Whether the ontology's own content is no longer as it was read: a
+    /// command changed it, or it was never read.
+    pub fn root_changed(&self) -> bool {
+        self.root_as_read != Some(self.root_digest())
+    }
+
+    /// Take the ontology's content as read, as the document it was read from
+    /// states it.
+    pub fn mark_root_as_read(&mut self) {
+        self.root_as_read = Some(self.root_digest());
+    }
+
+    /// Count the ontology as changed whatever its content: `reason`, `merge` and
+    /// `repair --merge-axiom-annotations true` do, even where they leave it as
+    /// it was.
+    pub fn mark_root_changed(&mut self) {
+        self.root_as_read = None;
     }
 
     /// Whether an ontology this one imports has the entity keyed `key`
@@ -604,6 +670,7 @@ impl Clone for Model {
         m.owl_genid_refs = self.owl_genid_refs.clone();
         m.owl_label_order = self.owl_label_order.clone();
         m.imports_closure = self.imports_closure.clone();
+        m.root_as_read = self.root_as_read;
         m.anon_doc_order = self.anon_doc_order.clone();
         m.plain_literals_typed = self.plain_literals_typed;
         m.owlapi_456 = self.owlapi_456;

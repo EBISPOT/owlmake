@@ -113,8 +113,9 @@ impl Ontology {
     /// Remove logically redundant `SubClassOf` axioms (transitive reduction of
     /// the class hierarchy), in place.
     #[wasm_bindgen(js_name = reduce)]
-    pub fn reduce(&mut self) {
-        self.model = api::reduce(&self.model);
+    pub fn reduce(&mut self) -> Result<(), JsError> {
+        self.model = api::reduce(&self.model).map_err(js_err)?;
+        Ok(())
     }
 
     /// Relax equivalence/expression axioms into entailed `SubClassOf` axioms,

@@ -1124,7 +1124,7 @@ checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 [[package]]
 name = "hermit-rs"
 version = "0.1.0"
-source = "git+https://github.com/EBISPOT/hermit-rs?rev=584a1cad78c05279baca1110f19f602cef26ec1f#584a1cad78c05279baca1110f19f602cef26ec1f"
+source = "git+https://github.com/EBISPOT/hermit-rs?rev=49faccd24a19ec5e9d2852cffad1de0cbf802198#49faccd24a19ec5e9d2852cffad1de0cbf802198"
 dependencies = [
  "horned-owl",
  "indexmap 2.14.0",
@@ -1152,7 +1152,7 @@ checksum = "242402749acf71e6f32f5857598b7002c4058a4e3c3b22b4c7d51cab9aea754e"
 [[package]]
 name = "horned-catalog"
 version = "1.0.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=4a0a24b#4a0a24bf229d9e533a3fba343a198f476033a798"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=694b756#694b75650c27cf0c1deb30ac184ab83feb5e06b4"
 dependencies = [
  "quick-xml 0.37.5",
  "thiserror 1.0.69",
@@ -1161,7 +1161,7 @@ dependencies = [
 [[package]]
 name = "horned-owl"
 version = "4.0.0"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=4a0a24b#4a0a24bf229d9e533a3fba343a198f476033a798"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=694b756#694b75650c27cf0c1deb30ac184ab83feb5e06b4"
 dependencies = [
  "curie",
  "enum_meta",
@@ -1185,7 +1185,7 @@ dependencies = [
 [[package]]
 name = "horned-pretty-rdf"
 version = "2.0.1"
-source = "git+https://github.com/EBISPOT/horned-owl?rev=4a0a24b#4a0a24bf229d9e533a3fba343a198f476033a798"
+source = "git+https://github.com/EBISPOT/horned-owl?rev=694b756#694b75650c27cf0c1deb30ac184ab83feb5e06b4"
 dependencies = [
  "indexmap 1.9.3",
  "oxrdf",
@@ -1970,7 +1970,7 @@ dependencies = [
 
 [[package]]
 name = "owlmake"
-version = "0.4.15"
+version = "0.4.18"
 dependencies = [
  "anyhow",
  "arrow-array",

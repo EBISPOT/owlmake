@@ -262,7 +262,9 @@ pub fn take_or_load(piped: Option<Model>, input: Option<&Path>, common: &CommonA
 /// [`crate::model::ImportsClosure`]). The closure is resolved from a scratch
 /// document carrying only the root's `Import(...)`s, so the root's own
 /// signature never counts as the closure's. An import that resolves nowhere
-/// fails, as it fails every load of the document.
+/// fails, as it fails every load of the document. The documents the closure
+/// reads are ones a functional write's banners draw their labels from, as
+/// they are for a document read with its imports merged.
 pub(crate) fn read_imports_closure(
     model: &mut Model,
     input: Option<&Path>,
@@ -271,7 +273,13 @@ pub(crate) fn read_imports_closure(
     if model.imports_closure.is_some() {
         return Ok(());
     }
-    read_imports(model, input, None, common).map(|_| ())
+    if let Some(imports) = read_imports(model, input, None, common)? {
+        if model.banner_docs.is_empty() {
+            model.banner_docs.push(banner_doc_of(model, true));
+            model.banner_docs.extend(imports.banner_docs.into_iter().filter(|d| !d.root));
+        }
+    }
+    Ok(())
 }
 
 /// Read the imports closure of `model`, a document loaded without its imports,
@@ -327,18 +335,6 @@ pub fn take_or_load_no_imports(
     let (mut model, _) = single_input(input, common)?;
     read_imports_closure(&mut model, input, common)?;
     Ok(model)
-}
-
-/// Collect `entity IRI → rdfs:label` across the input's whole import closure, for
-/// the functional-syntax banner comments.
-pub(crate) fn closure_labels(
-    input: Option<&std::path::Path>,
-    common: &crate::cmd::CommonArgs,
-) -> Result<std::collections::HashMap<String, String>> {
-    // `take_or_load` merges the import closure (via the catalog), which is exactly
-    // the label set the banners need; only the labels are read, then it is
-    // discarded.
-    Ok(rdfs_labels(&take_or_load(None, input, common)?))
 }
 
 /// Return every process-wide option to its default, so one invocation cannot

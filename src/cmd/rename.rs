@@ -544,6 +544,43 @@ fn replace_iris(ac: &mut AnnotatedComponent<RcStr>, rename: &HashMap<String, Str
     walk.annotated_component(ac);
 }
 
+/// Rename every entity `map` maps, all at once, as [`Renamer::change_iri`]
+/// renames one: a component is rewritten when it names one of the entities,
+/// when it is an annotation assertion about one, or when it is an ontology
+/// annotation that holds one of their IRIs; and then every IRI of it that `map`
+/// maps is replaced. A component `keep` holds is left as it is, and so are the
+/// ontology's IRI, version IRI and imports. What the model keeps of its blank
+/// nodes by IRI is renamed with them.
+pub(crate) fn rename_entities_at_once(
+    model: &mut Model,
+    map: &HashMap<String, String>,
+    keep: impl Fn(&AnnotatedComponent<RcStr>) -> bool,
+) {
+    let map: HashMap<String, String> = map.iter().filter(|(old, new)| old != new).map(|(o, n)| (o.clone(), n.clone())).collect();
+    if map.is_empty() {
+        return;
+    }
+    let order = model.natural_order();
+    let renamed: Vec<AnnotatedComponent<RcStr>> = model
+        .ont
+        .iter()
+        .filter(|ac| !matches!(ac.component, Component::OntologyID(_) | Component::DocIRI(_) | Component::Import(_)))
+        .filter(|ac| !keep(ac))
+        .filter(|ac| Named::of(ac).rewrites.iter().any(|iri| map.contains_key(iri)))
+        .cloned()
+        .collect();
+    for mut ac in renamed {
+        model.ont.remove(&ac);
+        replace_iris(&mut ac, &map, &model.build);
+        if let Component::Rule(rule) = &mut ac.component {
+            rehash_atoms(&mut rule.body, order);
+            rehash_atoms(&mut rule.head, order);
+        }
+        model.ont.insert(ac);
+    }
+    rename_blank_node_keys(model, &map);
+}
+
 /// Replace every IRI `map` maps, wherever it occurs in the ontology's axioms and
 /// ontology annotations, all at once; the ontology's IRI, version IRI and
 /// imports are kept. What the model keeps of its blank nodes by IRI is renamed

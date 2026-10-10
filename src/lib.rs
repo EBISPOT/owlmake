@@ -53,6 +53,7 @@ pub mod cli;
 pub mod diff;
 pub mod dosdp;
 pub mod extract;
+pub(crate) mod mireot;
 pub mod hash_trie;
 pub mod html_escape;
 /// OBO ID-policy files (`<ont>-idranges.owl`) — parsing and checking, behind

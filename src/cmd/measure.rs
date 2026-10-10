@@ -139,7 +139,7 @@ pub fn step(
     // Reasoned metrics (extended/all only): classify with the chosen reasoner
     // and report the number of inferred SubClassOf edges.
     if include_kinds {
-        let inferred = inferred_subclass_count(&model, &args.reasoner);
+        let inferred = inferred_subclass_count(&model, &args.reasoner)?;
         metrics.push(("inferred_subclass_axioms", inferred));
         metrics.sort_by_key(|(k, _)| *k);
     }
@@ -201,13 +201,16 @@ pub fn step(
 /// Classify `model` with `reasoner` and return the number of inferred
 /// SubClassOf edges (all subsumptions, excluding reflexive X ⊑ X). Dispatches
 /// across the EL/whelk/DL backends the same way `reason` does.
-fn inferred_subclass_count(model: &crate::model::Model, reasoner: &str) -> usize {
+fn inferred_subclass_count(model: &crate::model::Model, reasoner: &str) -> anyhow::Result<usize> {
     let lc = reasoner.to_ascii_lowercase();
     let pairs: Vec<(String, String)> = match lc.as_str() {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so every backend
         // is available in the browser too (see src/reason/mod.rs).
-        "hermit" | "jfact" => crate::reason::DlReasoner::classify(model).all_subsumptions(),
-        "whelk" => crate::reason::WhelkClassification::classify(model).direct_subsumptions(),
+        "hermit" | "jfact" => crate::cmd::reason::ReasonerKind::parse(&lc)
+            .expect("hermit and jfact are reasoner names")
+            .dl_reasoner(model)
+            .all_subsumptions(),
+        "whelk" => crate::reason::WhelkClassification::classify(model)?.direct_subsumptions(),
         _ => {
             if !matches!(lc.as_str(), "elk" | "structural" | "emr" | "owlmake") {
                 status!("measure: unknown reasoner '{reasoner}'; using the EL reasoner");
@@ -216,5 +219,5 @@ fn inferred_subclass_count(model: &crate::model::Model, reasoner: &str) -> usize
             crate::reason::Reasoner::classify(model).all_subsumptions()
         }
     };
-    pairs.iter().filter(|(a, b)| a != b).count()
+    Ok(pairs.iter().filter(|(a, b)| a != b).count())
 }

@@ -1,0 +1,27 @@
+Prefix(:=<http://example.org/mireot-order#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/mireot-order>
+
+Declaration(Class(:T))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:seeAlso))
+
+
+############################
+#   Classes
+############################
+
+# Class: :T (:T)
+
+AnnotationAssertion(Annotation(rdfs:seeAlso "x") rdfs:comment :T "c")
+AnnotationAssertion(rdfs:seeAlso :T "t")
+SubClassOf(:T owl:Thing)
+
+
+)

@@ -1,0 +1,84 @@
+Prefix(:=<http://example.org/mireot#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/mireot>
+<http://example.org/mireot/v1>
+Annotation(<http://purl.org/dc/elements/1.1/title> "the mireot input")
+Annotation(rdfs:comment "a header comment")
+
+Declaration(Class(:Top))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
+Declaration(Class(:Z2))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:p2))
+Declaration(ObjectProperty(:p3))
+Declaration(ObjectProperty(:pcs))
+Declaration(ObjectProperty(owl:topObjectProperty))
+Declaration(AnnotationProperty(<http://purl.org/dc/elements/1.1/title>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+Declaration(AnnotationProperty(rdfs:label))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :p (pee)
+
+AnnotationAssertion(rdfs:label :p "pee")
+SubObjectPropertyOf(:p :p2)
+
+# Object Property: :p2 (pee two)
+
+AnnotationAssertion(rdfs:label :p2 "pee two")
+SubObjectPropertyOf(:p2 :p3)
+
+# Object Property: :p3 (pee three)
+
+AnnotationAssertion(rdfs:label :p3 "pee three")
+SubObjectPropertyOf(:p3 :pcs)
+
+# Object Property: :pcs (:pcs)
+
+SubObjectPropertyOf(:pcs owl:topObjectProperty)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :Top (:Top)
+
+SubClassOf(:Top owl:Thing)
+
+# Class: :X (ex2)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> :X "exx")
+AnnotationAssertion(rdfs:label :X "ex"@en)
+AnnotationAssertion(rdfs:label :X "ex2")
+SubClassOf(:X :Y)
+
+# Class: :Y (why)
+
+AnnotationAssertion(rdfs:label :Y "why")
+SubClassOf(:Y :Z)
+SubClassOf(:Y :Z2)
+
+# Class: :Z (zed)
+
+AnnotationAssertion(Annotation(rdfs:comment "on the label") rdfs:label :Z "zed")
+SubClassOf(:Z :Top)
+
+# Class: :Z2 (:Z2)
+
+SubClassOf(:Z2 owl:Thing)
+
+
+)

@@ -198,7 +198,7 @@ pub fn step(
     status!("  reason: +{asserted} inferred SubClassOf axioms");
 
     // 3. Reduce: remove redundant SubClassOf.
-    let mut full = reduce::reduce(&model);
+    let mut full = reduce::reduce(&model)?;
     status!("  reduce: {} components in -full", full.ont.iter().count());
 
     // -full

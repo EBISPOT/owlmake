@@ -5423,10 +5423,7 @@ idspaces={} rdf_prefixes={} explicit_prefixes={} plain_typed={} prefixes_cleared
             Component::HasKey(k) if !matches!(k.ce, CE::Class(_)) && ac.ann.is_empty() => {
                 // On an anonymous class the key is one more statement of the
                 // expression's own node, which stands as a general axiom.
-                let key = format!(
-                    "        <owl:hasKey rdf:parseType=\"Collection\">\n{}        </owl:hasKey>\n",
-                    render_key_members(k).0.concat()
-                );
+                let (key, _) = list_slots("owl:hasKey", &render_key_members(k).0, None, &mut String::new());
                 gci_blocks.push((ac, insert_before_close(&render_ce(&k.ce, 4, &no_g), &key)));
             }
             Component::HasKey(k) => match &k.ce {

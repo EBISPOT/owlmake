@@ -48,7 +48,6 @@ pub fn step(
     piped: Option<crate::model::Model>,
     args: &Args,
 ) -> anyhow::Result<Option<crate::model::Model>> {
-    let piped_input = piped.is_some();
     // A conversion keeps the document's `owl:imports` as declarations rather than
     // folding the imported axioms in — but what the imported ontologies hold still
     // decides the output, because a class one of them has in its signature needs
@@ -100,34 +99,8 @@ pub fn step(
         }
     }
 
-    // Functional-syntax banners name each entity as `# Class: <IRI> (label)`, and
-    // the label an entity carries is the one anywhere in the document's import
-    // closure — an edit file that only DECLARES a class still banners it with the
-    // label its imported pattern module asserts. The closure is loaded for its
-    // labels alone and discarded; only the root is serialised.
-    if !piped_input && writes_functional(args) && has_imports(&model) {
-        model.banner_labels = crate::cmd::closure_labels(args.input.as_deref(), &args.common)?;
-    }
-
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(model))
-}
-
-/// Whether this conversion writes Functional syntax, the one format whose
-/// per-entity banners carry labels.
-fn writes_functional(args: &Args) -> bool {
-    let fmt = match (args.format.as_deref(), args.output.as_deref()) {
-        (Some(name), _) => crate::io::Format::from_name(name),
-        (None, Some(path)) => crate::io::Format::from_path(path),
-        (None, None) => return false,
-    };
-    matches!(fmt, Ok(crate::io::Format::Functional))
-}
-
-/// Whether the document declares any `owl:imports`, i.e. whether it has a closure
-/// to resolve at all.
-fn has_imports(model: &crate::model::Model) -> bool {
-    model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)))
 }
 
 /// `convert --check` (OBO output): report OBO document-structure problems

@@ -55,7 +55,6 @@ pub fn run(args: Args) -> Result<()> {
 }
 
 pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
-    let piped_input = piped.is_some();
     // Load the edit file's OWN axioms only — mint reallocates IDs that live in the
     // edit file and must preserve its `Import(...)` declarations rather than
     // flatten the whole import closure into the reserialised output.
@@ -80,14 +79,6 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
         used_iris.iter().filter(|i| i.starts_with(&args.temp_id_prefix)).cloned().collect();
     temp.sort_by(|a, b| suffix_num(a).cmp(&suffix_num(b)).then_with(|| a.cmp(b)));
 
-    // Banner labels for the reserialised edit file are resolved from the import
-    // closure: the closure is loaded for its labels, but only the root is
-    // serialised. A piped model's banners are the pipeline's.
-    let banner_labels = if piped_input {
-        std::collections::HashMap::new()
-    } else {
-        crate::cmd::closure_labels(args.input.as_deref(), &args.common)?
-    };
     // The in-memory ontology is an unordered set, so recover the source file's
     // `Import(...)` order from its text and preserve it on output — reserialising
     // the edit file must not reshuffle its imports.
@@ -95,7 +86,6 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
 
     if temp.is_empty() {
         status!("mint: no IRIs under `{}` — nothing to allocate", args.temp_id_prefix);
-        model.banner_labels = banner_labels;
         model.import_order = import_order;
         crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
         return Ok(Some(model));
@@ -147,7 +137,6 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     );
 
     let mut renamed = crate::cmd::rename::rename_model(model, &map)?;
-    renamed.banner_labels = banner_labels;
     renamed.import_order = import_order;
     crate::cmd::maybe_save(&mut renamed, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(renamed))

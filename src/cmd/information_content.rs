@@ -99,7 +99,7 @@ pub fn step(
     let scored: Vec<(String, usize, f64)> = if args.relations {
         relation_scores(&model)
     } else {
-        subclass_scores(&model, args)
+        subclass_scores(&model, args)?
     };
     let scored: Vec<(String, usize, f64)> =
         scored.into_iter().filter(|(t, _, _)| named(t)).collect();
@@ -181,7 +181,7 @@ fn named(iri: &str) -> bool {
 
 /// Subclass-only structural IC: `(class, desc(t), IC(t))` over the subclass
 /// hierarchy (asserted, or `--reasoner`-inferred), sorted by class.
-fn subclass_scores(model: &crate::model::Model, args: &Args) -> Vec<(String, usize, f64)> {
+fn subclass_scores(model: &crate::model::Model, args: &Args) -> anyhow::Result<Vec<(String, usize, f64)>> {
     // Direct subclass edges (child → parents) over named classes, plus the full
     // class set (so isolated classes still score).
     let mut classes: HashSet<String> = HashSet::new();
@@ -195,7 +195,7 @@ fn subclass_scores(model: &crate::model::Model, args: &Args) -> Vec<(String, usi
         }
     }
     let edges = match &args.reasoner {
-        Some(r) => reasoned_subsumptions(model, r),
+        Some(r) => reasoned_subsumptions(model, r)?,
         None => asserted_subclass_edges(model),
     };
     for (sub, sup) in edges {
@@ -212,7 +212,7 @@ fn subclass_scores(model: &crate::model::Model, args: &Args) -> Vec<(String, usi
     let mut out: Vec<(String, usize, f64)> =
         score.into_iter().map(|(t, (d, ic))| (t, d, ic)).collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
+    Ok(out)
 }
 
 /// Full existential-relation IC: classify with the EL reasoner, materialize the
@@ -292,13 +292,16 @@ fn asserted_subclass_edges(model: &crate::model::Model) -> Vec<(String, String)>
 
 /// Classify `model` with `reasoner` and return its subsumption `(sub, sup)`
 /// pairs. Dispatches across the EL/whelk/DL backends exactly as `measure` does.
-fn reasoned_subsumptions(model: &crate::model::Model, reasoner: &str) -> Vec<(String, String)> {
+fn reasoned_subsumptions(model: &crate::model::Model, reasoner: &str) -> anyhow::Result<Vec<(String, String)>> {
     let lc = reasoner.to_ascii_lowercase();
-    match lc.as_str() {
+    Ok(match lc.as_str() {
         // hermit-rs (DL) and whelk-rs (EL) both build for wasm, so every backend
         // is available in the browser too (see src/reason/mod.rs).
-        "hermit" | "jfact" => crate::reason::DlReasoner::classify(model).all_subsumptions(),
-        "whelk" => crate::reason::WhelkClassification::classify(model).direct_subsumptions(),
+        "hermit" | "jfact" => crate::cmd::reason::ReasonerKind::parse(&lc)
+            .expect("hermit and jfact are reasoner names")
+            .dl_reasoner(model)
+            .all_subsumptions(),
+        "whelk" => crate::reason::WhelkClassification::classify(model)?.direct_subsumptions(),
         _ => {
             if !matches!(lc.as_str(), "elk" | "structural" | "emr" | "owlmake") {
                 status!("information-content: unknown reasoner '{reasoner}'; using the EL reasoner");
@@ -306,7 +309,7 @@ fn reasoned_subsumptions(model: &crate::model::Model, reasoner: &str) -> Vec<(St
             crate::reason::el::set_whelk_mode(lc == "owlmake");
             crate::reason::Reasoner::classify(model).all_subsumptions()
         }
-    }
+    })
 }
 
 #[cfg(test)]

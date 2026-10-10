@@ -1,0 +1,74 @@
+Prefix(:=<http://x.org/root#>)
+Prefix(po:=<http://x.org/po#>)
+Prefix(efo:=<http://x.org/efo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://x.org/root>
+Import(<http://x.org/po>)
+
+Declaration(Class(efo:EFO_0000998))
+Declaration(Class(:LeafComponent))
+Declaration(Class(:ReproSystem))
+Declaration(ObjectProperty(po:part_of))
+
+############################
+#   Classes
+############################
+
+# Class: efo:EFO_0000998 (efo:EFO_0000998)
+
+SubClassOf(efo:EFO_0000998 po:Structure)
+
+# Class: po:Flower (po:Flower)
+
+SubClassOf(po:Flower :ReproSystem)
+SubClassOf(po:Flower ObjectSomeValuesFrom(po:part_of :ReproSystem))
+
+# Class: po:Leaf (po:Leaf)
+
+SubClassOf(po:Leaf po:Structure)
+
+# Class: po:Organ (po:Organ)
+
+SubClassOf(po:Organ po:Structure)
+
+# Class: po:Perianth (po:Perianth)
+
+SubClassOf(po:Perianth po:Organ)
+SubClassOf(po:Perianth :ReproSystem)
+
+# Class: po:Stoma (po:Stoma)
+
+SubClassOf(po:Stoma po:Tissue)
+SubClassOf(po:Stoma :LeafComponent)
+SubClassOf(po:Stoma ObjectSomeValuesFrom(po:part_of po:Leaf))
+
+# Class: po:Structure (po:Structure)
+
+SubClassOf(po:Structure owl:Thing)
+
+# Class: po:Tepal (po:Tepal)
+
+SubClassOf(po:Tepal po:Perianth)
+
+# Class: po:Tissue (po:Tissue)
+
+SubClassOf(po:Tissue po:Structure)
+
+# Class: :LeafComponent (:LeafComponent)
+
+EquivalentClasses(:LeafComponent ObjectIntersectionOf(po:Structure ObjectSomeValuesFrom(po:part_of po:Leaf)))
+SubClassOf(:LeafComponent po:Structure)
+
+# Class: :ReproSystem (:ReproSystem)
+
+EquivalentClasses(:ReproSystem ObjectIntersectionOf(po:Structure ObjectSomeValuesFrom(po:part_of :ReproSystem)))
+SubClassOf(:ReproSystem po:Structure)
+
+
+)

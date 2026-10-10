@@ -83,7 +83,11 @@ fn prefix_map(prefixes: &[(String, String)]) -> Vec<(String, String)> {
 /// edge — not ⊤, not ⊥, not an anonymous expression.
 fn named_class<'a>(state: &'a ReasonerState, id: ConceptId) -> Option<&'a str> {
     match state.interner.concept_data(id) {
-        ConceptData::AtomicConcept(iri) if iri != OWL_THING && iri != OWL_NOTHING => Some(iri),
+        ConceptData::AtomicConcept(iri)
+            if iri != OWL_THING && iri != OWL_NOTHING && !crate::reason::whelk::is_atom(iri) =>
+        {
+            Some(iri)
+        }
         _ => None,
     }
 }

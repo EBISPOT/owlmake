@@ -1,0 +1,161 @@
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(
+Declaration(Class(<http://example.org/mireot#A>))
+Declaration(Class(<http://example.org/mireot#B>))
+Declaration(Class(<http://example.org/mireot#C>))
+Declaration(Class(<http://example.org/mireot#L>))
+Declaration(Class(<http://example.org/mireot#M>))
+Declaration(Class(<http://example.org/mireot#Mid>))
+Declaration(Class(<http://example.org/mireot#T1>))
+Declaration(Class(<http://example.org/mireot#T2>))
+Declaration(Class(<http://example.org/mireot#T3>))
+Declaration(Class(<http://example.org/mireot#T4>))
+Declaration(Class(<http://example.org/mireot#T5>))
+Declaration(Class(<http://example.org/mireot#T6>))
+Declaration(Class(<http://example.org/mireot#Top>))
+Declaration(Class(<http://example.org/mireot#Unknown>))
+Declaration(Class(<http://example.org/mireot#Up>))
+Declaration(Class(<http://example.org/mireot#W>))
+Declaration(Class(<http://example.org/mireot#X>))
+Declaration(Class(<http://example.org/mireot#Y>))
+Declaration(Class(<http://example.org/mireot#Z>))
+Declaration(Class(<http://example.org/mireot#Z2>))
+Declaration(ObjectProperty(<http://example.org/mireot#p>))
+Declaration(ObjectProperty(<http://example.org/mireot#p2>))
+Declaration(ObjectProperty(<http://example.org/mireot#p3>))
+Declaration(ObjectProperty(<http://example.org/mireot#pcs>))
+Declaration(ObjectProperty(owl:topObjectProperty))
+Declaration(AnnotationProperty(rdfs:label))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/mireot#p> (pee)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#p> "pee")
+SubObjectPropertyOf(<http://example.org/mireot#p> <http://example.org/mireot#p2>)
+
+# Object Property: <http://example.org/mireot#p2> (pee two)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#p2> "pee two")
+SubObjectPropertyOf(<http://example.org/mireot#p2> <http://example.org/mireot#p3>)
+
+# Object Property: <http://example.org/mireot#p3> (pee three)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#p3> "pee three")
+SubObjectPropertyOf(<http://example.org/mireot#p3> <http://example.org/mireot#pcs>)
+
+# Object Property: <http://example.org/mireot#pcs> (<http://example.org/mireot#pcs>)
+
+SubObjectPropertyOf(<http://example.org/mireot#pcs> owl:topObjectProperty)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/mireot#A> (ay)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#A> "ay")
+SubClassOf(<http://example.org/mireot#A> <http://example.org/mireot#Up>)
+
+# Class: <http://example.org/mireot#B> (bee)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#B> "bee")
+SubClassOf(<http://example.org/mireot#B> <http://example.org/mireot#Up>)
+
+# Class: <http://example.org/mireot#C> (see)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#C> "see")
+SubClassOf(<http://example.org/mireot#C> <http://example.org/mireot#A>)
+SubClassOf(<http://example.org/mireot#C> <http://example.org/mireot#B>)
+
+# Class: <http://example.org/mireot#L> (ell from the input)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#L> "ell from the input")
+SubClassOf(<http://example.org/mireot#L> <http://example.org/mireot#M>)
+
+# Class: <http://example.org/mireot#M> (<http://example.org/mireot#M>)
+
+SubClassOf(<http://example.org/mireot#M> owl:Thing)
+
+# Class: <http://example.org/mireot#Mid> (mid)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#Mid> "mid")
+SubClassOf(<http://example.org/mireot#Mid> <http://example.org/mireot#L>)
+
+# Class: <http://example.org/mireot#T1> (t one)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#T1> "t one")
+SubClassOf(<http://example.org/mireot#T1> <http://example.org/mireot#X>)
+
+# Class: <http://example.org/mireot#T2> (t two)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#T2> "t two")
+SubClassOf(<http://example.org/mireot#T2> ObjectSomeValuesFrom(<http://example.org/mireot#p> <http://example.org/mireot#W>))
+
+# Class: <http://example.org/mireot#T3> (t three)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#T3> "t three")
+SubClassOf(<http://example.org/mireot#T3> <http://example.org/mireot#C>)
+
+# Class: <http://example.org/mireot#T4> (t four)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#T4> "t four")
+SubClassOf(<http://example.org/mireot#T4> <http://example.org/mireot#Unknown>)
+
+# Class: <http://example.org/mireot#T5> (t five)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#T5> "t five")
+SubClassOf(<http://example.org/mireot#T5> <http://example.org/mireot#M>)
+
+# Class: <http://example.org/mireot#T6> (t six)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#T6> "t six")
+SubClassOf(<http://example.org/mireot#T6> <http://example.org/mireot#Mid>)
+
+# Class: <http://example.org/mireot#Top> (<http://example.org/mireot#Top>)
+
+SubClassOf(<http://example.org/mireot#Top> owl:Thing)
+
+# Class: <http://example.org/mireot#Up> (up)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#Up> "up")
+SubClassOf(<http://example.org/mireot#Up> owl:Thing)
+
+# Class: <http://example.org/mireot#W> (double-u)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#W> "double-u")
+SubClassOf(<http://example.org/mireot#W> owl:Thing)
+
+# Class: <http://example.org/mireot#X> (ex2)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#X> "ex"@en)
+AnnotationAssertion(rdfs:label <http://example.org/mireot#X> "ex2")
+SubClassOf(<http://example.org/mireot#X> <http://example.org/mireot#Y>)
+
+# Class: <http://example.org/mireot#Y> (why)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#Y> "why")
+SubClassOf(<http://example.org/mireot#Y> <http://example.org/mireot#Z>)
+SubClassOf(<http://example.org/mireot#Y> <http://example.org/mireot#Z2>)
+
+# Class: <http://example.org/mireot#Z> (zed)
+
+AnnotationAssertion(Annotation(rdfs:comment "on the label") rdfs:label <http://example.org/mireot#Z> "zed")
+SubClassOf(<http://example.org/mireot#Z> <http://example.org/mireot#Top>)
+
+# Class: <http://example.org/mireot#Z2> (<http://example.org/mireot#Z2>)
+
+SubClassOf(<http://example.org/mireot#Z2> owl:Thing)
+
+
+)

@@ -327,23 +327,16 @@ pub fn materialize(model: Model, properties: &[String]) -> Result<Model> {
 }
 
 /// Extract a module for a seed term set (`om extract`). `method` is one of
-/// `BOT`, `TOP`, `STAR` (syntactic locality) or `MIREOT`.
+/// `BOT`, `TOP`, `STAR` (syntactic locality) or `MIREOT`, whose seed terms are
+/// its lower terms: each with its ancestors.
 pub fn extract(model: &Model, terms: &[String], method: &str) -> Result<Model> {
-    let seed: std::collections::HashSet<String> = terms.iter().cloned().collect();
-    let opts = crate::extract::ExtractOptions::default();
     if method.eq_ignore_ascii_case("MIREOT") {
-        Ok(crate::extract::mireot_with(
-            model,
-            &seed,
-            &std::collections::HashSet::new(),
-            &std::collections::HashSet::new(),
-            &opts,
-        ))
-    } else {
-        let m = crate::extract::Method::parse(method)
-            .ok_or_else(|| Error::Unknown { param: "method", value: method.to_string() })?;
-        Ok(crate::extract::extract_with(model, &seed, m, &opts))
+        return Ok(crate::extract::mireot(model, terms, &[], &[], false, crate::extract::Intermediates::All)?);
     }
+    let seed: std::collections::HashSet<String> = terms.iter().cloned().collect();
+    let m = crate::extract::Method::parse(method)
+        .ok_or_else(|| Error::Unknown { param: "method", value: method.to_string() })?;
+    Ok(crate::extract::extract_with(model, &seed, m, &crate::extract::ExtractOptions::default())?)
 }
 
 /// A human-readable diff of two ontologies (`om diff`), in the default
@@ -559,8 +552,12 @@ pub fn dl_query(model: &Model, expression: &str, kind: &str, reasoner: &str) -> 
 
     let lc = reasoner.to_ascii_lowercase();
     if matches!(lc.as_str(), "hermit" | "jfact") {
-        let r = crate::reason::DlReasoner::classify(&clone);
-        // The DL reasoner answers instance membership by full entailment.
+        let dl = crate::cmd::reason::ReasonerKind::parse(&lc).expect("hermit and jfact are reasoner names");
+        // The ontology as the reasoner reads it, over which it answers instance
+        // membership by full entailment.
+        let rules = dl.rules();
+        clone.ont = clone.ont.iter().filter(|ac| rules.reads(&ac.component)).cloned().collect();
+        let r = dl.dl_reasoner(&clone);
         let instances = crate::reason::instances(&clone, DL_QUERY_IRI);
         return Ok(dl_select(&r.all_subsumptions(), &r.direct_subsumptions(), kind, &instances));
     }

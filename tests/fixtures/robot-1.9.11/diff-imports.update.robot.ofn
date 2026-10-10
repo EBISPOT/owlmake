@@ -1,0 +1,49 @@
+Prefix(:=<http://example.org/diff-imports#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(child:=<http://example.org/diff-imports-child#>)
+
+
+Ontology(<http://example.org/diff-imports>
+Import(<http://example.org/diff-imports-child>)
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(obo:GO_0000001))
+Declaration(Class(obo:GO_0000002))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (import label of A)
+
+SubClassOf(:A child:L)
+
+# Class: :B (line one
+# line two)
+
+AnnotationAssertion(rdfs:label :B "line one
+line two")
+
+# Class: :C (:C)
+
+SubClassOf(:C :A)
+
+# Class: obo:GO_0000001 (obo:GO_0000001)
+
+SubClassOf(obo:GO_0000001 obo:UBERON_0000001)
+
+# Class: obo:GO_0000002 (GO:0000002)
+
+AnnotationAssertion(rdfs:label obo:GO_0000002 "GO:0000002")
+SubClassOf(obo:GO_0000002 :B)
+
+
+)

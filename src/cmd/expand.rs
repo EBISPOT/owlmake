@@ -1,28 +1,22 @@
-//! `expand` — expand OBO/OWL macros.
+//! `expand` — expand macro relations.
 //!
-//! Handles the `oboInOwl`/IAO macro mechanism: an object property `P` annotated
-//! with `IAO:0000424` (expandExpressionTo) carries a Manchester-template value
-//! using `?Y` for the filler. Each `X SubClassOf (P some Z)` then expands by
-//! substituting `?Y := Z` into the template. The supported template forms are
-//! `?Y` and `REL some ?Y` (optionally conjoined with `and`), which cover the
-//! common GCI macros.
+//! An entity annotated with `OMO:0002000` (defined by construct) carries a SPARQL
+//! CONSTRUCT query. The query runs over the ontology's RDF rendering, and the
+//! axioms its result states are added to the ontology. No other annotation is a
+//! macro: an `IAO:0000424` (expand expression to) template expands nothing.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use clap::Args as ClapArgs;
 use horned_owl::model::{
-    AnnotatedComponent, Annotation, AnnotationSubject, AnnotationValue, ClassExpression as CE,
-    Component, Literal, MutableOntology, ObjectPropertyExpression as OPE, RcStr, SubClassOf,
+    AnnotatedComponent, Annotation, AnnotationSubject, AnnotationValue, Component, Literal,
+    MutableOntology, RcStr,
 };
 
 use crate::cmd::select;
 use crate::model::Model;
 
-const IAO_EXPAND_EXPR: &str = "http://purl.obolibrary.org/obo/IAO_0000424";
-/// The second macro mechanism: an entity annotated with `OMO_0002000` ("is expanded
-/// by"/defined-by-construct) carries a SPARQL CONSTRUCT query whose results are added
-/// as axioms.
 const OMO_EXPAND_CONSTRUCT: &str = "http://purl.obolibrary.org/obo/OMO_0002000";
 const DCT_SOURCE: &str = "http://purl.org/dc/terms/source";
 
@@ -78,27 +72,6 @@ pub fn step(
     let include = select::collect_terms(&model, &args.expand_term, &args.expand_term_file)?;
     let exclude = select::collect_terms(&model, &args.no_expand_term, &args.no_expand_term_file)?;
 
-    // Collect macros: property IRI -> template string.
-    let mut macros: HashMap<String, String> = HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() == IAO_EXPAND_EXPR {
-                if let (AnnotationSubject::IRI(p), AnnotationValue::Literal(lit)) =
-                    (&aa.subject, &aa.ann.av)
-                {
-                    let prop = p.as_ref().to_string();
-                    if !include.is_empty() && !include.contains(&prop) {
-                        continue;
-                    }
-                    if exclude.contains(&prop) {
-                        continue;
-                    }
-                    macros.insert(prop, literal_text(lit));
-                }
-            }
-        }
-    }
-
     // Collect OMO_0002000 SPARQL-CONSTRUCT macros: subject IRI -> query string.
     let mut construct_macros: Vec<(String, String)> = Vec::new();
     for ac in model.ont.iter() {
@@ -120,68 +93,32 @@ pub fn step(
         }
     }
 
-    if macros.is_empty() && construct_macros.is_empty() {
-        status!(
-            "expand: no IAO:0000424 or OMO:0002000 macros to expand (after term filtering)"
-        );
+    if construct_macros.is_empty() {
+        status!("expand: no OMO:0002000 macros to expand (after term filtering)");
     }
 
-    // Find X SubClassOf (P some Z) where P is a macro property, and expand. Each
-    // generated axiom remembers its source macro property (for --annotate-…).
+    // Each generated axiom remembers the term whose macro made it (for --annotate-…).
     let mut to_add: Vec<(Component<RcStr>, String)> = Vec::new();
 
     // Run each OMO_0002000 SPARQL CONSTRUCT against the ontology and fold the
-    // resulting triples back in as OWL axioms.
+    // resulting triples back in as OWL axioms. A query that does not parse or
+    // run fails the command.
     if !construct_macros.is_empty() {
         let q = crate::sparql::Queryable::from_model(&model)?;
         for (subj, query) in &construct_macros {
-            let rdf = match q.construct(query, oxigraph::io::RdfFormat::RdfXml) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    status!("expand: skipping OMO:0002000 construct on <{subj}>: {e}");
+            let rdf = q
+                .construct(query, oxigraph::io::RdfFormat::RdfXml)
+                .with_context(|| format!("expand: the OMO:0002000 query of <{subj}>"))?;
+            let constructed = parse_constructed(&rdf)
+                .with_context(|| format!("expand: reading what the OMO:0002000 query of <{subj}> constructs"))?;
+            for ac in constructed.ont.iter() {
+                if is_skippable(&ac.component) {
                     continue;
                 }
-            };
-            match parse_constructed(&rdf) {
-                Ok(constructed) => {
-                    for ac in constructed.ont.iter() {
-                        if is_skippable(&ac.component) {
-                            continue;
-                        }
-                        to_add.push((ac.component.clone(), subj.clone()));
-                    }
-                }
-                Err(e) => {
-                    status!("expand: could not parse construct output for <{subj}>: {e}");
-                }
+                to_add.push((ac.component.clone(), subj.clone()));
             }
         }
     }
-    // rdfs:label → IRI, so a macro template referencing a relation by quoted
-    // label (`'part of' some ?Y`) resolves to the property IRI.
-    let label_to_iri = label_to_iri_map(&model);
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (sub_ce, CE::ObjectSomeValuesFrom { ope, bce }) = (&sc.sub, &sc.sup) {
-                if let (OPE::ObjectProperty(p), CE::Class(z)) = (ope, bce.as_ref()) {
-                    if let Some(tmpl) = macros.get(p.0.as_ref()) {
-                        if let Some(expanded) =
-                            instantiate(&model, &label_to_iri, tmpl, z.0.as_ref())
-                        {
-                            to_add.push((
-                                Component::SubClassOf(SubClassOf {
-                                    sub: sub_ce.clone(),
-                                    sup: expanded,
-                                }),
-                                p.0.as_ref().to_string(),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     let create_new = args.create_new_ontology.unwrap_or(false);
     let annotate = args.annotate_expansion_axioms.unwrap_or(false);
     // Build a `dct:source <macro property>` annotation for an expansion axiom.
@@ -199,27 +136,27 @@ pub fn step(
     };
 
     if create_new {
-        // Output only the expansion axioms, in a fresh ontology carrying prefixes.
-        use horned_owl::ontology::set::SetOntology;
-        let mut ont = SetOntology::new();
-        let mut added = 0;
-        for (c, src) in to_add {
-            let inserted = if annotate {
-                ont.insert(make_annotated(c, &src))
-            } else {
-                ont.insert(c)
-            };
-            if inserted {
-                added += 1;
-            }
+        // `--create-new-ontology`: the root gives up its own axioms to take the
+        // expansions. Its ontology ID, annotations and imports stay, and so do
+        // the axioms its imports lent.
+        let own: Vec<AnnotatedComponent<RcStr>> = model
+            .ont
+            .iter()
+            .filter(|ac| {
+                !model.imported_components.contains(*ac)
+                    && !matches!(
+                        ac.component,
+                        Component::OntologyID(_)
+                            | Component::DocIRI(_)
+                            | Component::OntologyAnnotation(_)
+                            | Component::Import(_)
+                    )
+            })
+            .cloned()
+            .collect();
+        for ac in &own {
+            model.ont.remove(ac);
         }
-        status!(
-            "expand: created new ontology with {added} expanded axiom(s) from {} macro(s)",
-            macros.len() + construct_macros.len()
-        );
-        let mut result = Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes));
-        crate::cmd::maybe_save(&mut result, args.output.as_deref(), args.format.as_deref())?;
-        return Ok(Some(result));
     }
 
     let mut added = 0;
@@ -233,67 +170,20 @@ pub fn step(
             added += 1;
         }
     }
-    status!(
-        "expand: added {added} expanded axiom(s) from {} macro(s)",
-        macros.len() + construct_macros.len()
-    );
+    if create_new {
+        status!(
+            "expand: created new ontology with {added} expanded axiom(s) from {} macro(s)",
+            construct_macros.len()
+        );
+    } else {
+        status!(
+            "expand: added {added} expanded axiom(s) from {} macro(s)",
+            construct_macros.len()
+        );
+    }
 
     crate::cmd::maybe_save(&mut model, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(model))
-}
-
-/// Instantiate a macro template, substituting `?Y` with the filler `z`. Returns
-/// the resulting class expression, or None if the template is unsupported.
-/// Build an rdfs:label → entity-IRI map from the model.
-fn label_to_iri_map(model: &Model) -> HashMap<String, String> {
-    const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
-    let mut map = HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::AnnotationAssertion(aa) = &ac.component {
-            if aa.ann.ap.0.as_ref() == RDFS_LABEL {
-                if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(lit)) =
-                    (&aa.subject, &aa.ann.av)
-                {
-                    map.insert(literal_text(lit), s.as_ref().to_string());
-                }
-            }
-        }
-    }
-    map
-}
-
-fn instantiate(
-    model: &Model,
-    label_to_iri: &HashMap<String, String>,
-    template: &str,
-    z: &str,
-) -> Option<CE<RcStr>> {
-    let b = &model.build;
-    // Conjunction of clauses joined by " and ".
-    let clauses: Vec<&str> = template.split(" and ").map(|s| s.trim()).collect();
-    let mut parts: Vec<CE<RcStr>> = Vec::new();
-    for clause in clauses {
-        let part = if clause == "?Y" {
-            CE::Class(b.class(z))
-        } else if let Some(rel) = clause.strip_suffix("some ?Y").map(|s| s.trim().to_string()) {
-            let rel = rel.trim().trim_matches('\'');
-            // Resolve the relation by rdfs:label first (Manchester quoted-label
-            // form), then fall back to CURIE/IRI expansion.
-            let rel_iri = label_to_iri.get(rel).cloned().unwrap_or_else(|| select::expand(model, rel));
-            CE::ObjectSomeValuesFrom {
-                ope: OPE::ObjectProperty(b.object_property(rel_iri.as_str())),
-                bce: Box::new(CE::Class(b.class(z))),
-            }
-        } else {
-            return None; // unsupported template form
-        };
-        parts.push(part);
-    }
-    match parts.len() {
-        0 => None,
-        1 => Some(parts.into_iter().next().unwrap()),
-        _ => Some(CE::ObjectIntersectionOf(parts)),
-    }
 }
 
 /// Parse RDF/XML bytes (the output of a CONSTRUCT) into a Model by round-tripping

@@ -156,8 +156,9 @@ impl Ontology {
 
     /// Remove logically redundant `SubClassOf` axioms (transitive reduction of
     /// the class hierarchy), in place.
-    fn reduce(&mut self) {
-        self.model = api::reduce(&self.model);
+    fn reduce(&mut self) -> PyResult<()> {
+        self.model = api::reduce(&self.model).map_err(|e| pyerr(e.into()))?;
+        Ok(())
     }
 
     /// Relax equivalence/expression axioms into entailed `SubClassOf` axioms

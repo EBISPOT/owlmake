@@ -2113,13 +2113,13 @@ def extract(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = 
     output: (--output / -o)
     format: (--format) Output format. `-f` is taken by `--force` on this command, so the format has no short; use the long `--format`
     method: (--method / -m) Extraction method: star, top, bot, mireot
-    term: (--term / -t) Seed term to extract (repeatable). For MIREOT these are the lower terms
+    term: (--term / -t) Seed term to extract (repeatable). MIREOT reads its lower, upper and branch terms instead
     term_file: (--term-file / -T) File(s) listing seed terms (repeatable)
     upper_term: (--upper-term / -u) MIREOT upper (boundary) term (repeatable)
     upper_terms: (--upper-terms / -U) File(s) of MIREOT upper terms (repeatable)
-    lower_term: (--lower-term / -l) MIREOT lower term (repeatable; alias for --term under MIREOT)
+    lower_term: (--lower-term / -l) MIREOT lower term (repeatable): its ancestors are extracted
     lower_terms: (--lower-terms / -L) File(s) of MIREOT lower terms (repeatable)
-    branch_from_term: (--branch-from-term / -b) Branch root term (repeatable): extract the branch rooted here
+    branch_from_term: (--branch-from-term / -b) MIREOT branch term (repeatable): its descendants are extracted
     branch_from_terms: (--branch-from-terms / -B) File(s) of branch root terms (repeatable)
     copy_ontology_annotations: (--copy-ontology-annotations / -c) Copy the source ontology's ontology-level annotations into the module (`<bool>`, default false)
     annotate_with_source: (--annotate-with-source / -a) Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`true` or `yes` in any case; default false)
@@ -2184,13 +2184,13 @@ def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[
     output: (--output / -o)
     format: (--format) Output format. `-f` is taken by `--force` on this command, so the format has no short; use the long `--format`
     method: (--method / -m) Extraction method: star, top, bot, mireot
-    term: (--term / -t) Seed term to extract (repeatable). For MIREOT these are the lower terms
+    term: (--term / -t) Seed term to extract (repeatable). MIREOT reads its lower, upper and branch terms instead
     term_file: (--term-file / -T) File(s) listing seed terms (repeatable)
     upper_term: (--upper-term / -u) MIREOT upper (boundary) term (repeatable)
     upper_terms: (--upper-terms / -U) File(s) of MIREOT upper terms (repeatable)
-    lower_term: (--lower-term / -l) MIREOT lower term (repeatable; alias for --term under MIREOT)
+    lower_term: (--lower-term / -l) MIREOT lower term (repeatable): its ancestors are extracted
     lower_terms: (--lower-terms / -L) File(s) of MIREOT lower terms (repeatable)
-    branch_from_term: (--branch-from-term / -b) Branch root term (repeatable): extract the branch rooted here
+    branch_from_term: (--branch-from-term / -b) MIREOT branch term (repeatable): its descendants are extracted
     branch_from_terms: (--branch-from-terms / -B) File(s) of branch root terms (repeatable)
     copy_ontology_annotations: (--copy-ontology-annotations / -c) Copy the source ontology's ontology-level annotations into the module (`<bool>`, default false)
     annotate_with_source: (--annotate-with-source / -a) Annotate extracted terms with rdfs:isDefinedBy / oboInOwl:source = their source ontology IRI (`true` or `yes` in any case; default false)
@@ -3488,7 +3488,7 @@ def _chain_report(self, *, input: Optional[StrOrPath] = None, output: Optional[S
 Chain.report = _chain_report
 
 
-def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: Optional[bool] = None, merge_after: Optional[bool] = None, ancestors: Optional[bool] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: bool = False, merge_after: bool = False, ancestors: bool = False, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Generate OWL from a template table (TSV/CSV)
 
     Flags:
@@ -3501,11 +3501,11 @@ def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[
     external_template: (--external-template / -E) Additional template file(s), treated exactly like `--template`
     ontology_iri: (--ontology-iri / -O) Set the output ontology IRI
     version_iri: (--version-iri / -V) Set the output version IRI
-    merge_before: (--merge-before / -m) Merge the generated axioms into the input ontology before output. owlmake already merges into the input when one is present; this forces that behavior on. `<bool>`
-    merge_after: (--merge-after / -M) Merge the generated axioms into the input ontology after output. Treated like `--merge-before` here. `<bool>`
-    ancestors: (--ancestors / -a) MIREOT the ancestors of generated terms from the input into the results. `<bool>`
-    include_annotations: (--include-annotations / -A) If true, include ontology annotations from the merge input. `<bool>`
-    collapse_import_closure: (--collapse-import-closure / -c) If true, collapse the import closure when merging. Accepted for compatibility. `<bool>`
+    merge_before: (--merge-before / -m) Add the generated axioms to the input ontology, and write and go on with the input so merged
+    merge_after: (--merge-after / -M) Write the generated axioms alone, then add them to the input ontology and go on with the input so merged
+    ancestors: (--ancestors / -a) Add the ancestors the input gives the generated axioms' terms, each with its labels: every term the axioms name that the input names too, climbed as `extract --method MIREOT` climbs a lower term
+    include_annotations: (--include-annotations / -A) If true, a merge adds the ontology annotations of the generated axioms' ontology, which has none. `<bool>`
+    collapse_import_closure: (--collapse-import-closure / -c) If true, a merge takes the input ontology's imports out of it: the merged ontology imports nothing, and the imports' axioms stay out. `<bool>`
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -3547,7 +3547,7 @@ def template(*, template: Optional[Sequence[StrOrPath]] = None, input: Optional[
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: Optional[bool] = None, merge_after: Optional[bool] = None, ancestors: Optional[bool] = None, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, force: Optional[StrOrPath] = None, errors: Optional[StrOrPath] = None, external_template: Optional[Sequence[StrOrPath]] = None, ontology_iri: Optional[StrOrPath] = None, version_iri: Optional[StrOrPath] = None, merge_before: bool = False, merge_after: bool = False, ancestors: bool = False, include_annotations: Optional[bool] = None, collapse_import_closure: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Generate OWL from a template table (TSV/CSV)
 
     Flags:
@@ -3560,11 +3560,11 @@ def _chain_template(self, *, template: Optional[Sequence[StrOrPath]] = None, inp
     external_template: (--external-template / -E) Additional template file(s), treated exactly like `--template`
     ontology_iri: (--ontology-iri / -O) Set the output ontology IRI
     version_iri: (--version-iri / -V) Set the output version IRI
-    merge_before: (--merge-before / -m) Merge the generated axioms into the input ontology before output. owlmake already merges into the input when one is present; this forces that behavior on. `<bool>`
-    merge_after: (--merge-after / -M) Merge the generated axioms into the input ontology after output. Treated like `--merge-before` here. `<bool>`
-    ancestors: (--ancestors / -a) MIREOT the ancestors of generated terms from the input into the results. `<bool>`
-    include_annotations: (--include-annotations / -A) If true, include ontology annotations from the merge input. `<bool>`
-    collapse_import_closure: (--collapse-import-closure / -c) If true, collapse the import closure when merging. Accepted for compatibility. `<bool>`
+    merge_before: (--merge-before / -m) Add the generated axioms to the input ontology, and write and go on with the input so merged
+    merge_after: (--merge-after / -M) Write the generated axioms alone, then add them to the input ontology and go on with the input so merged
+    ancestors: (--ancestors / -a) Add the ancestors the input gives the generated axioms' terms, each with its labels: every term the axioms name that the input names too, climbed as `extract --method MIREOT` climbs a lower term
+    include_annotations: (--include-annotations / -A) If true, a merge adds the ontology annotations of the generated axioms' ontology, which has none. `<bool>`
+    collapse_import_closure: (--collapse-import-closure / -c) If true, a merge takes the input ontology's imports out of it: the merged ontology imports nothing, and the imports' axioms stay out. `<bool>`
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -4772,17 +4772,17 @@ Chain.explain = _chain_explain
 
 
 def repair(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, invalid_references: Optional[bool] = None, merge_axiom_annotations: Optional[bool] = None, annotation_property: Optional[Sequence[StrOrPath]] = None, annotation_properties_file: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Fix common mechanical problems (duplicates, dangling references)
+    """Migrate references to deprecated entities to their replacements, and merge the annotations of axioms that are otherwise the same
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    invalid_references: (--invalid-references / -r) Remove annotation assertions whose subject IRI is never declared or used in a logical axiom (dangling references)
-    merge_axiom_annotations: (--merge-axiom-annotations / -m) If true, merge the annotation sets of axioms that are otherwise identical. `<bool>`
-    annotation_property: (--annotation-property / -a) An annotation property whose assertions should be migrated/retained. Repeatable. Accepted for compatibility; currently only recorded, not used to drive a migration
-    annotation_properties_file: (--annotation-properties-file / -A) File listing annotation properties to migrate, one IRI/CURIE per line; unioned with `--annotation-property`
-    output_iri: (--output-iri / -O) Set the OntologyIRI for the output
+    invalid_references: (--invalid-references / -r) Migrate every reference to a deprecated entity to its replacement. Without `--merge-axiom-annotations true` this repair is made whatever this says. `<bool>`
+    merge_axiom_annotations: (--merge-axiom-annotations / -m) Merge the annotations of axioms that are otherwise the same, before any reference is migrated. `<bool>`
+    annotation_property: (--annotation-property / -a) An annotation property whose assertions on a deprecated entity move to its replacement; the deprecated entity keeps its other annotations. Repeatable
+    annotation_properties_file: (--annotation-properties-file / -A) A file listing more such annotation properties, one per line; a blank line and a line starting `#` list none
+    output_iri: (--output-iri / -O) Read and not used: the ontology keeps its IRI
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -4819,17 +4819,17 @@ def repair(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
 
 
 def _chain_repair(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, invalid_references: Optional[bool] = None, merge_axiom_annotations: Optional[bool] = None, annotation_property: Optional[Sequence[StrOrPath]] = None, annotation_properties_file: Optional[StrOrPath] = None, output_iri: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Fix common mechanical problems (duplicates, dangling references)
+    """Migrate references to deprecated entities to their replacements, and merge the annotations of axioms that are otherwise the same
 
     Flags:
     input: (--input / -i)
     output: (--output / -o)
     format: (--format / -f)
-    invalid_references: (--invalid-references / -r) Remove annotation assertions whose subject IRI is never declared or used in a logical axiom (dangling references)
-    merge_axiom_annotations: (--merge-axiom-annotations / -m) If true, merge the annotation sets of axioms that are otherwise identical. `<bool>`
-    annotation_property: (--annotation-property / -a) An annotation property whose assertions should be migrated/retained. Repeatable. Accepted for compatibility; currently only recorded, not used to drive a migration
-    annotation_properties_file: (--annotation-properties-file / -A) File listing annotation properties to migrate, one IRI/CURIE per line; unioned with `--annotation-property`
-    output_iri: (--output-iri / -O) Set the OntologyIRI for the output
+    invalid_references: (--invalid-references / -r) Migrate every reference to a deprecated entity to its replacement. Without `--merge-axiom-annotations true` this repair is made whatever this says. `<bool>`
+    merge_axiom_annotations: (--merge-axiom-annotations / -m) Merge the annotations of axioms that are otherwise the same, before any reference is migrated. `<bool>`
+    annotation_property: (--annotation-property / -a) An annotation property whose assertions on a deprecated entity move to its replacement; the deprecated entity keeps its other annotations. Repeatable
+    annotation_properties_file: (--annotation-properties-file / -A) A file listing more such annotation properties, one per line; a blank line and a line starting `#` list none
+    output_iri: (--output-iri / -O) Read and not used: the ontology keeps its IRI
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -4966,7 +4966,7 @@ Chain.collapse = _chain_collapse
 
 
 def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, expand_term: Optional[Sequence[StrOrPath]] = None, expand_term_file: Optional[Sequence[StrOrPath]] = None, no_expand_term: Optional[Sequence[StrOrPath]] = None, no_expand_term_file: Optional[Sequence[StrOrPath]] = None, create_new_ontology: Optional[bool] = None, annotate_expansion_axioms: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Expand OBO/OWL macros (IAO:0000424 expandExpressionTo)
+    """Expand `OMO:0002000` (defined by construct) macros
 
     Flags:
     input: (--input / -i)
@@ -5015,7 +5015,7 @@ def expand(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = N
 
 
 def _chain_expand(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, expand_term: Optional[Sequence[StrOrPath]] = None, expand_term_file: Optional[Sequence[StrOrPath]] = None, no_expand_term: Optional[Sequence[StrOrPath]] = None, no_expand_term_file: Optional[Sequence[StrOrPath]] = None, create_new_ontology: Optional[bool] = None, annotate_expansion_axioms: Optional[bool] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Expand OBO/OWL macros (IAO:0000424 expandExpressionTo)
+    """Expand `OMO:0002000` (defined by construct) macros
 
     Flags:
     input: (--input / -i)

@@ -1,0 +1,73 @@
+Prefix(:=<http://example.org/mireot#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/mireot>
+<http://example.org/mireot/v1>
+
+Declaration(Class(:Br))
+Declaration(Class(:C1))
+Declaration(Class(:C2))
+Declaration(Class(:G2))
+Declaration(Class(:H))
+Declaration(Class(:X))
+Declaration(Class(:Z))
+Declaration(Class(:Z2))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:label))
+
+
+############################
+#   Classes
+############################
+
+# Class: :Br (branch root)
+
+AnnotationAssertion(rdfs:label :Br "branch root")
+SubClassOf(:Br owl:Thing)
+
+# Class: :C1 (child one)
+
+AnnotationAssertion(rdfs:comment :C1 "a comment on child one")
+AnnotationAssertion(rdfs:label :C1 "child one")
+SubClassOf(:C1 :Br)
+
+# Class: :C2 (child two)
+
+AnnotationAssertion(rdfs:label :C2 "child two")
+SubClassOf(:C2 :Br)
+
+# Class: :G2 (grandchild two)
+
+AnnotationAssertion(rdfs:label :G2 "grandchild two")
+SubClassOf(:G2 :C1)
+
+# Class: :H (great-grandchild)
+
+AnnotationAssertion(rdfs:label :H "great-grandchild")
+SubClassOf(:H :Br)
+SubClassOf(:H :C1)
+
+# Class: :X (ex2)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> :X "exx")
+AnnotationAssertion(rdfs:label :X "ex"@en)
+AnnotationAssertion(rdfs:label :X "ex2")
+SubClassOf(:X :Z)
+SubClassOf(:X :Z2)
+
+# Class: :Z (zed)
+
+AnnotationAssertion(Annotation(rdfs:comment "on the label") rdfs:label :Z "zed")
+
+# Class: :Z2 (:Z2)
+
+SubClassOf(:Z2 owl:Thing)
+
+
+)

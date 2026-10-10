@@ -168,7 +168,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
     let kind = ReasonerKind::parse(args.reasoner.as_deref().unwrap_or("elk"))?;
     let (subsumptions, equivalences) = match kind {
         ReasonerKind::Hermit | ReasonerKind::JFact => {
-            let r = crate::reason::DlReasoner::classify(&classified);
+            let r = kind.dl_reasoner(&classified);
             (r.all_subsumptions(), r.equivalent_class_pairs())
         }
         _ => {

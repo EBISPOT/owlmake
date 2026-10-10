@@ -2362,6 +2362,8 @@ pub fn step(
             crate::model::clone_prefixes(&model.prefixes),
         );
         out.carry_meta_from(&model);
+        // The updated ontology is read back, as a document is: it is as read.
+        out.mark_root_as_read();
         // The round trip retypes every untyped literal: a literal with no datatype
         // comes back out of the store as `xsd:string`, where an OFN / RDF-XML parse
         // gives `rdf:PlainLiteral`. That reorders a subject's triples, because

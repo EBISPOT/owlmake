@@ -1,0 +1,41 @@
+Prefix(:=<http://example.org/x/expand-import.owl#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/x/expand-import.owl>
+Import(<http://example.org/x/expand-import-child.owl>)
+
+Declaration(Class(<http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07>))
+Declaration(ObjectProperty(obo:BFO_0000050))
+Declaration(ObjectProperty(obo:RO_0002162))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/x#A> (<http://example.org/x#A>)
+
+SubClassOf(<http://example.org/x#A> ObjectSomeValuesFrom(obo:RO_0002162 ObjectComplementOf(<http://example.org/x#T>)))
+DisjointClasses(<http://example.org/x#A> ObjectSomeValuesFrom(obo:RO_0002162 <http://example.org/x#T>))
+
+# Class: <http://example.org/x#B> (<http://example.org/x#B>)
+
+SubClassOf(<http://example.org/x#B> ObjectSomeValuesFrom(obo:RO_0002162 ObjectComplementOf(<http://example.org/x#U>)))
+DisjointClasses(<http://example.org/x#B> ObjectSomeValuesFrom(obo:RO_0002162 <http://example.org/x#U>))
+
+# Class: <http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> (http://example.org/x#B in taxon http://example.org/x#T)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> "http://example.org/x#B in taxon http://example.org/x#T")
+SubClassOf(<http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> <http://example.org/x#B>)
+SubClassOf(<http://purl.obolibrary.org/obo/RO_0002175#699ba5abbb5b62c3642986b8c2d07c78-555558bff663a80f54c7410408b75d07> ObjectSomeValuesFrom(obo:RO_0002162 <http://example.org/x#T>))
+
+
+DisjointClasses(ObjectSomeValuesFrom(obo:BFO_0000050 <http://example.org/x#A>) ObjectSomeValuesFrom(obo:BFO_0000050 <http://example.org/x#B>))
+)

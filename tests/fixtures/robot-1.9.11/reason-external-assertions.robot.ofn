@@ -1,0 +1,41 @@
+Prefix(:=<http://example.org/ext2#>)
+Prefix(e:=<http://example.org/other#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/ext2>
+
+Declaration(ObjectProperty(:q))
+Declaration(ObjectProperty(:q2))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(e:i3))
+Declaration(NamedIndividual(e:i4))
+############################
+#   Object Properties
+############################
+
+# Object Property: :q (:q)
+
+SubObjectPropertyOf(:q :q2)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+ObjectPropertyAssertion(:q :i e:i4)
+ObjectPropertyAssertion(:q2 :i e:i4)
+
+# Individual: e:i3 (e:i3)
+
+ObjectPropertyAssertion(:q e:i3 :i)
+ObjectPropertyAssertion(:q2 e:i3 :i)
+
+
+)

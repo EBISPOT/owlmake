@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 
 use horned_owl::model::{
     AnnotatedComponent, AnnotationValue, Atom, ClassExpression as CE, Component, DataRange as DR, Individual,
-    Literal, ObjectPropertyExpression as OPE, RcStr, SubObjectPropertyExpression as SOPE,
+    Literal, ObjectPropertyExpression as OPE, PropertyExpression, RcStr, SubObjectPropertyExpression as SOPE,
 };
 
 use crate::owlapi_hash::iri_cmp;
@@ -479,6 +479,14 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::FunctionalDataProperty(x), Component::FunctionalDataProperty(y)) => {
             iri_cmp(x.0 .0.as_ref(), y.0 .0.as_ref())
         }
+        // A key orders by its class expression, then by its properties as a set.
+        (Component::HasKey(x), Component::HasKey(y)) => cmp_ce(&x.ce, &y.ce).then_with(|| {
+            let mut p: Vec<&PropertyExpression<RcStr>> = x.vpe.iter().collect();
+            let mut q: Vec<&PropertyExpression<RcStr>> = y.vpe.iter().collect();
+            p.sort_by(|m, n| cmp_property_expression(m, n));
+            q.sort_by(|m, n| cmp_property_expression(m, n));
+            cmp_sorted(&p, &q, |m, n| cmp_property_expression(m, n))
+        }),
         _ => match (declared_entity(a), declared_entity(b)) {
             (Some((ta, ia)), Some((tb, ib))) => ta.cmp(&tb).then_with(|| iri_cmp(ia, ib)),
             _ => Ordering::Equal,
@@ -508,6 +516,30 @@ fn cmp_dp_set(a: &[horned_owl::model::DataProperty<RcStr>], b: &[horned_owl::mod
     a.sort_by(|p, q| iri_cmp(p, q));
     b.sort_by(|p, q| iri_cmp(p, q));
     cmp_sorted(&a, &b, |p, q| iri_cmp(p, q))
+}
+
+/// A key's property expressions: object properties (typeIndex 1002), inverse
+/// properties (1003), data properties (1004), annotation properties (1006), each
+/// kind in IRI order.
+fn cmp_property_expression(a: &PropertyExpression<RcStr>, b: &PropertyExpression<RcStr>) -> Ordering {
+    let rank = |pe: &PropertyExpression<RcStr>| match pe {
+        PropertyExpression::ObjectPropertyExpression(OPE::ObjectProperty(_)) => 1002,
+        PropertyExpression::ObjectPropertyExpression(OPE::InverseObjectProperty(_)) => 1003,
+        PropertyExpression::DataProperty(_) => 1004,
+        PropertyExpression::AnnotationProperty(_) => 1006,
+    };
+    rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
+        (PropertyExpression::ObjectPropertyExpression(x), PropertyExpression::ObjectPropertyExpression(y)) => {
+            cmp_ope(x, y)
+        }
+        (PropertyExpression::DataProperty(x), PropertyExpression::DataProperty(y)) => {
+            iri_cmp(x.0.as_ref(), y.0.as_ref())
+        }
+        (PropertyExpression::AnnotationProperty(x), PropertyExpression::AnnotationProperty(y)) => {
+            iri_cmp(x.0.as_ref(), y.0.as_ref())
+        }
+        _ => Ordering::Equal,
+    })
 }
 
 /// Two sets of object property expressions, each in its own order.

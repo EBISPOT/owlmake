@@ -26,7 +26,7 @@ use crate::cmd::reason::ReasonerKind;
 use crate::cmd::select;
 use crate::extract::{self, Method};
 use crate::model::{clone_prefixes, Model};
-use crate::reason::{DlReasoner, Reasoner, WhelkClassification};
+use crate::reason::{Reasoner, WhelkClassification};
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -95,6 +95,11 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+/// Why a whelk classification inside the search cannot fail: whelk refuses
+/// part of the ontology — an axiom it has no reading of, or a rule that fires
+/// with an unbound head variable — only where it refuses all of it, and
+/// [`run`] classifies all of it before the search starts.
+const WHOLE_FIRST: &str = "what whelk refuses in part of the ontology it refuses in all of it, which explain classified first";
 
 pub fn step(
     piped: Option<crate::model::Model>,
@@ -114,6 +119,9 @@ pub fn step(
     let kind = ReasonerKind::parse(&args.reasoner)?;
     crate::reason::el::set_whelk_mode(kind == ReasonerKind::Owlmake);
     let backend = Backend::of(kind);
+    if backend == Backend::Whelk {
+        WhelkClassification::classify(&model)?;
+    }
 
     let max = args.max.max(1);
 
@@ -369,8 +377,9 @@ pub fn step(
 enum Backend {
     /// The built-in EL reasoner (`elk`/`emr`/`structural`/`owlmake`).
     El,
-    /// The hermit-rs OWL 2 DL reasoner (`hermit`/`jfact`).
-    Dl,
+    /// The hermit-rs OWL 2 DL reasoner (`hermit`/`jfact`), as the kind it
+    /// serves reads the ontology.
+    Dl(ReasonerKind),
     /// The whelk-rs EL reasoner (`whelk`).
     Whelk,
 }
@@ -378,7 +387,7 @@ enum Backend {
 impl Backend {
     fn of(kind: ReasonerKind) -> Backend {
         match kind {
-            ReasonerKind::Hermit | ReasonerKind::JFact => Backend::Dl,
+            kind @ (ReasonerKind::Hermit | ReasonerKind::JFact) => Backend::Dl(kind),
             ReasonerKind::Whelk => Backend::Whelk,
             ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Structural | ReasonerKind::Emr => {
                 Backend::El
@@ -391,7 +400,7 @@ impl Backend {
     fn engine(self) -> &'static str {
         match self {
             Backend::El => "the built-in EL reasoner",
-            Backend::Dl => "hermit-rs",
+            Backend::Dl(_) => "hermit-rs",
             Backend::Whelk => "whelk-rs",
         }
     }
@@ -400,8 +409,8 @@ impl Backend {
     fn is_subsumed(self, model: &Model, sub: &str, sup: &str) -> bool {
         match self {
             Backend::El => Reasoner::classify(model).is_subsumed(sub, sup),
-            Backend::Dl => DlReasoner::classify(model).is_subsumed(sub, sup),
-            Backend::Whelk => WhelkClassification::classify(model).subsumes(sub, sup),
+            Backend::Dl(kind) => kind.dl_reasoner(model).is_subsumed(sub, sup),
+            Backend::Whelk => WhelkClassification::classify(model).expect(WHOLE_FIRST).subsumes(sub, sup),
         }
     }
 
@@ -409,8 +418,8 @@ impl Backend {
     fn is_consistent(self, model: &Model) -> bool {
         match self {
             Backend::El => Reasoner::classify(model).is_consistent(),
-            Backend::Dl => DlReasoner::classify(model).is_consistent(),
-            Backend::Whelk => WhelkClassification::classify(model).is_consistent(),
+            Backend::Dl(kind) => kind.dl_reasoner(model).is_consistent(),
+            Backend::Whelk => WhelkClassification::classify(model).expect(WHOLE_FIRST).is_consistent(),
         }
     }
 

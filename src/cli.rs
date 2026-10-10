@@ -190,11 +190,12 @@ pub enum Command {
     Schema(cmd::schema::Args),
     /// Explain why a subsumption is entailed (compute a justification).
     Explain(cmd::explain::Args),
-    /// Fix common mechanical problems (duplicates, dangling references).
+    /// Migrate references to deprecated entities to their replacements, and
+    /// merge the annotations of axioms that are otherwise the same.
     Repair(cmd::repair::Args),
     /// Collapse the hierarchy to a set of precious terms.
     Collapse(cmd::collapse::Args),
-    /// Expand OBO/OWL macros (IAO:0000424 expandExpressionTo).
+    /// Expand `OMO:0002000` (defined by construct) macros.
     Expand(cmd::expand::Args),
     /// Extract an `oboInOwl:inSubset` slice (`odk:subset`).
     Subset(cmd::subset::Args),

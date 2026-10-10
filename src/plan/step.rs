@@ -143,9 +143,16 @@ pub enum Op {
         /// `reports/mondo_release_diff_changed_terms.tsv`.
         tdb: bool,
     },
+    /// `repair`: merge the annotations of axioms that are otherwise the same,
+    /// and migrate every reference to a deprecated entity to its replacement.
     Repair {
         invalid_references: bool,
         merge_axiom_annotations: bool,
+        /// The annotation properties, as written, whose assertions on a
+        /// deprecated entity move to its replacement.
+        annotation_properties: Vec<String>,
+        /// A file listing more of them, one per line.
+        annotation_properties_file: Option<String>,
     },
     /// `upheno:extract-upheno-relations` — materialise uPheno's phenotype
     /// shortcut relations (`UPHENO:0000001`/`0000003`/`0000002`) from the EQ
@@ -211,10 +218,19 @@ pub enum Op {
         add_prefix: Vec<String>,
     },
     /// `template` — generate axioms from template tables (a row of template
-    /// strings over a table of terms) and merge them in.
+    /// strings over a table of terms). The step yields the generated axioms'
+    /// own ontology, or under `merge` its input with the axioms added.
     Template {
         templates: Vec<String>,
+        /// The input, keeping its IRIs, annotations and prefixes, with the
+        /// generated axioms added, counts as changed whatever they add.
         merge: bool,
+        /// Under `merge`, the input's imports are taken out of it: the merged
+        /// ontology imports nothing, and the imports' axioms stay out.
+        collapse_import_closure: bool,
+        /// `--ancestors`: the generated axioms' terms the input names come
+        /// with the ancestors the input gives them, and their labels.
+        ancestors: bool,
         /// `--force true`: a row the tables cannot be read into is reported and
         /// skipped. Without it such a row fails the step.
         force: bool,
@@ -244,22 +260,27 @@ pub enum Op {
         /// dropping the root left the extract with no seed at all.
         branch_from_terms: Vec<String>,
         branch_from_term_files: Vec<String>,
+        /// MIREOT `--lower-term`/`--lower-terms`: the terms whose ancestors
+        /// are extracted.
+        lower_terms: Vec<String>,
+        lower_term_files: Vec<String>,
+        /// MIREOT `--upper-term`/`--upper-terms`: the terms a climb stops at.
+        upper_terms: Vec<String>,
+        upper_term_files: Vec<String>,
+        /// `--intermediates`: `all`, `minimal` or `none`; `all` when unset.
+        intermediates: Option<String>,
         /// `--force true`: extract even when the ontology names none of the
         /// terms, which otherwise fails the step.
         force: bool,
     },
-    /// Write the in-flight model to `path` and read it back — the round trip a
-    /// recipe performs whenever one command writes a file and the next command
-    /// reads that file back.
+    /// Write the in-flight model to `path`, in the format the path's extension
+    /// names, and go on with it: a command's `-o` part way through a chain. What
+    /// the next command sees is the model, not the file.
     ///
-    /// It is not bookkeeping: an RDF/XML round trip is lossy in ways that reach the
-    /// bytes (the writer derives an `xmlns` block the in-memory model never had, and
-    /// re-reading collapses it back). EFO's mondo import writes
-    /// `mondo_import.owl.tmp.owl` between its `extract` and its `remove`, and
-    /// eliding that write changes the module by 7 MB. The in-memory pipeline elides
-    /// round trips by design, so the ones the recipe *depends on* have to be
-    /// recorded — otherwise they live only in a command line.
-    RoundTrip {
+    /// It is not bookkeeping: the file is the recipe's, and a later invocation
+    /// may read it. EFO's mondo import writes `mondo_import.owl.tmp.owl` with its
+    /// `extract`, and the invocations after it open that file.
+    Write {
         path: String,
     },
     /// `merge-equivalent-sets` — collapse equivalent-class cliques by IRI-prefix
@@ -286,13 +307,12 @@ pub enum Op {
         /// OBO Graphs JSON instead of the table.
         format: Option<String>,
     },
-    /// `expand` — expand OBO/OWL macros (`IAO:0000424` expandExpressionToType).
+    /// `expand` — expand `OMO:0002000` (defined by construct) macros.
     ///
-    /// `expand_terms` is the ALLOW-list: with one, only those properties' macros
-    /// run. CL builds its taxon views with `expand --expand-term RO:0002161`, and
-    /// without the list recorded every macro in `cl-full.owl` ran — including
-    /// `RO:0002175`'s, which mints a named witness class per taxon assertion and
-    /// put 412 of them into `subsets/human-view.owl`.
+    /// `expand_terms` is the ALLOW-list: with one, only those terms' macros run.
+    /// CL builds its taxon views with `expand --expand-term RO:0002161`, which
+    /// leaves `RO:0002175`'s macro, minting a named witness class per taxon
+    /// assertion, unexpanded.
     Expand {
         expand_terms: Vec<String>,
         expand_term_files: Vec<String>,
@@ -882,10 +902,12 @@ fn op_label(op: &Op) -> String {
             }
             format!("prefixes[{}]", bits.join(", "))
         }
-        Op::Template { templates, merge, force } => format!(
-            "template[×{}{}{}]",
+        Op::Template { templates, merge, collapse_import_closure, ancestors, force } => format!(
+            "template[×{}{}{}{}{}]",
             templates.len(),
             if *merge { ", merge" } else { "" },
+            if *collapse_import_closure { ", collapse imports" } else { "" },
+            if *ancestors { ", ancestors" } else { "" },
             if *force { ", force" } else { "" }
         ),
         Op::Rename { mappings, prefix_mappings, .. } => {
@@ -899,7 +921,7 @@ fn op_label(op: &Op) -> String {
             term_files.len(),
             if *force { ", forced" } else { "" }
         ),
-        Op::RoundTrip { path } => format!("round-trip[{path}]"),
+        Op::Write { path } => format!("write[{path}]"),
         Op::Query { updates, selects, constructs, .. } => {
             let mut bits = vec![];
             if !updates.is_empty() { bits.push(format!("update×{}", updates.len())); }
@@ -907,11 +929,13 @@ fn op_label(op: &Op) -> String {
             if !constructs.is_empty() { bits.push(format!("construct×{}", constructs.len())); }
             format!("query[{}]", bits.join(", "))
         }
-        Op::Repair { invalid_references, merge_axiom_annotations } => {
-            let mut bits = vec![];
-            if *invalid_references { bits.push("invalid-references"); }
-            if *merge_axiom_annotations { bits.push("merge-axiom-annotations"); }
-            if bits.is_empty() { bits.push("dedupe"); }
+        Op::Repair { invalid_references, merge_axiom_annotations, annotation_properties, annotation_properties_file } => {
+            let mut bits: Vec<String> = vec![];
+            if *merge_axiom_annotations { bits.push("merge-axiom-annotations".into()); }
+            if *invalid_references { bits.push("invalid-references".into()); }
+            if !annotation_properties.is_empty() { bits.push(format!("annotation-property×{}", annotation_properties.len())); }
+            if let Some(f) = annotation_properties_file { bits.push(format!("annotation-properties-file {f}")); }
+            if bits.is_empty() { bits.push("nothing".into()); }
             format!("repair[{}]", bits.join(", "))
         }
         Op::MergeEquivalentSets { set_prefix, .. } => {

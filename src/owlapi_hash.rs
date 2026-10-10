@@ -346,7 +346,7 @@ pub(crate) fn axiom_annotations_hash(anns: &std::collections::BTreeSet<Annotatio
 }
 
 fn data_property_hash(dp: &horned_owl::model::DataProperty<RcStr>) -> i32 {
-    tag(4073, &[iri_hash(dp.0.as_ref())])
+    entity_hash(crate::sig::kind::DATA_PROPERTY, dp.0.as_ref())
 }
 
 fn datatype_hash(iri: &str) -> i32 {
@@ -541,6 +541,20 @@ pub fn named_individual_hash(iri: &str) -> i32 {
 /// The hash of a named object property.
 pub fn object_property_hash(iri: &str) -> i32 {
     tag(P_OBJECT_PROPERTY, &[iri_hash(iri)])
+}
+
+/// The hash of the entity of `kind` (one of [`crate::sig::kind`]) named `iri`.
+pub(crate) fn entity_hash(kind: u8, iri: &str) -> i32 {
+    use crate::sig::kind;
+    let prime = match kind {
+        kind::CLASS => P_CLASS,
+        kind::OBJECT_PROPERTY => P_OBJECT_PROPERTY,
+        kind::DATA_PROPERTY => 4073,
+        kind::ANNOTATION_PROPERTY => P_ANNOTATION_PROPERTY_ENTITY,
+        kind::NAMED_INDIVIDUAL => P_NAMED_INDIVIDUAL,
+        _ => P_DATATYPE,
+    };
+    tag(prime, &[iri_hash(iri)])
 }
 
 /// The capacities a Trove 3 hash table takes, in the order its source lists

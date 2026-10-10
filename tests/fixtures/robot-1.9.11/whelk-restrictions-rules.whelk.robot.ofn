@@ -1,0 +1,803 @@
+Prefix(:=<http://example.org/w#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/w>
+
+Declaration(Class(:A0))
+Declaration(Class(:Held))
+Declaration(Class(:d23_A))
+Declaration(Class(:d23_K))
+Declaration(Class(:f18_B))
+Declaration(Class(:f18_C))
+Declaration(Class(:f35_A))
+Declaration(Class(:f35_C))
+Declaration(Class(:f36_C))
+Declaration(Class(:f36_D))
+Declaration(Class(:h01_B))
+Declaration(Class(:h06_C))
+Declaration(Class(:h07_C))
+Declaration(Class(:h08_B))
+Declaration(Class(:h09_C))
+Declaration(Class(:h10_C))
+Declaration(Class(:h14_B))
+Declaration(Class(:h15_B))
+Declaration(Class(:h16_B))
+Declaration(Class(:h8_A))
+Declaration(Class(:h8_B))
+Declaration(Class(:held2_A))
+Declaration(Class(:held2_B))
+Declaration(Class(:held2_C))
+Declaration(Class(:held2_C4))
+Declaration(Class(:held2_C5))
+Declaration(Class(:held2_C6))
+Declaration(Class(:held2_C7))
+Declaration(Class(:held_A))
+Declaration(Class(:held_B))
+Declaration(Class(:held_C))
+Declaration(Class(:held_C2))
+Declaration(Class(:held_C3))
+Declaration(Class(:held_Z))
+Declaration(Class(:q3_A))
+Declaration(Class(:q3_B))
+Declaration(Class(:q3_C))
+Declaration(ObjectProperty(:f18_r))
+Declaration(ObjectProperty(:f35_r))
+Declaration(ObjectProperty(:f36_r))
+Declaration(ObjectProperty(:h01_q))
+Declaration(ObjectProperty(:h02_q))
+Declaration(ObjectProperty(:h03_q))
+Declaration(ObjectProperty(:h06_q))
+Declaration(ObjectProperty(:h07_q))
+Declaration(ObjectProperty(:h07_s))
+Declaration(ObjectProperty(:h08_q))
+Declaration(ObjectProperty(:h09_q))
+Declaration(ObjectProperty(:h10_q))
+Declaration(ObjectProperty(:h11_q))
+Declaration(ObjectProperty(:h11_s))
+Declaration(ObjectProperty(:h12_q))
+Declaration(ObjectProperty(:h12_s))
+Declaration(ObjectProperty(:h14_q))
+Declaration(ObjectProperty(:h14_s))
+Declaration(ObjectProperty(:h15_q))
+Declaration(ObjectProperty(:h15_s))
+Declaration(ObjectProperty(:h16_q))
+Declaration(ObjectProperty(:h8_q))
+Declaration(ObjectProperty(:held2_q))
+Declaration(ObjectProperty(:held_q))
+Declaration(ObjectProperty(:refl))
+Declaration(DataProperty(:d23_dp))
+Declaration(DataProperty(:h04_dp))
+Declaration(DataProperty(:h05_dp))
+Declaration(DataProperty(:h13_dp))
+Declaration(DataProperty(:held2_dp))
+Declaration(DataProperty(:held_dp))
+Declaration(NamedIndividual(:a0))
+Declaration(NamedIndividual(:d23_k))
+Declaration(NamedIndividual(:f18_a))
+Declaration(NamedIndividual(:f35_a))
+Declaration(NamedIndividual(:f35_b))
+Declaration(NamedIndividual(:f36_a))
+Declaration(NamedIndividual(:f36_b))
+Declaration(NamedIndividual(:h01_h1))
+Declaration(NamedIndividual(:h02_h2))
+Declaration(NamedIndividual(:h03_h3))
+Declaration(NamedIndividual(:h04_h4))
+Declaration(NamedIndividual(:h05_h5))
+Declaration(NamedIndividual(:h06_h6))
+Declaration(NamedIndividual(:h07_h7))
+Declaration(NamedIndividual(:h08_h8))
+Declaration(NamedIndividual(:h09_h9))
+Declaration(NamedIndividual(:h10_h10))
+Declaration(NamedIndividual(:h11_h11))
+Declaration(NamedIndividual(:h12_h12))
+Declaration(NamedIndividual(:h13_h13))
+Declaration(NamedIndividual(:h14_h14))
+Declaration(NamedIndividual(:h15_h15))
+Declaration(NamedIndividual(:h16_h16))
+Declaration(NamedIndividual(:h8_a))
+Declaration(NamedIndividual(:h8_c11))
+Declaration(NamedIndividual(:h8_c12))
+Declaration(NamedIndividual(:held2_a))
+Declaration(NamedIndividual(:held2_a1))
+Declaration(NamedIndividual(:held2_a10))
+Declaration(NamedIndividual(:held2_a11))
+Declaration(NamedIndividual(:held2_a12))
+Declaration(NamedIndividual(:held2_a13))
+Declaration(NamedIndividual(:held2_a2))
+Declaration(NamedIndividual(:held2_a3))
+Declaration(NamedIndividual(:held2_a4))
+Declaration(NamedIndividual(:held2_a5))
+Declaration(NamedIndividual(:held2_a6))
+Declaration(NamedIndividual(:held2_a7))
+Declaration(NamedIndividual(:held2_a8))
+Declaration(NamedIndividual(:held2_a9))
+Declaration(NamedIndividual(:held2_b1))
+Declaration(NamedIndividual(:held2_b10))
+Declaration(NamedIndividual(:held2_b11))
+Declaration(NamedIndividual(:held2_b12))
+Declaration(NamedIndividual(:held2_b13))
+Declaration(NamedIndividual(:held2_b2))
+Declaration(NamedIndividual(:held2_b3))
+Declaration(NamedIndividual(:held2_b4))
+Declaration(NamedIndividual(:held2_b5))
+Declaration(NamedIndividual(:held2_b6))
+Declaration(NamedIndividual(:held2_b7))
+Declaration(NamedIndividual(:held_a))
+Declaration(NamedIndividual(:held_c))
+Declaration(NamedIndividual(:held_d))
+Declaration(NamedIndividual(:held_e))
+Declaration(NamedIndividual(:held_f))
+Declaration(NamedIndividual(:held_g))
+Declaration(NamedIndividual(:held_h))
+Declaration(NamedIndividual(:held_i))
+Declaration(NamedIndividual(:held_j))
+Declaration(NamedIndividual(:held_k))
+Declaration(NamedIndividual(:held_k2))
+Declaration(NamedIndividual(:held_n))
+Declaration(NamedIndividual(:held_o1))
+Declaration(NamedIndividual(:held_o2))
+Declaration(NamedIndividual(:held_r1))
+Declaration(NamedIndividual(:held_r2))
+Declaration(NamedIndividual(:held_r3))
+Declaration(NamedIndividual(:held_s1))
+Declaration(NamedIndividual(:held_s2))
+Declaration(NamedIndividual(:held_t))
+Declaration(NamedIndividual(:held_u))
+Declaration(NamedIndividual(:held_v))
+Declaration(NamedIndividual(:held_w))
+Declaration(NamedIndividual(:held_w2))
+Declaration(NamedIndividual(:held_y1))
+Declaration(NamedIndividual(:held_y2))
+Declaration(NamedIndividual(:held_z1))
+Declaration(NamedIndividual(:q3_a))
+Declaration(NamedIndividual(:q3_c))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :refl (:refl)
+
+ReflexiveObjectProperty(:refl)
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A0 (:A0)
+
+SubClassOf(:A0 owl:Thing)
+
+# Class: :Held (:Held)
+
+SubClassOf(:Held owl:Thing)
+
+# Class: :d23_A (:d23_A)
+
+EquivalentClasses(:d23_A DataSomeValuesFrom(:d23_dp xsd:integer))
+SubClassOf(:d23_A owl:Thing)
+
+# Class: :d23_K (:d23_K)
+
+SubClassOf(:d23_K owl:Thing)
+
+# Class: :f18_B (:f18_B)
+
+SubClassOf(:f18_B owl:Thing)
+
+# Class: :f18_C (:f18_C)
+
+SubClassOf(:f18_C owl:Thing)
+
+# Class: :f35_A (:f35_A)
+
+SubClassOf(:f35_A owl:Thing)
+
+# Class: :f35_C (:f35_C)
+
+SubClassOf(:f35_C owl:Thing)
+
+# Class: :f36_C (:f36_C)
+
+SubClassOf(:f36_C owl:Thing)
+
+# Class: :f36_D (:f36_D)
+
+SubClassOf(:f36_D owl:Thing)
+
+# Class: :h01_B (:h01_B)
+
+SubClassOf(:h01_B owl:Thing)
+
+# Class: :h06_C (:h06_C)
+
+SubClassOf(:h06_C owl:Thing)
+SubClassOf(:h06_C ObjectMaxCardinality(1 :h06_q ObjectOneOf(:h06_h6)))
+
+# Class: :h07_C (:h07_C)
+
+SubClassOf(:h07_C owl:Thing)
+SubClassOf(:h07_C ObjectAllValuesFrom(:h07_q ObjectHasValue(:h07_s :h07_h7)))
+
+# Class: :h08_B (:h08_B)
+
+SubClassOf(:h08_B owl:Thing)
+
+# Class: :h09_C (:h09_C)
+
+SubClassOf(:h09_C owl:Thing)
+
+# Class: :h10_C (:h10_C)
+
+SubClassOf(:h10_C owl:Thing)
+
+# Class: :h14_B (:h14_B)
+
+SubClassOf(:h14_B owl:Thing)
+
+# Class: :h15_B (:h15_B)
+
+SubClassOf(:h15_B owl:Thing)
+
+# Class: :h16_B (:h16_B)
+
+SubClassOf(:h16_B owl:Thing)
+
+# Class: :h8_A (:h8_A)
+
+SubClassOf(:h8_A owl:Thing)
+
+# Class: :h8_B (:h8_B)
+
+SubClassOf(:h8_B owl:Thing)
+
+# Class: :held2_A (:held2_A)
+
+SubClassOf(:held2_A owl:Thing)
+
+# Class: :held2_B (:held2_B)
+
+SubClassOf(:held2_B owl:Thing)
+DisjointClasses(:held2_B ObjectOneOf(:held2_b10))
+
+# Class: :held2_C (:held2_C)
+
+SubClassOf(:held2_C owl:Thing)
+SubClassOf(:held2_C ObjectAllValuesFrom(:held2_q ObjectOneOf(:held2_b1)))
+
+# Class: :held2_C4 (:held2_C4)
+
+SubClassOf(:held2_C4 owl:Thing)
+SubClassOf(:held2_C4 ObjectMinCardinality(2 :held2_q ObjectOneOf(:held2_b2)))
+
+# Class: :held2_C5 (:held2_C5)
+
+SubClassOf(:held2_C5 owl:Thing)
+SubClassOf(:held2_C5 ObjectSomeValuesFrom(ObjectInverseOf(:held2_q) ObjectOneOf(:held2_b3)))
+
+# Class: :held2_C6 (:held2_C6)
+
+SubClassOf(:held2_C6 owl:Thing)
+SubClassOf(:held2_C6 ObjectMinCardinality(2 :held2_q))
+
+# Class: :held2_C7 (:held2_C7)
+
+EquivalentClasses(:held2_C7 ObjectUnionOf(ObjectOneOf(:held2_b11) ObjectMinCardinality(2 :held2_q)))
+SubClassOf(:held2_C7 owl:Thing)
+
+# Class: :held_A (:held_A)
+
+SubClassOf(:held_A owl:Thing)
+
+# Class: :held_B (:held_B)
+
+SubClassOf(:held_B owl:Thing)
+
+# Class: :held_C (:held_C)
+
+SubClassOf(:held_C :Held)
+SubClassOf(:held_C ObjectOneOf(:held_s1 :held_s2))
+
+# Class: :held_C2 (:held_C2)
+
+SubClassOf(:held_C2 owl:Thing)
+SubClassOf(:held_C2 ObjectHasValue(:held_q :held_t))
+
+# Class: :held_C3 (:held_C3)
+
+SubClassOf(:held_C3 owl:Thing)
+SubClassOf(:held_C3 ObjectSomeValuesFrom(:held_q ObjectOneOf(:held_y1 :held_y2)))
+
+# Class: :held_Z (:held_Z)
+
+SubClassOf(:held_Z owl:Thing)
+
+# Class: :q3_A (:q3_A)
+
+SubClassOf(:q3_A owl:Thing)
+
+# Class: :q3_B (:q3_B)
+
+SubClassOf(:q3_B owl:Thing)
+
+# Class: :q3_C (:q3_C)
+
+SubClassOf(:q3_C owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :a0 (:a0)
+
+ClassAssertion(:A0 :a0)
+ClassAssertion(:Held :a0)
+ObjectPropertyAssertion(:refl :a0 :a0)
+
+# Individual: :d23_k (:d23_k)
+
+ClassAssertion(:Held :d23_k)
+ClassAssertion(:d23_A :d23_k)
+ClassAssertion(:d23_K :d23_k)
+ObjectPropertyAssertion(:refl :d23_k :d23_k)
+
+# Individual: :f18_a (:f18_a)
+
+ClassAssertion(:Held :f18_a)
+ClassAssertion(:f18_B :f18_a)
+ClassAssertion(ObjectAllValuesFrom(:f18_r :f18_C) :f18_a)
+ObjectPropertyAssertion(:refl :f18_a :f18_a)
+
+# Individual: :f35_a (:f35_a)
+
+ClassAssertion(:Held :f35_a)
+ClassAssertion(:f35_A :f35_a)
+ClassAssertion(ObjectAllValuesFrom(:f35_r :f35_C) :f35_a)
+ObjectPropertyAssertion(:f35_r :f35_a :f35_b)
+ObjectPropertyAssertion(:refl :f35_a :f35_a)
+
+# Individual: :f35_b (:f35_b)
+
+ClassAssertion(:Held :f35_b)
+ClassAssertion(:f35_C :f35_b)
+ObjectPropertyAssertion(:refl :f35_b :f35_b)
+
+# Individual: :f36_a (:f36_a)
+
+ClassAssertion(:Held :f36_a)
+ClassAssertion(ObjectAllValuesFrom(:f36_r :f36_C) :f36_a)
+ObjectPropertyAssertion(:f36_r :f36_a :f36_b)
+ObjectPropertyAssertion(:refl :f36_a :f36_a)
+
+# Individual: :f36_b (:f36_b)
+
+ClassAssertion(:Held :f36_b)
+ClassAssertion(:f36_C :f36_b)
+ClassAssertion(:f36_D :f36_b)
+ObjectPropertyAssertion(:refl :f36_b :f36_b)
+
+# Individual: :h01_h1 (:h01_h1)
+
+ClassAssertion(owl:Thing :h01_h1)
+ClassAssertion(ObjectAllValuesFrom(ObjectInverseOf(:h01_q) :h01_B) :h01_h1)
+
+# Individual: :h02_h2 (:h02_h2)
+
+ClassAssertion(owl:Thing :h02_h2)
+ClassAssertion(ObjectMaxCardinality(1 ObjectInverseOf(:h02_q)) :h02_h2)
+
+# Individual: :h03_h3 (:h03_h3)
+
+ClassAssertion(owl:Thing :h03_h3)
+ClassAssertion(ObjectMaxCardinality(2 :h03_q) :h03_h3)
+
+# Individual: :h04_h4 (:h04_h4)
+
+ClassAssertion(:Held :h04_h4)
+ClassAssertion(DataSomeValuesFrom(:h04_dp xsd:integer) :h04_h4)
+ObjectPropertyAssertion(:refl :h04_h4 :h04_h4)
+
+# Individual: :h05_h5 (:h05_h5)
+
+ClassAssertion(owl:Thing :h05_h5)
+ClassAssertion(DataMinCardinality(1 :h05_dp) :h05_h5)
+
+# Individual: :h06_h6 (:h06_h6)
+
+ClassAssertion(:Held :h06_h6)
+ObjectPropertyAssertion(:refl :h06_h6 :h06_h6)
+
+# Individual: :h07_h7 (:h07_h7)
+
+ClassAssertion(:Held :h07_h7)
+ObjectPropertyAssertion(:refl :h07_h7 :h07_h7)
+
+# Individual: :h08_h8 (:h08_h8)
+
+ClassAssertion(:Held :h08_h8)
+ClassAssertion(ObjectMaxCardinality(1 :h08_q :h08_B) :h08_h8)
+ObjectPropertyAssertion(:refl :h08_h8 :h08_h8)
+
+# Individual: :h09_h9 (:h09_h9)
+
+ClassAssertion(:Held :h09_h9)
+ObjectPropertyAssertion(:refl :h09_h9 :h09_h9)
+
+# Individual: :h10_h10 (:h10_h10)
+
+ClassAssertion(:Held :h10_h10)
+ObjectPropertyAssertion(:refl :h10_h10 :h10_h10)
+
+# Individual: :h11_h11 (:h11_h11)
+
+ClassAssertion(owl:Thing :h11_h11)
+ClassAssertion(ObjectAllValuesFrom(:h11_q ObjectMinCardinality(2 :h11_s)) :h11_h11)
+
+# Individual: :h12_h12 (:h12_h12)
+
+ClassAssertion(owl:Thing :h12_h12)
+ClassAssertion(ObjectMaxCardinality(1 :h12_q ObjectMinCardinality(2 :h12_s)) :h12_h12)
+
+# Individual: :h13_h13 (:h13_h13)
+
+ClassAssertion(:Held :h13_h13)
+ClassAssertion(DataSomeValuesFrom(:h13_dp DataOneOf("1")) :h13_h13)
+ObjectPropertyAssertion(:refl :h13_h13 :h13_h13)
+
+# Individual: :h14_h14 (:h14_h14)
+
+ClassAssertion(owl:Thing :h14_h14)
+ClassAssertion(ObjectAllValuesFrom(:h14_q ObjectAllValuesFrom(ObjectInverseOf(:h14_s) :h14_B)) :h14_h14)
+
+# Individual: :h15_h15 (:h15_h15)
+
+ClassAssertion(:Held :h15_h15)
+ClassAssertion(ObjectMaxCardinality(1 :h15_q ObjectAllValuesFrom(:h15_s :h15_B)) :h15_h15)
+ObjectPropertyAssertion(:refl :h15_h15 :h15_h15)
+
+# Individual: :h16_h16 (:h16_h16)
+
+ClassAssertion(owl:Thing :h16_h16)
+ClassAssertion(ObjectIntersectionOf(:h16_B ObjectMaxCardinality(2 :h16_q)) :h16_h16)
+
+# Individual: :h8_a (:h8_a)
+
+ClassAssertion(:Held :h8_a)
+ClassAssertion(:h8_A :h8_a)
+ObjectPropertyAssertion(:refl :h8_a :h8_a)
+
+# Individual: :h8_c11 (:h8_c11)
+
+ClassAssertion(:Held :h8_c11)
+ObjectPropertyAssertion(:refl :h8_c11 :h8_c11)
+
+# Individual: :h8_c12 (:h8_c12)
+
+ClassAssertion(:Held :h8_c12)
+ObjectPropertyAssertion(:refl :h8_c12 :h8_c12)
+
+# Individual: :held2_a (:held2_a)
+
+ClassAssertion(:Held :held2_a)
+ClassAssertion(:held2_A :held2_a)
+ObjectPropertyAssertion(:refl :held2_a :held2_a)
+
+# Individual: :held2_a1 (:held2_a1)
+
+ClassAssertion(:Held :held2_a1)
+ClassAssertion(ObjectMaxCardinality(1 :held2_q) :held2_a1)
+ObjectPropertyAssertion(:refl :held2_a1 :held2_a1)
+
+# Individual: :held2_a10 (:held2_a10)
+
+ClassAssertion(:Held :held2_a10)
+ClassAssertion(ObjectMaxCardinality(0 :held2_q) :held2_a10)
+ObjectPropertyAssertion(:refl :held2_a10 :held2_a10)
+
+# Individual: :held2_a11 (:held2_a11)
+
+ClassAssertion(owl:Thing :held2_a11)
+ClassAssertion(ObjectIntersectionOf(:held2_B ObjectMinCardinality(2 :held2_q)) :held2_a11)
+
+# Individual: :held2_a12 (:held2_a12)
+
+ClassAssertion(owl:Thing :held2_a12)
+ClassAssertion(ObjectUnionOf(:held2_B ObjectMinCardinality(2 :held2_q)) :held2_a12)
+
+# Individual: :held2_a13 (:held2_a13)
+
+ClassAssertion(owl:Thing :held2_a13)
+ClassAssertion(ObjectComplementOf(ObjectMinCardinality(2 :held2_q)) :held2_a13)
+
+# Individual: :held2_a2 (:held2_a2)
+
+ClassAssertion(owl:Thing :held2_a2)
+ClassAssertion(ObjectExactCardinality(1 :held2_q) :held2_a2)
+
+# Individual: :held2_a3 (:held2_a3)
+
+ClassAssertion(owl:Thing :held2_a3)
+ClassAssertion(ObjectMinCardinality(1 :held2_q) :held2_a3)
+
+# Individual: :held2_a4 (:held2_a4)
+
+ClassAssertion(owl:Thing :held2_a4)
+ClassAssertion(ObjectMinCardinality(1 :held2_q :held2_B) :held2_a4)
+
+# Individual: :held2_a5 (:held2_a5)
+
+ClassAssertion(:Held :held2_a5)
+ClassAssertion(DataHasValue(:held2_dp "1") :held2_a5)
+ObjectPropertyAssertion(:refl :held2_a5 :held2_a5)
+
+# Individual: :held2_a6 (:held2_a6)
+
+ClassAssertion(owl:Thing :held2_a6)
+ClassAssertion(DataAllValuesFrom(:held2_dp xsd:integer) :held2_a6)
+
+# Individual: :held2_a7 (:held2_a7)
+
+ClassAssertion(:Held :held2_a7)
+ClassAssertion(ObjectHasSelf(:held2_q) :held2_a7)
+ObjectPropertyAssertion(:held2_q :held2_a7 :held2_a7)
+ObjectPropertyAssertion(:refl :held2_a7 :held2_a7)
+
+# Individual: :held2_a8 (:held2_a8)
+
+ClassAssertion(:Held :held2_a8)
+ClassAssertion(:held2_B :held2_a8)
+ClassAssertion(ObjectIntersectionOf(:held2_B ObjectAllValuesFrom(:held2_q :held2_B)) :held2_a8)
+ObjectPropertyAssertion(:refl :held2_a8 :held2_a8)
+
+# Individual: :held2_a9 (:held2_a9)
+
+ClassAssertion(owl:Thing :held2_a9)
+ClassAssertion(ObjectSomeValuesFrom(ObjectInverseOf(:held2_q) :held2_B) :held2_a9)
+
+# Individual: :held2_b1 (:held2_b1)
+
+ClassAssertion(:Held :held2_b1)
+ObjectPropertyAssertion(:refl :held2_b1 :held2_b1)
+
+# Individual: :held2_b10 (:held2_b10)
+
+ClassAssertion(:Held :held2_b10)
+ObjectPropertyAssertion(:refl :held2_b10 :held2_b10)
+
+# Individual: :held2_b11 (:held2_b11)
+
+ClassAssertion(owl:Thing :held2_b11)
+
+# Individual: :held2_b12 (:held2_b12)
+
+ClassAssertion(:Held :held2_b12)
+ObjectPropertyAssertion(:refl :held2_b12 :held2_b12)
+
+# Individual: :held2_b13 (:held2_b13)
+
+ClassAssertion(owl:Thing :held2_b13)
+
+# Individual: :held2_b2 (:held2_b2)
+
+ClassAssertion(owl:Thing :held2_b2)
+
+# Individual: :held2_b3 (:held2_b3)
+
+ClassAssertion(owl:Thing :held2_b3)
+
+# Individual: :held2_b4 (:held2_b4)
+
+ClassAssertion(owl:Thing :held2_b4)
+
+# Individual: :held2_b5 (:held2_b5)
+
+ClassAssertion(owl:Thing :held2_b5)
+
+# Individual: :held2_b6 (:held2_b6)
+
+ClassAssertion(:Held :held2_b6)
+ObjectPropertyAssertion(:refl :held2_b6 :held2_b6)
+
+# Individual: :held2_b7 (:held2_b7)
+
+ClassAssertion(:Held :held2_b7)
+ClassAssertion(:held2_B :held2_b7)
+ObjectPropertyAssertion(:refl :held2_b7 :held2_b7)
+
+# Individual: :held_a (:held_a)
+
+ClassAssertion(:Held :held_a)
+ClassAssertion(:held_A :held_a)
+ObjectPropertyAssertion(:refl :held_a :held_a)
+
+# Individual: :held_c (:held_c)
+
+ClassAssertion(:Held :held_c)
+ObjectPropertyAssertion(:refl :held_c :held_c)
+
+# Individual: :held_d (:held_d)
+
+ClassAssertion(:Held :held_d)
+ObjectPropertyAssertion(:refl :held_d :held_d)
+
+# Individual: :held_e (:held_e)
+
+ClassAssertion(:Held :held_e)
+ObjectPropertyAssertion(:refl :held_e :held_e)
+NegativeObjectPropertyAssertion(:held_q :held_e :held_d)
+
+# Individual: :held_f (:held_f)
+
+ClassAssertion(:Held :held_f)
+ClassAssertion(ObjectAllValuesFrom(:held_q :held_B) :held_f)
+ObjectPropertyAssertion(:refl :held_f :held_f)
+
+# Individual: :held_g (:held_g)
+
+ClassAssertion(owl:Thing :held_g)
+DataPropertyAssertion(:held_dp :held_g "1")
+
+# Individual: :held_h (:held_h)
+
+ClassAssertion(owl:Thing :held_h)
+NegativeDataPropertyAssertion(:held_dp :held_h "1")
+
+# Individual: :held_i (:held_i)
+
+ClassAssertion(:Held :held_i)
+ObjectPropertyAssertion(:refl :held_i :held_i)
+
+# Individual: :held_j (:held_j)
+
+ClassAssertion(:Held :held_j)
+ObjectPropertyAssertion(:refl :held_j :held_j)
+
+# Individual: :held_k (:held_k)
+
+ClassAssertion(:Held :held_k)
+SameIndividual(:held_k :held_k2)
+ObjectPropertyAssertion(:refl :held_k :held_k)
+ObjectPropertyAssertion(:refl :held_k :held_k2)
+
+# Individual: :held_k2 (:held_k2)
+
+ClassAssertion(:Held :held_k2)
+ObjectPropertyAssertion(:refl :held_k2 :held_k)
+ObjectPropertyAssertion(:refl :held_k2 :held_k2)
+
+# Individual: :held_n (:held_n)
+
+ClassAssertion(:Held :held_n)
+ClassAssertion(ObjectComplementOf(:held_B) :held_n)
+ObjectPropertyAssertion(:refl :held_n :held_n)
+
+# Individual: :held_o1 (:held_o1)
+
+ClassAssertion(:Held :held_o1)
+ObjectPropertyAssertion(:refl :held_o1 :held_o1)
+ObjectPropertyAssertion(ObjectInverseOf(:held_q) :held_o1 :held_o2)
+
+# Individual: :held_o2 (:held_o2)
+
+ClassAssertion(:Held :held_o2)
+ObjectPropertyAssertion(:held_q :held_o2 :held_o1)
+ObjectPropertyAssertion(:refl :held_o2 :held_o2)
+
+# Individual: :held_r1 (:held_r1)
+
+ClassAssertion(:Held :held_r1)
+ObjectPropertyAssertion(:refl :held_r1 :held_r1)
+
+# Individual: :held_r2 (:held_r2)
+
+ClassAssertion(:Held :held_r2)
+ObjectPropertyAssertion(:refl :held_r2 :held_r2)
+
+# Individual: :held_r3 (:held_r3)
+
+ClassAssertion(:Held :held_r3)
+ObjectPropertyAssertion(:refl :held_r3 :held_r3)
+
+# Individual: :held_s1 (:held_s1)
+
+ClassAssertion(:Held :held_s1)
+ObjectPropertyAssertion(:refl :held_s1 :held_s1)
+
+# Individual: :held_s2 (:held_s2)
+
+ClassAssertion(:Held :held_s2)
+ObjectPropertyAssertion(:refl :held_s2 :held_s2)
+
+# Individual: :held_t (:held_t)
+
+ClassAssertion(:Held :held_t)
+ObjectPropertyAssertion(:refl :held_t :held_t)
+
+# Individual: :held_u (:held_u)
+
+ClassAssertion(:Held :held_u)
+ClassAssertion(ObjectUnionOf(:held_B :held_Z) :held_u)
+ObjectPropertyAssertion(:refl :held_u :held_u)
+
+# Individual: :held_v (:held_v)
+
+ClassAssertion(owl:Thing :held_v)
+ClassAssertion(ObjectMinCardinality(2 :held_q) :held_v)
+
+# Individual: :held_w (:held_w)
+
+ClassAssertion(owl:Thing :held_w)
+DataPropertyAssertion(:held_dp :held_w "2")
+
+# Individual: :held_w2 (:held_w2)
+
+ClassAssertion(:Held :held_w2)
+ClassAssertion(DataSomeValuesFrom(:held_dp xsd:integer) :held_w2)
+ObjectPropertyAssertion(:refl :held_w2 :held_w2)
+
+# Individual: :held_y1 (:held_y1)
+
+ClassAssertion(:Held :held_y1)
+ObjectPropertyAssertion(:refl :held_y1 :held_y1)
+
+# Individual: :held_y2 (:held_y2)
+
+ClassAssertion(:Held :held_y2)
+ObjectPropertyAssertion(:refl :held_y2 :held_y2)
+
+# Individual: :held_z1 (:held_z1)
+
+ClassAssertion(:Held :held_z1)
+ClassAssertion(:held_A :held_z1)
+ObjectPropertyAssertion(:refl :held_z1 :held_z1)
+
+# Individual: :q3_a (:q3_a)
+
+ClassAssertion(:Held :q3_a)
+ClassAssertion(:q3_A :q3_a)
+ClassAssertion(:q3_B :q3_a)
+ClassAssertion(:q3_C :q3_a)
+ObjectPropertyAssertion(:refl :q3_a :q3_a)
+ObjectPropertyAssertion(:refl :q3_a :q3_c)
+
+# Individual: :q3_c (:q3_c)
+
+ClassAssertion(:Held :q3_c)
+ClassAssertion(:q3_A :q3_c)
+ClassAssertion(:q3_B :q3_c)
+ClassAssertion(:q3_C :q3_c)
+ObjectPropertyAssertion(:refl :q3_c :q3_a)
+ObjectPropertyAssertion(:refl :q3_c :q3_c)
+
+
+SubClassOf(ObjectOneOf(:held_z1) :held_A)
+SubClassOf(ObjectAllValuesFrom(:h10_q ObjectOneOf(:h10_h10)) :h10_C)
+SubClassOf(ObjectMaxCardinality(1 :h09_q ObjectOneOf(:h09_h9)) :h09_C)
+DifferentIndividuals(:held_a :held_c)
+DifferentIndividuals(:held_r1 :held_r2 :held_r3)
+DLSafeRule(Body()Head(ClassAtom(:held2_B :held2_b12)))
+DLSafeRule(Body(ClassAtom(:d23_K Variable(<urn:swrl:var#x>)))Head(ClassAtom(DataSomeValuesFrom(:d23_dp xsd:integer) Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:f35_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:f35_r Variable(<urn:swrl:var#x>) :f35_b)))
+DLSafeRule(Body(ClassAtom(:f36_C Variable(<urn:swrl:var#x>)))Head(ClassAtom(:f36_D Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:held2_B Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held2_B :held2_b5) DataPropertyAtom(:held2_dp Variable(<urn:swrl:var#x>) "1")))
+DLSafeRule(Body(ClassAtom(:held2_B :held2_b4) DataPropertyAtom(:held2_dp Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:held2_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:held_Z Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:held_q Variable(<urn:swrl:var#x>) :held_j)))
+DLSafeRule(Body(ClassAtom(:q3_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(ObjectOneOf(:q3_c) Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(owl:Thing Variable(<urn:swrl:var#x>)))Head(ClassAtom(:Held Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectAllValuesFrom(:f18_r :f18_C) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:f18_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectAllValuesFrom(:h8_q :h8_B) :h8_c11))Head(ClassAtom(:h8_B :h8_c12)))
+DLSafeRule(Body(ClassAtom(ObjectMinCardinality(2 :held2_q) :held2_b13))Head(ClassAtom(:held2_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(:held_q :held_i Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(SameIndividualAtom(:held2_b7 Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held2_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(DifferentIndividualsAtom(Variable(<urn:swrl:var#x>) :held2_b6))Head(ClassAtom(:held2_B Variable(<urn:swrl:var#x>))))
+AnnotationAssertion(rdfs:comment :held_m "x")
+)

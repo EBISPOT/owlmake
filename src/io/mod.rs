@@ -1192,7 +1192,16 @@ pub fn load_from<R: BufRead>(reader: R, fmt: Format) -> Result<Model> {
     ontology_id_as_made(&mut model)?;
     literals_as_made(&mut model.ont);
     canonicalize_rules(&mut model);
+    as_read(&mut model);
     Ok(model)
+}
+
+/// Record a document that imports as read ([`Model::root_as_read`]).
+fn as_read(model: &mut Model) {
+    use horned_owl::model::Component;
+    if model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_))) {
+        model.mark_root_as_read();
+    }
 }
 
 /// The ontology's ID as [`crate::model::ontology_id`] makes it from the IRIs the
@@ -1769,18 +1778,12 @@ fn sorted_ces(
     v
 }
 
-/// Save `model` to `path` in the explicitly given format. Shows a byte heartbeat
-/// for the (potentially multi-GB) serialization, which is otherwise silent.
-///
-/// Takes `&mut Model` so the XML writers (which require an owned
-/// `ComponentMappedOntology`) can *move* the components in and back out rather
-/// than deep-cloning the whole ontology — a multi-GB copy on phenio-scale
-/// inputs. The model is left unchanged once the write returns.
 /// The ontologies `model` imports, directly or not, read again from where its
-/// closure was read: a writer that renders each of them on its own needs them
-/// whole. A model that imports and whose closure was never read has none to
-/// give, and that is an error rather than a document written without them.
-fn closure_documents(model: &Model) -> Result<Vec<Model>> {
+/// closure was read, for a use that needs them whole: a writer that renders
+/// each of them on its own, a walk over the closure's hierarchy. A model that
+/// imports and whose closure was never read has none to give, and that is an
+/// error, `consequence` saying what cannot be done without them.
+pub(crate) fn closure_documents(model: &Model, consequence: &str) -> Result<Vec<Model>> {
     let imports: Vec<String> = model
         .ont
         .iter()
@@ -1795,7 +1798,7 @@ fn closure_documents(model: &Model) -> Result<Vec<Model>> {
     let documents = model.imports_closure.as_ref().map(|c| c.documents.as_slice()).unwrap_or_default();
     if documents.is_empty() {
         anyhow::bail!(
-            "the ontology imports <{}>, and its imports closure was not read, so the closure's graphs cannot be written",
+            "the ontology imports <{}>, and its imports closure was not read, so {consequence}",
             imports.join(">, <")
         );
     }
@@ -1808,6 +1811,13 @@ fn closure_documents(model: &Model) -> Result<Vec<Model>> {
         .collect()
 }
 
+/// Save `model` to `path` in the explicitly given format. Shows a byte heartbeat
+/// for the (potentially multi-GB) serialization, which is otherwise silent.
+///
+/// Takes `&mut Model` so the XML writers (which require an owned
+/// `ComponentMappedOntology`) can *move* the components in and back out rather
+/// than deep-cloning the whole ontology — a multi-GB copy on phenio-scale
+/// inputs. The model is left unchanged once the write returns.
 pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
     if is_discard_path(path) {
         return Ok(());
@@ -2154,7 +2164,7 @@ fn write_to_with<W: Write>(
         }
         Format::Obo => obo::save(model, &mut writer)?,
         Format::OboGraph => {
-            let imports = closure_documents(model)?;
+            let imports = closure_documents(model, "the closure's graphs cannot be written")?;
             obograph::save_closure(model, &imports, &mut writer)?
         }
         Format::Manchester => {

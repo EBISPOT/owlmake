@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/class-assertions-top#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/class-assertions-top>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:T))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+EquivalentClasses(:T owl:Thing)
+SubClassOf(:A :B)
+ClassAssertion(:A :j)
+)

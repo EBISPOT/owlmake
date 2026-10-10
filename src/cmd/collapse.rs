@@ -65,7 +65,8 @@ pub fn step(
     term_files.extend(args.precious_terms.iter().cloned());
     let precious = select::collect_terms(&model, &terms, &term_files)?;
 
-    let mut result = collapse(model, threshold, &precious)?;
+    let (mut result, removed) = collapse(model, threshold, &precious)?;
+    status!("collapse: removed {removed} intermediate class(es) (threshold {threshold})");
     crate::cmd::maybe_save(&mut result, args.output.as_deref(), args.format.as_deref())?;
     Ok(Some(result))
 }
@@ -93,12 +94,11 @@ fn read_threshold(text: Option<&str>) -> anyhow::Result<usize> {
 ///   ontology as it was before any class went, across the classes that went —
 ///   so an entity only the removed axioms named is not reached, and each
 ///   remaining edge is asserted once more without annotations.
-pub fn collapse(model: Model, threshold: usize, precious: &HashSet<String>) -> anyhow::Result<Model> {
+///
+/// Returns the collapsed model and how many classes went.
+pub fn collapse(model: Model, threshold: usize, precious: &HashSet<String>) -> anyhow::Result<(Model, usize)> {
     let original = model.clone();
     let mut model = model;
-    let plain = objects::plain_datatype(&model);
-    let all = ["all".to_string()];
-    let judge = Judge { selectors: &all, base: &[], partial: true, named_only: false, annotation_values: true, plain };
     let mut removed = 0usize;
     loop {
         let classes = classes_to_remove(&model, threshold, precious);
@@ -106,20 +106,7 @@ pub fn collapse(model: Model, threshold: usize, precious: &HashSet<String>) -> a
             break;
         }
         removed += classes.len();
-        let selected: HashSet<Obj> =
-            classes.iter().map(|c| Obj::Entity(Kind::Class, RcStr::from(c.as_str()))).collect();
-        let (doomed, surviving) = {
-            let sel = Selection::new(&model);
-            let doomed: HashSet<_> = objects::judge_axioms(sel.axioms(), &selected, &judge)?.into_iter().collect();
-            let mut surviving: HashSet<Obj> = HashSet::new();
-            for ac in sel.axioms().iter().filter(|ac| !doomed.contains(**ac)) {
-                surviving.extend(objects::axiom_objects(&ac.component, Some(&ac.ann), plain));
-            }
-            (doomed, surviving)
-        };
-        for ac in &doomed {
-            model.ont.remove(ac);
-        }
+        let surviving = remove_classes(&mut model, &classes)?;
         let mut shared = HashMap::new();
         let mut cross = HashMap::new();
         for bridge in crate::cmd::remove::span_gaps(&original, &surviving, &mut shared, &mut cross) {
@@ -127,8 +114,30 @@ pub fn collapse(model: Model, threshold: usize, precious: &HashSet<String>) -> a
         }
         merge_groups(&mut model, shared, cross);
     }
-    status!("collapse: removed {removed} intermediate class(es) (threshold {threshold})");
-    Ok(model)
+    Ok((model, removed))
+}
+
+/// Remove from `model` every axiom any of whose objects, or any of whose
+/// annotations' properties and values, is one of `classes`, and return the
+/// objects the axioms left name.
+pub(crate) fn remove_classes(model: &mut Model, classes: &HashSet<String>) -> anyhow::Result<HashSet<Obj>> {
+    let plain = objects::plain_datatype(model);
+    let all = ["all".to_string()];
+    let judge = Judge { selectors: &all, base: &[], partial: true, named_only: false, annotation_values: true, plain };
+    let selected: HashSet<Obj> = classes.iter().map(|c| Obj::Entity(Kind::Class, RcStr::from(c.as_str()))).collect();
+    let (doomed, surviving) = {
+        let sel = Selection::new(model);
+        let doomed: HashSet<_> = objects::judge_axioms(sel.axioms(), &selected, &judge)?.into_iter().collect();
+        let mut surviving: HashSet<Obj> = HashSet::new();
+        for ac in sel.axioms().iter().filter(|ac| !doomed.contains(**ac)) {
+            surviving.extend(objects::axiom_objects(&ac.component, Some(&ac.ann), plain));
+        }
+        (doomed, surviving)
+    };
+    for ac in &doomed {
+        model.ont.remove(ac);
+    }
+    Ok(surviving)
 }
 
 /// The classes one pass of [`collapse`] removes.

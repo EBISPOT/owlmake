@@ -394,8 +394,12 @@ pub fn missing_type(model: &Model, declared: &HashSet<(Kind, String)>, kind: Kin
 /// The entities a document written from `model` in functional syntax or
 /// OWL/XML declares although the ontology does not: every entity of the
 /// ontology's signature and its imports closure's that is not built in, not
-/// illegally punned across the two, and declared by neither. An ontology that
-/// imports declares none while its closure is unread.
+/// illegally punned across the two, and declared by neither. Once a command has
+/// changed the ontology ([`Model::root_changed`]), the closure's signature is
+/// left out, and only what the ontology names itself is declared. An ontology
+/// that imports nothing has no closure unless it outlives its imports
+/// ([`ImportsClosure::outlives_imports`](crate::model::ImportsClosure)); one
+/// that imports declares none while its closure is unread.
 ///
 /// They come in the order a hash set built from that signature holds them: by
 /// bucket, the table sized for the signature (at least 16 slots, a power of
@@ -405,12 +409,15 @@ pub fn missing_declarations(model: &Model) -> Vec<(Kind, String)> {
     let mut sig = signature(model);
     let mut declared = declared(model);
     let imports = model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)));
-    if imports {
-        let Some(closure) = &model.imports_closure else {
-            return Vec::new();
-        };
-        sig.extend(closure.signature.iter().filter_map(|k| key_entity(k)));
-        declared.extend(closure.declared.iter().filter_map(|k| key_entity(k)));
+    match &model.imports_closure {
+        Some(closure) if imports || closure.outlives_imports => {
+            if !model.root_changed() {
+                sig.extend(closure.signature.iter().filter_map(|k| key_entity(k)));
+            }
+            declared.extend(closure.declared.iter().filter_map(|k| key_entity(k)));
+        }
+        None if imports => return Vec::new(),
+        _ => {}
     }
     let illegal = illegal_punnings(&sig);
     let mut cap = 16usize;

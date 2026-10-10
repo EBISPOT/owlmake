@@ -1,0 +1,1580 @@
+Prefix(:=<http://example.org/w#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/w>
+
+Declaration(Class(:atom_n1_A))
+Declaration(Class(:atom_n1_B))
+Declaration(Class(:atom_n2_B))
+Declaration(Class(:atom_n3_B))
+Declaration(Class(:atom_n4_A))
+Declaration(Class(:atom_n4_B))
+Declaration(Class(:atom_n5_A))
+Declaration(Class(:atom_n5_B))
+Declaration(Class(:atom_n6_A))
+Declaration(Class(:atom_n6_B))
+Declaration(Class(:h_data_A))
+Declaration(Class(:h_data_B))
+Declaration(Class(:h_diff_A))
+Declaration(Class(:h_same_A))
+Declaration(Class(:h_same_B))
+Declaration(Class(:held_abox_A))
+Declaration(Class(:held_abox_B))
+Declaration(Class(:held_abox_C))
+Declaration(Class(:held_abox_C2))
+Declaration(Class(:held_abox_C3))
+Declaration(Class(:held_abox_Z))
+Declaration(Class(:held_expr_A))
+Declaration(Class(:held_expr_B))
+Declaration(Class(:held_expr_C4))
+Declaration(Class(:held_expr_C5))
+Declaration(Class(:held_expr_C6))
+Declaration(Class(:held_expr_C7))
+Declaration(Class(:held_h2_A))
+Declaration(Class(:held_h2_B))
+Declaration(Class(:held_h3_A))
+Declaration(Class(:held_h3_B))
+Declaration(Class(:held_h5_A))
+Declaration(Class(:held_h5_Z))
+Declaration(Class(:held_h6_A))
+Declaration(Class(:held_h6_B))
+Declaration(Class(:held_h6_Z))
+Declaration(Class(:held_h7_A))
+Declaration(Class(:held_h7_B))
+Declaration(Class(:i_inv_rule_B))
+Declaration(Class(:i_rule_head_inverse_expr_A))
+Declaration(Class(:i_rule_inv_head_A))
+Declaration(Class(:link_y1_A))
+Declaration(Class(:link_y1_B))
+Declaration(Class(:link_y1_Y))
+Declaration(Class(:link_y1_Z))
+Declaration(Class(:link_y4_A))
+Declaration(Class(:link_y4_B))
+Declaration(Class(:link_y4_Z))
+Declaration(Class(:r_anon_A))
+Declaration(Class(:r_anon_B))
+Declaration(Class(:r_builtin_A))
+Declaration(Class(:r_builtin_B))
+Declaration(Class(:r_chain_A))
+Declaration(Class(:r_chain_B))
+Declaration(Class(:r_chain_C))
+Declaration(Class(:r_data_A))
+Declaration(Class(:r_data_B))
+Declaration(Class(:r_diff_A))
+Declaration(Class(:r_diff_B))
+Declaration(Class(:r_domain_A))
+Declaration(Class(:r_domain_B))
+Declaration(Class(:r_exist_body_B))
+Declaration(Class(:r_exist_body_C))
+Declaration(Class(:r_exist_head_A))
+Declaration(Class(:r_exist_head_B))
+Declaration(Class(:r_exist_head_E))
+Declaration(Class(:r_head_const_A))
+Declaration(Class(:r_inverse_atom_B))
+Declaration(Class(:r_join_A))
+Declaration(Class(:r_join_B))
+Declaration(Class(:r_join_C))
+Declaration(Class(:r_noindividual_A))
+Declaration(Class(:r_noindividual_B))
+Declaration(Class(:r_noindividual_C))
+Declaration(Class(:r_role_chain_C))
+Declaration(Class(:r_role_tbox_A))
+Declaration(Class(:r_role_tbox_C))
+Declaration(Class(:r_same_A))
+Declaration(Class(:r_same_B))
+Declaration(Class(:r_subrole_B))
+Declaration(Class(:r_tbox_in_A))
+Declaration(Class(:r_tbox_in_A2))
+Declaration(Class(:r_tbox_in_B))
+Declaration(Class(:r_tbox_out_A))
+Declaration(Class(:r_tbox_out_B))
+Declaration(Class(:r_tbox_out_C))
+Declaration(Class(:r_thing_A))
+Declaration(Class(:r_thing_B))
+Declaration(Class(:u_const_body_A))
+Declaration(Class(:u_const_body_B))
+Declaration(Class(:u_const_body_C))
+Declaration(Class(:u_empty_body_A))
+Declaration(Class(:u_empty_body_B))
+Declaration(Class(:u_exist_nominal_head_A))
+Declaration(Class(:u_sym_rule_B))
+Declaration(Class(:u_thing_unheld_A))
+Declaration(Class(:u_thing_unheld_B))
+Declaration(Class(:u_thing_unheld_C))
+Declaration(Class(:u_thing_unheld_D))
+Declaration(Class(:u_two_head_A))
+Declaration(Class(:u_two_head_B))
+Declaration(Class(:u_undeclared_ind_A))
+Declaration(Class(:u_undeclared_ind_B))
+Declaration(Class(:u_undeclared_ind_C))
+Declaration(Class(:u_undeclared_ind_D))
+Declaration(Class(:u_unsafe_nomatch_A))
+Declaration(Class(:u_unsafe_nomatch_B))
+Declaration(ObjectProperty(:atom_n3_q))
+Declaration(ObjectProperty(:held_abox_q))
+Declaration(ObjectProperty(:held_expr_q))
+Declaration(ObjectProperty(:held_h2_q))
+Declaration(ObjectProperty(:held_h5_q))
+Declaration(ObjectProperty(:held_h6_q))
+Declaration(ObjectProperty(:i_inv_rule_p))
+Declaration(ObjectProperty(:i_inv_rule_pi))
+Declaration(ObjectProperty(:i_rule_head_inverse_expr_q))
+Declaration(ObjectProperty(:i_rule_inv_head_p))
+Declaration(ObjectProperty(:i_rule_inv_head_pi))
+Declaration(ObjectProperty(:link_y1_r))
+Declaration(ObjectProperty(:link_y4_r))
+Declaration(ObjectProperty(:r_anon_p))
+Declaration(ObjectProperty(:r_domain_p))
+Declaration(ObjectProperty(:r_exist_body_p))
+Declaration(ObjectProperty(:r_exist_head_p))
+Declaration(ObjectProperty(:r_head_const_q))
+Declaration(ObjectProperty(:r_inverse_atom_p))
+Declaration(ObjectProperty(:r_join_p))
+Declaration(ObjectProperty(:r_role_chain_p))
+Declaration(ObjectProperty(:r_role_chain_q))
+Declaration(ObjectProperty(:r_role_tbox_q))
+Declaration(ObjectProperty(:r_self_p))
+Declaration(ObjectProperty(:r_self_q))
+Declaration(ObjectProperty(:r_subrole_p))
+Declaration(ObjectProperty(:r_subrole_r))
+Declaration(ObjectProperty(:r_thing_q))
+Declaration(ObjectProperty(:u_exist_nominal_head_p))
+Declaration(ObjectProperty(:u_sym_rule_p))
+Declaration(ObjectProperty(:u_thing_unheld_p))
+Declaration(ObjectProperty(:u_thing_unheld_q))
+Declaration(ObjectProperty(:u_two_head_q))
+Declaration(ObjectProperty(:u_undeclared_ind_p))
+Declaration(ObjectProperty(:u_undeclared_ind_q))
+Declaration(ObjectProperty(:u_unsafe_nomatch_q))
+Declaration(DataProperty(:h_data_d))
+Declaration(DataProperty(:held_abox_dp))
+Declaration(DataProperty(:held_expr_dp))
+Declaration(DataProperty(:r_data_d))
+Declaration(NamedIndividual(:atom_n1_c3))
+Declaration(NamedIndividual(:atom_n2_c3))
+Declaration(NamedIndividual(:atom_n2_c4))
+Declaration(NamedIndividual(:atom_n3_a))
+Declaration(NamedIndividual(:atom_n3_c5))
+Declaration(NamedIndividual(:atom_n4_c3))
+Declaration(NamedIndividual(:atom_n5_c3))
+Declaration(NamedIndividual(:atom_n5_c6))
+Declaration(NamedIndividual(:atom_n6_c3))
+Declaration(NamedIndividual(:h_data_a))
+Declaration(NamedIndividual(:h_diff_a))
+Declaration(NamedIndividual(:h_diff_c))
+Declaration(NamedIndividual(:h_same_a))
+Declaration(NamedIndividual(:h_same_c))
+Declaration(NamedIndividual(:held_abox_a))
+Declaration(NamedIndividual(:held_abox_c))
+Declaration(NamedIndividual(:held_abox_d))
+Declaration(NamedIndividual(:held_abox_e))
+Declaration(NamedIndividual(:held_abox_g))
+Declaration(NamedIndividual(:held_abox_h))
+Declaration(NamedIndividual(:held_abox_i))
+Declaration(NamedIndividual(:held_abox_j))
+Declaration(NamedIndividual(:held_abox_k))
+Declaration(NamedIndividual(:held_abox_k2))
+Declaration(NamedIndividual(:held_abox_n))
+Declaration(NamedIndividual(:held_abox_o1))
+Declaration(NamedIndividual(:held_abox_o2))
+Declaration(NamedIndividual(:held_abox_r1))
+Declaration(NamedIndividual(:held_abox_r2))
+Declaration(NamedIndividual(:held_abox_r3))
+Declaration(NamedIndividual(:held_abox_s1))
+Declaration(NamedIndividual(:held_abox_s2))
+Declaration(NamedIndividual(:held_abox_t))
+Declaration(NamedIndividual(:held_abox_u))
+Declaration(NamedIndividual(:held_abox_v))
+Declaration(NamedIndividual(:held_abox_w))
+Declaration(NamedIndividual(:held_abox_y1))
+Declaration(NamedIndividual(:held_abox_y2))
+Declaration(NamedIndividual(:held_abox_z1))
+Declaration(NamedIndividual(:held_expr_a))
+Declaration(NamedIndividual(:held_expr_a10))
+Declaration(NamedIndividual(:held_expr_a11))
+Declaration(NamedIndividual(:held_expr_a12))
+Declaration(NamedIndividual(:held_expr_a13))
+Declaration(NamedIndividual(:held_expr_a2))
+Declaration(NamedIndividual(:held_expr_a3))
+Declaration(NamedIndividual(:held_expr_a4))
+Declaration(NamedIndividual(:held_expr_a6))
+Declaration(NamedIndividual(:held_expr_a7))
+Declaration(NamedIndividual(:held_expr_a9))
+Declaration(NamedIndividual(:held_expr_b10))
+Declaration(NamedIndividual(:held_expr_b11))
+Declaration(NamedIndividual(:held_expr_b12))
+Declaration(NamedIndividual(:held_expr_b13))
+Declaration(NamedIndividual(:held_expr_b2))
+Declaration(NamedIndividual(:held_expr_b3))
+Declaration(NamedIndividual(:held_expr_b4))
+Declaration(NamedIndividual(:held_expr_b5))
+Declaration(NamedIndividual(:held_expr_b6))
+Declaration(NamedIndividual(:held_expr_b7))
+Declaration(NamedIndividual(:held_h2_a))
+Declaration(NamedIndividual(:held_h2_c2))
+Declaration(NamedIndividual(:held_h3_a))
+Declaration(NamedIndividual(:held_h3_c3))
+Declaration(NamedIndividual(:held_h5_a))
+Declaration(NamedIndividual(:held_h5_c5))
+Declaration(NamedIndividual(:held_h6_a))
+Declaration(NamedIndividual(:held_h6_c7))
+Declaration(NamedIndividual(:held_h7_a))
+Declaration(NamedIndividual(:held_h7_c10))
+Declaration(NamedIndividual(:held_h7_c8))
+Declaration(NamedIndividual(:held_h7_c9))
+Declaration(NamedIndividual(:i_inv_rule_a))
+Declaration(NamedIndividual(:i_inv_rule_b))
+Declaration(NamedIndividual(:i_rule_head_inverse_expr_a))
+Declaration(NamedIndividual(:i_rule_head_inverse_expr_b))
+Declaration(NamedIndividual(:i_rule_inv_head_a))
+Declaration(NamedIndividual(:i_rule_inv_head_b))
+Declaration(NamedIndividual(:link_y1_a))
+Declaration(NamedIndividual(:link_y4_a))
+Declaration(NamedIndividual(:link_y4_c))
+Declaration(NamedIndividual(:r_anon_a))
+Declaration(NamedIndividual(:r_builtin_a))
+Declaration(NamedIndividual(:r_chain_a))
+Declaration(NamedIndividual(:r_data_a))
+Declaration(NamedIndividual(:r_diff_a))
+Declaration(NamedIndividual(:r_diff_c))
+Declaration(NamedIndividual(:r_domain_a))
+Declaration(NamedIndividual(:r_domain_b))
+Declaration(NamedIndividual(:r_exist_body_a))
+Declaration(NamedIndividual(:r_exist_body_b))
+Declaration(NamedIndividual(:r_exist_head_a))
+Declaration(NamedIndividual(:r_head_const_a))
+Declaration(NamedIndividual(:r_head_const_c))
+Declaration(NamedIndividual(:r_inverse_atom_a))
+Declaration(NamedIndividual(:r_inverse_atom_b))
+Declaration(NamedIndividual(:r_join_a))
+Declaration(NamedIndividual(:r_join_b))
+Declaration(NamedIndividual(:r_join_c))
+Declaration(NamedIndividual(:r_role_chain_a))
+Declaration(NamedIndividual(:r_role_chain_b))
+Declaration(NamedIndividual(:r_role_tbox_a))
+Declaration(NamedIndividual(:r_role_tbox_b))
+Declaration(NamedIndividual(:r_same_a))
+Declaration(NamedIndividual(:r_same_c))
+Declaration(NamedIndividual(:r_self_a))
+Declaration(NamedIndividual(:r_subrole_a))
+Declaration(NamedIndividual(:r_subrole_b))
+Declaration(NamedIndividual(:r_tbox_in_a))
+Declaration(NamedIndividual(:r_tbox_out_a))
+Declaration(NamedIndividual(:r_thing_a))
+Declaration(NamedIndividual(:r_thing_c))
+Declaration(NamedIndividual(:u_const_body_a))
+Declaration(NamedIndividual(:u_const_body_b))
+Declaration(NamedIndividual(:u_empty_body_a))
+Declaration(NamedIndividual(:u_exist_nominal_head_a))
+Declaration(NamedIndividual(:u_exist_nominal_head_c))
+Declaration(NamedIndividual(:u_sym_rule_a))
+Declaration(NamedIndividual(:u_sym_rule_b))
+Declaration(NamedIndividual(:u_thing_unheld_a))
+Declaration(NamedIndividual(:u_thing_unheld_b))
+Declaration(NamedIndividual(:u_thing_unheld_c))
+Declaration(NamedIndividual(:u_two_head_a))
+Declaration(NamedIndividual(:u_two_head_c))
+Declaration(NamedIndividual(:u_undeclared_ind_a))
+Declaration(NamedIndividual(:u_undeclared_ind_b))
+Declaration(NamedIndividual(:u_undeclared_ind_c))
+Declaration(NamedIndividual(:u_undeclared_ind_z))
+Declaration(NamedIndividual(:u_unsafe_nomatch_a))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :i_inv_rule_p (:i_inv_rule_p)
+
+InverseObjectProperties(:i_inv_rule_p :i_inv_rule_pi)
+
+# Object Property: :i_rule_inv_head_p (:i_rule_inv_head_p)
+
+InverseObjectProperties(:i_rule_inv_head_p :i_rule_inv_head_pi)
+
+# Object Property: :r_domain_p (:r_domain_p)
+
+ObjectPropertyDomain(:r_domain_p :r_domain_A)
+
+# Object Property: :r_role_tbox_q (:r_role_tbox_q)
+
+ObjectPropertyDomain(:r_role_tbox_q :r_role_tbox_C)
+
+# Object Property: :r_subrole_p (:r_subrole_p)
+
+SubObjectPropertyOf(:r_subrole_p :r_subrole_r)
+
+# Object Property: :u_sym_rule_p (:u_sym_rule_p)
+
+SymmetricObjectProperty(:u_sym_rule_p)
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :atom_n1_A (:atom_n1_A)
+
+SubClassOf(:atom_n1_A owl:Thing)
+
+# Class: :atom_n1_B (:atom_n1_B)
+
+SubClassOf(:atom_n1_B owl:Thing)
+
+# Class: :atom_n2_B (:atom_n2_B)
+
+SubClassOf(:atom_n2_B owl:Thing)
+
+# Class: :atom_n3_B (:atom_n3_B)
+
+SubClassOf(:atom_n3_B owl:Thing)
+
+# Class: :atom_n4_A (:atom_n4_A)
+
+SubClassOf(:atom_n4_A owl:Thing)
+
+# Class: :atom_n4_B (:atom_n4_B)
+
+SubClassOf(:atom_n4_B owl:Thing)
+
+# Class: :atom_n5_A (:atom_n5_A)
+
+SubClassOf(:atom_n5_A owl:Thing)
+
+# Class: :atom_n5_B (:atom_n5_B)
+
+SubClassOf(:atom_n5_B owl:Thing)
+
+# Class: :atom_n6_A (:atom_n6_A)
+
+SubClassOf(:atom_n6_A owl:Thing)
+
+# Class: :atom_n6_B (:atom_n6_B)
+
+SubClassOf(:atom_n6_B owl:Thing)
+
+# Class: :h_data_A (:h_data_A)
+
+SubClassOf(:h_data_A owl:Thing)
+
+# Class: :h_data_B (:h_data_B)
+
+SubClassOf(:h_data_B owl:Thing)
+
+# Class: :h_diff_A (:h_diff_A)
+
+SubClassOf(:h_diff_A owl:Thing)
+
+# Class: :h_same_A (:h_same_A)
+
+SubClassOf(:h_same_A owl:Thing)
+
+# Class: :h_same_B (:h_same_B)
+
+SubClassOf(:h_same_B owl:Thing)
+
+# Class: :held_abox_A (:held_abox_A)
+
+SubClassOf(:held_abox_A owl:Thing)
+
+# Class: :held_abox_B (:held_abox_B)
+
+SubClassOf(:held_abox_B owl:Thing)
+
+# Class: :held_abox_C (:held_abox_C)
+
+SubClassOf(:held_abox_C :r_thing_B)
+SubClassOf(:held_abox_C :u_thing_unheld_B)
+SubClassOf(:held_abox_C ObjectOneOf(:held_abox_s1 :held_abox_s2))
+
+# Class: :held_abox_C2 (:held_abox_C2)
+
+SubClassOf(:held_abox_C2 owl:Thing)
+SubClassOf(:held_abox_C2 ObjectHasValue(:held_abox_q :held_abox_t))
+
+# Class: :held_abox_C3 (:held_abox_C3)
+
+SubClassOf(:held_abox_C3 owl:Thing)
+SubClassOf(:held_abox_C3 ObjectSomeValuesFrom(:held_abox_q ObjectOneOf(:held_abox_y1 :held_abox_y2)))
+
+# Class: :held_abox_Z (:held_abox_Z)
+
+SubClassOf(:held_abox_Z owl:Thing)
+
+# Class: :held_expr_A (:held_expr_A)
+
+SubClassOf(:held_expr_A owl:Thing)
+
+# Class: :held_expr_B (:held_expr_B)
+
+SubClassOf(:held_expr_B owl:Thing)
+DisjointClasses(:held_expr_B ObjectOneOf(:held_expr_b10))
+
+# Class: :held_expr_C4 (:held_expr_C4)
+
+SubClassOf(:held_expr_C4 owl:Thing)
+SubClassOf(:held_expr_C4 ObjectMinCardinality(2 :held_expr_q ObjectOneOf(:held_expr_b2)))
+
+# Class: :held_expr_C5 (:held_expr_C5)
+
+SubClassOf(:held_expr_C5 owl:Thing)
+SubClassOf(:held_expr_C5 ObjectSomeValuesFrom(ObjectInverseOf(:held_expr_q) ObjectOneOf(:held_expr_b3)))
+
+# Class: :held_expr_C6 (:held_expr_C6)
+
+SubClassOf(:held_expr_C6 owl:Thing)
+SubClassOf(:held_expr_C6 ObjectMinCardinality(2 :held_expr_q))
+
+# Class: :held_expr_C7 (:held_expr_C7)
+
+EquivalentClasses(:held_expr_C7 ObjectUnionOf(ObjectOneOf(:held_expr_b11) ObjectMinCardinality(2 :held_expr_q)))
+SubClassOf(:held_expr_C7 owl:Thing)
+
+# Class: :held_h2_A (:held_h2_A)
+
+SubClassOf(:held_h2_A owl:Thing)
+
+# Class: :held_h2_B (:held_h2_B)
+
+SubClassOf(:held_h2_B owl:Thing)
+
+# Class: :held_h3_A (:held_h3_A)
+
+SubClassOf(:held_h3_A owl:Thing)
+
+# Class: :held_h3_B (:held_h3_B)
+
+SubClassOf(:held_h3_B owl:Thing)
+
+# Class: :held_h5_A (:held_h5_A)
+
+SubClassOf(:held_h5_A owl:Thing)
+
+# Class: :held_h5_Z (:held_h5_Z)
+
+SubClassOf(:held_h5_Z owl:Thing)
+
+# Class: :held_h6_A (:held_h6_A)
+
+SubClassOf(:held_h6_A owl:Thing)
+
+# Class: :held_h6_B (:held_h6_B)
+
+SubClassOf(:held_h6_B owl:Thing)
+
+# Class: :held_h6_Z (:held_h6_Z)
+
+SubClassOf(:held_h6_Z owl:Thing)
+
+# Class: :held_h7_A (:held_h7_A)
+
+SubClassOf(:held_h7_A owl:Thing)
+
+# Class: :held_h7_B (:held_h7_B)
+
+SubClassOf(:held_h7_B owl:Thing)
+
+# Class: :i_inv_rule_B (:i_inv_rule_B)
+
+SubClassOf(:i_inv_rule_B owl:Thing)
+
+# Class: :i_rule_head_inverse_expr_A (:i_rule_head_inverse_expr_A)
+
+SubClassOf(:i_rule_head_inverse_expr_A owl:Thing)
+
+# Class: :i_rule_inv_head_A (:i_rule_inv_head_A)
+
+SubClassOf(:i_rule_inv_head_A owl:Thing)
+
+# Class: :link_y1_A (:link_y1_A)
+
+SubClassOf(:link_y1_A owl:Thing)
+
+# Class: :link_y1_B (:link_y1_B)
+
+SubClassOf(:link_y1_B owl:Thing)
+
+# Class: :link_y1_Y (:link_y1_Y)
+
+SubClassOf(:link_y1_Y :link_y1_Z)
+SubClassOf(:link_y1_Y ObjectSomeValuesFrom(:link_y1_r ObjectOneOf(:link_y1_a)))
+
+# Class: :link_y1_Z (:link_y1_Z)
+
+EquivalentClasses(:link_y1_Z ObjectSomeValuesFrom(:link_y1_r :link_y1_B))
+SubClassOf(:link_y1_Z owl:Thing)
+
+# Class: :link_y4_A (:link_y4_A)
+
+SubClassOf(:link_y4_A owl:Thing)
+
+# Class: :link_y4_B (:link_y4_B)
+
+SubClassOf(:link_y4_B owl:Thing)
+
+# Class: :link_y4_Z (:link_y4_Z)
+
+EquivalentClasses(:link_y4_Z ObjectSomeValuesFrom(:link_y4_r :link_y4_B))
+SubClassOf(:link_y4_Z owl:Thing)
+
+# Class: :r_anon_A (:r_anon_A)
+
+SubClassOf(:r_anon_A owl:Thing)
+
+# Class: :r_anon_B (:r_anon_B)
+
+SubClassOf(:r_anon_B owl:Thing)
+
+# Class: :r_builtin_A (:r_builtin_A)
+
+SubClassOf(:r_builtin_A owl:Thing)
+
+# Class: :r_builtin_B (:r_builtin_B)
+
+SubClassOf(:r_builtin_B owl:Thing)
+
+# Class: :r_chain_A (:r_chain_A)
+
+SubClassOf(:r_chain_A owl:Thing)
+
+# Class: :r_chain_B (:r_chain_B)
+
+SubClassOf(:r_chain_B owl:Thing)
+
+# Class: :r_chain_C (:r_chain_C)
+
+SubClassOf(:r_chain_C owl:Thing)
+
+# Class: :r_data_A (:r_data_A)
+
+SubClassOf(:r_data_A owl:Thing)
+
+# Class: :r_data_B (:r_data_B)
+
+SubClassOf(:r_data_B owl:Thing)
+
+# Class: :r_diff_A (:r_diff_A)
+
+SubClassOf(:r_diff_A owl:Thing)
+
+# Class: :r_diff_B (:r_diff_B)
+
+SubClassOf(:r_diff_B owl:Thing)
+
+# Class: :r_domain_A (:r_domain_A)
+
+SubClassOf(:r_domain_A owl:Thing)
+
+# Class: :r_domain_B (:r_domain_B)
+
+SubClassOf(:r_domain_B owl:Thing)
+
+# Class: :r_exist_body_B (:r_exist_body_B)
+
+SubClassOf(:r_exist_body_B owl:Thing)
+
+# Class: :r_exist_body_C (:r_exist_body_C)
+
+SubClassOf(:r_exist_body_C owl:Thing)
+
+# Class: :r_exist_head_A (:r_exist_head_A)
+
+SubClassOf(:r_exist_head_A owl:Thing)
+
+# Class: :r_exist_head_B (:r_exist_head_B)
+
+SubClassOf(:r_exist_head_B owl:Thing)
+
+# Class: :r_exist_head_E (:r_exist_head_E)
+
+SubClassOf(:r_exist_head_E owl:Thing)
+
+# Class: :r_head_const_A (:r_head_const_A)
+
+SubClassOf(:r_head_const_A owl:Thing)
+
+# Class: :r_inverse_atom_B (:r_inverse_atom_B)
+
+SubClassOf(:r_inverse_atom_B owl:Thing)
+
+# Class: :r_join_A (:r_join_A)
+
+SubClassOf(:r_join_A owl:Thing)
+
+# Class: :r_join_B (:r_join_B)
+
+SubClassOf(:r_join_B owl:Thing)
+
+# Class: :r_join_C (:r_join_C)
+
+SubClassOf(:r_join_C owl:Thing)
+
+# Class: :r_noindividual_A (:r_noindividual_A)
+
+SubClassOf(:r_noindividual_A owl:Thing)
+
+# Class: :r_noindividual_B (:r_noindividual_B)
+
+SubClassOf(:r_noindividual_B owl:Thing)
+
+# Class: :r_noindividual_C (:r_noindividual_C)
+
+SubClassOf(:r_noindividual_C :r_noindividual_A)
+
+# Class: :r_role_chain_C (:r_role_chain_C)
+
+SubClassOf(:r_role_chain_C owl:Thing)
+
+# Class: :r_role_tbox_A (:r_role_tbox_A)
+
+SubClassOf(:r_role_tbox_A owl:Thing)
+
+# Class: :r_role_tbox_C (:r_role_tbox_C)
+
+SubClassOf(:r_role_tbox_C owl:Thing)
+
+# Class: :r_same_A (:r_same_A)
+
+SubClassOf(:r_same_A owl:Thing)
+
+# Class: :r_same_B (:r_same_B)
+
+SubClassOf(:r_same_B owl:Thing)
+
+# Class: :r_subrole_B (:r_subrole_B)
+
+SubClassOf(:r_subrole_B owl:Thing)
+
+# Class: :r_tbox_in_A (:r_tbox_in_A)
+
+SubClassOf(:r_tbox_in_A :r_tbox_in_A2)
+
+# Class: :r_tbox_in_A2 (:r_tbox_in_A2)
+
+SubClassOf(:r_tbox_in_A2 owl:Thing)
+
+# Class: :r_tbox_in_B (:r_tbox_in_B)
+
+SubClassOf(:r_tbox_in_B owl:Thing)
+
+# Class: :r_tbox_out_A (:r_tbox_out_A)
+
+SubClassOf(:r_tbox_out_A owl:Thing)
+
+# Class: :r_tbox_out_B (:r_tbox_out_B)
+
+SubClassOf(:r_tbox_out_B :r_tbox_out_C)
+
+# Class: :r_tbox_out_C (:r_tbox_out_C)
+
+SubClassOf(:r_tbox_out_C owl:Thing)
+
+# Class: :r_thing_A (:r_thing_A)
+
+SubClassOf(:r_thing_A owl:Thing)
+
+# Class: :r_thing_B (:r_thing_B)
+
+SubClassOf(:r_thing_B owl:Thing)
+
+# Class: :u_const_body_A (:u_const_body_A)
+
+SubClassOf(:u_const_body_A owl:Thing)
+
+# Class: :u_const_body_B (:u_const_body_B)
+
+SubClassOf(:u_const_body_B owl:Thing)
+
+# Class: :u_const_body_C (:u_const_body_C)
+
+SubClassOf(:u_const_body_C owl:Thing)
+
+# Class: :u_empty_body_A (:u_empty_body_A)
+
+SubClassOf(:u_empty_body_A owl:Thing)
+
+# Class: :u_empty_body_B (:u_empty_body_B)
+
+SubClassOf(:u_empty_body_B owl:Thing)
+
+# Class: :u_exist_nominal_head_A (:u_exist_nominal_head_A)
+
+SubClassOf(:u_exist_nominal_head_A owl:Thing)
+
+# Class: :u_sym_rule_B (:u_sym_rule_B)
+
+SubClassOf(:u_sym_rule_B owl:Thing)
+
+# Class: :u_thing_unheld_A (:u_thing_unheld_A)
+
+SubClassOf(:u_thing_unheld_A :u_thing_unheld_C)
+
+# Class: :u_thing_unheld_B (:u_thing_unheld_B)
+
+SubClassOf(:u_thing_unheld_B owl:Thing)
+
+# Class: :u_thing_unheld_C (:u_thing_unheld_C)
+
+SubClassOf(:u_thing_unheld_C owl:Thing)
+
+# Class: :u_thing_unheld_D (:u_thing_unheld_D)
+
+SubClassOf(:u_thing_unheld_D owl:Thing)
+
+# Class: :u_two_head_A (:u_two_head_A)
+
+SubClassOf(:u_two_head_A owl:Thing)
+
+# Class: :u_two_head_B (:u_two_head_B)
+
+SubClassOf(:u_two_head_B owl:Thing)
+
+# Class: :u_undeclared_ind_A (:u_undeclared_ind_A)
+
+SubClassOf(:u_undeclared_ind_A owl:Thing)
+
+# Class: :u_undeclared_ind_B (:u_undeclared_ind_B)
+
+SubClassOf(:u_undeclared_ind_B owl:Thing)
+
+# Class: :u_undeclared_ind_C (:u_undeclared_ind_C)
+
+SubClassOf(:u_undeclared_ind_C owl:Thing)
+
+# Class: :u_undeclared_ind_D (:u_undeclared_ind_D)
+
+SubClassOf(:u_undeclared_ind_D owl:Thing)
+
+# Class: :u_unsafe_nomatch_A (:u_unsafe_nomatch_A)
+
+SubClassOf(:u_unsafe_nomatch_A owl:Thing)
+
+# Class: :u_unsafe_nomatch_B (:u_unsafe_nomatch_B)
+
+SubClassOf(:u_unsafe_nomatch_B owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :atom_n1_c3 (:atom_n1_c3)
+
+ClassAssertion(:atom_n1_A :atom_n1_c3)
+ClassAssertion(:r_thing_B :atom_n1_c3)
+ClassAssertion(:u_thing_unheld_B :atom_n1_c3)
+
+# Individual: :atom_n2_c3 (:atom_n2_c3)
+
+ClassAssertion(:r_thing_B :atom_n2_c3)
+ClassAssertion(:u_thing_unheld_B :atom_n2_c3)
+SameIndividual(:atom_n2_c3 :atom_n2_c4)
+
+# Individual: :atom_n2_c4 (:atom_n2_c4)
+
+ClassAssertion(:r_thing_B :atom_n2_c4)
+ClassAssertion(:u_thing_unheld_B :atom_n2_c4)
+
+# Individual: :atom_n3_a (:atom_n3_a)
+
+ClassAssertion(:atom_n3_B :atom_n3_a)
+ClassAssertion(:r_thing_B :atom_n3_a)
+ClassAssertion(:u_thing_unheld_B :atom_n3_a)
+ObjectPropertyAssertion(:atom_n3_q :atom_n3_a :atom_n3_c5)
+
+# Individual: :atom_n3_c5 (:atom_n3_c5)
+
+ClassAssertion(:r_thing_B :atom_n3_c5)
+ClassAssertion(:u_thing_unheld_B :atom_n3_c5)
+
+# Individual: :atom_n4_c3 (:atom_n4_c3)
+
+ClassAssertion(:atom_n4_A :atom_n4_c3)
+ClassAssertion(:r_thing_B :atom_n4_c3)
+ClassAssertion(:u_thing_unheld_B :atom_n4_c3)
+
+# Individual: :atom_n5_c3 (:atom_n5_c3)
+
+ClassAssertion(:atom_n5_A :atom_n5_c3)
+ClassAssertion(:atom_n5_B :atom_n5_c3)
+ClassAssertion(:r_thing_B :atom_n5_c3)
+ClassAssertion(:u_thing_unheld_B :atom_n5_c3)
+
+# Individual: :atom_n5_c6 (:atom_n5_c6)
+
+ClassAssertion(:atom_n5_B :atom_n5_c6)
+ClassAssertion(:r_thing_B :atom_n5_c6)
+ClassAssertion(:u_thing_unheld_B :atom_n5_c6)
+
+# Individual: :atom_n6_c3 (:atom_n6_c3)
+
+ClassAssertion(:atom_n6_A :atom_n6_c3)
+ClassAssertion(:atom_n6_B :atom_n6_c3)
+ClassAssertion(:r_thing_B :atom_n6_c3)
+ClassAssertion(:u_thing_unheld_B :atom_n6_c3)
+
+# Individual: :h_data_a (:h_data_a)
+
+ClassAssertion(:h_data_A :h_data_a)
+ClassAssertion(:r_thing_B :h_data_a)
+ClassAssertion(:u_thing_unheld_B :h_data_a)
+
+# Individual: :h_diff_a (:h_diff_a)
+
+ClassAssertion(:h_diff_A :h_diff_a)
+ClassAssertion(:r_thing_B :h_diff_a)
+ClassAssertion(:u_thing_unheld_B :h_diff_a)
+SameIndividual(:h_diff_a :h_diff_c)
+
+# Individual: :h_diff_c (:h_diff_c)
+
+ClassAssertion(:h_diff_A :h_diff_c)
+ClassAssertion(:r_thing_B :h_diff_c)
+ClassAssertion(:u_thing_unheld_B :h_diff_c)
+
+# Individual: :h_same_a (:h_same_a)
+
+ClassAssertion(:h_same_A :h_same_a)
+ClassAssertion(:h_same_B :h_same_a)
+ClassAssertion(:r_thing_B :h_same_a)
+ClassAssertion(:u_thing_unheld_B :h_same_a)
+
+# Individual: :h_same_c (:h_same_c)
+
+ClassAssertion(:h_same_A :h_same_c)
+ClassAssertion(:h_same_B :h_same_c)
+ClassAssertion(:r_thing_B :h_same_c)
+ClassAssertion(:u_thing_unheld_B :h_same_c)
+
+# Individual: :held_abox_a (:held_abox_a)
+
+ClassAssertion(:held_abox_A :held_abox_a)
+ClassAssertion(:r_thing_B :held_abox_a)
+ClassAssertion(:u_thing_unheld_B :held_abox_a)
+
+# Individual: :held_abox_c (:held_abox_c)
+
+ClassAssertion(:r_thing_B :held_abox_c)
+ClassAssertion(:u_thing_unheld_B :held_abox_c)
+
+# Individual: :held_abox_d (:held_abox_d)
+
+ClassAssertion(:r_thing_B :held_abox_d)
+ClassAssertion(:u_thing_unheld_B :held_abox_d)
+
+# Individual: :held_abox_e (:held_abox_e)
+
+ClassAssertion(:r_thing_B :held_abox_e)
+ClassAssertion(:u_thing_unheld_B :held_abox_e)
+NegativeObjectPropertyAssertion(:held_abox_q :held_abox_e :held_abox_d)
+
+# Individual: :held_abox_g (:held_abox_g)
+
+ClassAssertion(owl:Thing :held_abox_g)
+DataPropertyAssertion(:held_abox_dp :held_abox_g "1")
+
+# Individual: :held_abox_h (:held_abox_h)
+
+ClassAssertion(owl:Thing :held_abox_h)
+NegativeDataPropertyAssertion(:held_abox_dp :held_abox_h "1")
+
+# Individual: :held_abox_i (:held_abox_i)
+
+ClassAssertion(:r_thing_B :held_abox_i)
+ClassAssertion(:u_thing_unheld_B :held_abox_i)
+
+# Individual: :held_abox_j (:held_abox_j)
+
+ClassAssertion(:r_thing_B :held_abox_j)
+ClassAssertion(:u_thing_unheld_B :held_abox_j)
+
+# Individual: :held_abox_k (:held_abox_k)
+
+ClassAssertion(:r_thing_B :held_abox_k)
+ClassAssertion(:u_thing_unheld_B :held_abox_k)
+SameIndividual(:held_abox_k :held_abox_k2)
+
+# Individual: :held_abox_k2 (:held_abox_k2)
+
+ClassAssertion(:r_thing_B :held_abox_k2)
+ClassAssertion(:u_thing_unheld_B :held_abox_k2)
+
+# Individual: :held_abox_n (:held_abox_n)
+
+ClassAssertion(:r_thing_B :held_abox_n)
+ClassAssertion(:u_thing_unheld_B :held_abox_n)
+ClassAssertion(ObjectComplementOf(:held_abox_B) :held_abox_n)
+
+# Individual: :held_abox_o1 (:held_abox_o1)
+
+ClassAssertion(:r_thing_B :held_abox_o1)
+ClassAssertion(:u_thing_unheld_B :held_abox_o1)
+ObjectPropertyAssertion(ObjectInverseOf(:held_abox_q) :held_abox_o1 :held_abox_o2)
+
+# Individual: :held_abox_o2 (:held_abox_o2)
+
+ClassAssertion(:r_thing_B :held_abox_o2)
+ClassAssertion(:u_thing_unheld_B :held_abox_o2)
+ObjectPropertyAssertion(:held_abox_q :held_abox_o2 :held_abox_o1)
+
+# Individual: :held_abox_r1 (:held_abox_r1)
+
+ClassAssertion(:r_thing_B :held_abox_r1)
+ClassAssertion(:u_thing_unheld_B :held_abox_r1)
+
+# Individual: :held_abox_r2 (:held_abox_r2)
+
+ClassAssertion(:r_thing_B :held_abox_r2)
+ClassAssertion(:u_thing_unheld_B :held_abox_r2)
+
+# Individual: :held_abox_r3 (:held_abox_r3)
+
+ClassAssertion(:r_thing_B :held_abox_r3)
+ClassAssertion(:u_thing_unheld_B :held_abox_r3)
+
+# Individual: :held_abox_s1 (:held_abox_s1)
+
+ClassAssertion(:r_thing_B :held_abox_s1)
+ClassAssertion(:u_thing_unheld_B :held_abox_s1)
+
+# Individual: :held_abox_s2 (:held_abox_s2)
+
+ClassAssertion(:r_thing_B :held_abox_s2)
+ClassAssertion(:u_thing_unheld_B :held_abox_s2)
+
+# Individual: :held_abox_t (:held_abox_t)
+
+ClassAssertion(:r_thing_B :held_abox_t)
+ClassAssertion(:u_thing_unheld_B :held_abox_t)
+
+# Individual: :held_abox_u (:held_abox_u)
+
+ClassAssertion(:r_thing_B :held_abox_u)
+ClassAssertion(:u_thing_unheld_B :held_abox_u)
+ClassAssertion(ObjectUnionOf(:held_abox_B :held_abox_Z) :held_abox_u)
+
+# Individual: :held_abox_v (:held_abox_v)
+
+ClassAssertion(owl:Thing :held_abox_v)
+ClassAssertion(ObjectMinCardinality(2 :held_abox_q) :held_abox_v)
+
+# Individual: :held_abox_w (:held_abox_w)
+
+ClassAssertion(owl:Thing :held_abox_w)
+DataPropertyAssertion(:held_abox_dp :held_abox_w "2")
+
+# Individual: :held_abox_y1 (:held_abox_y1)
+
+ClassAssertion(:r_thing_B :held_abox_y1)
+ClassAssertion(:u_thing_unheld_B :held_abox_y1)
+
+# Individual: :held_abox_y2 (:held_abox_y2)
+
+ClassAssertion(:r_thing_B :held_abox_y2)
+ClassAssertion(:u_thing_unheld_B :held_abox_y2)
+
+# Individual: :held_abox_z1 (:held_abox_z1)
+
+ClassAssertion(:held_abox_A :held_abox_z1)
+ClassAssertion(:r_thing_B :held_abox_z1)
+ClassAssertion(:u_thing_unheld_B :held_abox_z1)
+
+# Individual: :held_expr_a (:held_expr_a)
+
+ClassAssertion(:held_expr_A :held_expr_a)
+ClassAssertion(:r_thing_B :held_expr_a)
+ClassAssertion(:u_thing_unheld_B :held_expr_a)
+
+# Individual: :held_expr_a10 (:held_expr_a10)
+
+ClassAssertion(:r_thing_B :held_expr_a10)
+ClassAssertion(:u_thing_unheld_B :held_expr_a10)
+ClassAssertion(ObjectMaxCardinality(0 :held_expr_q) :held_expr_a10)
+
+# Individual: :held_expr_a11 (:held_expr_a11)
+
+ClassAssertion(owl:Thing :held_expr_a11)
+ClassAssertion(ObjectIntersectionOf(:held_expr_B ObjectMinCardinality(2 :held_expr_q)) :held_expr_a11)
+
+# Individual: :held_expr_a12 (:held_expr_a12)
+
+ClassAssertion(owl:Thing :held_expr_a12)
+ClassAssertion(ObjectUnionOf(:held_expr_B ObjectMinCardinality(2 :held_expr_q)) :held_expr_a12)
+
+# Individual: :held_expr_a13 (:held_expr_a13)
+
+ClassAssertion(owl:Thing :held_expr_a13)
+ClassAssertion(ObjectComplementOf(ObjectMinCardinality(2 :held_expr_q)) :held_expr_a13)
+
+# Individual: :held_expr_a2 (:held_expr_a2)
+
+ClassAssertion(owl:Thing :held_expr_a2)
+ClassAssertion(ObjectExactCardinality(1 :held_expr_q) :held_expr_a2)
+
+# Individual: :held_expr_a3 (:held_expr_a3)
+
+ClassAssertion(owl:Thing :held_expr_a3)
+ClassAssertion(ObjectMinCardinality(1 :held_expr_q) :held_expr_a3)
+
+# Individual: :held_expr_a4 (:held_expr_a4)
+
+ClassAssertion(owl:Thing :held_expr_a4)
+ClassAssertion(ObjectMinCardinality(1 :held_expr_q :held_expr_B) :held_expr_a4)
+
+# Individual: :held_expr_a6 (:held_expr_a6)
+
+ClassAssertion(owl:Thing :held_expr_a6)
+ClassAssertion(DataAllValuesFrom(:held_expr_dp xsd:integer) :held_expr_a6)
+
+# Individual: :held_expr_a7 (:held_expr_a7)
+
+ClassAssertion(:r_thing_B :held_expr_a7)
+ClassAssertion(:u_thing_unheld_B :held_expr_a7)
+ClassAssertion(ObjectHasSelf(:held_expr_q) :held_expr_a7)
+ObjectPropertyAssertion(:held_expr_q :held_expr_a7 :held_expr_a7)
+
+# Individual: :held_expr_a9 (:held_expr_a9)
+
+ClassAssertion(owl:Thing :held_expr_a9)
+ClassAssertion(ObjectSomeValuesFrom(ObjectInverseOf(:held_expr_q) :held_expr_B) :held_expr_a9)
+
+# Individual: :held_expr_b10 (:held_expr_b10)
+
+ClassAssertion(:r_thing_B :held_expr_b10)
+ClassAssertion(:u_thing_unheld_B :held_expr_b10)
+
+# Individual: :held_expr_b11 (:held_expr_b11)
+
+ClassAssertion(owl:Thing :held_expr_b11)
+
+# Individual: :held_expr_b12 (:held_expr_b12)
+
+ClassAssertion(:r_thing_B :held_expr_b12)
+ClassAssertion(:u_thing_unheld_B :held_expr_b12)
+
+# Individual: :held_expr_b13 (:held_expr_b13)
+
+ClassAssertion(owl:Thing :held_expr_b13)
+
+# Individual: :held_expr_b2 (:held_expr_b2)
+
+ClassAssertion(owl:Thing :held_expr_b2)
+
+# Individual: :held_expr_b3 (:held_expr_b3)
+
+ClassAssertion(owl:Thing :held_expr_b3)
+
+# Individual: :held_expr_b4 (:held_expr_b4)
+
+ClassAssertion(owl:Thing :held_expr_b4)
+
+# Individual: :held_expr_b5 (:held_expr_b5)
+
+ClassAssertion(owl:Thing :held_expr_b5)
+
+# Individual: :held_expr_b6 (:held_expr_b6)
+
+ClassAssertion(:r_thing_B :held_expr_b6)
+ClassAssertion(:u_thing_unheld_B :held_expr_b6)
+
+# Individual: :held_expr_b7 (:held_expr_b7)
+
+ClassAssertion(:held_expr_B :held_expr_b7)
+ClassAssertion(:r_thing_B :held_expr_b7)
+ClassAssertion(:u_thing_unheld_B :held_expr_b7)
+
+# Individual: :held_h2_a (:held_h2_a)
+
+ClassAssertion(:held_h2_A :held_h2_a)
+ClassAssertion(:r_thing_B :held_h2_a)
+ClassAssertion(:u_thing_unheld_B :held_h2_a)
+
+# Individual: :held_h2_c2 (:held_h2_c2)
+
+ClassAssertion(:r_thing_B :held_h2_c2)
+ClassAssertion(:u_thing_unheld_B :held_h2_c2)
+
+# Individual: :held_h3_a (:held_h3_a)
+
+ClassAssertion(:held_h3_A :held_h3_a)
+ClassAssertion(:r_thing_B :held_h3_a)
+ClassAssertion(:u_thing_unheld_B :held_h3_a)
+
+# Individual: :held_h3_c3 (:held_h3_c3)
+
+ClassAssertion(:r_thing_B :held_h3_c3)
+ClassAssertion(:u_thing_unheld_B :held_h3_c3)
+
+# Individual: :held_h5_a (:held_h5_a)
+
+ClassAssertion(:held_h5_A :held_h5_a)
+ClassAssertion(:r_thing_B :held_h5_a)
+ClassAssertion(:u_thing_unheld_B :held_h5_a)
+
+# Individual: :held_h5_c5 (:held_h5_c5)
+
+ClassAssertion(:r_thing_B :held_h5_c5)
+ClassAssertion(:u_thing_unheld_B :held_h5_c5)
+
+# Individual: :held_h6_a (:held_h6_a)
+
+ClassAssertion(:held_h6_A :held_h6_a)
+ClassAssertion(:r_thing_B :held_h6_a)
+ClassAssertion(:u_thing_unheld_B :held_h6_a)
+
+# Individual: :held_h6_c7 (:held_h6_c7)
+
+ClassAssertion(owl:Thing :held_h6_c7)
+
+# Individual: :held_h7_a (:held_h7_a)
+
+ClassAssertion(:held_h7_A :held_h7_a)
+ClassAssertion(:r_thing_B :held_h7_a)
+ClassAssertion(:u_thing_unheld_B :held_h7_a)
+
+# Individual: :held_h7_c10 (:held_h7_c10)
+
+ClassAssertion(:r_thing_B :held_h7_c10)
+ClassAssertion(:u_thing_unheld_B :held_h7_c10)
+
+# Individual: :held_h7_c8 (:held_h7_c8)
+
+ClassAssertion(:r_thing_B :held_h7_c8)
+ClassAssertion(:u_thing_unheld_B :held_h7_c8)
+
+# Individual: :held_h7_c9 (:held_h7_c9)
+
+ClassAssertion(:r_thing_B :held_h7_c9)
+ClassAssertion(:u_thing_unheld_B :held_h7_c9)
+
+# Individual: :i_inv_rule_a (:i_inv_rule_a)
+
+ClassAssertion(:r_thing_B :i_inv_rule_a)
+ClassAssertion(:u_thing_unheld_B :i_inv_rule_a)
+ObjectPropertyAssertion(:i_inv_rule_p :i_inv_rule_a :i_inv_rule_b)
+
+# Individual: :i_inv_rule_b (:i_inv_rule_b)
+
+ClassAssertion(:i_inv_rule_B :i_inv_rule_b)
+ClassAssertion(:r_thing_B :i_inv_rule_b)
+ClassAssertion(:u_thing_unheld_B :i_inv_rule_b)
+ObjectPropertyAssertion(:i_inv_rule_pi :i_inv_rule_b :i_inv_rule_a)
+
+# Individual: :i_rule_head_inverse_expr_a (:i_rule_head_inverse_expr_a)
+
+ClassAssertion(:i_rule_head_inverse_expr_A :i_rule_head_inverse_expr_a)
+ClassAssertion(:r_thing_B :i_rule_head_inverse_expr_a)
+ClassAssertion(:u_thing_unheld_B :i_rule_head_inverse_expr_a)
+
+# Individual: :i_rule_head_inverse_expr_b (:i_rule_head_inverse_expr_b)
+
+ClassAssertion(:r_thing_B :i_rule_head_inverse_expr_b)
+ClassAssertion(:u_thing_unheld_B :i_rule_head_inverse_expr_b)
+ObjectPropertyAssertion(:i_rule_head_inverse_expr_q :i_rule_head_inverse_expr_b :i_rule_head_inverse_expr_a)
+
+# Individual: :i_rule_inv_head_a (:i_rule_inv_head_a)
+
+ClassAssertion(:i_rule_inv_head_A :i_rule_inv_head_a)
+ClassAssertion(:r_thing_B :i_rule_inv_head_a)
+ClassAssertion(:u_thing_unheld_B :i_rule_inv_head_a)
+ObjectPropertyAssertion(:i_rule_inv_head_p :i_rule_inv_head_a :i_rule_inv_head_b)
+
+# Individual: :i_rule_inv_head_b (:i_rule_inv_head_b)
+
+ClassAssertion(:r_thing_B :i_rule_inv_head_b)
+ClassAssertion(:u_thing_unheld_B :i_rule_inv_head_b)
+ObjectPropertyAssertion(:i_rule_inv_head_pi :i_rule_inv_head_b :i_rule_inv_head_a)
+
+# Individual: :link_y1_a (:link_y1_a)
+
+ClassAssertion(:link_y1_A :link_y1_a)
+ClassAssertion(:link_y1_B :link_y1_a)
+ClassAssertion(:r_thing_B :link_y1_a)
+ClassAssertion(:u_thing_unheld_B :link_y1_a)
+
+# Individual: :link_y4_a (:link_y4_a)
+
+ClassAssertion(:link_y4_A :link_y4_a)
+ClassAssertion(:link_y4_B :link_y4_a)
+ClassAssertion(:r_thing_B :link_y4_a)
+ClassAssertion(:u_thing_unheld_B :link_y4_a)
+
+# Individual: :link_y4_c (:link_y4_c)
+
+ClassAssertion(:link_y4_Z :link_y4_c)
+ClassAssertion(:r_thing_B :link_y4_c)
+ClassAssertion(:u_thing_unheld_B :link_y4_c)
+ObjectPropertyAssertion(:link_y4_r :link_y4_c :link_y4_a)
+
+# Individual: :r_anon_a (:r_anon_a)
+
+ClassAssertion(owl:Thing :r_anon_a)
+ObjectPropertyAssertion(:r_anon_p :r_anon_a _:genid2147483648)
+
+# Individual: :r_builtin_a (:r_builtin_a)
+
+ClassAssertion(:r_builtin_A :r_builtin_a)
+ClassAssertion(:r_thing_B :r_builtin_a)
+ClassAssertion(:u_thing_unheld_B :r_builtin_a)
+
+# Individual: :r_chain_a (:r_chain_a)
+
+ClassAssertion(:r_chain_A :r_chain_a)
+ClassAssertion(:r_chain_B :r_chain_a)
+ClassAssertion(:r_chain_C :r_chain_a)
+ClassAssertion(:r_thing_B :r_chain_a)
+ClassAssertion(:u_thing_unheld_B :r_chain_a)
+
+# Individual: :r_data_a (:r_data_a)
+
+ClassAssertion(:r_data_A :r_data_a)
+ClassAssertion(:r_thing_B :r_data_a)
+ClassAssertion(:u_thing_unheld_B :r_data_a)
+DataPropertyAssertion(:r_data_d :r_data_a "1"^^xsd:integer)
+
+# Individual: :r_diff_a (:r_diff_a)
+
+ClassAssertion(:r_diff_A :r_diff_a)
+ClassAssertion(:r_thing_B :r_diff_a)
+ClassAssertion(:u_thing_unheld_B :r_diff_a)
+
+# Individual: :r_diff_c (:r_diff_c)
+
+ClassAssertion(:r_thing_B :r_diff_c)
+ClassAssertion(:u_thing_unheld_B :r_diff_c)
+
+# Individual: :r_domain_a (:r_domain_a)
+
+ClassAssertion(:r_domain_A :r_domain_a)
+ClassAssertion(:r_domain_B :r_domain_a)
+ClassAssertion(:r_thing_B :r_domain_a)
+ClassAssertion(:u_thing_unheld_B :r_domain_a)
+ObjectPropertyAssertion(:r_domain_p :r_domain_a :r_domain_b)
+
+# Individual: :r_domain_b (:r_domain_b)
+
+ClassAssertion(:r_thing_B :r_domain_b)
+ClassAssertion(:u_thing_unheld_B :r_domain_b)
+
+# Individual: :r_exist_body_a (:r_exist_body_a)
+
+ClassAssertion(:r_exist_body_C :r_exist_body_a)
+ClassAssertion(:r_thing_B :r_exist_body_a)
+ClassAssertion(:u_thing_unheld_B :r_exist_body_a)
+ObjectPropertyAssertion(:r_exist_body_p :r_exist_body_a :r_exist_body_b)
+
+# Individual: :r_exist_body_b (:r_exist_body_b)
+
+ClassAssertion(:r_exist_body_B :r_exist_body_b)
+ClassAssertion(:r_thing_B :r_exist_body_b)
+ClassAssertion(:u_thing_unheld_B :r_exist_body_b)
+
+# Individual: :r_exist_head_a (:r_exist_head_a)
+
+ClassAssertion(:r_exist_head_A :r_exist_head_a)
+ClassAssertion(:r_exist_head_E :r_exist_head_a)
+ClassAssertion(:r_thing_B :r_exist_head_a)
+ClassAssertion(:u_thing_unheld_B :r_exist_head_a)
+
+# Individual: :r_head_const_a (:r_head_const_a)
+
+ClassAssertion(:r_head_const_A :r_head_const_a)
+ClassAssertion(:r_thing_B :r_head_const_a)
+ClassAssertion(:u_thing_unheld_B :r_head_const_a)
+ObjectPropertyAssertion(:r_head_const_q :r_head_const_a :r_head_const_c)
+
+# Individual: :r_head_const_c (:r_head_const_c)
+
+ClassAssertion(:r_thing_B :r_head_const_c)
+ClassAssertion(:u_thing_unheld_B :r_head_const_c)
+
+# Individual: :r_inverse_atom_a (:r_inverse_atom_a)
+
+ClassAssertion(:r_thing_B :r_inverse_atom_a)
+ClassAssertion(:u_thing_unheld_B :r_inverse_atom_a)
+ObjectPropertyAssertion(:r_inverse_atom_p :r_inverse_atom_a :r_inverse_atom_b)
+
+# Individual: :r_inverse_atom_b (:r_inverse_atom_b)
+
+ClassAssertion(:r_inverse_atom_B :r_inverse_atom_b)
+ClassAssertion(:r_thing_B :r_inverse_atom_b)
+ClassAssertion(:u_thing_unheld_B :r_inverse_atom_b)
+
+# Individual: :r_join_a (:r_join_a)
+
+ClassAssertion(:r_join_A :r_join_a)
+ClassAssertion(:r_join_C :r_join_a)
+ClassAssertion(:r_thing_B :r_join_a)
+ClassAssertion(:u_thing_unheld_B :r_join_a)
+ObjectPropertyAssertion(:r_join_p :r_join_a :r_join_b)
+
+# Individual: :r_join_b (:r_join_b)
+
+ClassAssertion(:r_join_B :r_join_b)
+ClassAssertion(:r_thing_B :r_join_b)
+ClassAssertion(:u_thing_unheld_B :r_join_b)
+
+# Individual: :r_join_c (:r_join_c)
+
+ClassAssertion(:r_join_A :r_join_c)
+ClassAssertion(:r_thing_B :r_join_c)
+ClassAssertion(:u_thing_unheld_B :r_join_c)
+ObjectPropertyAssertion(:r_join_p :r_join_c :r_join_a)
+
+# Individual: :r_role_chain_a (:r_role_chain_a)
+
+ClassAssertion(:r_thing_B :r_role_chain_a)
+ClassAssertion(:u_thing_unheld_B :r_role_chain_a)
+ObjectPropertyAssertion(:r_role_chain_p :r_role_chain_a :r_role_chain_b)
+
+# Individual: :r_role_chain_b (:r_role_chain_b)
+
+ClassAssertion(:r_role_chain_C :r_role_chain_b)
+ClassAssertion(:r_thing_B :r_role_chain_b)
+ClassAssertion(:u_thing_unheld_B :r_role_chain_b)
+ObjectPropertyAssertion(:r_role_chain_q :r_role_chain_b :r_role_chain_a)
+
+# Individual: :r_role_tbox_a (:r_role_tbox_a)
+
+ClassAssertion(:r_role_tbox_A :r_role_tbox_a)
+ClassAssertion(:r_role_tbox_C :r_role_tbox_a)
+ClassAssertion(:r_thing_B :r_role_tbox_a)
+ClassAssertion(:u_thing_unheld_B :r_role_tbox_a)
+ObjectPropertyAssertion(:r_role_tbox_q :r_role_tbox_a :r_role_tbox_b)
+
+# Individual: :r_role_tbox_b (:r_role_tbox_b)
+
+ClassAssertion(:r_thing_B :r_role_tbox_b)
+ClassAssertion(:u_thing_unheld_B :r_role_tbox_b)
+
+# Individual: :r_same_a (:r_same_a)
+
+ClassAssertion(:r_same_A :r_same_a)
+ClassAssertion(:r_same_B :r_same_a)
+ClassAssertion(:r_thing_B :r_same_a)
+ClassAssertion(:u_thing_unheld_B :r_same_a)
+SameIndividual(:r_same_a :r_same_c)
+
+# Individual: :r_same_c (:r_same_c)
+
+ClassAssertion(:r_same_A :r_same_c)
+ClassAssertion(:r_same_B :r_same_c)
+ClassAssertion(:r_thing_B :r_same_c)
+ClassAssertion(:u_thing_unheld_B :r_same_c)
+
+# Individual: :r_self_a (:r_self_a)
+
+ClassAssertion(:r_thing_B :r_self_a)
+ClassAssertion(:u_thing_unheld_B :r_self_a)
+ObjectPropertyAssertion(:r_self_p :r_self_a :r_self_a)
+ObjectPropertyAssertion(:r_self_q :r_self_a :r_self_a)
+
+# Individual: :r_subrole_a (:r_subrole_a)
+
+ClassAssertion(:r_thing_B :r_subrole_a)
+ClassAssertion(:u_thing_unheld_B :r_subrole_a)
+ObjectPropertyAssertion(:r_subrole_p :r_subrole_a :r_subrole_b)
+ObjectPropertyAssertion(:r_subrole_r :r_subrole_a :r_subrole_b)
+
+# Individual: :r_subrole_b (:r_subrole_b)
+
+ClassAssertion(:r_subrole_B :r_subrole_b)
+ClassAssertion(:r_thing_B :r_subrole_b)
+ClassAssertion(:u_thing_unheld_B :r_subrole_b)
+
+# Individual: :r_tbox_in_a (:r_tbox_in_a)
+
+ClassAssertion(:r_tbox_in_A :r_tbox_in_a)
+ClassAssertion(:r_tbox_in_B :r_tbox_in_a)
+ClassAssertion(:r_thing_B :r_tbox_in_a)
+ClassAssertion(:u_thing_unheld_B :r_tbox_in_a)
+
+# Individual: :r_tbox_out_a (:r_tbox_out_a)
+
+ClassAssertion(:r_tbox_out_A :r_tbox_out_a)
+ClassAssertion(:r_tbox_out_B :r_tbox_out_a)
+ClassAssertion(:r_thing_B :r_tbox_out_a)
+ClassAssertion(:u_thing_unheld_B :r_tbox_out_a)
+
+# Individual: :r_thing_a (:r_thing_a)
+
+ClassAssertion(:r_thing_A :r_thing_a)
+ClassAssertion(:r_thing_B :r_thing_a)
+ClassAssertion(:u_thing_unheld_B :r_thing_a)
+
+# Individual: :r_thing_c (:r_thing_c)
+
+ClassAssertion(:r_thing_B :r_thing_c)
+ClassAssertion(:u_thing_unheld_B :r_thing_c)
+ObjectPropertyAssertion(:r_thing_q :r_thing_c :r_thing_c)
+
+# Individual: :u_const_body_a (:u_const_body_a)
+
+ClassAssertion(:r_thing_B :u_const_body_a)
+ClassAssertion(:u_const_body_A :u_const_body_a)
+ClassAssertion(:u_thing_unheld_B :u_const_body_a)
+
+# Individual: :u_const_body_b (:u_const_body_b)
+
+ClassAssertion(:r_thing_B :u_const_body_b)
+ClassAssertion(:u_const_body_B :u_const_body_b)
+ClassAssertion(:u_const_body_C :u_const_body_b)
+ClassAssertion(:u_thing_unheld_B :u_const_body_b)
+
+# Individual: :u_empty_body_a (:u_empty_body_a)
+
+ClassAssertion(:r_thing_B :u_empty_body_a)
+ClassAssertion(:u_empty_body_A :u_empty_body_a)
+ClassAssertion(:u_thing_unheld_B :u_empty_body_a)
+
+# Individual: :u_exist_nominal_head_a (:u_exist_nominal_head_a)
+
+ClassAssertion(:r_thing_B :u_exist_nominal_head_a)
+ClassAssertion(:u_exist_nominal_head_A :u_exist_nominal_head_a)
+ClassAssertion(:u_thing_unheld_B :u_exist_nominal_head_a)
+ObjectPropertyAssertion(:u_exist_nominal_head_p :u_exist_nominal_head_a :u_exist_nominal_head_c)
+
+# Individual: :u_exist_nominal_head_c (:u_exist_nominal_head_c)
+
+ClassAssertion(:r_thing_B :u_exist_nominal_head_c)
+ClassAssertion(:u_thing_unheld_B :u_exist_nominal_head_c)
+
+# Individual: :u_sym_rule_a (:u_sym_rule_a)
+
+ClassAssertion(:r_thing_B :u_sym_rule_a)
+ClassAssertion(:u_sym_rule_B :u_sym_rule_a)
+ClassAssertion(:u_thing_unheld_B :u_sym_rule_a)
+ObjectPropertyAssertion(:u_sym_rule_p :u_sym_rule_a :u_sym_rule_b)
+
+# Individual: :u_sym_rule_b (:u_sym_rule_b)
+
+ClassAssertion(:r_thing_B :u_sym_rule_b)
+ClassAssertion(:u_sym_rule_B :u_sym_rule_b)
+ClassAssertion(:u_thing_unheld_B :u_sym_rule_b)
+ObjectPropertyAssertion(:u_sym_rule_p :u_sym_rule_b :u_sym_rule_a)
+
+# Individual: :u_thing_unheld_a (:u_thing_unheld_a)
+
+ClassAssertion(owl:Thing :u_thing_unheld_a)
+
+# Individual: :u_thing_unheld_b (:u_thing_unheld_b)
+
+ClassAssertion(owl:Thing :u_thing_unheld_b)
+
+# Individual: :u_thing_unheld_c (:u_thing_unheld_c)
+
+ClassAssertion(owl:Thing :u_thing_unheld_c)
+
+# Individual: :u_two_head_a (:u_two_head_a)
+
+ClassAssertion(:r_thing_B :u_two_head_a)
+ClassAssertion(:u_thing_unheld_B :u_two_head_a)
+ClassAssertion(:u_two_head_A :u_two_head_a)
+ClassAssertion(:u_two_head_B :u_two_head_a)
+ObjectPropertyAssertion(:u_two_head_q :u_two_head_a :u_two_head_c)
+
+# Individual: :u_two_head_c (:u_two_head_c)
+
+ClassAssertion(:r_thing_B :u_two_head_c)
+ClassAssertion(:u_thing_unheld_B :u_two_head_c)
+
+# Individual: :u_undeclared_ind_a (:u_undeclared_ind_a)
+
+ClassAssertion(:r_thing_B :u_undeclared_ind_a)
+ClassAssertion(:u_thing_unheld_B :u_undeclared_ind_a)
+ClassAssertion(:u_undeclared_ind_A :u_undeclared_ind_a)
+
+# Individual: :u_undeclared_ind_b (:u_undeclared_ind_b)
+
+ClassAssertion(owl:Thing :u_undeclared_ind_b)
+
+# Individual: :u_undeclared_ind_c (:u_undeclared_ind_c)
+
+ClassAssertion(owl:Thing :u_undeclared_ind_c)
+
+# Individual: :u_undeclared_ind_z (:u_undeclared_ind_z)
+
+ClassAssertion(:r_thing_B :u_undeclared_ind_z)
+ClassAssertion(:u_thing_unheld_B :u_undeclared_ind_z)
+ClassAssertion(:u_undeclared_ind_B :u_undeclared_ind_z)
+
+# Individual: :u_unsafe_nomatch_a (:u_unsafe_nomatch_a)
+
+ClassAssertion(:r_thing_B :u_unsafe_nomatch_a)
+ClassAssertion(:u_thing_unheld_B :u_unsafe_nomatch_a)
+ClassAssertion(:u_unsafe_nomatch_B :u_unsafe_nomatch_a)
+
+
+SubClassOf(ObjectOneOf(:atom_n4_c3) :atom_n4_A)
+SubClassOf(ObjectOneOf(:held_abox_z1) :held_abox_A)
+SubClassOf(ObjectSomeValuesFrom(:r_exist_head_p :r_exist_head_B) :r_exist_head_E)
+ClassAssertion(:r_anon_A _:genid2147483648)
+DifferentIndividuals(:held_abox_a :held_abox_c)
+DifferentIndividuals(:held_abox_r1 :held_abox_r2 :held_abox_r3)
+DifferentIndividuals(:r_diff_a :r_diff_c)
+DLSafeRule(Body()Head(ClassAtom(:held_expr_B :held_expr_b12)))
+DLSafeRule(Body()Head(ClassAtom(:u_empty_body_B :u_empty_body_a)))
+DLSafeRule(Body(ClassAtom(:h_data_A Variable(<urn:swrl:var#x>)))Head(DataPropertyAtom(:h_data_d Variable(<urn:swrl:var#x>) "1"^^xsd:integer) ClassAtom(:h_data_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:h_diff_A Variable(<urn:swrl:var#x>)))Head(DifferentIndividualsAtom(Variable(<urn:swrl:var#x>) :h_diff_c)))
+DLSafeRule(Body(ClassAtom(:h_same_A Variable(<urn:swrl:var#x>)))Head(SameIndividualAtom(Variable(<urn:swrl:var#x>) :h_same_c)))
+DLSafeRule(Body(ClassAtom(:held_abox_Z Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:held_abox_q Variable(<urn:swrl:var#x>) :held_abox_j)))
+DLSafeRule(Body(ClassAtom(:held_expr_B Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_expr_B :held_expr_b5) DataPropertyAtom(:held_expr_dp Variable(<urn:swrl:var#x>) "1")))
+DLSafeRule(Body(ClassAtom(:held_expr_B :held_expr_b4) DataPropertyAtom(:held_expr_dp Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:held_expr_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:held_h5_Z Variable(<urn:swrl:var#x>)))Head(ClassAtom(ObjectSomeValuesFrom(:held_h5_q ObjectOneOf(:held_h5_c5)) Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectSomeValuesFrom(ObjectInverseOf(:held_h6_q) :held_h6_B) :held_h6_c7) ClassAtom(:held_h6_Z Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_h6_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:i_rule_head_inverse_expr_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(ObjectInverseOf(:i_rule_head_inverse_expr_q) Variable(<urn:swrl:var#x>) :i_rule_head_inverse_expr_b)))
+DLSafeRule(Body(ClassAtom(:i_rule_inv_head_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:i_rule_inv_head_p Variable(<urn:swrl:var#x>) :i_rule_inv_head_b)))
+DLSafeRule(Body(ClassAtom(:link_y1_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:link_y1_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:link_y4_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:link_y4_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_anon_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_anon_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(BuiltInAtom(<http://www.w3.org/2003/11/swrlb#equal> Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#x>)) ClassAtom(:r_builtin_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_builtin_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_chain_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_chain_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_chain_B Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_chain_C Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(DataPropertyAtom(:r_data_d Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#v>)) ClassAtom(:r_data_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_data_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(DifferentIndividualsAtom(Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)) ClassAtom(:r_diff_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_diff_B Variable(<urn:swrl:var#y>))))
+DLSafeRule(Body(ClassAtom(:r_domain_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_domain_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_exist_head_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(ObjectSomeValuesFrom(:r_exist_head_p :r_exist_head_B) Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_head_const_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:r_head_const_q Variable(<urn:swrl:var#x>) :r_head_const_c)))
+DLSafeRule(Body(ClassAtom(:r_join_A Variable(<urn:swrl:var#x>)) ObjectPropertyAtom(:r_join_p Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)) ClassAtom(:r_join_B Variable(<urn:swrl:var#y>)))Head(ClassAtom(:r_join_C Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_noindividual_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_noindividual_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_role_tbox_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:r_role_tbox_q Variable(<urn:swrl:var#x>) :r_role_tbox_b)))
+DLSafeRule(Body(SameIndividualAtom(Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)) ClassAtom(:r_same_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_same_B Variable(<urn:swrl:var#y>))))
+DLSafeRule(Body(ClassAtom(:r_tbox_in_A2 Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_tbox_in_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:r_tbox_out_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_tbox_out_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:u_const_body_A :u_const_body_a))Head(ClassAtom(:u_const_body_B :u_const_body_b)))
+DLSafeRule(Body(ClassAtom(:u_exist_nominal_head_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(ObjectSomeValuesFrom(:u_exist_nominal_head_p ObjectOneOf(:u_exist_nominal_head_c)) Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:u_two_head_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:u_two_head_q Variable(<urn:swrl:var#x>) :u_two_head_c) ClassAtom(:u_two_head_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(:u_undeclared_ind_A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:u_undeclared_ind_B :u_undeclared_ind_z)))
+DLSafeRule(Body(ClassAtom(:u_unsafe_nomatch_A Variable(<urn:swrl:var#x>)))Head(ObjectPropertyAtom(:u_unsafe_nomatch_q Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>))))
+DLSafeRule(Body(ClassAtom(owl:Thing Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_thing_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(owl:Thing Variable(<urn:swrl:var#x>)))Head(ClassAtom(:u_thing_unheld_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectIntersectionOf(:atom_n6_A ObjectOneOf(:atom_n6_c3)) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:atom_n6_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectUnionOf(ObjectOneOf(:atom_n5_c3) ObjectOneOf(:atom_n5_c6)) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:atom_n5_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectOneOf(:atom_n1_c3) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:atom_n1_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectOneOf(:atom_n2_c3) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:atom_n2_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectOneOf(:atom_n4_c3) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:atom_n4_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectOneOf(:held_h3_c3) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_h3_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectSomeValuesFrom(:atom_n3_q ObjectOneOf(:atom_n3_c5)) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:atom_n3_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectSomeValuesFrom(:r_exist_body_p :r_exist_body_B) Variable(<urn:swrl:var#x>)))Head(ClassAtom(:r_exist_body_C Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ClassAtom(ObjectMinCardinality(2 :held_expr_q) :held_expr_b13))Head(ClassAtom(:held_expr_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(:held_abox_q :held_abox_i Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_abox_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(:i_inv_rule_pi Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:i_inv_rule_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(:r_role_chain_p Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ObjectPropertyAtom(:r_role_chain_q Variable(<urn:swrl:var#y>) Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(:r_role_chain_q Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:r_role_chain_C Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(:r_self_p Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ObjectPropertyAtom(:r_self_q Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>))))
+DLSafeRule(Body(ObjectPropertyAtom(:r_subrole_r Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:r_subrole_B Variable(<urn:swrl:var#y>))))
+DLSafeRule(Body(ObjectPropertyAtom(:u_sym_rule_p Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:u_sym_rule_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(ObjectInverseOf(:held_h2_q) :held_h2_c2 Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_h2_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(ObjectPropertyAtom(ObjectInverseOf(:r_inverse_atom_p) Variable(<urn:swrl:var#x>) Variable(<urn:swrl:var#y>)))Head(ClassAtom(:r_inverse_atom_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(SameIndividualAtom(:held_expr_b7 Variable(<urn:swrl:var#x>)))Head(ClassAtom(:held_expr_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(DifferentIndividualsAtom(Variable(<urn:swrl:var#x>) :held_expr_b6))Head(ClassAtom(:held_expr_B Variable(<urn:swrl:var#x>))))
+DLSafeRule(Body(DifferentIndividualsAtom(:held_h7_c8 :held_h7_c9))Head(ClassAtom(:held_h7_B :held_h7_c10)))
+AnnotationAssertion(rdfs:comment :held_abox_m "x")
+)

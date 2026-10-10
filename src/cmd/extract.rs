@@ -25,8 +25,8 @@ pub struct Args {
     #[arg(short = 'm', long, default_value = "star")]
     pub method: String,
 
-    /// Seed term to extract (repeatable). For MIREOT these are the lower
-    /// terms.
+    /// Seed term to extract (repeatable). MIREOT reads its lower, upper and
+    /// branch terms instead.
     #[arg(short = 't', long)]
     pub term: Vec<String>,
     /// File(s) listing seed terms (repeatable).
@@ -40,14 +40,14 @@ pub struct Args {
     #[arg(short = 'U', long)]
     pub upper_terms: Vec<PathBuf>,
 
-    /// MIREOT lower term (repeatable; alias for --term under MIREOT).
+    /// MIREOT lower term (repeatable): its ancestors are extracted.
     #[arg(short = 'l', long)]
     pub lower_term: Vec<String>,
     /// File(s) of MIREOT lower terms (repeatable).
     #[arg(short = 'L', long)]
     pub lower_terms: Vec<PathBuf>,
 
-    /// Branch root term (repeatable): extract the branch rooted here.
+    /// MIREOT branch term (repeatable): its descendants are extracted.
     #[arg(short = 'b', long)]
     pub branch_from_term: Vec<String>,
     /// File(s) of branch root terms (repeatable).
@@ -108,45 +108,36 @@ pub fn step(
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
 
-    // -M,--imports exclude: drop owl:imports declarations up front (owlmake never
-    // follows them, so `include` needs no special handling).
-    if args.imports.eq_ignore_ascii_case("exclude") {
-        model = select::retain(model, |c| {
-            !matches!(c, horned_owl::model::Component::Import(_))
-        });
-    }
-
-    // Seed terms: --term/--term-file, plus --lower-term(s) (the MIREOT lower
-    // boundary) and --branch-from-term(s) (branch roots are extra seeds).
-    let mut seed = select::collect_terms(&model, &args.term, &args.term_file)?;
-    let lower = select::collect_terms(&model, &args.lower_term, &args.lower_terms)?;
-    seed.extend(lower.iter().cloned());
-    // --branch-from-term(s): a branch root pulls in its whole descendant subtree,
-    // not just the root term itself.
-    let branch = select::collect_terms(&model, &args.branch_from_term, &args.branch_from_terms)?;
-    if !branch.is_empty() {
-        seed.extend(branch.iter().cloned());
-        let desc = descendants(&model, &branch);
-        if crate::progress::verbosity() >= 1 {
-            status!("extract: --branch-from-term added {} descendant(s)", desc.len());
-        }
-        seed.extend(desc);
-    }
-
-    if args.method.eq_ignore_ascii_case("MIREOT") {
-        // MIREOT climbs from lower terms and descends from branch terms; upper
-        // terms only bound the climb. `--term` and `--term-file` stand for the
-        // lower terms when none is given.
-        let upper = select::collect_terms(&model, &args.upper_term, &args.upper_terms)?;
-        let term = select::collect_terms(&model, &args.term, &args.term_file)?;
-        let lower = if lower.is_empty() { &term } else { &lower };
+    let mut result = if args.method.eq_ignore_ascii_case("MIREOT") {
+        // MIREOT climbs from the lower terms to the upper ones and descends from
+        // the branch terms. `--term` and `--term-file` seed nothing here, and
+        // the options that trim, annotate or name a locality module change
+        // nothing.
+        let lower = sorted(select::collect_terms(&model, &args.lower_term, &args.lower_terms)?);
+        let upper = sorted(select::collect_terms(&model, &args.upper_term, &args.upper_terms)?);
+        let branch = sorted(select::collect_terms(&model, &args.branch_from_term, &args.branch_from_terms)?);
         if lower.is_empty() && branch.is_empty() {
             bail!("MISSING MIREOT TERMS ERROR either lower term(s) or branch term(s) must be specified for MIREOT");
         }
         if lower.is_empty() && !upper.is_empty() {
             bail!("MISSING LOWER TERMS ERROR lower term(s) must be specified with upper term(s) for MIREOT");
         }
+        let intermediates = Intermediates::parse(&args.intermediates)
+            .ok_or_else(|| anyhow::anyhow!("unknown --intermediates value: {}", args.intermediates))?;
+        extract::mireot(
+            &model,
+            &lower,
+            &upper,
+            &branch,
+            args.copy_ontology_annotations.unwrap_or(false),
+            intermediates,
+        )?
     } else {
+        // -M,--imports exclude: drop owl:imports declarations up front (owlmake
+        // never follows them, so `include` needs no special handling).
+        if args.imports.eq_ignore_ascii_case("exclude") {
+            model = select::retain(model, |c| !matches!(c, horned_owl::model::Component::Import(_)));
+        }
         // Every other method is seeded by `--term` and `--term-file` alone, and
         // refuses an ontology that names none of them unless forced.
         if !(args.upper_term.is_empty()
@@ -160,41 +151,22 @@ pub fn step(
                 "INVALID OPTION ERROR only --term or --term-file can be used to specify extract term(s) for methods: star, top, bot, subset"
             );
         }
-        let given = select::collect_terms(&model, &args.term, &args.term_file)?;
-        if given.is_empty() {
+        let seed = select::collect_terms(&model, &args.term, &args.term_file)?;
+        if seed.is_empty() {
             bail!("MISSING TERMS ERROR term(s) are required with --term or --term-file");
         }
         let named = crate::cmd::objects::signature_entity_iris(&model, !args.imports.eq_ignore_ascii_case("exclude"));
-        if !given.iter().any(|t| named.contains(t)) && !args.force.unwrap_or(false) {
+        if !seed.iter().any(|t| named.contains(t)) && !args.force.unwrap_or(false) {
             bail!("EMPTY TERMS ERROR ontology does not contain input terms");
         }
-    }
-
-    let opts = build_options(&model, args)?;
-
-    let mut result = if args.method.eq_ignore_ascii_case("MIREOT") {
-        let upper = select::collect_terms(&model, &args.upper_term, &args.upper_terms)?;
-        // MIREOT lower seeds: explicit lower terms, else the generic --term set —
-        // minus the branch roots and their subtrees, which do not climb.
-        let branch_set: std::collections::HashSet<String> = if branch.is_empty() {
-            Default::default()
+        let opts = build_options(&model, args)?;
+        if args.method.eq_ignore_ascii_case("subset") {
+            subset_module(model, &seed)?
         } else {
-            let mut b: std::collections::HashSet<String> = branch.iter().cloned().collect();
-            b.extend(descendants(&model, &branch));
-            b
-        };
-        let lower_seed: std::collections::HashSet<String> = if lower.is_empty() {
-            seed.difference(&branch_set).cloned().collect()
-        } else {
-            lower.clone()
-        };
-        extract::mireot_with(&model, &lower_seed, &upper, &branch_set, &opts)
-    } else if args.method.eq_ignore_ascii_case("subset") {
-        subset_module(model, &seed)?
-    } else {
-        let method = Method::parse(&args.method)
-            .ok_or_else(|| anyhow::anyhow!("unknown extract method: {}", args.method))?;
-        extract::extract_with(&model, &seed, method, &opts)
+            let method = Method::parse(&args.method)
+                .ok_or_else(|| anyhow::anyhow!("unknown extract method: {}", args.method))?;
+            extract::extract_with(&model, &seed, method, &opts)?
+        }
     };
 
     // `extract` builds a NEW `OWLOntology`, so its document format declares no
@@ -314,7 +286,7 @@ fn subset_module(
             }
         }
     }
-    let mut out = crate::cmd::reduce::reduce(&filtered);
+    let mut out = crate::cmd::reduce::reduce(&filtered)?;
     out.span_shared = span_before;
     out.cross_shared = cross_before;
     out.shared_occurrences = occurrences_before;
@@ -387,33 +359,11 @@ pub(crate) fn property_signature(model: &crate::model::Model) -> HashSet<String>
     out
 }
 
-/// All asserted-named descendants of `roots` (transitive subclasses), via the
-/// `SubClassOf(named, named)` edges. Roots themselves are not included.
-fn descendants(model: &crate::model::Model, roots: &HashSet<String>) -> HashSet<String> {
-    use horned_owl::model::{ClassExpression as CE, Component};
-    let mut children: HashMap<String, Vec<String>> = HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
-                children
-                    .entry(sup.0.to_string())
-                    .or_default()
-                    .push(sub.0.to_string());
-            }
-        }
-    }
-    let mut out = HashSet::new();
-    let mut stack: Vec<String> = roots.iter().cloned().collect();
-    while let Some(c) = stack.pop() {
-        if let Some(kids) = children.get(&c) {
-            for k in kids {
-                if out.insert(k.clone()) {
-                    stack.push(k.clone());
-                }
-            }
-        }
-    }
-    out
+/// The terms of `set`, in order.
+fn sorted(set: HashSet<String>) -> Vec<String> {
+    let mut terms: Vec<String> = set.into_iter().collect();
+    terms.sort();
+    terms
 }
 
 /// Assemble [`ExtractOptions`] from the parsed CLI args, expanding/validating the

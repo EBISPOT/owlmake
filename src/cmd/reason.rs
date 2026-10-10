@@ -19,10 +19,12 @@ use horned_owl::model::{
 };
 
 use crate::model::Model;
-use crate::reason::{Datatypes, Reasoner};
+use crate::reason::{Datatypes, Reasoner, Rules};
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+const OWL_TOP_OBJECT_PROPERTY: &str = "http://www.w3.org/2002/07/owl#topObjectProperty";
+const OWL_BOTTOM_OBJECT_PROPERTY: &str = "http://www.w3.org/2002/07/owl#bottomObjectProperty";
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -241,6 +243,22 @@ impl ReasonerKind {
         }
     }
 
+    /// What the reasoner does with a SWRL rule: `jfact` reads past every
+    /// rule, and `hermit` takes each as DL-safe.
+    pub(crate) fn rules(self) -> Rules {
+        if self == ReasonerKind::JFact {
+            Rules::Ignored
+        } else {
+            Rules::DlSafe
+        }
+    }
+
+    /// The DL reasoner this kind names over `model`, reading datatypes as it
+    /// does everywhere but materialization, and rules as it does.
+    pub(crate) fn dl_reasoner(self, model: &Model) -> crate::reason::DlReasoner {
+        crate::reason::DlReasoner::classify_with(model, self.datatypes(false), self.rules())
+    }
+
     /// Whether classification runs on the built-in EL engine, which can take
     /// ownership of the model and free it before saturating.
     pub(crate) fn is_builtin_el(self) -> bool {
@@ -270,7 +288,7 @@ pub(crate) fn coherence(model: &Model, kind: ReasonerKind) -> Result<(bool, Vec<
         kind,
         false,
         false,
-        false,
+        Types::None,
         false,
         &HashSet::new(),
         PropertyCheck::None,
@@ -586,6 +604,11 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     let want_equiv = generators.contains(&AxiomGenerator::EquivalentClass);
     let want_class_assertion = generators.contains(&AxiomGenerator::ClassAssertion);
     let want_property_assertion = generators.contains(&AxiomGenerator::PropertyAssertion);
+    let types = match (want_class_assertion, opts.include_indirect) {
+        (false, _) => Types::None,
+        (true, false) => Types::Direct,
+        (true, true) => Types::All,
+    };
     // The equivalence policy needs the inferred equivalence pairs, NOT the full
     // subsumption closure: each backend computes them directly (O(n·|S(c)|)).
     // `--equivalent-classes-allowed asserted-only` is on essentially every
@@ -597,8 +620,38 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // Stash everything the output stage needs from the model UP FRONT, so the
     // (huge) parsed model can be freed before saturation in reasoning-only mode —
     // on phenio that drops ~12 GB held uselessly through the ~60 s saturation.
-    let declared = declared_classes(&model);
-    let declared_individuals = declared_individuals(&model);
+    // Under `--create-new-ontology` the output is the root with its axioms
+    // removed ([`emptied_root`]); the filters below judge what it then holds.
+    let fresh = opts.create_new_ontology || opts.create_new_ontology_with_annotations;
+    // Every class of the signature, declared or not: the subclass generator
+    // asserts each one's superclasses, `owl:Thing` for a class with no other.
+    let signature_classes = signature_classes(&model);
+    // whelk reads no declaration: an `owl:Nothing` only a declaration names is
+    // a class it does not hold.
+    let nothing_only_declared = kind == ReasonerKind::Whelk
+        && signature_classes.contains(OWL_NOTHING)
+        && !model.ont.iter().any(|ac| {
+            !matches!(ac.component, Component::DeclareClass(_))
+                && crate::sig::typed_signature(&ac.component)
+                    .iter()
+                    .any(|(k, iri)| *k == crate::sig::kind::CLASS && iri == OWL_NOTHING)
+        });
+    // The structural reasoner's direct superclasses are its told parents,
+    // `owl:Thing` among them.
+    let told_thing: HashSet<String> = if kind == ReasonerKind::Structural {
+        told_parents(&model)
+            .into_iter()
+            .filter(|(_, parents)| parents.contains(&OWL_THING))
+            .map(|(c, _)| c.to_string())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    // The classes the output declares, for `--exclude-external-entities`.
+    let own_declared = if fresh { HashSet::new() } else { own_declared_classes(&model) };
+    let mut individuals = if want_class_assertion { individuals_in_signature(&model) } else { Vec::new() };
+    let unmet = if want_class_assertion { Unmet::of(&model, kind) } else { Unmet::default() };
+    individuals.retain(|i| unmet.individuals.binary_search(i).is_err());
     // The properties the PropertyAssertion generator is restricted to, expanded
     // against the model's prefixes here, before the model may be released.
     let assertion_properties: HashSet<String> = opts
@@ -608,7 +661,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         .filter(|p| !p.is_empty())
         .map(|p| crate::cmd::select::expand_with_document_prefixes(&model, p))
         .collect();
-    let existing = existing_subclass_pairs(&model);
+    let existing = existing_subclass_pairs(&model, fresh);
     // `--equivalent-classes-allowed asserted-only` subtracts the equivalences the
     // input ALREADY states, so the asserted set must be captured here, before the
     // model can be handed to `classify_consume`. Normalised in both orders so the
@@ -630,6 +683,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         m.carry_meta_from(&model);
         m
     };
+    let emptied = fresh.then(|| emptied_root(&model, opts.create_new_ontology_with_annotations));
 
     // The EL reasoner can release the model before saturating when the model is
     // neither the output (default merge) nor needed for its annotations
@@ -676,17 +730,15 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             direct: r.direct_subsumptions(),
             all: if need_all { r.all_subsumptions() } else { Vec::new() },
             equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
-            class_assertions: if want_class_assertion {
-                r.class_assertions()
-            } else {
-                Vec::new()
-            },
+            class_assertions: if want_class_assertion { r.class_assertions() } else { Vec::new() },
+            top: r.top_equivalents(),
             property_assertions: if want_property_assertion {
                 r.object_property_assertions()
             } else {
                 Vec::new()
             },
             unsat_properties,
+            holds_thing: true,
         }
     } else {
         classify(
@@ -694,7 +746,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             kind,
             need_all,
             need_equiv,
-            want_class_assertion,
+            types,
             want_property_assertion,
             &assertion_properties,
             check,
@@ -708,9 +760,13 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         all,
         equiv,
         class_assertions,
+        top,
         mut property_assertions,
         unsat_properties,
+        holds_thing,
     } = cls;
+    let mut class_assertions = class_assertion_types(kind, &individuals, class_assertions, &top, &all, types);
+    class_assertions.extend(unmet.class_assertions(&unsat, types));
     if !assertion_properties.is_empty() {
         property_assertions.retain(|(_, p, _)| assertion_properties.contains(p));
     }
@@ -759,53 +815,53 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         );
     }
 
-    // Base subsumption set: direct (transitive reduction) or all (indirect).
-    // The subclass generator also asserts `X ⊑ owl:Thing` for the top-level
-    // classes (every class, under --include-indirect); the exclusion flags below
-    // remove those again when requested.
+    // Base subsumption set: direct (transitive reduction) or all (indirect),
+    // with the edges into the top node — `owl:Thing` and the classes the
+    // reasoner finds equivalent to it. A class in the top node has no
+    // superclass to assert. A class with no parent outside it has the whole
+    // node as its direct superclasses (under whelk, `owl:Thing` alone), and
+    // under --include-indirect every class has. The exclusion flags below
+    // remove the edges to `owl:Thing` again when requested.
+    let top_node: HashSet<&str> = top.iter().map(String::as_str).filter(|c| *c != OWL_THING).collect();
+    // A mutual pair — each member of an equivalence node subsuming the other —
+    // is no parent. An asserted ANONYMOUS superclass is no parent either: a
+    // class whose only superclass is a restriction is still a child of the top
+    // node.
+    let pairs: HashSet<(&str, &str)> = direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let has_named_super: HashSet<&str> = direct
+        .iter()
+        .filter(|(sub, sup)| {
+            sup != OWL_THING && !top_node.contains(sup.as_str()) && !pairs.contains(&(sup.as_str(), sub.as_str()))
+        })
+        .map(|(sub, _)| sub.as_str())
+        .collect();
+    // Whether the top node holds `c`'s direct superclasses.
+    let top_is_direct = |c: &str| !top_node.contains(c) && !has_named_super.contains(c);
     let mut base: Vec<(String, String)> = if opts.include_indirect {
         all.clone()
     } else {
         direct.clone()
     };
-    {
-        // A mutual pair — each member of an equivalence node subsuming the other
-        // — is no parent: a root equivalence node's members all carry the root
-        // edge themselves.
-        let pairs: std::collections::HashSet<(&str, &str)> =
-            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-        let mut has_named_super: std::collections::HashSet<String> = direct
-            .iter()
-            .filter(|(sub, sup)| {
-                sup.as_str() != OWL_THING && !pairs.contains(&(sup.as_str(), sub.as_str()))
-            })
-            .map(|(sub, _)| sub.clone())
-            .collect();
-        // An asserted ANONYMOUS superclass does not carry the root edge: a class
-        // whose only superclass is a restriction still gets `⊑ owl:Thing`, so
-        // nothing more to mark here — the reasoner's hierarchy already named
-        // every class with a named parent.
-        // Every class in the SIGNATURE, declared or not: a merge can leave an
-        // undeclared class referenced by surviving axioms, and its inferred
-        // superclass is still asserted — under a bare `reason` that is the
-        // trivial `⊑ owl:Thing` root edge.
-        let mut sig_classes = declared.clone();
-        for ac in model.as_ref().map(|m| m.ont.iter()).into_iter().flatten() {
-            for (k, iri) in crate::sig::typed_signature(&ac.component) {
-                if k == crate::sig::kind::CLASS {
-                    sig_classes.insert(iri);
-                }
-            }
+    base.retain(|(sub, sup)| {
+        !top_node.contains(sub.as_str()) && !(kind == ReasonerKind::Whelk && top_node.contains(sup.as_str()))
+    });
+    // Every class in the SIGNATURE, declared or not: a merge can leave an
+    // undeclared class referenced by surviving axioms, and its inferred
+    // superclass is still asserted — under a bare `reason` that is the trivial
+    // `⊑ owl:Thing` root edge.
+    for c in &signature_classes {
+        if c == OWL_THING || c == OWL_NOTHING || top_node.contains(c.as_str()) {
+            continue;
         }
-        for c in &sig_classes {
-            if c == OWL_THING || c == OWL_NOTHING {
-                continue;
-            }
-            if opts.include_indirect || !has_named_super.contains(c.as_str()) {
-                base.push((c.clone(), OWL_THING.to_string()));
+        if opts.include_indirect || top_is_direct(c) || told_thing.contains(c.as_str()) {
+            base.push((c.clone(), OWL_THING.to_string()));
+            if kind != ReasonerKind::Whelk {
+                base.extend(top_node.iter().map(|t| (c.clone(), t.to_string())));
             }
         }
     }
+    base.sort();
+    base.dedup();
     let base = &base;
 
     // Tautology / owl:Thing filtering. `structural` and `all` share the cheap
@@ -835,31 +891,14 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // SubClassOf pairs, for O(1) dedupe) were stashed up front so the model could
     // be released before saturation.
 
-    // If building a fresh ontology, start from an empty model carrying prefixes.
-    let mut target = if opts.create_new_ontology || opts.create_new_ontology_with_annotations {
-        let mut fresh = Model::from_parts(horned_owl::ontology::set::SetOntology::new(), prefixes);
-        if opts.create_new_ontology_with_annotations {
-            // Reached only when `free_model` is false, so the model is still held.
-            // The ROOT's annotations and declarations, as in ROBOT (whose
-            // `OWLOntology.getAxioms()` is root-only): what the import closure
-            // lent is not copied here — and, see below, nothing is stripped from
-            // the fresh ontology on save either, so this filter is the only
-            // thing keeping the closure's annotations out of it.
-            let src = model.as_ref().expect("model retained for annotation copy");
-            for ac in src.ont.iter() {
-                if matches!(
-                    ac.component,
-                    Component::AnnotationAssertion(_) | Component::DeclareClass(_)
-                ) && !src.imported_components.contains(ac)
-                {
-                    fresh.ont.insert(ac.clone());
-                }
-            }
+    let mut target = match emptied {
+        Some((kept, imported)) => {
+            let mut root = Model::from_parts(kept.into_iter().collect(), prefixes);
+            root.imported_components = imported;
+            root
         }
-        fresh
-    } else {
-        // Default merge: the model itself becomes the output (free_model is false).
-        std::mem::replace(model.as_mut().expect("model retained for merge output"), Model::new())
+        // The model itself is the output (free_model is false).
+        None => std::mem::take(model.as_mut().expect("model retained for merge output")),
     };
 
     let infer_prop = target
@@ -868,27 +907,41 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
 
     let mut added = 0usize;
     if want_subclass {
-        // `owl:Nothing` is part of the taxonomy, so when the ontology MENTIONS it
-        // — a general class axiom `… ⊑ owl:Nothing`, say — the bottom node's own
-        // reflexive edge is asserted with it. A composite whose input has no such
-        // axiom gets no such edge, which is the difference between the metazoan
-        // and vertebrate composites.
-        let nothing_in_sig = !exclude_self
-            && target.ont.iter().any(|ac| match &ac.component {
-                Component::SubClassOf(sc) => {
-                    matches!(&sc.sup, CE::Class(c) if c.0.as_ref() == OWL_NOTHING)
-                        || matches!(&sc.sub, CE::Class(c) if c.0.as_ref() == OWL_NOTHING)
-                }
-                Component::EquivalentClasses(eq) => eq
-                    .0
-                    .iter()
-                    .any(|m| matches!(m, CE::Class(c) if c.0.as_ref() == OWL_NOTHING)),
-                _ => false,
-            });
-        if nothing_in_sig {
+        // `owl:Nothing` is a class of the signature when the closure names it
+        // anywhere — in an expression, a rule, a declaration — and its node's
+        // own edge is asserted with it. whelk holds no class that is only
+        // declared, so to it an `owl:Nothing` only declared is one more class
+        // below `owl:Thing`.
+        let nothing_sup = if nothing_only_declared { OWL_THING } else { OWL_NOTHING };
+        let filtered = if nothing_sup == OWL_THING { exclude_thing } else { exclude_self };
+        if signature_classes.contains(OWL_NOTHING)
+            && !filtered
+            && !(opts.exclude_external_entities && !own_declared.contains(OWL_NOTHING))
+        {
             let ax = Component::SubClassOf(SubClassOf {
                 sub: CE::Class(target.build.class(OWL_NOTHING.to_string())),
-                sup: CE::Class(target.build.class(OWL_NOTHING.to_string())),
+                sup: CE::Class(target.build.class(nothing_sup.to_string())),
+            });
+            if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
+                added += 1;
+            }
+        }
+        // whelk takes a class it does not hold to be below `owl:Thing` and
+        // nothing else; so with every superclass asked for, `owl:Thing`, a
+        // class of the signature no axiom the reasoner reads names, is a
+        // subclass of itself.
+        let thing = (OWL_THING.to_string(), OWL_THING.to_string());
+        if opts.include_indirect
+            && !holds_thing
+            && signature_classes.contains(OWL_THING)
+            && !exclude_thing
+            && !exclude_self
+            && !(opts.exclude_external_entities && !own_declared.contains(OWL_THING))
+            && !(opts.exclude_duplicate_axioms && existing.contains(&thing))
+        {
+            let ax = Component::SubClassOf(SubClassOf {
+                sub: CE::Class(target.build.class(OWL_THING.to_string())),
+                sup: CE::Class(target.build.class(OWL_THING.to_string())),
             });
             if insert_axiom(&mut target, ax, opts.annotate_inferred_axioms, &infer_prop)? {
                 added += 1;
@@ -907,7 +960,7 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
             if sub == OWL_THING || sub == OWL_NOTHING || sup == OWL_NOTHING {
                 continue;
             }
-            if opts.exclude_external_entities && !declared.contains(sub) {
+            if opts.exclude_external_entities && !own_declared.contains(sub) && !own_declared.contains(sup) {
                 continue;
             }
             if opts.exclude_duplicate_axioms && existing.contains(&(sub.clone(), sup.clone())) {
@@ -927,8 +980,16 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     }
 
     if want_equiv {
+        let existing_eq = if opts.exclude_duplicate_axioms {
+            existing_equivalences(&target)
+        } else {
+            HashSet::new()
+        };
         for (a, b) in &equiv_pairs {
-            if opts.exclude_external_entities && !declared.contains(a) {
+            if opts.exclude_external_entities && !own_declared.contains(a) && !own_declared.contains(b) {
+                continue;
+            }
+            if existing_eq.contains(&(a.clone(), b.clone())) {
                 continue;
             }
             let ax = Component::EquivalentClasses(EquivalentClasses(vec![
@@ -947,10 +1008,9 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     if want_class_assertion {
         let existing_ca = existing_class_assertions(&target);
         for (ind, class) in &class_assertions {
-            if class == OWL_THING || class == OWL_NOTHING {
-                continue;
-            }
-            if opts.exclude_external_entities && !declared.contains(class) {
+            // An assertion of `owl:Thing` names `owl:Thing`, which the three
+            // switches drop, and is a tautology to both tests.
+            if class == OWL_THING && exclude_thing {
                 continue;
             }
             if opts.exclude_duplicate_axioms
@@ -974,9 +1034,6 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     if want_property_assertion {
         let existing_pa = existing_object_property_assertions(&target);
         for (from, prop, to) in &property_assertions {
-            if opts.exclude_external_entities && !declared_individuals.contains(from) {
-                continue;
-            }
             if opts.exclude_duplicate_axioms
                 && existing_pa.contains(&(from.clone(), prop.clone(), to.clone()))
             {
@@ -1007,9 +1064,8 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
     // subsumption. Anonymous superclasses are left to the explicit `reduce` step;
     // this pass is named-only. Uses the already-computed `direct` set, so it adds
     // no reasoning.
-    if opts.remove_redundant_subclass_axioms {
-        let direct_set: std::collections::HashSet<(&str, &str)> =
-            direct.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    // Under `emr` no subclass axiom is redundant.
+    if opts.remove_redundant_subclass_axioms && kind != ReasonerKind::Emr {
         let to_remove: Vec<AnnotatedComponent<crate::model::Str>> = target
             .ont
             .iter()
@@ -1029,6 +1085,24 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
                     Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
                         (CE::Class(c), CE::Class(x)) => {
                             let (c, x) = (c.0.as_ref(), x.0.as_ref());
+                            // A superclass of `owl:Thing` or `owl:Nothing` is
+                            // never redundant, nor is `owl:Nothing` as a
+                            // superclass.
+                            if c == OWL_THING || c == OWL_NOTHING || x == OWL_NOTHING {
+                                return false;
+                            }
+                            // The top node holds the direct superclasses of a
+                            // class with no parent outside it, but under whelk
+                            // only `owl:Thing` of it is one. The structural
+                            // reasoner's direct superclasses are its told
+                            // parents, so an asserted one is never redundant.
+                            if x == OWL_THING || top_node.contains(x) {
+                                return match kind {
+                                    ReasonerKind::Structural => false,
+                                    ReasonerKind::Whelk if x != OWL_THING => true,
+                                    _ => !top_is_direct(c),
+                                };
+                            }
                             // A *proper* direct super: `(c, x)` is direct AND the
                             // reverse edge `(x, c)` is absent. The DL backend
                             // reports a class's own equivalence-clique siblings as
@@ -1043,14 +1117,13 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
                             // default generators nothing replaces the dropped
                             // edge. The EL backend already omits those pairs, so
                             // this changes nothing there.
-                            let proper_direct = direct_set.contains(&(c, x))
-                                && !direct_set.contains(&(x, c));
+                            let proper_direct = pairs.contains(&(c, x)) && !pairs.contains(&(x, c));
                             // A self-subsumption goes too: a class is never among
                             // its own direct superclasses, so an asserted `C ⊑ C`
                             // is never in the inferred set and is removed. EFO
                             // asserts two of them by hand; exempting `c == x` here
                             // would leave both in the released `efo.owl`.
-                            x != OWL_THING && x != OWL_NOTHING && !proper_direct
+                            !proper_direct
                         }
                         _ => false,
                     },
@@ -1064,19 +1137,21 @@ pub fn reason_with(model: Model, reasoner: &str, opts: &ReasonOptions) -> Result
         }
     }
 
+    // The axioms the imports lent are still theirs, but for those an inference
+    // asserted in the root ([`insert_axiom`]).
+    let imported = std::mem::take(&mut target.imported_components);
     target.carry_meta_from(&meta_src);
-    // A fresh output is a NEW ontology of inferences, not the processed root. It
-    // still declares the root's imports on save, as ROBOT's does, but nothing in
-    // it was lent by the closure: an inferred `C ⊑ D` that an import also asserts
-    // is an inference all the same, and ROBOT writes it
-    // (`--exclude-duplicate-axioms` is the switch that drops it). Carrying the
-    // root's `imported_components` into the fresh model made the save strip
-    // exactly those edges — on EFO, every direct parent of a PO class that the
-    // PO import asserts, so `tepal` came out of `--create-new-ontology` with no
-    // parent at all while `explain` derived them (EBISPOT/owlmake#2).
-    if opts.create_new_ontology || opts.create_new_ontology_with_annotations {
-        target.imported_components.clear();
+    target.imported_components = imported;
+    if fresh {
+        // The emptied root imports nothing: its imports' axioms stay loaded,
+        // and declare what they declare, but no import is written.
+        target.inlined_imports.clear();
+        target.import_order.clear();
+        if let Some(closure) = target.imports_closure.as_mut() {
+            closure.outlives_imports = true;
+        }
     }
+    target.mark_root_changed();
     Ok(target)
 }
 
@@ -1091,15 +1166,23 @@ struct Classification {
     /// `EquivalentClass` generator or a non-`all` equivalence policy needs them —
     /// never derived from `all`, which is the full O(n·ancestors) closure.
     equiv: Vec<(String, String)>,
-    /// Inferred direct class assertions (individual_iri, class_iri), only the
-    /// `class-assertion` generator populates this.
+    /// The class assertions the reasoner makes, (individual, class), only for
+    /// the `ClassAssertion` generator: under the EL and DL reasoners each held
+    /// individual's direct named types; under whelk and the structural
+    /// reasoner the types [`Types`] asks for, `owl:Thing` included.
     class_assertions: Vec<(String, String)>,
+    /// The named classes equivalent to `owl:Thing`, which with it make the top
+    /// node; for the structural reasoner, those a told cycle puts with it.
+    top: Vec<String>,
     /// Inferred object property assertions (subject, property, object) between
     /// named individuals; only the `property-assertion` generator populates this.
     property_assertions: Vec<(String, String, String)>,
     /// The unsatisfiable object properties, sorted; asked only of an ontology
     /// that is consistent and has no unsatisfiable class.
     unsat_properties: Vec<String>,
+    /// Whether the reasoner holds `owl:Thing` as a class of its own; only
+    /// whelk can hold it not ([`WhelkClassification::holds_thing`](crate::reason::WhelkClassification::holds_thing)).
+    holds_thing: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1108,7 +1191,7 @@ fn classify(
     kind: ReasonerKind,
     need_all: bool,
     need_equiv: bool,
-    need_class_assertions: bool,
+    types: Types,
     need_property_assertions: bool,
     assertion_properties: &HashSet<String>,
     check: PropertyCheck,
@@ -1119,7 +1202,7 @@ fn classify(
         // `jfact`/`whelk` all work in the browser too (see src/reason/mod.rs).
         ReasonerKind::Hermit | ReasonerKind::JFact => {
             status!("reason: using hermit-rs, the HermiT OWL 2 DL reasoner ('{kind:?}')");
-            let r = crate::reason::DlReasoner::classify_with(model, datatypes);
+            let r = crate::reason::DlReasoner::classify_with(model, datatypes, kind.rules());
             r.try_classify().map_err(anyhow::Error::msg)?;
             let direct = r.direct_subsumptions();
             let all = if need_all { r.all_subsumptions() } else { Vec::new() };
@@ -1140,29 +1223,25 @@ fn classify(
                 direct,
                 all,
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
-                class_assertions: if need_class_assertions && consistent {
+                class_assertions: if types != Types::None && consistent {
                     r.class_assertions()
                 } else {
                     Vec::new()
                 },
+                top: if consistent { r.top_equivalents() } else { Vec::new() },
                 property_assertions: if need_property_assertions && consistent {
                     r.object_property_assertions(assertion_properties)
                 } else {
                     Vec::new()
                 },
                 unsat_properties,
+                holds_thing: true,
             }
         }
         ReasonerKind::Whelk => {
             status!("reason: using the whelk-rs EL reasoner");
-            let r = crate::reason::WhelkClassification::classify(model);
+            let r = crate::reason::WhelkClassification::classify(model)?;
             let direct = r.direct_subsumptions();
-            if need_class_assertions {
-                status!("note: the 'class-assertion' generator needs the built-in EL reasoner; no inferred class assertions from whelk");
-            }
-            if need_property_assertions {
-                status!("note: the 'property-assertion' generator needs the built-in EL reasoner or hermit; no inferred property assertions from whelk");
-            }
             let consistent = r.is_consistent();
             let unsat = r.unsatisfiable();
             let unsat_properties = if consistent && unsat.is_empty() && check == PropertyCheck::Probe {
@@ -1180,13 +1259,33 @@ fn classify(
                 all: if need_all { r.all_subsumptions() } else { Vec::new() },
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
                 direct,
-                class_assertions: Vec::new(),
-                property_assertions: Vec::new(),
+                class_assertions: match types {
+                    Types::None => Vec::new(),
+                    _ if !consistent => Vec::new(),
+                    Types::Direct => r.class_assertions(true),
+                    Types::All => r.class_assertions(false),
+                },
+                top: r.top_node().into_iter().filter(|c| c != OWL_THING).collect(),
+                property_assertions: if need_property_assertions && consistent {
+                    let mut asked: Vec<String> = if assertion_properties.is_empty() {
+                        object_property_signature(model)
+                            .into_iter()
+                            .filter(|p| p != OWL_TOP_OBJECT_PROPERTY && p != OWL_BOTTOM_OBJECT_PROPERTY)
+                            .collect()
+                    } else {
+                        assertion_properties.iter().cloned().collect()
+                    };
+                    asked.sort();
+                    r.object_property_assertions(&asked)
+                } else {
+                    Vec::new()
+                },
                 unsat_properties,
+                holds_thing: r.holds_thing(),
             }
         }
         // `structural`: the TOLD hierarchy, no reasoning at all.
-        ReasonerKind::Structural => classify_structural(model, need_all, need_equiv),
+        ReasonerKind::Structural => classify_structural(model, need_all, need_equiv, types),
         ReasonerKind::Elk | ReasonerKind::Owlmake | ReasonerKind::Emr => {
             let union_elim = kind == ReasonerKind::Owlmake;
             if union_elim {
@@ -1219,17 +1318,15 @@ fn classify(
                 direct: r.direct_subsumptions(),
                 all: if need_all { r.all_subsumptions() } else { Vec::new() },
                 equiv: if need_equiv { r.equivalent_class_pairs() } else { Vec::new() },
-                class_assertions: if need_class_assertions {
-                    r.class_assertions()
-                } else {
-                    Vec::new()
-                },
+                class_assertions: if types != Types::None { r.class_assertions() } else { Vec::new() },
+                top: r.top_equivalents(),
                 property_assertions: if need_property_assertions {
                     r.object_property_assertions()
                 } else {
                     Vec::new()
                 },
                 unsat_properties,
+                holds_thing: true,
             }
         }
     })
@@ -1323,6 +1420,174 @@ pub(crate) fn told_unsatisfiable_properties(model: &Model) -> Vec<String> {
     below.into_iter().map(str::to_string).collect()
 }
 
+/// Which types of each individual the `ClassAssertion` generator asks the
+/// reasoner for: none, its direct types, or under `--include-indirect` all of
+/// them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Types {
+    None,
+    Direct,
+    All,
+}
+
+/// The named individuals of the signature that the reasoner reads nothing
+/// about, and the classes it holds. `jfact` reads past every SWRL rule, so it
+/// never meets an individual that only rules name; it gives one the bottom node
+/// as its direct types, and as all of them every class it holds, `owl:Thing`
+/// and `owl:Nothing` among them. Every other reasoner meets every individual.
+#[derive(Default)]
+struct Unmet {
+    /// Sorted.
+    individuals: Vec<String>,
+    classes: Vec<String>,
+}
+
+impl Unmet {
+    fn of(model: &Model, kind: ReasonerKind) -> Unmet {
+        if kind != ReasonerKind::JFact {
+            return Unmet::default();
+        }
+        let rules = kind.rules();
+        let mut met = HashSet::new();
+        let mut named = std::collections::BTreeSet::new();
+        let mut classes = std::collections::BTreeSet::from([OWL_THING.to_string(), OWL_NOTHING.to_string()]);
+        for ac in model.ont.iter() {
+            let reads = rules.reads(&ac.component);
+            for (k, iri) in crate::sig::typed_signature(&ac.component) {
+                match k {
+                    crate::sig::kind::NAMED_INDIVIDUAL if reads => {
+                        met.insert(iri);
+                    }
+                    crate::sig::kind::NAMED_INDIVIDUAL => {
+                        named.insert(iri);
+                    }
+                    crate::sig::kind::CLASS if reads => {
+                        classes.insert(iri);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let individuals: Vec<String> = named.into_iter().filter(|i| !met.contains(i)).collect();
+        Unmet { classes: classes.into_iter().collect(), individuals }
+    }
+
+    /// The class assertions the `ClassAssertion` generator makes of the
+    /// individuals the reasoner never meets, given the classes it found
+    /// unsatisfiable.
+    fn class_assertions(&self, unsat: &[String], types: Types) -> Vec<(String, String)> {
+        let classes: Vec<&str> = match types {
+            Types::None => return Vec::new(),
+            Types::Direct => std::iter::once(OWL_NOTHING)
+                .chain(unsat.iter().map(String::as_str).filter(|c| *c != OWL_NOTHING))
+                .collect(),
+            Types::All => self.classes.iter().map(String::as_str).collect(),
+        };
+        self.individuals
+            .iter()
+            .flat_map(|i| classes.iter().map(move |c| (i.clone(), c.to_string())))
+            .collect()
+    }
+}
+
+/// The named individuals of the signature of `model` and its imports, sorted.
+fn individuals_in_signature(model: &Model) -> Vec<String> {
+    let mut out: Vec<String> = model
+        .ont
+        .iter()
+        .flat_map(|ac| crate::sig::typed_signature(&ac.component))
+        .filter(|(k, _)| *k == crate::sig::kind::NAMED_INDIVIDUAL)
+        .map(|(_, iri)| iri)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The class assertions the structural reasoner makes: each named individual
+/// with the types [`Told::types`](crate::reason::told::Told::types) gives it
+/// from the named classes it is told it is an instance of.
+fn told_class_assertions(model: &Model, types: Types) -> Vec<(String, String)> {
+    if types == Types::None {
+        return Vec::new();
+    }
+    let mut asserted: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for ac in model.ont.iter() {
+        if let Component::ClassAssertion(ClassAssertion { ce: CE::Class(c), i: Individual::Named(i) }) = &ac.component {
+            asserted.entry(i.0.to_string()).or_default().push(c.0.to_string());
+        }
+    }
+    if asserted.is_empty() {
+        return Vec::new();
+    }
+    let told = crate::reason::told::Told::of(model);
+    let mut out = Vec::new();
+    for (i, classes) in asserted {
+        for c in told.types(&classes, types == Types::Direct) {
+            out.push((i.clone(), c));
+        }
+    }
+    out
+}
+
+/// The class assertions the `ClassAssertion` generator makes, from what the
+/// reasoner reported ([`Classification::class_assertions`]): each named
+/// individual of the signature with its types. The EL and DL reasoners give
+/// an individual whose named types are all equivalent to `owl:Thing`, or that
+/// has none, the top node, `owl:Thing` and its equivalents; asked for every
+/// type, they give each individual the classes above its direct types and the
+/// top node too. whelk gives an individual it does not hold `owl:Thing`. The
+/// structural reasoner gives an individual the types it is told and no other.
+fn class_assertion_types(
+    kind: ReasonerKind,
+    individuals: &[String],
+    reported: Vec<(String, String)>,
+    top: &[String],
+    all: &[(String, String)],
+    types: Types,
+) -> Vec<(String, String)> {
+    if types == Types::None {
+        return Vec::new();
+    }
+    match kind {
+        ReasonerKind::Structural => return reported,
+        ReasonerKind::Whelk => {
+            let held: HashSet<&str> = reported.iter().map(|(i, _)| i.as_str()).collect();
+            let mut out: Vec<(String, String)> = individuals
+                .iter()
+                .filter(|i| !held.contains(i.as_str()))
+                .map(|i| (i.clone(), OWL_THING.to_string()))
+                .collect();
+            out.extend(reported);
+            return out;
+        }
+        _ => {}
+    }
+    let mut by_individual: HashMap<&str, std::collections::BTreeSet<&str>> = HashMap::new();
+    for (i, c) in &reported {
+        if c != OWL_THING && c != OWL_NOTHING {
+            by_individual.entry(i.as_str()).or_default().insert(c.as_str());
+        }
+    }
+    let mut out = Vec::new();
+    for i in individuals {
+        let mut classes = by_individual.remove(i.as_str()).unwrap_or_default();
+        if types == Types::All {
+            let direct: Vec<&str> = classes.iter().copied().collect();
+            for d in direct {
+                let from = all.partition_point(|(sub, _)| sub.as_str() < d);
+                classes.extend(all[from..].iter().take_while(|(sub, _)| sub == d).map(|(_, sup)| sup.as_str()));
+            }
+        }
+        if types == Types::All || classes.iter().all(|c| top.iter().any(|t| t == c)) {
+            classes.insert(OWL_THING);
+            classes.extend(top.iter().map(String::as_str));
+        }
+        out.extend(classes.into_iter().map(|c| (i.clone(), c.to_string())));
+    }
+    out
+}
+
 /// `--reasoner structural` — the told class hierarchy.
 ///
 /// This is a *told* hierarchy, not a reasoner: it is the transitive closure of
@@ -1333,7 +1598,7 @@ pub(crate) fn told_unsatisfiable_properties(model: &Model) -> Vec<String> {
 /// may well be configured with it, so it has to stay this weak rather than
 /// quietly running the full EL engine — which would report inferences a told
 /// hierarchy does not make, and unsatisfiable classes it can never find.
-fn classify_structural<'a>(model: &'a Model, need_all: bool, need_equiv: bool) -> Classification {
+fn classify_structural<'a>(model: &'a Model, need_all: bool, need_equiv: bool, types: Types) -> Classification {
     status!("reason: using the structural reasoner (told class hierarchy)");
     let told = told_parents(model);
 
@@ -1406,6 +1671,24 @@ fn classify_structural<'a>(model: &'a Model, need_all: bool, need_equiv: bool) -
     equiv.dedup();
     direct.sort();
     direct.dedup();
+    // The top node: `owl:Thing` and the classes a told cycle makes equivalent
+    // to it.
+    let told_ancestors = |start: &'a str| -> HashSet<&'a str> {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut stack: Vec<&str> = told.get(start).cloned().unwrap_or_default();
+        while let Some(c) = stack.pop() {
+            if seen.insert(c) {
+                stack.extend(told.get(c).into_iter().flatten().copied());
+            }
+        }
+        seen
+    };
+    let mut top: Vec<String> = told_ancestors(OWL_THING)
+        .into_iter()
+        .filter(|&c| c != OWL_THING && c != OWL_NOTHING && told_ancestors(c).contains(OWL_THING))
+        .map(str::to_string)
+        .collect();
+    top.sort();
     Classification {
         // A told hierarchy has no satisfiability test: it never reports an
         // inconsistency, an unsatisfiable class or an unsatisfiable property.
@@ -1414,9 +1697,11 @@ fn classify_structural<'a>(model: &'a Model, need_all: bool, need_equiv: bool) -
         direct,
         all,
         equiv,
-        class_assertions: Vec::new(),
+        class_assertions: told_class_assertions(model, types),
+        top,
         property_assertions: Vec::new(),
         unsat_properties: Vec::new(),
+        holds_thing: true,
     }
 }
 
@@ -1483,13 +1768,13 @@ pub(crate) fn direct_superclass_nodes(
     datatypes: Datatypes,
 ) -> Result<Vec<(String, String)>> {
     match kind {
-        ReasonerKind::Structural => return Ok(classify_structural(model, false, false).direct),
+        ReasonerKind::Structural => return Ok(classify_structural(model, false, false, Types::None).direct),
         ReasonerKind::Whelk => {
-            return Ok(crate::reason::WhelkClassification::classify(model).direct_subsumptions())
+            return Ok(crate::reason::WhelkClassification::classify(model)?.direct_subsumptions())
         }
         _ => {}
     }
-    let all = classify(model, kind, true, false, false, false, &HashSet::new(), PropertyCheck::None, datatypes)?.all;
+    let all = classify(model, kind, true, false, Types::None, false, &HashSet::new(), PropertyCheck::None, datatypes)?.all;
     let mut supers: HashMap<&str, HashSet<&str>> = HashMap::new();
     for (a, b) in &all {
         if a != b && ![a, b].iter().any(|c| *c == OWL_THING || *c == OWL_NOTHING) {
@@ -1589,7 +1874,7 @@ pub(crate) fn validate_model(model: &Model, kind: ReasonerKind, materializing: b
         kind,
         false,
         false,
-        false,
+        Types::None,
         false,
         &HashSet::new(),
         kind.property_check(materializing),
@@ -1651,16 +1936,28 @@ fn insert_axiom(
     annotate: bool,
     infer_prop: &horned_owl::model::AnnotationProperty<crate::model::Str>,
 ) -> Result<bool> {
+    let plain = AnnotatedComponent { component, ann: Default::default() };
     if !annotate {
-        return Ok(model.ont.insert(component));
+        // An inference the root's imports assert is asserted in the root as well.
+        let promoted = model.imported_components.remove(&plain);
+        return Ok(model.ont.insert(plain) || promoted);
     }
+    let component = plain.component;
     if !matches!(component, Component::SubClassOf(_)) {
-        bail!(
-            "AXIOM TYPE ERROR cannot annotate axioms of type: {:?}",
-            horned_owl::model::Kinded::kind(&component)
-        );
+        // The axiom's type, by the class name the message gives it.
+        let class = match &component {
+            Component::EquivalentClasses(_) => "OWLEquivalentClassesAxiomImpl",
+            Component::ClassAssertion(_) => "OWLClassAssertionAxiomImpl",
+            Component::ObjectPropertyAssertion(_) => "OWLObjectPropertyAssertionAxiomImpl",
+            other => unreachable!("reason asserts no {:?}", horned_owl::model::Kinded::kind(other)),
+        };
+        bail!("AXIOM TYPE ERROR cannot annotate axioms of type: class uk.ac.manchester.cs.owl.owlapi.{class}");
     }
-    model.ont.remove(&AnnotatedComponent { component: component.clone(), ann: Default::default() });
+    // The annotated copy replaces the root's own; an import's stays the import's.
+    let plain = AnnotatedComponent { component: component.clone(), ann: Default::default() };
+    if !model.imported_components.contains(&plain) {
+        model.ont.remove(&plain);
+    }
     let ann = Annotation {
         ann: Default::default(),
         ap: infer_prop.clone(),
@@ -1669,10 +1966,22 @@ fn insert_axiom(
     Ok(model.ont.insert(AnnotatedComponent { component, ann: std::collections::BTreeSet::from([ann]) }))
 }
 
-fn existing_subclass_pairs(model: &Model) -> HashSet<(String, String)> {
+/// The axioms `--exclude-duplicate-axioms` counts as asserted: those of the
+/// root and its imports, or of its imports alone where the root is emptied
+/// ([`emptied_root`]), each as stated, so an axiom asserted with annotations
+/// is not one inferred without them.
+fn asserted(model: &Model, fresh: bool) -> impl Iterator<Item = &Component<crate::model::Str>> {
+    model
+        .ont
+        .iter()
+        .filter(move |ac| ac.ann.is_empty() && (!fresh || model.imported_components.contains(*ac)))
+        .map(|ac| &ac.component)
+}
+
+fn existing_subclass_pairs(model: &Model, fresh: bool) -> HashSet<(String, String)> {
     let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
+    for component in asserted(model, fresh) {
+        if let Component::SubClassOf(sc) = component {
             if let (CE::Class(a), CE::Class(b)) = (&sc.sub, &sc.sup) {
                 out.insert((a.0.as_ref().to_string(), b.0.as_ref().to_string()));
             }
@@ -1770,10 +2079,24 @@ fn dump_unsatisfiable_module(
     Ok(())
 }
 
+/// The two-class equivalences `model` asserts ([`asserted`]), in both orders.
+fn existing_equivalences(model: &Model) -> HashSet<(String, String)> {
+    let mut out = HashSet::new();
+    for component in asserted(model, false) {
+        if let Component::EquivalentClasses(EquivalentClasses(members)) = component {
+            if let [CE::Class(a), CE::Class(b)] = members.as_slice() {
+                out.insert((a.0.to_string(), b.0.to_string()));
+                out.insert((b.0.to_string(), a.0.to_string()));
+            }
+        }
+    }
+    out
+}
+
 fn existing_class_assertions(model: &Model) -> std::collections::HashSet<(String, String)> {
     let mut out = std::collections::HashSet::new();
-    for ac in model.ont.iter() {
-        if let Component::ClassAssertion(ca) = &ac.component {
+    for component in asserted(model, false) {
+        if let Component::ClassAssertion(ca) = component {
             if let (CE::Class(c), Individual::Named(i)) = (&ca.ce, &ca.i) {
                 out.insert((i.0.as_ref().to_string(), c.0.as_ref().to_string()));
             }
@@ -1786,8 +2109,8 @@ fn existing_class_assertions(model: &Model) -> std::collections::HashSet<(String
 /// individuals on named properties, for `--exclude-duplicate-axioms`.
 fn existing_object_property_assertions(model: &Model) -> HashSet<(String, String, String)> {
     let mut out = HashSet::new();
-    for ac in model.ont.iter() {
-        if let Component::ObjectPropertyAssertion(pa) = &ac.component {
+    for component in asserted(model, false) {
+        if let Component::ObjectPropertyAssertion(pa) = component {
             if let (OPE::ObjectProperty(p), Individual::Named(f), Individual::Named(t)) =
                 (&pa.ope, &pa.from, &pa.to)
             {
@@ -1802,24 +2125,56 @@ fn existing_object_property_assertions(model: &Model) -> HashSet<(String, String
     out
 }
 
-fn declared_individuals(model: &Model) -> HashSet<String> {
+/// The classes the root declares, not those its imports declare.
+fn own_declared_classes(model: &Model) -> HashSet<String> {
     let mut out = HashSet::new();
     for ac in model.ont.iter() {
-        if let Component::DeclareNamedIndividual(d) = &ac.component {
-            out.insert(d.0 .0.as_ref().to_string());
+        if let Component::DeclareClass(dc) = &ac.component {
+            if !model.imported_components.contains(ac) {
+                out.insert(dc.0 .0.as_ref().to_string());
+            }
         }
     }
     out
 }
 
-fn declared_classes(model: &Model) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
+/// The classes of the signature of `model` and its imports.
+fn signature_classes(model: &Model) -> HashSet<String> {
+    let mut out = HashSet::new();
     for ac in model.ont.iter() {
-        if let Component::DeclareClass(dc) = &ac.component {
-            out.insert(dc.0 .0.as_ref().to_string());
+        for (k, iri) in crate::sig::typed_signature(&ac.component) {
+            if k == crate::sig::kind::CLASS {
+                out.insert(iri);
+            }
         }
     }
     out
+}
+
+/// The root of `model` with its axioms removed, and the axioms its imports
+/// lent, as `--create-new-ontology` leaves it to take the inferences: its
+/// ontology ID and annotations stay, and so do the axioms the imports lent,
+/// which still count as asserted and still declare what they declare. Under
+/// `--create-new-ontology-with-annotations` its annotation assertions stay as
+/// well.
+#[allow(clippy::type_complexity)]
+fn emptied_root(
+    model: &Model,
+    annotations: bool,
+) -> (Vec<AnnotatedComponent<crate::model::Str>>, std::collections::HashSet<AnnotatedComponent<crate::model::Str>>) {
+    let mut kept = Vec::new();
+    for ac in model.ont.iter() {
+        let keep = model.imported_components.contains(ac)
+            || match &ac.component {
+                Component::OntologyID(_) | Component::DocIRI(_) | Component::OntologyAnnotation(_) => true,
+                Component::AnnotationAssertion(_) => annotations,
+                _ => false,
+            };
+        if keep {
+            kept.push(ac.clone());
+        }
+    }
+    (kept, model.imported_components.clone())
 }
 
 #[cfg(test)]
@@ -2011,7 +2366,7 @@ mod tests {
             Component::SubClassOf(SubClassOf { sub: cls(&b, "A"), sup: some.clone() }),
             Component::SubClassOf(SubClassOf { sub: some, sup: cls(&b, "D") }),
         ]);
-        let c = classify_structural(&m, true, true);
+        let c = classify_structural(&m, true, true, Types::None);
         let has = |sub: &str, sup: &str| {
             c.all.contains(&(format!("{NS}{sub}"), format!("{NS}{sup}")))
         };
@@ -2029,7 +2384,7 @@ mod tests {
     fn structural_reasoner_sees_asserted_equivalences() {
         let b = Build::new_rc();
         let m = model_of(vec![decl(&b, "A"), decl(&b, "B"), equiv(&b, "A", "B")]);
-        let c = classify_structural(&m, false, true);
+        let c = classify_structural(&m, false, true, Types::None);
         assert_eq!(c.equiv, vec![(format!("{NS}A"), format!("{NS}B"))]);
     }
 

@@ -1,0 +1,8 @@
+ID	LABEL	SC %
+ID	LABEL	SC %
+http://example.org/mireot#T1	t one	http://example.org/mireot#X
+http://example.org/mireot#T2	t two	'pee' some 'double-u'
+http://example.org/mireot#T3	t three	http://example.org/mireot#C
+http://example.org/mireot#T4	t four	http://example.org/mireot#Unknown
+http://example.org/mireot#T5	t five	http://example.org/mireot#M
+http://example.org/mireot#T6	t six	http://example.org/mireot#Mid

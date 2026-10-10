@@ -165,6 +165,9 @@ pub struct Reasoner {
     ignored: usize,
     /// Ids that correspond to real named classes (not fresh/auxiliary).
     named: Vec<CId>,
+    /// Whether each concept id is one of `named`. An individual's nominal has
+    /// an IRI too, but is no class.
+    is_named: Vec<bool>,
     /// Ids that stand for asserted individuals (nominals). An unsatisfiable
     /// individual makes the whole ontology inconsistent.
     individuals: Vec<CId>,
@@ -373,9 +376,7 @@ impl Reasoner {
         props: &std::collections::HashSet<String>,
     ) -> Vec<(String, String, String)> {
         let mut out = Vec::new();
-        let named_class = |c: CId| {
-            c != TOP && c != BOT && self.class_iri[c as usize].is_some() && self.named.contains(&c)
-        };
+        let named_class = |c: CId| c != TOP && c != BOT && self.is_named[c as usize];
         for ((r, x), ys) in &self.state.r_succ {
             let r_iri = match self.role_iri.get(*r as usize) {
                 Some(iri)
@@ -435,12 +436,25 @@ impl Reasoner {
         }
     }
 
+    /// The named classes equivalent to `owl:Thing`, sorted: those `owl:Thing`
+    /// is subsumed by.
+    pub fn top_equivalents(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .named
+            .iter()
+            .copied()
+            .filter(|&c| c != TOP && c != BOT && self.state.s[TOP as usize].contains(&c))
+            .filter_map(|c| self.class_iri[c as usize].clone())
+            .collect();
+        out.sort();
+        out
+    }
+
     /// Inferred *direct* class assertions: for every asserted individual (treated
     /// as a singleton nominal), the most-specific named classes it is entailed to
     /// be an instance of — its direct types. Returns (individual_iri, class_iri)
     /// pairs.
     pub fn class_assertions(&self) -> Vec<(String, String)> {
-        let named: HashSet<CId> = self.named.iter().copied().collect();
         let mut out = Vec::new();
         for &i in &self.individuals {
             let ind_iri = match &self.class_iri[i as usize] {
@@ -452,7 +466,7 @@ impl Reasoner {
             let types: Vec<CId> = self.state.s[i as usize]
                 .iter()
                 .copied()
-                .filter(|&d| d != TOP && d != BOT && d != i && named.contains(&d))
+                .filter(|&d| d != TOP && d != BOT && d != i && self.is_named[d as usize])
                 .collect();
             // Keep only the most-specific (direct) types: drop D if some other type
             // E is a *strict* subclass of D (E ⊑ D and not D ⊑ E). The strictness
@@ -533,7 +547,7 @@ impl Reasoner {
                 None => continue,
             };
             for &d in &self.state.s[c as usize] {
-                if d == c || d == TOP || d == BOT {
+                if d == c || d == TOP || d == BOT || !self.is_named[d as usize] {
                     continue;
                 }
                 if let Some(di) = &self.class_iri[d as usize] {
@@ -563,7 +577,7 @@ impl Reasoner {
                 None => continue,
             };
             for &d in &self.state.s[c as usize] {
-                if d == c || d == TOP || d == BOT {
+                if d == c || d == TOP || d == BOT || !self.is_named[d as usize] {
                     continue;
                 }
                 let Some(di) = &self.class_iri[d as usize] else {
@@ -623,11 +637,7 @@ impl Reasoner {
     fn direct_subsumptions_chunk(&self, classes: &[CId]) -> Vec<(String, String)> {
         let satisfiable = |c: CId| !self.state.s[c as usize].contains(&BOT);
         let named_sup = |c: CId, d: CId| {
-            d != c
-                && d != TOP
-                && d != BOT
-                && self.class_iri[d as usize].is_some()
-                && satisfiable(d)
+            d != c && d != TOP && d != BOT && self.is_named[d as usize] && satisfiable(d)
         };
         // `d` is a direct super of `c` unless some other super `mid` lies strictly
         // between (`mid ⊑ d` and not `d ⊑ mid`).
@@ -1858,6 +1868,10 @@ impl Builder {
         let named: Vec<CId> = (0..n_classes as CId)
             .filter(|&c| self.class_iri[c as usize].is_some() && !self.individuals.contains(&c))
             .collect();
+        let mut is_named = vec![false; n_classes];
+        for &c in &named {
+            is_named[c as usize] = true;
+        }
         let mut individuals: Vec<CId> = self.individuals.iter().copied().collect();
         individuals.sort_unstable();
 
@@ -1868,6 +1882,7 @@ impl Builder {
             state,
             ignored: self.ignored,
             named,
+            is_named,
             individuals,
             probes: self.probes,
         }

@@ -1,6 +1,6 @@
 {
   "program": "owlmake",
-  "version": "0.4.15",
+  "version": "0.4.18",
   "about": "Self-contained OWL/OBO ontology build and QC toolkit",
   "commands": [
     {
@@ -9011,7 +9011,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Seed term to extract (repeatable). For MIREOT these are the lower terms"
+          "help": "Seed term to extract (repeatable). MIREOT reads its lower, upper and branch terms instead"
         },
         {
           "id": "term_file",
@@ -9095,7 +9095,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "MIREOT lower term (repeatable; alias for --term under MIREOT)"
+          "help": "MIREOT lower term (repeatable): its ancestors are extracted"
         },
         {
           "id": "lower_terms",
@@ -9137,7 +9137,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Branch root term (repeatable): extract the branch rooted here"
+          "help": "MIREOT branch term (repeatable): its descendants are extracted"
         },
         {
           "id": "branch_from_terms",
@@ -14322,7 +14322,7 @@
           "shorts": [
             "m"
           ],
-          "action": "set",
+          "action": "set_true",
           "value_names": [
             "MERGE_BEFORE"
           ],
@@ -14336,7 +14336,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Merge the generated axioms into the input ontology before output. owlmake already merges into the input when one is present; this forces that behavior on. `<bool>`"
+          "help": "Add the generated axioms to the input ontology, and write and go on with the input so merged"
         },
         {
           "id": "merge_after",
@@ -14346,7 +14346,7 @@
           "shorts": [
             "M"
           ],
-          "action": "set",
+          "action": "set_true",
           "value_names": [
             "MERGE_AFTER"
           ],
@@ -14360,7 +14360,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Merge the generated axioms into the input ontology after output. Treated like `--merge-before` here. `<bool>`"
+          "help": "Write the generated axioms alone, then add them to the input ontology and go on with the input so merged"
         },
         {
           "id": "ancestors",
@@ -14370,7 +14370,7 @@
           "shorts": [
             "a"
           ],
-          "action": "set",
+          "action": "set_true",
           "value_names": [
             "ANCESTORS"
           ],
@@ -14384,7 +14384,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "MIREOT the ancestors of generated terms from the input into the results. `<bool>`"
+          "help": "Add the ancestors the input gives the generated axioms' terms, each with its labels: every term the axioms name that the input names too, climbed as `extract --method MIREOT` climbs a lower term"
         },
         {
           "id": "include_annotations",
@@ -14408,7 +14408,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, include ontology annotations from the merge input. `<bool>`"
+          "help": "If true, a merge adds the ontology annotations of the generated axioms' ontology, which has none. `<bool>`"
         },
         {
           "id": "collapse_import_closure",
@@ -14432,7 +14432,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, collapse the import closure when merging. Accepted for compatibility. `<bool>`"
+          "help": "If true, a merge takes the input ontology's imports out of it: the merged ontology imports nothing, and the imports' axioms stay out. `<bool>`"
         },
         {
           "id": "input_iri",
@@ -19201,7 +19201,7 @@
     {
       "name": "repair",
       "aliases": [],
-      "about": "Fix common mechanical problems (duplicates, dangling references)",
+      "about": "Migrate references to deprecated entities to their replacements, and merge the annotations of axioms that are otherwise the same",
       "passthrough": false,
       "args": [
         {
@@ -19289,7 +19289,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "Remove annotation assertions whose subject IRI is never declared or used in a logical axiom (dangling references)"
+          "help": "Migrate every reference to a deprecated entity to its replacement. Without `--merge-axiom-annotations true` this repair is made whatever this says. `<bool>`"
         },
         {
           "id": "merge_axiom_annotations",
@@ -19313,7 +19313,7 @@
           ],
           "defaults": [],
           "hidden": false,
-          "help": "If true, merge the annotation sets of axioms that are otherwise identical. `<bool>`"
+          "help": "Merge the annotations of axioms that are otherwise the same, before any reference is migrated. `<bool>`"
         },
         {
           "id": "annotation_property",
@@ -19334,7 +19334,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "An annotation property whose assertions should be migrated/retained. Repeatable. Accepted for compatibility; currently only recorded, not used to drive a migration"
+          "help": "An annotation property whose assertions on a deprecated entity move to its replacement; the deprecated entity keeps its other annotations. Repeatable"
         },
         {
           "id": "annotation_properties_file",
@@ -19355,7 +19355,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "File listing annotation properties to migrate, one IRI/CURIE per line; unioned with `--annotation-property`"
+          "help": "A file listing more such annotation properties, one per line; a blank line and a line starting `#` list none"
         },
         {
           "id": "output_iri",
@@ -19376,7 +19376,7 @@
           "possible_values": [],
           "defaults": [],
           "hidden": false,
-          "help": "Set the OntologyIRI for the output"
+          "help": "Read and not used: the ontology keeps its IRI"
         },
         {
           "id": "input_iri",
@@ -20007,7 +20007,7 @@
     {
       "name": "expand",
       "aliases": [],
-      "about": "Expand OBO/OWL macros (IAO:0000424 expandExpressionTo)",
+      "about": "Expand `OMO:0002000` (defined by construct) macros",
       "passthrough": false,
       "args": [
         {

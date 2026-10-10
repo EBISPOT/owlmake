@@ -184,6 +184,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
         }
         crate::cmd::finish_lending(&mut merged);
     }
+    merged.mark_root_changed();
 
     collapse_inverse_pairs(&mut merged);
 

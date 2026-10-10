@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/imp2#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/imp2>
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(NamedIndividual(:r))
+SubClassOf(:C :D)
+ClassAssertion(:C :r)
+)

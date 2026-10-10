@@ -24,6 +24,9 @@
 //! factory reads it: a literal of one is a value of no known datatype. A
 //! reasoner made [`Datatypes::Strict`] refuses it instead, with HermiT's
 //! message, which [`DlReasoner::try_classify`] returns.
+//!
+//! A SWRL rule is DL-safe: its variables bind named individuals only. A
+//! reasoner made [`Rules::Ignored`] reads past every rule instead.
 
 use std::sync::OnceLock;
 
@@ -108,6 +111,23 @@ pub enum Datatypes {
     Lenient,
     /// The ontology is refused, with HermiT's message naming the datatype.
     Strict,
+}
+
+/// What the reasoner does with a SWRL rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rules {
+    /// A rule is DL-safe: its variables bind named individuals only, so it
+    /// adds to what holds of them and to no class.
+    DlSafe,
+    /// The reasoner reads past every rule.
+    Ignored,
+}
+
+impl Rules {
+    /// Whether a reasoner under this policy reads `component`.
+    pub fn reads(self, component: &ho::Component<RcStr>) -> bool {
+        self == Rules::DlSafe || !matches!(component, ho::Component::Rule(_))
+    }
 }
 
 /// The hermit-rs configuration a query runs under: the defaults, with
@@ -242,7 +262,7 @@ fn die(e: String) -> ! {
 /// logically identical ontology without parsing the ontology a second time,
 /// which on an ontology the size of EFO would cost ~15 s of pure overhead
 /// before any reasoning starts.
-fn to_arc(model: &Model) -> SetOntology<ArcStr> {
+fn to_arc(model: &Model, rules: Rules) -> SetOntology<ArcStr> {
     let cv = ArcConv {
         build: Build::new_arc(),
     };
@@ -251,7 +271,7 @@ fn to_arc(model: &Model) -> SetOntology<ArcStr> {
         // DocIRI is horned-owl bookkeeping (where the document was loaded
         // from), not an OWL axiom, and an OFN round trip drops it — so drop it
         // here too and reason over the same axiom set either way.
-        .filter(|ac| !matches!(ac.component, ho::Component::DocIRI(_)))
+        .filter(|ac| !matches!(ac.component, ho::Component::DocIRI(_)) && rules.reads(&ac.component))
         .map(|ac| cv.annotated_component(ac))
         .collect()
 }
@@ -766,21 +786,21 @@ fn is_named(iri: &str) -> bool {
 
 impl DlReasoner {
     /// Snapshot `model` for DL reasoning, reading past a datatype outside the
-    /// OWL 2 datatype map. Cheap: the classification itself runs lazily on the
-    /// first query that needs it.
+    /// OWL 2 datatype map and taking each SWRL rule as DL-safe. Cheap: the
+    /// classification itself runs lazily on the first query that needs it.
     pub fn classify(model: &Model) -> DlReasoner {
-        DlReasoner::classify_with(model, Datatypes::Lenient)
+        DlReasoner::classify_with(model, Datatypes::Lenient, Rules::DlSafe)
     }
 
     /// [`DlReasoner::classify`], treating a datatype outside the OWL 2 datatype
-    /// map as `datatypes` says.
-    pub fn classify_with(model: &Model, datatypes: Datatypes) -> DlReasoner {
+    /// map as `datatypes` says and a SWRL rule as `rules` says.
+    pub fn classify_with(model: &Model, datatypes: Datatypes, rules: Rules) -> DlReasoner {
         // The RcStr→ArcStr conversion rebuilds every component of the whole
         // ontology, which on a large input takes seconds before any reasoning
         // even starts; tick a heartbeat so it isn't a silent gap.
         let ont = {
             let _hb = crate::progress::Heartbeat::start("reason: hermit-rs converting model");
-            to_arc(model)
+            to_arc(model, rules)
         };
         let mut object_properties: Vec<String> = model
             .ont

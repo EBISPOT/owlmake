@@ -1126,12 +1126,23 @@ pub enum StepSpec {
         add_prefix: Vec<String>,
     },
     /// Generate axioms from template tables — TSV/CSV carrying a row of template
-    /// strings over a table of terms — and merge them in.
+    /// strings over a table of terms. The step yields the generated axioms' own
+    /// ontology, or under `merge` its input with them added.
     Template {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         templates: Vec<String>,
+        /// The input, keeping its IRIs, annotations and prefixes, with the
+        /// generated axioms added, counts as changed whatever they add.
         #[serde(default)]
         merge: bool,
+        /// Under `merge`, the input's imports are taken out of it: the merged
+        /// ontology imports nothing, and the imports' axioms stay out.
+        #[serde(default, skip_serializing_if = "is_false")]
+        collapse_import_closure: bool,
+        /// The generated axioms' terms the input names come with the ancestors
+        /// the input gives them, and their labels.
+        #[serde(default, skip_serializing_if = "is_false")]
+        ancestors: bool,
         /// `--force true`: a row the tables cannot be read into is reported and
         /// skipped instead of failing the step.
         #[serde(default, skip_serializing_if = "is_false")]
@@ -1170,21 +1181,38 @@ pub enum StepSpec {
         branch_from_terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         branch_from_term_files: Vec<String>,
+        /// MIREOT `--lower-term`/`--lower-terms`: the terms whose ancestors are
+        /// extracted.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        lower_terms: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        lower_term_files: Vec<String>,
+        /// MIREOT `--upper-term`/`--upper-terms`: the terms a climb stops at.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        upper_terms: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        upper_term_files: Vec<String>,
+        /// `--intermediates`: `all`, `minimal` or `none`; `all` when unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intermediates: Option<String>,
         /// Extract even when the ontology names none of the terms.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         force: bool,
     },
-    /// Write the model to `output` and read it back — the round trip a recipe
-    /// performs when one step writes a file and a later step reads it in again.
-    /// Recorded because it is not identity: an RDF/XML write derives an `xmlns`
-    /// block the in-memory model never had.
-    RoundTrip { output: String },
-    /// Fix mechanical problems (dangling references / duplicate axioms).
+    /// Write the model to `output`, in the format its extension names, and go
+    /// on with the model: a command's `-o` part way through a chain.
+    Write { output: String },
+    /// Merge the annotations of axioms that are otherwise the same, and migrate
+    /// every reference to a deprecated entity to its replacement.
     Repair {
         #[serde(default, skip_serializing_if = "is_false")]
         invalid_references: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         merge_axiom_annotations: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        annotation_properties: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        annotation_properties_file: Option<String>,
     },
     /// Collapse equivalent-class cliques by IRI-prefix priority.
     MergeEquivalentSets {
@@ -1204,9 +1232,9 @@ pub enum StepSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         format: Option<String>,
     },
-    /// Expand OBO/OWL macros (`IAO:0000424`).
+    /// Expand `OMO:0002000` (defined by construct) macros.
     Expand {
-        /// The ALLOW-list: with one, only these properties' macros are expanded.
+        /// The ALLOW-list: with one, only these terms' macros are expanded.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         expand_terms: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2153,9 +2181,11 @@ impl StepSpec {
                 output: output.clone(),
                 check: *check,
             },
-            Op::Template { templates, merge, force } => StepSpec::Template {
+            Op::Template { templates, merge, collapse_import_closure, ancestors, force } => StepSpec::Template {
                 templates: templates.clone(),
                 merge: *merge,
+                collapse_import_closure: *collapse_import_closure,
+                ancestors: *ancestors,
                 force: *force,
             },
             Op::Rename { mappings, mapping, prefix_mappings, allow_missing, allow_duplicates } => StepSpec::Rename {
@@ -2165,10 +2195,11 @@ impl StepSpec {
                 allow_missing: *allow_missing,
                 allow_duplicates: *allow_duplicates,
             },
-            Op::RoundTrip { path } => StepSpec::RoundTrip { output: path.clone() },
+            Op::Write { path } => StepSpec::Write { output: path.clone() },
             Op::Extract {
                 method, terms, term_files, copy_ontology_annotations, individuals,
-                branch_from_terms, branch_from_term_files, force,
+                branch_from_terms, branch_from_term_files, lower_terms, lower_term_files,
+                upper_terms, upper_term_files, intermediates, force,
             } => {
                 StepSpec::Extract {
                     method: method.clone(),
@@ -2178,6 +2209,11 @@ impl StepSpec {
                     individuals: individuals.clone(),
                     branch_from_terms: branch_from_terms.clone(),
                     branch_from_term_files: branch_from_term_files.clone(),
+                    lower_terms: lower_terms.clone(),
+                    lower_term_files: lower_term_files.clone(),
+                    upper_terms: upper_terms.clone(),
+                    upper_term_files: upper_term_files.clone(),
+                    intermediates: intermediates.clone(),
                     force: *force,
                 }
             }
@@ -2221,10 +2257,12 @@ impl StepSpec {
                 use_graphs: *use_graphs,
                 tdb: *tdb,
             },
-            Op::Repair { invalid_references, merge_axiom_annotations } => {
+            Op::Repair { invalid_references, merge_axiom_annotations, annotation_properties, annotation_properties_file } => {
                 StepSpec::Repair {
                     invalid_references: *invalid_references,
                     merge_axiom_annotations: *merge_axiom_annotations,
+                    annotation_properties: annotation_properties.clone(),
+                    annotation_properties_file: annotation_properties_file.clone(),
                 }
             }
             Op::MergeEquivalentSets { set_prefix, label_prefix, definition_prefix } => {
@@ -2435,8 +2473,8 @@ impl StepSpec {
             StepSpec::Normalize { base_iris, subset_decls, synonym_decls, add_source } => {
                 Step::Op(Op::Normalize { base_iris, subset_decls, synonym_decls, add_source })
             }
-            StepSpec::Template { templates, merge, force } => {
-                Step::Op(Op::Template { templates, merge, force })
+            StepSpec::Template { templates, merge, collapse_import_closure, ancestors, force } => {
+                Step::Op(Op::Template { templates, merge, collapse_import_closure, ancestors, force })
             }
             StepSpec::Rename { mappings, mapping, prefix_mappings, allow_missing, allow_duplicates } => {
                 Step::Op(Op::Rename {
@@ -2447,18 +2485,20 @@ impl StepSpec {
                     allow_duplicates,
                 })
             }
-            StepSpec::RoundTrip { output } => Step::Op(Op::RoundTrip { path: output }),
+            StepSpec::Write { output } => Step::Op(Op::Write { path: output }),
             StepSpec::Extract {
                 method, terms, term_files, copy_ontology_annotations, individuals,
-                branch_from_terms, branch_from_term_files, force,
+                branch_from_terms, branch_from_term_files, lower_terms, lower_term_files,
+                upper_terms, upper_term_files, intermediates, force,
             } => {
                 Step::Op(Op::Extract {
                     method, terms, term_files, copy_ontology_annotations, individuals,
-                    branch_from_terms, branch_from_term_files, force,
+                    branch_from_terms, branch_from_term_files, lower_terms, lower_term_files,
+                    upper_terms, upper_term_files, intermediates, force,
                 })
             }
-            StepSpec::Repair { invalid_references, merge_axiom_annotations } => {
-                Step::Op(Op::Repair { invalid_references, merge_axiom_annotations })
+            StepSpec::Repair { invalid_references, merge_axiom_annotations, annotation_properties, annotation_properties_file } => {
+                Step::Op(Op::Repair { invalid_references, merge_axiom_annotations, annotation_properties, annotation_properties_file })
             }
             StepSpec::Babelon { input, output, format } => Step::Op(Op::Babelon { input, output, format }),
             StepSpec::Expand { expand_terms, expand_term_files, no_expand_terms, no_expand_term_files } => {
@@ -2956,7 +2996,7 @@ fn validate(value: &serde_json::Value) -> Result<()> {
 /// new plan. Because a hand-maintained constant rots, `plan_schema_is_pinned`
 /// below fails whenever the emitted schema changes without this being
 /// reconsidered.
-pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.15";
+pub const PLAN_FORMAT_MIN_VERSION: &str = "0.4.18";
 
 /// Load and validate a committed plan (`owlmake.yaml` or `owlmake.json`).
 pub fn load(path: &Path) -> Result<OwlmakeSpec> {
@@ -3982,7 +4022,35 @@ mod format_floor_tests {
         // `allow_duplicates`. A 0.4.14 build ignores them and would rename fewer
         // entities than the plan says, or refuse a table the plan allows, so the
         // floor moves to 0.4.15.
-        const PLAN_SCHEMA_DIGEST: &str = "9fef500bd6d990c6";
+        //
+        // A repair step says what it does — `merge_axiom_annotations` merges
+        // the annotations of axioms that are otherwise the same, and
+        // `invalid_references` migrates references to deprecated entities —
+        // and carries the annotation properties whose assertions it moves,
+        // `annotation_properties` and `annotation_properties_file`. A 0.4.15
+        // build ignores the properties and reads the switches as other repairs,
+        // removing annotation assertions where the plan says to migrate, so the
+        // floor moves to 0.4.16.
+        //
+        // `round-trip` becomes `write`: a command's `-o` part way through a
+        // chain writes the model there and the chain goes on with the model
+        // rather than with what the file reads back as. A 0.4.16 build refuses
+        // `op: write` as an unknown `op`, loudly, so the floor stays.
+        //
+        // An expand step's description names the `OMO:0002000` macros it runs.
+        // The format itself does not change, so the floor stays.
+        //
+        // A template step carries `collapse_import_closure`: under `merge`, the
+        // input's imports come out of it. A 0.4.16 build ignores the field and
+        // would write the merged ontology with the imports the plan says it
+        // lacks, so the floor moves to 0.4.17.
+        //
+        // A template step carries `ancestors`, and an extract step a MIREOT's
+        // lower and upper terms and term files and `intermediates`. A 0.4.17
+        // build ignores them: it would write a template without its ancestors
+        // and an untrimmed module, and refuse a MIREOT whose lower terms it
+        // cannot see, so the floor moves to 0.4.18.
+        const PLAN_SCHEMA_DIGEST: &str = "e50ce51b10b44a0b";
         let actual = super::schema_digest();
         assert_eq!(
             actual, PLAN_SCHEMA_DIGEST,
@@ -4172,7 +4240,27 @@ mod round_trip_tests {
                 individuals: Some("exclude".into()),
                 branch_from_terms: vec![],
                 branch_from_term_files: vec![],
+                lower_terms: vec![],
+                lower_term_files: vec![],
+                upper_terms: vec![],
+                upper_term_files: vec![],
+                intermediates: None,
                 force: true,
+            }),
+            Step::Op(Op::Extract {
+                method: "MIREOT".into(),
+                terms: vec![],
+                term_files: vec![],
+                copy_ontology_annotations: false,
+                individuals: None,
+                branch_from_terms: vec!["X:1".into()],
+                branch_from_term_files: vec!["branch.txt".into()],
+                lower_terms: vec!["X:2".into()],
+                lower_term_files: vec!["lower.txt".into()],
+                upper_terms: vec!["X:3".into()],
+                upper_term_files: vec!["upper.txt".into()],
+                intermediates: Some("minimal".into()),
+                force: false,
             }),
             Step::Op(Op::Reduce {
                 reasoner: Some("ELK".into()),
@@ -4186,6 +4274,13 @@ mod round_trip_tests {
                 include_annotations: true,
                 annotate_defined_by: true,
                 annotate_derived_from: true,
+            }),
+            Step::Op(Op::Template {
+                templates: vec!["t.tsv".into()],
+                merge: true,
+                collapse_import_closure: true,
+                ancestors: true,
+                force: true,
             }),
             Step::UnsupportedOptions {
                 command: "reason".into(),

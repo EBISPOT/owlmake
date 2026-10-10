@@ -1096,7 +1096,7 @@ fn plan_rule(
     if input.as_deref() == Some(target) {
         input = None;
     }
-    drop_target_round_trip(&mut steps, target);
+    drop_target_write(&mut steps, target);
     fold_output_bookkeeping(&mut steps, target);
     // A recipe that is nothing but recursive make is an aggregate wearing a
     // disguise: `feature_diff: make reports/a.txt -B; make reports/b.txt -B` says
@@ -2083,7 +2083,7 @@ fn dosdp_merge_steps(
         if let Some(k) = opening.filter(|&k| matches!(steps[k], Step::Op(Op::Merge { .. }))) {
             steps.remove(k);
         }
-        while matches!(steps.last(), Some(Step::File(_)) | Some(Step::Op(Op::RoundTrip { .. }))) {
+        while matches!(steps.last(), Some(Step::File(_)) | Some(Step::Op(Op::Write { .. }))) {
             steps.pop();
         }
         (!steps.is_empty()).then_some(steps)
@@ -3513,7 +3513,7 @@ fn import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str) -> V
             steps.extend(recorded_steps(&expanded, &robot_prefix));
         }
     }
-    drop_target_round_trip(&mut steps, &target);
+    drop_target_write(&mut steps, &target);
     fold_output_bookkeeping(&mut steps, &target);
     resolve_seed_paths(make, repo, &mut steps);
     steps
@@ -3582,7 +3582,7 @@ fn transient_targets(
     let mut out: std::collections::BTreeSet<String> = Default::default();
     for imp in imports {
         for step in &imp.steps {
-            if let Step::Op(Op::RoundTrip { path }) = step {
+            if let Step::Op(Op::Write { path }) = step {
                 if !kept_after_build(make, path) {
                     out.insert(path.clone());
                 }
@@ -3629,6 +3629,11 @@ fn synth_import_pipeline(repo: &OdkRepo, p: &super::ImportProduct, obobase: &str
         individuals: None,
         branch_from_terms: vec![],
         branch_from_term_files: vec![],
+        lower_terms: vec![],
+        lower_term_files: vec![],
+        upper_terms: vec![],
+        upper_term_files: vec![],
+        intermediates: None,
         force: true,
     }));
     resolve_seed_paths(&repo.make, repo, &mut steps);
@@ -3713,16 +3718,15 @@ fn resolve_seed_paths(make: &super::makefile::MakeModel, repo: &OdkRepo, steps: 
 
 // --- Human stage descriptions -------------------------------------------------
 
-/// Drop the round-trip a rule's own final `-o $@` implies: the pipeline's closing
-/// write already performs it, and materializing the target twice would send it
-/// through one serialization more than the recipe asks for.
+/// Drop the write a rule's own final `-o $@` implies: the pipeline's closing
+/// write already performs it.
 ///
 /// Unless a LATER invocation reads the file back. A target-named write followed
 /// by a boundary over the same file is load-bearing (MONDO's
 /// `subsets/mondo-rare.owl` is `extract … --output $@ && robot annotate
 /// --input $@ …`): the write must happen where the recipe puts it, or the
 /// boundary has nothing to open.
-fn drop_target_round_trip(steps: &mut Vec<Step>, target: &str) {
+fn drop_target_write(steps: &mut Vec<Step>, target: &str) {
     let name = std::path::Path::new(target).file_name().map(|s| s.to_os_string());
     let same_file = |p: &str| std::path::Path::new(p).file_name().map(|s| s.to_os_string()) == name;
     let read_back_after: Vec<bool> = (0..steps.len())
@@ -3735,7 +3739,7 @@ fn drop_target_round_trip(steps: &mut Vec<Step>, target: &str) {
     let mut i = 0;
     steps.retain(|s| {
         let keep = match s {
-            Step::Op(robot::Op::RoundTrip { path, .. }) if same_file(path) => read_back_after[i],
+            Step::Op(robot::Op::Write { path, .. }) if same_file(path) => read_back_after[i],
             _ => true,
         };
         i += 1;
@@ -3750,7 +3754,7 @@ fn drop_target_round_trip(steps: &mut Vec<Step>, target: &str) {
 /// behind, which the pipeline's closing write already guarantees. So a closing
 /// write to a staging file followed by the move of that file onto the target is
 /// recorded as the write alone: a `convert` keeps its format and loses its
-/// `output`, and a `round-trip` — a write with no format of its own — goes
+/// `output`, and a `write` — a write with no format of its own — goes
 /// entirely.
 ///
 /// Two `annotate`s side by side are one annotation of the ontology, and are
@@ -3764,7 +3768,7 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
     if let [.., write, Step::File(FileOp::Move { src, dst })] = steps.as_slice() {
         let staged = match write {
             Step::Op(robot::Op::Convert { output: Some(o), .. }) => Some(o),
-            Step::Op(robot::Op::RoundTrip { path }) => Some(path),
+            Step::Op(robot::Op::Write { path }) => Some(path),
             _ => None,
         };
         let folds = same_file(dst, target)
@@ -3780,7 +3784,7 @@ fn fold_output_bookkeeping(steps: &mut Vec<Step>, target: &str) {
             let target_ext = staged_ext(target);
             match steps.last_mut() {
                 Some(Step::Op(robot::Op::Convert { output, .. })) => *output = None,
-                Some(Step::Op(robot::Op::RoundTrip { path })) if staged_ext(path) != target_ext => {
+                Some(Step::Op(robot::Op::Write { path })) if staged_ext(path) != target_ext => {
                     let format = staged_ext(path);
                     *steps.last_mut().unwrap() = Step::Op(robot::Op::Convert {
                         format,

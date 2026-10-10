@@ -75,8 +75,9 @@ pub fn step_outputs(steps: &[Step]) -> HashSet<String> {
 }
 
 /// The term files remove / filter / materialize steps read — a remove's or
-/// filter's include and exclude lists too — including inside a conditional
-/// branch (which `Step::gaps` also descends).
+/// filter's include and exclude lists too — and the annotation-property file a
+/// repair step reads, including inside a conditional branch (which
+/// `Step::gaps` also descends).
 pub fn step_term_files(steps: &[Step]) -> Vec<String> {
     let mut out = Vec::new();
     collect_term_files(steps, &mut out);
@@ -101,6 +102,7 @@ fn collect_term_files(steps: &[Step], out: &mut Vec<String>) {
         match op {
             Op::Remove(spec) | Op::Filter(spec) => out.extend(spec.files().cloned()),
             Op::Materialize { term_files, .. } => out.extend(term_files.clone()),
+            Op::Repair { annotation_properties_file: Some(f), .. } => out.push(f.clone()),
             _ => {}
         }
     }

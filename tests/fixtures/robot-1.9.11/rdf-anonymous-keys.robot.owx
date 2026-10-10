@@ -1,0 +1,201 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#"
+     xml:base="http://example.org/keys"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     ontologyIRI="http://example.org/keys">
+    <Prefix name="owl" IRI="http://www.w3.org/2002/07/owl#"/>
+    <Prefix name="rdf" IRI="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+    <Prefix name="xml" IRI="http://www.w3.org/XML/1998/namespace"/>
+    <Prefix name="xsd" IRI="http://www.w3.org/2001/XMLSchema#"/>
+    <Prefix name="rdfs" IRI="http://www.w3.org/2000/01/rdf-schema#"/>
+    <Declaration>
+        <Class IRI="#A11"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A14"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#C12"/>
+    </Declaration>
+    <Declaration>
+        <ObjectProperty IRI="#r"/>
+    </Declaration>
+    <Declaration>
+        <DataProperty IRI="#d"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B9"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B8"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B6"/>
+    </Declaration>
+    <Declaration>
+        <NamedIndividual IRI="#j7"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B1"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B10"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B12"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#B13"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A13"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A12"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A10"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A9"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A8"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A6"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A5"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A4"/>
+    </Declaration>
+    <Declaration>
+        <NamedIndividual IRI="#i7"/>
+    </Declaration>
+    <Declaration>
+        <Class IRI="#A1"/>
+    </Declaration>
+    <SubClassOf>
+        <Class IRI="#C12"/>
+        <ObjectUnionOf>
+            <Class IRI="#A12"/>
+            <Class IRI="#B12"/>
+        </ObjectUnionOf>
+    </SubClassOf>
+    <SubClassOf>
+        <ObjectUnionOf>
+            <Class IRI="#A8"/>
+            <Class IRI="#B8"/>
+        </ObjectUnionOf>
+        <Class IRI="#A8"/>
+    </SubClassOf>
+    <HasKey>
+        <Class IRI="#A11"/>
+    </HasKey>
+    <HasKey>
+        <Class IRI="#A14"/>
+        <ObjectProperty IRI="#r"/>
+        <DataProperty IRI="#d"/>
+    </HasKey>
+    <HasKey>
+        <ObjectIntersectionOf/>
+        <DataProperty IRI="#d"/>
+    </HasKey>
+    <HasKey>
+        <Annotation>
+            <AnnotationProperty abbreviatedIRI="rdfs:comment"/>
+            <Literal>annotated key</Literal>
+        </Annotation>
+        <ObjectIntersectionOf>
+            <Class IRI="#A6"/>
+            <Class IRI="#B6"/>
+        </ObjectIntersectionOf>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf/>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf>
+            <Class IRI="#A1"/>
+            <Class IRI="#B1"/>
+        </ObjectUnionOf>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf>
+            <Class IRI="#A10"/>
+            <Class IRI="#B10"/>
+        </ObjectUnionOf>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf>
+            <Class IRI="#A10"/>
+            <Class IRI="#B10"/>
+        </ObjectUnionOf>
+        <DataProperty IRI="#d"/>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf>
+            <Class IRI="#A12"/>
+            <Class IRI="#B12"/>
+        </ObjectUnionOf>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <Annotation>
+            <AnnotationProperty abbreviatedIRI="rdfs:comment"/>
+            <Literal>empty key</Literal>
+        </Annotation>
+        <ObjectUnionOf>
+            <Class IRI="#A13"/>
+            <Class IRI="#B13"/>
+        </ObjectUnionOf>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf>
+            <Class IRI="#A8"/>
+            <Class IRI="#B8"/>
+        </ObjectUnionOf>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <ObjectUnionOf>
+            <Class IRI="#A9"/>
+            <Class IRI="#B9"/>
+        </ObjectUnionOf>
+    </HasKey>
+    <HasKey>
+        <ObjectComplementOf>
+            <Class IRI="#A5"/>
+        </ObjectComplementOf>
+        <DataProperty IRI="#d"/>
+    </HasKey>
+    <HasKey>
+        <ObjectOneOf>
+            <NamedIndividual IRI="#i7"/>
+            <NamedIndividual IRI="#j7"/>
+        </ObjectOneOf>
+        <ObjectProperty IRI="#r"/>
+    </HasKey>
+    <HasKey>
+        <ObjectSomeValuesFrom>
+            <ObjectProperty IRI="#r"/>
+            <Class IRI="#A4"/>
+        </ObjectSomeValuesFrom>
+        <ObjectProperty IRI="#r"/>
+        <DataProperty IRI="#d"/>
+    </HasKey>
+</Ontology>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+
