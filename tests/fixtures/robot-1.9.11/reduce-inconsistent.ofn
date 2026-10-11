@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/reduce-inconsistent#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/reduce-inconsistent>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+SubClassOf(owl:Thing owl:Nothing)
+SubClassOf(:A :B)
+SubClassOf(:B :C)
+SubClassOf(:A :C)
+)

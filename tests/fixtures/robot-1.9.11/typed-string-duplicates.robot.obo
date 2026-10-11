@@ -1,0 +1,12 @@
+format-version: 1.2
+ontology: http://example.org/typed-string-duplicates
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/typed-string-duplicates#A>))\nDeclaration(DataProperty(<http://example.org/typed-string-duplicates#dp>))\nDeclaration(NamedIndividual(<http://example.org/typed-string-duplicates#i>))\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/typed-string-duplicates#A> (<http://example.org/typed-string-duplicates#A>)\n\nSubClassOf(<http://example.org/typed-string-duplicates#A> DataHasValue(<http://example.org/typed-string-duplicates#dp> \"w\"))\n\n\n############################\n#   Named Individuals\n############################\n\n# Individual: <http://example.org/typed-string-duplicates#i> (<http://example.org/typed-string-duplicates#i>)\n\nDataPropertyAssertion(<http://example.org/typed-string-duplicates#dp> <http://example.org/typed-string-duplicates#i> \"v\")\n\n\n)
+
+[Term]
+id: A
+name: x
+
+[Term]
+id: B
+name: y
+

@@ -24,18 +24,18 @@ pub struct Args {
     /// Also relax asserted `SubClassOf(C, R exactly|min n F)` axioms to
     /// existentials (`<bool>`, default false). When false, only EquivalentClasses
     /// axioms are relaxed.
-    #[arg(short = 's', long, num_args = 1, default_missing_value = "true")]
+    #[arg(short = 's', long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub include_subclass_of: Option<bool>,
 
     /// Only emit OBO-expressible relaxed superclasses (`<bool>`, default false):
     /// a named class, or `R some named`. Relaxed leaves that are not
     /// OBO-expressible are skipped.
-    #[arg(long, num_args = 1, default_missing_value = "true")]
+    #[arg(long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub enforce_obo_format: Option<bool>,
 
     /// Do not relax an EquivalentClasses axiom whose members are ALL named
     /// classes (`<bool>`, default false).
-    #[arg(long, num_args = 1, default_missing_value = "true")]
+    #[arg(long, num_args = 1, default_missing_value = "true", value_parser = crate::cmd::BoolParser)]
     pub exclude_named_classes: Option<bool>,
 
     /// Suppress the degenerate self-subclass `C ⊑ C` that a self-referential

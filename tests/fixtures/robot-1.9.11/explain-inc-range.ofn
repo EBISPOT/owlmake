@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/inc-range#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/inc-range>
+Declaration(DataProperty(:f))
+Declaration(NamedIndividual(:i))
+DataPropertyAssertion(:f :i "5"^^xsd:integer)
+DataPropertyRange(:f xsd:string)
+)

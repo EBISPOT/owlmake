@@ -1,0 +1,14 @@
+{
+  "graphs" : [ {
+    "id" : "http://example.org/o",
+    "meta" : {
+      "basicPropertyValues" : [ {
+        "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+        "val" : "c"
+      }, {
+        "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+        "val" : "d"
+      } ]
+    }
+  } ]
+}

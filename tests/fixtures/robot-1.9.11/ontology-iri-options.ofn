@@ -1,0 +1,7 @@
+Prefix(:=<http://example.org/ontology-iri-options#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/ontology-iri-options>
+Declaration(Class(:A))
+Declaration(Class(:B))
+SubClassOf(:A :B)
+)

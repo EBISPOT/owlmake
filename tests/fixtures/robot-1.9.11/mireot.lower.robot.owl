@@ -1,0 +1,366 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/mireot#"
+     xml:base="http://example.org/mireot"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:mireot="http://example.org/mireot#"
+     xmlns:oboInOwl="http://www.geneontology.org/formats/oboInOwl#">
+    <owl:Ontology rdf:about="http://example.org/mireot">
+        <owl:versionIRI rdf:resource="http://example.org/mireot/v1"/>
+    </owl:Ontology>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/mireot#ap -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/mireot#ap">
+        <rdfs:label>ay pee</rdfs:label>
+        <rdfs:subPropertyOf rdf:resource="http://example.org/mireot#ap2"/>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://example.org/mireot#ap2 -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/mireot#ap2">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/mireot#ap3"/>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://example.org/mireot#ap3 -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/mireot#ap3"/>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasExactSynonym -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasExactSynonym"/>
+    
+
+
+    <!-- http://www.w3.org/2000/01/rdf-schema#label -->
+
+    <owl:AnnotationProperty rdf:about="http://www.w3.org/2000/01/rdf-schema#label"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/mireot#inv -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/mireot#inv"/>
+    
+
+
+    <!-- http://example.org/mireot#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/mireot#p">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/mireot#p2"/>
+        <rdfs:label>pee</rdfs:label>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/mireot#p2 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/mireot#p2">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/mireot#p3"/>
+        <rdfs:label>pee two</rdfs:label>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/mireot#p3 -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/mireot#p3">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/mireot#pcs"/>
+        <rdfs:label>pee three</rdfs:label>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/mireot#pcs -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/mireot#pcs">
+        <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2002/07/owl#topObjectProperty"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/mireot#pi -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/mireot#pi">
+        <rdfs:label>pee eye</rdfs:label>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.w3.org/2002/07/owl#topObjectProperty -->
+
+    <owl:ObjectProperty rdf:about="http://www.w3.org/2002/07/owl#topObjectProperty"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/mireot#d -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/mireot#d">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/mireot#d2"/>
+        <rdfs:label>dee prop</rdfs:label>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/mireot#d2 -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/mireot#d2">
+        <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2002/07/owl#topDataProperty"/>
+        <rdfs:label>dee two</rdfs:label>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.w3.org/2002/07/owl#topDataProperty -->
+
+    <owl:DatatypeProperty rdf:about="http://www.w3.org/2002/07/owl#topDataProperty"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/mireot#A -->
+
+    <owl:Class rdf:about="http://example.org/mireot#A">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Up"/>
+        <rdfs:label>ay</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#B -->
+
+    <owl:Class rdf:about="http://example.org/mireot#B">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Up"/>
+        <rdfs:label>bee</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#C -->
+
+    <owl:Class rdf:about="http://example.org/mireot#C">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#A"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#B"/>
+        <rdfs:label>see</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#E -->
+
+    <owl:Class rdf:about="http://example.org/mireot#E">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:label>ee</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#K -->
+
+    <owl:Class rdf:about="http://example.org/mireot#K">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#R1"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#R2"/>
+        <rdfs:label>kay</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#L -->
+
+    <owl:Class rdf:about="http://example.org/mireot#L">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#M"/>
+        <rdfs:label>ell from the input</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#M -->
+
+    <owl:Class rdf:about="http://example.org/mireot#M">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Mid -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Mid">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#L"/>
+        <rdfs:label>mid</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Pun -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Pun">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Up"/>
+        <rdfs:label>pun</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Q -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Q">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Y"/>
+        <rdfs:label>queue</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#R1 -->
+
+    <owl:Class rdf:about="http://example.org/mireot#R1">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:label>r one</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#R2 -->
+
+    <owl:Class rdf:about="http://example.org/mireot#R2">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Top -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Top">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Up -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Up">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:label>up</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#X -->
+
+    <owl:Class rdf:about="http://example.org/mireot#X">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Y"/>
+        <oboInOwl:hasExactSynonym>exx</oboInOwl:hasExactSynonym>
+        <rdfs:label xml:lang="en">ex</rdfs:label>
+        <rdfs:label>ex2</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Y -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Y">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Z"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Z2"/>
+        <rdfs:label>why</rdfs:label>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/mireot#Z -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Z">
+        <rdfs:subClassOf rdf:resource="http://example.org/mireot#Top"/>
+        <rdfs:label>zed</rdfs:label>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/mireot#Z"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#label"/>
+        <owl:annotatedTarget>zed</owl:annotatedTarget>
+        <rdfs:comment>on the label</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/mireot#Z2 -->
+
+    <owl:Class rdf:about="http://example.org/mireot#Z2">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+    </owl:Class>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/mireot#i1 -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/mireot#i1">
+        <rdfs:comment>a comment on eye one</rdfs:comment>
+        <rdfs:label>eye one</rdfs:label>
+    </owl:NamedIndividual>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

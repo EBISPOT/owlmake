@@ -1,0 +1,19 @@
+Prefix(:=<http://example.org/repair#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+
+Ontology(<http://example.org/repair-import-child.owl>
+Declaration(Class(:IA))
+Declaration(Class(:IB))
+Declaration(Class(:IC))
+Declaration(AnnotationProperty(obo:IAO_0100001))
+AnnotationAssertion(owl:deprecated :IA "true"^^xsd:boolean)
+AnnotationAssertion(obo:IAO_0100001 :IA :IB)
+
+# The import's own axioms are neither migrated nor merged.
+SubClassOf(:IC :IA)
+SubClassOf(Annotation(rdfs:comment "i1") :IC :IB)
+SubClassOf(Annotation(rdfs:comment "i2") :IC :IB)
+)

@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/mireot-order#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/mireot-order>
+Declaration(Class(:A))
+Declaration(Class(:H))
+Declaration(Class(:T))
+AnnotationAssertion(Annotation(rdfs:label "about a") rdfs:comment :A "a note")
+AnnotationAssertion(rdfs:label :H "aitch")
+AnnotationAssertion(Annotation(rdfs:seeAlso "x") rdfs:comment :T "c")
+AnnotationAssertion(rdfs:seeAlso :T "t")
+)

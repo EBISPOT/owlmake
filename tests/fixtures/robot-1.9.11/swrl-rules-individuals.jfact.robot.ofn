@@ -1,0 +1,53 @@
+Prefix(:=<http://example.org/q#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/q>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:k))
+Declaration(NamedIndividual(:m))
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A owl:Thing)
+
+# Class: :B (:B)
+
+SubClassOf(:B owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+ClassAssertion(:A :i)
+
+# Individual: :j (:j)
+
+ClassAssertion(owl:Nothing :j)
+
+# Individual: :k (:k)
+
+ClassAssertion(owl:Thing :k)
+
+# Individual: :m (:m)
+
+ClassAssertion(owl:Nothing :m)
+
+
+DLSafeRule(Body(ClassAtom(:A Variable(<urn:swrl:var#x>)))Head(ClassAtom(:B :j)))
+DLSafeRule(Body(ClassAtom(:A :k))Head(ClassAtom(:B :m)))
+)

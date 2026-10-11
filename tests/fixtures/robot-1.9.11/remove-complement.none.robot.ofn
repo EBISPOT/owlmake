@@ -1,0 +1,35 @@
+Prefix(:=<http://example.org/c.owl#>)
+Prefix(ex:=<http://example.org/ex#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/c.owl>
+
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(ObjectProperty(ex:p))
+Declaration(ObjectProperty(ex:q))
+Declaration(AnnotationProperty(ex:n))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: ex:A (a)
+
+AnnotationAssertion(ex:n ex:A "note")
+AnnotationAssertion(rdfs:label ex:A "a")
+SubClassOf(ex:A ObjectSomeValuesFrom(ex:q ex:B))
+
+# Class: ex:B (ex:B)
+
+SubClassOf(ex:B ObjectSomeValuesFrom(ex:p ex:A))
+
+
+)

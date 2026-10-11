@@ -1,0 +1,252 @@
+Prefix(:=<http://example.org/reduce-reasoners#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/reduce-reasoners>
+
+Declaration(Class(:aA))
+Declaration(Class(:aB))
+Declaration(Class(:aC))
+Declaration(Class(:aD))
+Declaration(Class(:aD1))
+Declaration(Class(:aD2))
+Declaration(Class(:aX))
+Declaration(Class(:aX1))
+Declaration(Class(:aX2))
+Declaration(Class(:aY))
+Declaration(Class(:bAnimal))
+Declaration(Class(:bC))
+Declaration(Class(:bD))
+Declaration(Class(:bDog))
+Declaration(Class(:bE))
+Declaration(Class(:bM))
+Declaration(Class(:bMammal))
+Declaration(Class(:bN))
+Declaration(Class(:bS))
+Declaration(Class(:bT))
+Declaration(Class(:cA))
+Declaration(Class(:cB))
+Declaration(Class(:cX))
+Declaration(Class(:cY))
+Declaration(Class(:cZ))
+Declaration(Class(:dA))
+Declaration(Class(:dB))
+Declaration(Class(:dC))
+Declaration(Class(:dD))
+Declaration(Class(:dE))
+Declaration(Class(:dF))
+Declaration(Class(:dX))
+Declaration(Class(:eA))
+Declaration(Class(:eB))
+Declaration(Class(:eK))
+Declaration(Class(:eL))
+Declaration(Class(:eU))
+Declaration(Class(:eW))
+Declaration(Class(:fA))
+Declaration(Class(:fB))
+Declaration(Class(:fC))
+Declaration(Class(:fD))
+Declaration(Class(:gA))
+Declaration(Class(:gB))
+Declaration(Class(:gC))
+Declaration(Class(:gD))
+Declaration(Class(:gE))
+Declaration(Class(:gG))
+Declaration(Class(:gH))
+Declaration(Class(:gR))
+Declaration(ObjectProperty(:bp))
+Declaration(ObjectProperty(:bq))
+Declaration(ObjectProperty(:bt))
+Declaration(ObjectProperty(:cp))
+Declaration(ObjectProperty(:df))
+Declaration(ObjectProperty(:dp))
+Declaration(ObjectProperty(:gp))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :bq (:bq)
+
+SubObjectPropertyOf(:bq :bp)
+
+# Object Property: :bt (:bt)
+
+TransitiveObjectProperty(:bt)
+
+# Object Property: :df (:df)
+
+FunctionalObjectProperty(:df)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :aA (:aA)
+
+EquivalentClasses(:aA :aB)
+SubClassOf(:aA :aD)
+
+# Class: :aC (:aC)
+
+SubClassOf(:aC :aX)
+
+# Class: :aD1 (:aD1)
+
+SubClassOf(:aD1 :aD)
+
+# Class: :aD2 (:aD2)
+
+SubClassOf(:aD2 :aD)
+
+# Class: :aX1 (:aX1)
+
+SubClassOf(:aX1 :aX)
+
+# Class: :aX2 (:aX2)
+
+SubClassOf(:aX2 :aX)
+
+# Class: :bC (:bC)
+
+SubClassOf(:bC :bM)
+SubClassOf(:bC ObjectSomeValuesFrom(:bp :bD))
+SubClassOf(:bC ObjectSomeValuesFrom(:bp :bE))
+SubClassOf(:bC ObjectSomeValuesFrom(:bq :bN))
+
+# Class: :bD (:bD)
+
+SubClassOf(:bD :bE)
+SubClassOf(:bD ObjectSomeValuesFrom(:bt :bE))
+
+# Class: :bDog (:bDog)
+
+SubClassOf(:bDog :bMammal)
+
+# Class: :bM (:bM)
+
+SubClassOf(:bM ObjectSomeValuesFrom(:bq :bN))
+
+# Class: :bMammal (:bMammal)
+
+SubClassOf(:bMammal :bAnimal)
+
+# Class: :bN (:bN)
+
+SubClassOf(:bN ObjectSomeValuesFrom(:bt :bD))
+SubClassOf(:bN ObjectSomeValuesFrom(:bt :bE))
+
+# Class: :bS (:bS)
+
+SubClassOf(:bS ObjectSomeValuesFrom(:bp :bD))
+SubClassOf(:bS ObjectSomeValuesFrom(:bq :bD))
+
+# Class: :bT (:bT)
+
+SubClassOf(:bT :bD)
+SubClassOf(:bT ObjectSomeValuesFrom(:bp :bE))
+
+# Class: :cA (:cA)
+
+SubClassOf(:cA :cY)
+
+# Class: :cY (:cY)
+
+SubClassOf(:cY :cX)
+
+# Class: :cZ (:cZ)
+
+SubClassOf(:cZ :cY)
+
+# Class: :dA (:dA)
+
+SubClassOf(:dA :dX)
+
+# Class: :dB (:dB)
+
+SubClassOf(:dB :dX)
+
+# Class: :dC (:dC)
+
+SubClassOf(:dC :dX)
+SubClassOf(:dC ObjectUnionOf(:dA :dB))
+
+# Class: :dD (:dD)
+
+SubClassOf(:dD :dE)
+
+# Class: :dF (:dF)
+
+SubClassOf(:dF ObjectSomeValuesFrom(:df :dA))
+SubClassOf(:dF ObjectSomeValuesFrom(:df :dD))
+SubClassOf(:dF ObjectSomeValuesFrom(:df ObjectIntersectionOf(:dA :dD)))
+SubClassOf(:dF ObjectAllValuesFrom(:dp :dD))
+SubClassOf(:dF ObjectAllValuesFrom(:dp :dE))
+
+# Class: :eK (:eK)
+
+SubClassOf(:eK :eL)
+
+# Class: :eL (:eL)
+
+SubClassOf(:eL :eA)
+
+# Class: :eU (:eU)
+
+SubClassOf(:eU :eA)
+
+# Class: :eW (:eW)
+
+SubClassOf(:eW :eU)
+
+# Class: :fA (:fA)
+
+SubClassOf(:fA :fB)
+SubClassOf(Annotation(rdfs:comment "via") :fA :fD)
+
+# Class: :fB (:fB)
+
+SubClassOf(:fB :fC)
+
+# Class: :fD (:fD)
+
+SubClassOf(:fD :fC)
+
+# Class: :gA (:gA)
+
+EquivalentClasses(:gA :gB)
+
+# Class: :gC (:gC)
+
+SubClassOf(:gC :gB)
+
+# Class: :gD (:gD)
+
+SubClassOf(:gD :gR)
+
+# Class: :gE (:gE)
+
+EquivalentClasses(:gE ObjectIntersectionOf(:gG ObjectSomeValuesFrom(:gp :gH)))
+SubClassOf(:gE :gG)
+
+# Class: :gG (:gG)
+
+SubClassOf(:gG :gR)
+
+# Class: :gR (:gR)
+
+SubClassOf(:gR owl:Thing)
+
+
+SubClassOf(ObjectIntersectionOf(:cA :cB) :cX)
+SubClassOf(ObjectIntersectionOf(:cA :cB) :cZ)
+SubClassOf(ObjectIntersectionOf(:eA :eB) owl:Nothing)
+SubClassOf(ObjectSomeValuesFrom(:cp :cA) :cY)
+SubClassOf(ObjectSomeValuesFrom(:cp :cA) :cZ)
+)

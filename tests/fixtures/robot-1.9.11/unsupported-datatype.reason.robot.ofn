@@ -1,0 +1,42 @@
+Prefix(:=<http://example.org/unsupported-datatype#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/unsupported-datatype>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(DataProperty(:born))
+Declaration(NamedIndividual(:i))
+Declaration(Datatype(xsd:date))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A :B)
+
+# Class: :B (:B)
+
+SubClassOf(:B owl:Thing)
+SubClassOf(:B DataSomeValuesFrom(:born xsd:date))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+ClassAssertion(:A :i)
+DataPropertyAssertion(:born :i "2020-01-01"^^xsd:date)
+
+
+)

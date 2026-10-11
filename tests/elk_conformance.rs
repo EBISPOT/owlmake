@@ -8,6 +8,17 @@
 //! require the canonical taxonomy to equal the one its `.taxonomy` states, so a
 //! gap in a single construct surfaces as a named failure instead of as a wrong
 //! edge deep inside some real ontology.
+//!
+//! The EL engine classifies as the ELK that ROBOT 1.9.11 runs. Where that ELK
+//! classifies a case differently from the suite, `<Name>.robot.taxonomy` states
+//! what it computes, measured, and that is the classification required:
+//! - `BottomObjectProperty`, where `owl:bottomObjectProperty` and its
+//!   sub-properties are ordinary properties to it, so `∃R.C` over one is
+//!   satisfiable;
+//! - `DisjointSelf`, where the members of a disjointness are a set, so
+//!   `DisjointClasses(:A :B :A :A)` leaves `:A` satisfiable, while a
+//!   disjointness of the one class `:C` is `:C`'s disjointness from
+//!   `owl:Thing`.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -145,8 +156,9 @@ fn elk_classification_conformance() {
         total += 1;
         let result = (|| -> Result<(), String> {
             let input = load_functional(&p(&name, "owl")).map_err(|e| format!("load input: {e}"))?;
-            let expected_model =
-                load_functional(&p(&name, "taxonomy")).map_err(|e| format!("load taxonomy: {e}"))?;
+            let robot = p(&name, "robot.taxonomy");
+            let expected = if robot.exists() { robot } else { p(&name, "taxonomy") };
+            let expected_model = load_functional(&expected).map_err(|e| format!("load taxonomy: {e}"))?;
             let got = Reasoner::classify(&input).taxonomy();
             let want = expected_taxonomy(&expected_model);
             if got == want {

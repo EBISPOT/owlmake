@@ -1,0 +1,5 @@
+Prefix(:=<http://example.org/>)
+Ontology(<http://example.org/j>
+Declaration(Class(:W))
+SubClassOf(:W :Z)
+)

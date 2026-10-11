@@ -1,0 +1,210 @@
+Prefix(:=<http://example.org/mireot#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/mireot>
+<http://example.org/mireot/v1>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:E))
+Declaration(Class(:K))
+Declaration(Class(:L))
+Declaration(Class(:M))
+Declaration(Class(:Mid))
+Declaration(Class(:Pun))
+Declaration(Class(:Q))
+Declaration(Class(:R1))
+Declaration(Class(:R2))
+Declaration(Class(:Top))
+Declaration(Class(:Up))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
+Declaration(Class(:Z2))
+Declaration(ObjectProperty(:inv))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:p2))
+Declaration(ObjectProperty(:p3))
+Declaration(ObjectProperty(:pcs))
+Declaration(ObjectProperty(:pi))
+Declaration(ObjectProperty(owl:topObjectProperty))
+Declaration(DataProperty(:d))
+Declaration(DataProperty(:d2))
+Declaration(DataProperty(owl:topDataProperty))
+Declaration(NamedIndividual(:i1))
+Declaration(AnnotationProperty(:ap))
+Declaration(AnnotationProperty(:ap2))
+Declaration(AnnotationProperty(:ap3))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+Declaration(AnnotationProperty(rdfs:label))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: :ap (ay pee)
+
+AnnotationAssertion(rdfs:label :ap "ay pee")
+SubAnnotationPropertyOf(:ap :ap2)
+
+# Annotation Property: :ap2 (:ap2)
+
+SubAnnotationPropertyOf(:ap2 :ap3)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :p (pee)
+
+AnnotationAssertion(rdfs:label :p "pee")
+SubObjectPropertyOf(:p :p2)
+
+# Object Property: :p2 (pee two)
+
+AnnotationAssertion(rdfs:label :p2 "pee two")
+SubObjectPropertyOf(:p2 :p3)
+
+# Object Property: :p3 (pee three)
+
+AnnotationAssertion(rdfs:label :p3 "pee three")
+SubObjectPropertyOf(:p3 :pcs)
+
+# Object Property: :pcs (:pcs)
+
+SubObjectPropertyOf(:pcs owl:topObjectProperty)
+
+# Object Property: :pi (pee eye)
+
+AnnotationAssertion(rdfs:label :pi "pee eye")
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :d (dee prop)
+
+AnnotationAssertion(rdfs:label :d "dee prop")
+SubDataPropertyOf(:d :d2)
+
+# Data Property: :d2 (dee two)
+
+AnnotationAssertion(rdfs:label :d2 "dee two")
+SubDataPropertyOf(:d2 owl:topDataProperty)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (ay)
+
+AnnotationAssertion(rdfs:label :A "ay")
+SubClassOf(:A :Up)
+
+# Class: :B (bee)
+
+AnnotationAssertion(rdfs:label :B "bee")
+SubClassOf(:B :Up)
+
+# Class: :C (see)
+
+AnnotationAssertion(rdfs:label :C "see")
+SubClassOf(:C :A)
+SubClassOf(:C :B)
+
+# Class: :E (ee)
+
+AnnotationAssertion(rdfs:label :E "ee")
+SubClassOf(:E owl:Thing)
+
+# Class: :K (kay)
+
+AnnotationAssertion(rdfs:label :K "kay")
+SubClassOf(:K :R1)
+SubClassOf(:K :R2)
+
+# Class: :L (ell from the input)
+
+AnnotationAssertion(rdfs:label :L "ell from the input")
+SubClassOf(:L :M)
+
+# Class: :M (:M)
+
+SubClassOf(:M owl:Thing)
+
+# Class: :Mid (mid)
+
+AnnotationAssertion(rdfs:label :Mid "mid")
+SubClassOf(:Mid :L)
+
+# Class: :Pun (pun)
+
+AnnotationAssertion(rdfs:label :Pun "pun")
+SubClassOf(:Pun :Up)
+
+# Class: :Q (queue)
+
+AnnotationAssertion(rdfs:label :Q "queue")
+SubClassOf(:Q :Y)
+
+# Class: :R1 (r one)
+
+AnnotationAssertion(rdfs:label :R1 "r one")
+SubClassOf(:R1 owl:Thing)
+
+# Class: :R2 (:R2)
+
+SubClassOf(:R2 owl:Thing)
+
+# Class: :Top (:Top)
+
+SubClassOf(:Top owl:Thing)
+
+# Class: :Up (up)
+
+AnnotationAssertion(rdfs:label :Up "up")
+SubClassOf(:Up owl:Thing)
+
+# Class: :X (ex2)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> :X "exx")
+AnnotationAssertion(rdfs:label :X "ex"@en)
+AnnotationAssertion(rdfs:label :X "ex2")
+SubClassOf(:X :Y)
+
+# Class: :Y (why)
+
+AnnotationAssertion(rdfs:label :Y "why")
+SubClassOf(:Y :Z)
+SubClassOf(:Y :Z2)
+
+# Class: :Z (zed)
+
+AnnotationAssertion(Annotation(rdfs:comment "on the label") rdfs:label :Z "zed")
+SubClassOf(:Z :Top)
+
+# Class: :Z2 (:Z2)
+
+SubClassOf(:Z2 owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i1 (eye one)
+
+AnnotationAssertion(rdfs:comment :i1 "a comment on eye one")
+AnnotationAssertion(rdfs:label :i1 "eye one")
+
+
+)

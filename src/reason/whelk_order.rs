@@ -128,6 +128,26 @@ fn concept_hash(interner: &Interner, id: ConceptId, memo: &mut HashMap<ConceptId
     h
 }
 
+/// The hash of the concept the reasoner reads a universal restriction over
+/// `role` and `filler` as, or a max-1 restriction for `max_one`: the case-class
+/// hash of `UniversalRestriction(role, concept)` or of
+/// `MaxCardinalityRestriction(role, concept, 1)`.
+pub fn restriction_hash(
+    interner: &Interner,
+    max_one: bool,
+    role: &str,
+    filler: ConceptId,
+    memo: &mut HashMap<ConceptId, i32>,
+) -> i32 {
+    let rh = product_hash("Role", &[crate::owlapi_hash::java_string_hash(role)]);
+    let ch = concept_hash(interner, filler, memo);
+    if max_one {
+        product_hash("MaxCardinalityRestriction", &[rh, ch, 1])
+    } else {
+        product_hash("UniversalRestriction", &[rh, ch])
+    }
+}
+
 /// The order the reasoner visits `subsumers` in.
 pub fn visit_order(
     interner: &Interner,

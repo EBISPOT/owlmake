@@ -114,6 +114,7 @@ struct Frame<'a> {
 /// For each class whose frame holds a plain/`xsd:string` twin, the frame's
 /// annotation assertions in the order the frame writes them.
 pub(crate) fn assertion_orders(model: &Model) -> HashMap<String, Vec<&AnnotatedComponent<RcStr>>> {
+    let order = model.natural_order();
     let mut seen: HashMap<(&str, &str, &str), (bool, bool)> = HashMap::new();
     let mut assertions_total = 0usize;
     for ac in model.ont.iter() {
@@ -209,7 +210,7 @@ pub(crate) fn assertion_orders(model: &Model) -> HashMap<String, Vec<&AnnotatedC
             elems.push(d);
         }
         let hashes: Vec<i32> =
-            frame.class_axioms.iter().map(|ac| axiom_hash(&ac.component, &ac.ann).unwrap_or(0)).collect();
+            frame.class_axioms.iter().map(|ac| axiom_hash(&ac.component, &ac.ann, order).unwrap_or(0)).collect();
         for i in hashset_order_of(&hashes, hashes.len()) {
             let ac = frame.class_axioms[i];
             let kept = match &ac.component {
@@ -227,7 +228,7 @@ pub(crate) fn assertion_orders(model: &Model) -> HashMap<String, Vec<&AnnotatedC
             .iter()
             .map(|ac| {
                 let Component::AnnotationAssertion(aa) = &ac.component else { unreachable!() };
-                annotation_assertion_hash(subject, aa.ann.ap.0.as_ref(), &aa.ann.av, &ac.ann)
+                annotation_assertion_hash(subject, aa.ann.ap.0.as_ref(), &aa.ann.av, &ac.ann, order)
             })
             .collect();
         for i in subject_assertion_order(&hashes, hashes.len(), assertions_total) {

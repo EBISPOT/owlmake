@@ -1,0 +1,222 @@
+{
+  "graphs" : [ {
+    "id" : "http://example.org/obographs-axioms.owl",
+    "meta" : {
+      "subsets" : [ "http://example.org/obographs-axioms#ontsub" ],
+      "xrefs" : [ {
+        "val" : "ONT:1"
+      } ],
+      "basicPropertyValues" : [ {
+        "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+        "val" : "header"
+      } ],
+      "version" : "http://example.org/obographs-axioms/v1.owl",
+      "deprecated" : true
+    },
+    "nodes" : [ {
+      "id" : "http://example.org/obographs-axioms#A",
+      "lbl" : "label a",
+      "type" : "CLASS",
+      "meta" : {
+        "definition" : {
+          "val" : "def b"
+        },
+        "subsets" : [ "\"lit\\\"sub4\"", "\"litsub\"", "\"litsub3\"@en", "\"5\"^^xsd:integer" ],
+        "synonyms" : [ {
+          "pred" : "hasExactSynonym",
+          "val" : "syn"
+        }, {
+          "synonymType" : "http://example.org/obographs-axioms#t1",
+          "pred" : "hasExactSynonym",
+          "val" : "syn"
+        }, {
+          "synonymType" : "\"lit\"",
+          "pred" : "hasExactSynonym",
+          "val" : "syn2"
+        }, {
+          "pred" : "hasExactSynonym",
+          "val" : "syn3"
+        } ]
+      }
+    }, {
+      "id" : "http://example.org/obographs-axioms#B",
+      "type" : "CLASS",
+      "meta" : {
+        "definition" : {
+          "val" : "def of B",
+          "xrefs" : [ "X:3" ],
+          "meta" : {
+            "basicPropertyValues" : [ {
+              "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+              "val" : "source"
+            } ]
+          }
+        },
+        "xrefs" : [ {
+          "val" : "Y:1",
+          "meta" : {
+            "basicPropertyValues" : [ {
+              "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+              "val" : "source"
+            } ]
+          }
+        } ],
+        "basicPropertyValues" : [ {
+          "pred" : "http://www.w3.org/2000/01/rdf-schema#label",
+          "val" : "http://example.org/obographs-axioms#iriLabel"
+        }, {
+          "pred" : "http://www.w3.org/2002/07/owl#deprecated",
+          "val" : "false"
+        } ]
+      }
+    }, {
+      "id" : "http://example.org/obographs-axioms#C",
+      "type" : "CLASS",
+      "meta" : {
+        "deprecated" : true
+      }
+    }, {
+      "id" : "http://example.org/obographs-axioms#K",
+      "lbl" : "ctl\u0001\u001F tab\t end \uD83D\uDE00 é",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/obographs-axioms#P",
+      "type" : "INDIVIDUAL"
+    }, {
+      "id" : "http://example.org/obographs-axioms#r",
+      "type" : "PROPERTY",
+      "propertyType" : "OBJECT"
+    }, {
+      "id" : "http://example.org/obographs-axioms#s",
+      "type" : "PROPERTY",
+      "propertyType" : "OBJECT"
+    }, {
+      "id" : "http://example.org/obographs-axioms#d",
+      "type" : "PROPERTY",
+      "propertyType" : "DATA"
+    }, {
+      "id" : "http://example.org/obographs-axioms#i1",
+      "type" : "INDIVIDUAL"
+    }, {
+      "id" : "http://example.org/obographs-axioms#i2",
+      "type" : "INDIVIDUAL"
+    }, {
+      "id" : "http://example.org/obographs-axioms#ap",
+      "type" : "CLASS"
+    }, {
+      "id" : "_:genid2147483649"
+    }, {
+      "id" : "_:genid2147483650"
+    } ],
+    "edges" : [ {
+      "sub" : "http://example.org/obographs-axioms#B",
+      "pred" : "is_a",
+      "obj" : "http://example.org/obographs-axioms#A",
+      "meta" : {
+        "subsets" : [ "http://example.org/obographs-axioms#st", "http://example.org/obographs-axioms#sub1" ],
+        "xrefs" : [ {
+          "val" : "X:1"
+        } ],
+        "basicPropertyValues" : [ {
+          "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+          "val" : "c"
+        } ],
+        "deprecated" : true
+      }
+    }, {
+      "sub" : "http://example.org/obographs-axioms#C",
+      "pred" : "is_a",
+      "obj" : "http://example.org/obographs-axioms#A"
+    }, {
+      "sub" : "http://example.org/obographs-axioms#C",
+      "pred" : "is_a",
+      "obj" : "http://example.org/obographs-axioms#A",
+      "meta" : {
+        "basicPropertyValues" : [ {
+          "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+          "val" : "twin"
+        } ]
+      }
+    }, {
+      "sub" : "http://example.org/obographs-axioms#ap",
+      "pred" : "is_a",
+      "obj" : "http://example.org/obographs-axioms#A"
+    }, {
+      "sub" : "http://example.org/obographs-axioms#P",
+      "pred" : "type",
+      "obj" : "http://example.org/obographs-axioms#C"
+    }, {
+      "sub" : "_:genid2147483649",
+      "pred" : "type",
+      "obj" : "http://example.org/obographs-axioms#K"
+    }, {
+      "sub" : "http://example.org/obographs-axioms#i1",
+      "pred" : "http://example.org/obographs-axioms#s",
+      "obj" : "http://example.org/obographs-axioms#i2"
+    }, {
+      "sub" : "http://example.org/obographs-axioms#i2",
+      "pred" : "http://example.org/obographs-axioms#r",
+      "obj" : "http://example.org/obographs-axioms#i1"
+    }, {
+      "sub" : "_:genid2147483649",
+      "pred" : "http://example.org/obographs-axioms#r",
+      "obj" : "_:genid2147483650"
+    } ],
+    "equivalentNodesSets" : [ {
+      "representativeNodeId" : "http://example.org/obographs-axioms#A",
+      "nodeIds" : [ "http://example.org/obographs-axioms#A", "http://example.org/obographs-axioms#B" ]
+    }, {
+      "representativeNodeId" : "http://example.org/obographs-axioms#A",
+      "nodeIds" : [ "http://example.org/obographs-axioms#A", "http://example.org/obographs-axioms#B" ],
+      "meta" : {
+        "basicPropertyValues" : [ {
+          "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+          "val" : "twin"
+        } ]
+      }
+    } ],
+    "logicalDefinitionAxioms" : [ {
+      "definedClassId" : "http://example.org/obographs-axioms#C",
+      "genusIds" : [ "http://example.org/obographs-axioms#A" ],
+      "restrictions" : [ {
+        "propertyId" : "http://example.org/obographs-axioms#r",
+        "fillerId" : "http://example.org/obographs-axioms#B"
+      } ]
+    }, {
+      "definedClassId" : "http://example.org/obographs-axioms#C",
+      "genusIds" : [ "http://example.org/obographs-axioms#A" ],
+      "restrictions" : [ {
+        "propertyId" : "http://example.org/obographs-axioms#r",
+        "fillerId" : "http://example.org/obographs-axioms#B"
+      } ]
+    } ],
+    "domainRangeAxioms" : [ {
+      "predicateId" : "http://example.org/obographs-axioms#s",
+      "allValuesFromEdges" : [ {
+        "sub" : "http://example.org/obographs-axioms#A",
+        "pred" : "http://example.org/obographs-axioms#s",
+        "obj" : "http://example.org/obographs-axioms#B"
+      }, {
+        "sub" : "http://example.org/obographs-axioms#A",
+        "pred" : "http://example.org/obographs-axioms#s",
+        "obj" : "http://example.org/obographs-axioms#B",
+        "meta" : {
+          "basicPropertyValues" : [ {
+            "pred" : "http://www.w3.org/2000/01/rdf-schema#comment",
+            "val" : "twin"
+          } ]
+        }
+      } ]
+    }, {
+      "predicateId" : "http://example.org/obographs-axioms#r",
+      "domainClassIds" : [ "http://example.org/obographs-axioms#A" ]
+    } ],
+    "propertyChainAxioms" : [ {
+      "predicateId" : "http://example.org/obographs-axioms#r",
+      "chainPredicateIds" : [ "http://example.org/obographs-axioms#r", "http://example.org/obographs-axioms#s" ]
+    }, {
+      "predicateId" : "http://example.org/obographs-axioms#r",
+      "chainPredicateIds" : [ "http://example.org/obographs-axioms#r", "http://example.org/obographs-axioms#s" ]
+    } ]
+  } ]
+}

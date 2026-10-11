@@ -1,0 +1,113 @@
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(
+Declaration(Class(<http://example.org/mireot#Br>))
+Declaration(Class(<http://example.org/mireot#C1>))
+Declaration(Class(<http://example.org/mireot#C2>))
+Declaration(Class(<http://example.org/mireot#G1>))
+Declaration(Class(<http://example.org/mireot#G2>))
+Declaration(Class(<http://example.org/mireot#H>))
+Declaration(ObjectProperty(<http://example.org/mireot#p>))
+Declaration(ObjectProperty(<http://example.org/mireot#p2>))
+Declaration(ObjectProperty(<http://example.org/mireot#p3>))
+Declaration(DataProperty(<http://example.org/mireot#d4>))
+Declaration(DataProperty(<http://example.org/mireot#dd>))
+Declaration(DataProperty(<http://example.org/mireot#dup>))
+Declaration(AnnotationProperty(<http://example.org/mireot#a1>))
+Declaration(AnnotationProperty(<http://example.org/mireot#ac>))
+Declaration(AnnotationProperty(<http://example.org/mireot#apb>))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:label))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/mireot#a1> (ay one)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#a1> "ay one")
+SubAnnotationPropertyOf(<http://example.org/mireot#a1> <http://example.org/mireot#apb>)
+
+# Annotation Property: <http://example.org/mireot#ac> (<http://example.org/mireot#ac>)
+
+SubAnnotationPropertyOf(<http://example.org/mireot#ac> <http://example.org/mireot#apb>)
+
+# Annotation Property: <http://example.org/mireot#apb> (ay pee branch)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#apb> "ay pee branch")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/mireot#p> (pee)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#p> "pee")
+
+# Object Property: <http://example.org/mireot#p2> (pee two)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#p2> "pee two")
+SubObjectPropertyOf(<http://example.org/mireot#p2> <http://example.org/mireot#p>)
+
+# Object Property: <http://example.org/mireot#p3> (pee three)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#p3> "pee three")
+SubObjectPropertyOf(<http://example.org/mireot#p3> <http://example.org/mireot#p2>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/mireot#d4> (<http://example.org/mireot#d4>)
+
+SubDataPropertyOf(<http://example.org/mireot#d4> <http://example.org/mireot#dup>)
+
+# Data Property: <http://example.org/mireot#dd> (dee dee)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#dd> "dee dee")
+SubDataPropertyOf(<http://example.org/mireot#dd> <http://example.org/mireot#dup>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/mireot#Br> (branch root)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#Br> "branch root")
+
+# Class: <http://example.org/mireot#C1> (child one)
+
+AnnotationAssertion(rdfs:comment <http://example.org/mireot#C1> "a comment on child one")
+AnnotationAssertion(rdfs:label <http://example.org/mireot#C1> "child one")
+SubClassOf(<http://example.org/mireot#C1> <http://example.org/mireot#Br>)
+
+# Class: <http://example.org/mireot#C2> (child two)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#C2> "child two")
+SubClassOf(<http://example.org/mireot#C2> <http://example.org/mireot#Br>)
+
+# Class: <http://example.org/mireot#G1> (grandchild one)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#G1> "grandchild one")
+SubClassOf(<http://example.org/mireot#G1> <http://example.org/mireot#C1>)
+
+# Class: <http://example.org/mireot#G2> (grandchild two)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#G2> "grandchild two")
+SubClassOf(<http://example.org/mireot#G2> <http://example.org/mireot#C1>)
+
+# Class: <http://example.org/mireot#H> (great-grandchild)
+
+AnnotationAssertion(rdfs:label <http://example.org/mireot#H> "great-grandchild")
+SubClassOf(<http://example.org/mireot#H> <http://example.org/mireot#G1>)
+
+
+)

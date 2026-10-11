@@ -1,0 +1,18 @@
+format-version: 1.2
+ontology: banner-labels
+
+[Term]
+id: EX:1
+is_a: EX:9
+
+[Term]
+id: EX:2
+name: two
+is_a: EX:1
+is_a: EX:9
+
+[Term]
+id: EX:3
+name: three\nlines
+is_a: EX:2 ! two
+

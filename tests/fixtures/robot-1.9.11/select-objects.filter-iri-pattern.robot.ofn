@@ -1,0 +1,74 @@
+Prefix(:=<http://example.org/select-objects#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/select-objects>
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/B>))
+Declaration(Class(<http://example.org/C>))
+Declaration(Class(<http://example.org/D>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(ObjectProperty(<http://example.org/q>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(NamedIndividual(<http://example.org/A>))
+Declaration(NamedIndividual(<http://example.org/i>))
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/p> (<http://example.org/p>)
+
+ObjectPropertyDomain(<http://example.org/p> <http://example.org/A>)
+
+# Object Property: <http://example.org/q> (<http://example.org/q>)
+
+SubObjectPropertyOf(<http://example.org/q> <http://example.org/p>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/d> (<http://example.org/d>)
+
+DataPropertyDomain(<http://example.org/d> <http://example.org/D>)
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/B> (<http://example.org/B>)
+
+SubClassOf(<http://example.org/B> <http://example.org/A>)
+
+# Class: <http://example.org/C> (<http://example.org/C>)
+
+SubClassOf(<http://example.org/C> <http://example.org/B>)
+SubClassOf(<http://example.org/C> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/A>))
+
+# Class: <http://example.org/D> (<http://example.org/D>)
+
+SubClassOf(<http://example.org/D> <http://example.org/C>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/A> (<http://example.org/A>)
+
+ClassAssertion(<http://example.org/B> <http://example.org/A>)
+
+# Individual: <http://example.org/i> (<http://example.org/i>)
+
+ClassAssertion(<http://example.org/D> <http://example.org/i>)
+ObjectPropertyAssertion(<http://example.org/p> <http://example.org/i> <http://example.org/A>)
+
+
+)

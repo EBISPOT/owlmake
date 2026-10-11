@@ -1,0 +1,16 @@
+@prefix : <http://example.org/export-typed-label-annotations#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<http://example.org/export-typed-label-annotations> a owl:Ontology .
+
+:A a owl:Class .
+:A rdfs:label "v" .
+[ a owl:Axiom ;
+  owl:annotatedSource :A ;
+  owl:annotatedProperty rdfs:label ;
+  owl:annotatedTarget "v" ;
+  rdfs:comment "q" ;
+  rdfs:comment "7"^^xsd:integer ] .
+:A rdfs:label "x" .

@@ -1,0 +1,11 @@
+format-version: 1.2
+ontology: http://example.org/prop-bottom.owl
+
+[Term]
+id: http://example.org/D
+relationship: http://example.org/q http://example.org/B
+
+[Typedef]
+id: http://example.org/r
+is_a: http://example.org/p
+

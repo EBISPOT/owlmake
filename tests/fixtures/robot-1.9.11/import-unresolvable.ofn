@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/import-unresolvable#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<http://example.org/import-unresolvable>
+Import(<file:///nonexistent-owlmake-fixture/unresolvable-import.owl>)
+
+Declaration(Class(:A))
+AnnotationAssertion(rdfs:label :A "A")
+)

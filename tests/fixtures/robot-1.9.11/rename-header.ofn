@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/rename-header#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/rename-header>
+Annotation(Annotation(rdfs:comment "inner") rdfs:comment "first")
+Annotation(rdfs:label "second")
+Annotation(rdfs:seeAlso <http://example.org/x>)
+Declaration(Class(:A))
+SubClassOf(:A :B)
+)

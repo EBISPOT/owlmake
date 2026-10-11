@@ -138,7 +138,7 @@ fn materialize_existentials_over_transitive_chain() {
         }),
     ]);
     let props = std::collections::HashSet::new(); // all properties
-    let out = owlmake::cmd::materialize::materialize(m, &props);
+    let out = owlmake::cmd::materialize::materialize(m, &props).unwrap();
     let direct = Component::SubClassOf(horned_owl::model::SubClassOf {
         sub: c("Endocardium"),
         sup: some(c("HeartWall")),
@@ -304,7 +304,7 @@ fn whelk_matches_builtin_on_endocarditis() {
     ]);
 
     let elk = Reasoner::classify(&m);
-    let whelk = WhelkClassification::classify(&m);
+    let whelk = WhelkClassification::classify(&m).unwrap();
 
     assert!(whelk.is_consistent());
     assert_eq!(whelk.is_consistent(), elk.is_consistent());
@@ -330,7 +330,7 @@ fn whelk_detects_unsatisfiable_class() {
         sub(c("A"), c("C")),
         Component::DisjointClasses(horned_owl::model::DisjointClasses(vec![c("B"), c("C")])),
     ]);
-    let whelk = WhelkClassification::classify(&m);
+    let whelk = WhelkClassification::classify(&m).unwrap();
     assert!(whelk.is_consistent(), "owl:Thing remains satisfiable");
     assert!(
         whelk.unsatisfiable().contains(&format!("{NS}A")),

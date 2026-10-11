@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/c#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+
+Ontology(<http://example.org/closure-declarations-child.owl>
+Declaration(Class(:K))
+AnnotationAssertion(obo:IAO_0000115 :K "a definition only the import states")
+SubClassOf(:K :U)
+SubObjectPropertyOf(:q :r)
+)

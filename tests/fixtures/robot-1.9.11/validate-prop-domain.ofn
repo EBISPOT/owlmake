@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/prop-domain.owl>
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:q))
+DisjointClasses(:B :C)
+ObjectPropertyDomain(:p ObjectIntersectionOf(:B :C))
+SubClassOf(:D ObjectSomeValuesFrom(:q :B))
+)

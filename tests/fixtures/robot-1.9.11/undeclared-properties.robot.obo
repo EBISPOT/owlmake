@@ -1,0 +1,12 @@
+format-version: 1.2
+ontology: http://example.org/p
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(DataProperty(<http://example.org/d1>))\nDeclaration(DataProperty(<http://example.org/d2>))\nDeclaration(AnnotationProperty(<http://example.org/p>))\nDeclaration(AnnotationProperty(<http://example.org/q>))\nDeclaration(AnnotationProperty(<http://example.org/r>))\nDeclaration(AnnotationProperty(<http://example.org/t>))\n############################\n#   Annotation Properties\n############################\n\n# Annotation Property: <http://example.org/p> (<http://example.org/p>)\n\nSubAnnotationPropertyOf(<http://example.org/p> <http://example.org/q>)\n\n# Annotation Property: <http://example.org/r> (<http://example.org/r>)\n\nAnnotationPropertyDomain(<http://example.org/r> <http://example.org/A>)\n\n# Annotation Property: <http://example.org/t> (<http://example.org/t>)\n\nAnnotationPropertyRange(<http://example.org/t> <http://example.org/A>)\n\n\n############################\n#   Data Properties\n############################\n\n# Data Property: <http://example.org/d1> (<http://example.org/d1>)\n\nSubDataPropertyOf(<http://example.org/d1> <http://example.org/d2>)\n\n\n)
+
+[Term]
+id: http://example.org/A
+property_value: http://example.org/s "x" xsd:string
+
+[Typedef]
+id: http://example.org/o1
+is_a: http://example.org/o2
+

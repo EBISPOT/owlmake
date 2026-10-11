@@ -1,0 +1,55 @@
+Prefix(:=<http://example.org/twins#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(prov:=<http://www.w3.org/ns/prov#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/twins>
+
+Declaration(Annotation(prov:wasDerivedFrom <http://example.org/s>) Class(<http://example.org/A>))
+Declaration(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/B>))
+Declaration(ObjectProperty(<http://example.org/r>))
+Declaration(AnnotationProperty(prov:wasDerivedFrom))
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/r> (<http://example.org/r>)
+
+ObjectPropertyDomain(Annotation(prov:wasDerivedFrom <http://example.org/s>) <http://example.org/r> <http://example.org/A>)
+ObjectPropertyDomain(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) <http://example.org/r> <http://example.org/A>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (a)
+
+AnnotationAssertion(Annotation(rdfs:comment "z") rdfs:comment <http://example.org/A> "c")
+AnnotationAssertion(Annotation(prov:wasDerivedFrom <http://example.org/s>) rdfs:comment <http://example.org/A> "c")
+AnnotationAssertion(Annotation(prov:wasDerivedFrom <http://example.org/s>) rdfs:label <http://example.org/A> "a")
+AnnotationAssertion(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) rdfs:label <http://example.org/A> "a")
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/s>) <http://example.org/A> <http://example.org/B>)
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) <http://example.org/A> <http://example.org/B>)
+SubClassOf(<http://example.org/A> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/B>))
+SubClassOf(Annotation(rdfs:comment "one") <http://example.org/A> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/B>))
+SubClassOf(Annotation(rdfs:comment "two") Annotation(prov:wasDerivedFrom <http://example.org/s>) <http://example.org/A> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/B>))
+
+# Class: <http://example.org/B> (<http://example.org/B>)
+
+EquivalentClasses(Annotation(prov:wasDerivedFrom <http://example.org/s>) <http://example.org/B> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/A>))
+EquivalentClasses(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) <http://example.org/B> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/A>))
+
+
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/s>) ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/A>) <http://example.org/B>)
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/A>) <http://example.org/B>)
+DisjointClasses(Annotation(prov:wasDerivedFrom <http://example.org/s>) <http://example.org/A> <http://example.org/B> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/B>))
+DisjointClasses(Annotation(prov:wasDerivedFrom <http://example.org/p/v1>) <http://example.org/A> <http://example.org/B> ObjectSomeValuesFrom(<http://example.org/r> <http://example.org/B>))
+)

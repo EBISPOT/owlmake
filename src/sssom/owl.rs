@@ -553,15 +553,9 @@ fn xref_extract(model: Option<Model>, args: &[String]) -> Result<()> {
         if !secs.contains('.') {
             secs.push_str(".0");
         }
-        log_warn("org.obolibrary.robot.CommandManager", &format!("Subcommand Timing: sssom:xref-extract took {secs} seconds"));
+        crate::cmd::reason::log_warn("org.obolibrary.robot.CommandManager", &format!("Subcommand Timing: sssom:xref-extract took {secs} seconds"));
     }
     Ok(())
-}
-
-/// A warning on the console, in the log's line format.
-fn log_warn(logger: &str, msg: &str) {
-    let stamp = crate::cmd::reason::log_stamp();
-    crate::build::console_line(&format!("{stamp} WARN  {logger} - {msg}"));
 }
 
 /// The hash of an extracted mapping as a record of its forty-nine fields, of
@@ -618,7 +612,7 @@ fn report_dropped_duplicates(identities: &[(i32, String, String)]) {
     keys.sort_by_key(|&k| spread(crate::owlapi_hash::java_string_hash(groups[k].0)) & (key_cap - 1));
     for k in keys {
         let (object, subjects) = &groups[k];
-        log_warn(
+        crate::cmd::reason::log_warn(
             "org.incenp.obofoundry.sssom.robot.XrefExtractCommand",
             &format!("Cross-reference ignored: {object} mapped to {}", subjects.join(", ")),
         );

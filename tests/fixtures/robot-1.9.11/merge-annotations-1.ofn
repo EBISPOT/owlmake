@@ -1,0 +1,5 @@
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/m1>
+Annotation(rdfs:comment "c")
+Annotation(Annotation(rdfs:label "y") rdfs:comment "d")
+)

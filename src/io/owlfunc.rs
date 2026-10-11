@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 
 use horned_owl::model::{
     AnnotatedComponent, AnnotationValue, Atom, ClassExpression as CE, Component, DataRange as DR, Individual,
-    Literal, ObjectPropertyExpression as OPE, RcStr, SubObjectPropertyExpression as SOPE,
+    Literal, ObjectPropertyExpression as OPE, PropertyExpression, RcStr, SubObjectPropertyExpression as SOPE,
 };
 
 use crate::owlapi_hash::iri_cmp;
@@ -336,12 +336,27 @@ fn axiom_type_index(c: &Component<RcStr>) -> i32 {
     }
 }
 
+/// A declaration's entity, keyed as entities order: by the entity's type index
+/// (Class 1001, ObjectProperty 1002, DataProperty 1004, NamedIndividual 1005,
+/// AnnotationProperty 1006, Datatype 4001), then by IRI.
+fn declared_entity(c: &Component<RcStr>) -> Option<(i32, &str)> {
+    match c {
+        Component::DeclareClass(d) => Some((1001, d.0 .0.as_ref())),
+        Component::DeclareObjectProperty(d) => Some((1002, d.0 .0.as_ref())),
+        Component::DeclareDataProperty(d) => Some((1004, d.0 .0.as_ref())),
+        Component::DeclareNamedIndividual(d) => Some((1005, d.0 .0.as_ref())),
+        Component::DeclareAnnotationProperty(d) => Some((1006, d.0 .0.as_ref())),
+        Component::DeclareDatatype(d) => Some((4001, d.0 .0.as_ref())),
+        _ => None,
+    }
+}
+
 /// Orders axioms by the axiom-type rank, then by the axiom's own fields.
 ///
-/// Types with no comparison arm of their own — the declarations, and everything
-/// the 99 catch-all collects — compare equal to each other, so this is a
-/// preorder, not a total order. Ties keep the order they arrived in, which only a
-/// stable sort preserves.
+/// Types with no comparison arm of their own — everything the 99 catch-all
+/// collects — compare equal to each other, so this is a preorder, not a total
+/// order. Ties keep the order they arrived in, which only a stable sort
+/// preserves.
 pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Ordering {
     let ti = axiom_type_index(a).cmp(&axiom_type_index(b));
     if ti != Ordering::Equal {
@@ -362,25 +377,27 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::SubObjectPropertyOf(x), Component::SubObjectPropertyOf(y)) => {
             cmp_sope(&x.sub, &y.sub).then_with(|| cmp_ope(&x.sup, &y.sup))
         }
+        // A property assertion orders by its subject, then its property, then
+        // its object.
         (Component::ObjectPropertyAssertion(x), Component::ObjectPropertyAssertion(y)) => {
-            cmp_ope(&x.ope, &y.ope)
-                .then_with(|| cmp_individual(&x.from, &y.from))
+            cmp_individual(&x.from, &y.from)
+                .then_with(|| cmp_ope(&x.ope, &y.ope))
                 .then_with(|| cmp_individual(&x.to, &y.to))
         }
         (
             Component::NegativeObjectPropertyAssertion(x),
             Component::NegativeObjectPropertyAssertion(y),
-        ) => cmp_ope(&x.ope, &y.ope)
-            .then_with(|| cmp_individual(&x.from, &y.from))
+        ) => cmp_individual(&x.from, &y.from)
+            .then_with(|| cmp_ope(&x.ope, &y.ope))
             .then_with(|| cmp_individual(&x.to, &y.to)),
-        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref())
-            .then_with(|| cmp_individual(&x.from, &y.from))
+        (Component::DataPropertyAssertion(x), Component::DataPropertyAssertion(y)) => cmp_individual(&x.from, &y.from)
+            .then_with(|| iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref()))
             .then_with(|| cmp_literal(&x.to, &y.to)),
         (
             Component::NegativeDataPropertyAssertion(x),
             Component::NegativeDataPropertyAssertion(y),
-        ) => iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref())
-            .then_with(|| cmp_individual(&x.from, &y.from))
+        ) => cmp_individual(&x.from, &y.from)
+            .then_with(|| iri_cmp(x.dp.0.as_ref(), y.dp.0.as_ref()))
             .then_with(|| cmp_literal(&x.to, &y.to)),
         (Component::ClassAssertion(x), Component::ClassAssertion(y)) => {
             cmp_individual(&x.i, &y.i).then_with(|| cmp_ce(&x.ce, &y.ce))
@@ -462,7 +479,18 @@ pub(crate) fn cmp_component(a: &Component<RcStr>, b: &Component<RcStr>) -> Order
         (Component::FunctionalDataProperty(x), Component::FunctionalDataProperty(y)) => {
             iri_cmp(x.0 .0.as_ref(), y.0 .0.as_ref())
         }
-        _ => Ordering::Equal,
+        // A key orders by its class expression, then by its properties as a set.
+        (Component::HasKey(x), Component::HasKey(y)) => cmp_ce(&x.ce, &y.ce).then_with(|| {
+            let mut p: Vec<&PropertyExpression<RcStr>> = x.vpe.iter().collect();
+            let mut q: Vec<&PropertyExpression<RcStr>> = y.vpe.iter().collect();
+            p.sort_by(|m, n| cmp_property_expression(m, n));
+            q.sort_by(|m, n| cmp_property_expression(m, n));
+            cmp_sorted(&p, &q, |m, n| cmp_property_expression(m, n))
+        }),
+        _ => match (declared_entity(a), declared_entity(b)) {
+            (Some((ta, ia)), Some((tb, ib))) => ta.cmp(&tb).then_with(|| iri_cmp(ia, ib)),
+            _ => Ordering::Equal,
+        },
     }
 }
 
@@ -488,6 +516,30 @@ fn cmp_dp_set(a: &[horned_owl::model::DataProperty<RcStr>], b: &[horned_owl::mod
     a.sort_by(|p, q| iri_cmp(p, q));
     b.sort_by(|p, q| iri_cmp(p, q));
     cmp_sorted(&a, &b, |p, q| iri_cmp(p, q))
+}
+
+/// A key's property expressions: object properties (typeIndex 1002), inverse
+/// properties (1003), data properties (1004), annotation properties (1006), each
+/// kind in IRI order.
+fn cmp_property_expression(a: &PropertyExpression<RcStr>, b: &PropertyExpression<RcStr>) -> Ordering {
+    let rank = |pe: &PropertyExpression<RcStr>| match pe {
+        PropertyExpression::ObjectPropertyExpression(OPE::ObjectProperty(_)) => 1002,
+        PropertyExpression::ObjectPropertyExpression(OPE::InverseObjectProperty(_)) => 1003,
+        PropertyExpression::DataProperty(_) => 1004,
+        PropertyExpression::AnnotationProperty(_) => 1006,
+    };
+    rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
+        (PropertyExpression::ObjectPropertyExpression(x), PropertyExpression::ObjectPropertyExpression(y)) => {
+            cmp_ope(x, y)
+        }
+        (PropertyExpression::DataProperty(x), PropertyExpression::DataProperty(y)) => {
+            iri_cmp(x.0.as_ref(), y.0.as_ref())
+        }
+        (PropertyExpression::AnnotationProperty(x), PropertyExpression::AnnotationProperty(y)) => {
+            iri_cmp(x.0.as_ref(), y.0.as_ref())
+        }
+        _ => Ordering::Equal,
+    })
 }
 
 /// Two sets of object property expressions, each in its own order.
@@ -536,6 +588,26 @@ pub(crate) fn render_component_line(ac: &AnnotatedComponent<RcStr>) -> String {
     let component = crate::io::canonical_component(&ac.component).unwrap_or_else(|| ac.component.clone());
     let ac = AnnotatedComponent { component, ann: ac.ann.clone() };
     ac.as_functional_with_prefixes(&crate::io::ofn_prefix_block(&Default::default(), None)).to_string()
+}
+
+/// One component in the functional writer's simple style, on one line: its
+/// set-valued operands in canonical order, and every IRI in full but those of
+/// the five built-in namespaces, which are CURIEs.
+pub(crate) fn render_component_simple(ac: &AnnotatedComponent<RcStr>) -> String {
+    render_component_styled(ac, horned_owl::io::ofn::writer::Style::Simple)
+}
+
+/// One component as the functional writer writes it outside any frame, every
+/// entity, and every IRI it names as an object, written by `names`.
+pub(crate) fn render_component_named(ac: &AnnotatedComponent<RcStr>, names: &dyn Fn(&str) -> String) -> String {
+    render_component_styled(ac, horned_owl::io::ofn::writer::Style::Named(names))
+}
+
+fn render_component_styled(ac: &AnnotatedComponent<RcStr>, style: horned_owl::io::ofn::writer::Style<'_>) -> String {
+    use horned_owl::io::ofn::writer::AsFunctional;
+    let component = crate::io::canonical_component(&ac.component).unwrap_or_else(|| ac.component.clone());
+    let ac = AnnotatedComponent { component, ann: ac.ann.clone() };
+    ac.as_functional_styled(&crate::io::ofn_prefix_block(&Default::default(), None), style).to_string()
 }
 
 /// The functional-syntax document the `owl-axioms:` clause carries: the

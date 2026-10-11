@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#" xml:base="http://example.org/base/" ontologyIRI="rel/o.owl" versionIRI="rel/v.owl">
+    <Declaration><Class IRI="http://example.org/relative-ontology-iri#A"/></Declaration>
+</Ontology>

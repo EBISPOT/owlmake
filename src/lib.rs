@@ -42,6 +42,8 @@ pub mod plan;
 pub mod spec;
 pub mod table;
 pub mod cmd;
+/// The prefixes a command reads the CURIEs it is given with.
+pub mod context;
 // The command-chaining CLI dispatch — the `Cli`/`Command` clap tree and
 // `run_argv`, the in-process entry point both the binary (`src/main.rs`) and
 // the Python extension call. Native-only: it reaches the embedded text
@@ -51,6 +53,7 @@ pub mod cli;
 pub mod diff;
 pub mod dosdp;
 pub mod extract;
+pub(crate) mod mireot;
 pub mod hash_trie;
 pub mod html_escape;
 /// OBO ID-policy files (`<ont>-idranges.owl`) — parsing and checking, behind
@@ -60,6 +63,8 @@ pub mod io;
 pub mod java_number;
 pub mod model;
 pub mod odk;
+// The ontology annotations an ontology holds of those it is given.
+pub mod owlapi_annotations;
 // OWLAPI-compatible content hashes and set iteration order. Pure std +
 // object model, so it builds everywhere the model does, wasm included.
 pub mod owlapi_hash;

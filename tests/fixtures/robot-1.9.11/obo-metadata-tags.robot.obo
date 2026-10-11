@@ -1,0 +1,59 @@
+format-version: 1.2
+default-namespace: qns
+ontology: q
+
+[Term]
+id: Q:1
+name: one
+relationship: R:1 Q:2 {source="s1"} ! meta
+relationship: R:3 Q:2 ! plain relation
+
+[Term]
+id: Q:2
+
+[Typedef]
+id: R:1
+name: meta
+namespace: own
+alt_id: R:8
+def: "a meta tag" [X:1, X:2]
+comment: c1 {comment="cc"}
+subset: s1
+synonym: "syn one" EXACT []
+xref: X:9 "xref label"
+property_value: custom_tag "custom value" xsd:string
+property_value: R:2 "pv text" xsd:string
+property_value: R:2 Q:3
+domain: Q:0000001
+range: Q:0000002
+builtin: true
+holds_over_chain: R:2
+is_anti_symmetric: true
+is_cyclic: true
+is_symmetric: false
+is_transitive: true
+equivalent_to: R:5
+disjoint_from: R:6
+inverse_of: R:2
+transitive_over: R:2
+equivalent_to_chain: R:3 ! plain relation
+disjoint_over: R:7
+relationship: R:3 ! plain relation
+is_obsolete: true
+replaced_by: R:9
+consider: R:10
+created_by: someone
+creation_date: 2020-01-01T00:00:00Z
+expand_assertion_to: "x ?X y ?Y" []
+is_metadata_tag: true
+is_class_level: true
+
+[Typedef]
+id: R:2
+is_metadata_tag: true
+
+[Typedef]
+id: R:3
+name: plain relation
+property_value: R:1 R:2
+

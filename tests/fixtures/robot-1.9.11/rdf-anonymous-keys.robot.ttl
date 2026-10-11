@@ -1,0 +1,262 @@
+@prefix : <http://example.org/keys#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xml: <http://www.w3.org/XML/1998/namespace> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@base <http://example.org/keys> .
+
+<http://example.org/keys> rdf:type owl:Ontology .
+
+#################################################################
+#    Object Properties
+#################################################################
+
+###  http://example.org/keys#r
+:r rdf:type owl:ObjectProperty .
+
+
+#################################################################
+#    Data properties
+#################################################################
+
+###  http://example.org/keys#d
+:d rdf:type owl:DatatypeProperty .
+
+
+#################################################################
+#    Classes
+#################################################################
+
+###  http://example.org/keys#A1
+:A1 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A10
+:A10 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A11
+:A11 rdf:type owl:Class ;
+     owl:hasKey rdf:nil .
+
+
+###  http://example.org/keys#A12
+:A12 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A13
+:A13 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A14
+:A14 rdf:type owl:Class ;
+     owl:hasKey ( :r
+                  :d
+                ) .
+
+
+###  http://example.org/keys#A4
+:A4 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A5
+:A5 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A6
+:A6 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A8
+:A8 rdf:type owl:Class .
+
+
+###  http://example.org/keys#A9
+:A9 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B1
+:B1 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B10
+:B10 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B12
+:B12 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B13
+:B13 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B6
+:B6 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B8
+:B8 rdf:type owl:Class .
+
+
+###  http://example.org/keys#B9
+:B9 rdf:type owl:Class .
+
+
+###  http://example.org/keys#C12
+:C12 rdf:type owl:Class ;
+     rdfs:subClassOf [ rdf:type owl:Class ;
+                       owl:unionOf ( :A12
+                                     :B12
+                                   )
+                     ] .
+
+
+#################################################################
+#    Individuals
+#################################################################
+
+###  http://example.org/keys#i7
+:i7 rdf:type owl:NamedIndividual .
+
+
+###  http://example.org/keys#j7
+:j7 rdf:type owl:NamedIndividual .
+
+
+#################################################################
+#    General axioms
+#################################################################
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A8
+                :B8
+              ) ;
+  rdfs:subClassOf :A8
+] .
+
+
+[ owl:intersectionOf rdf:nil ;
+  rdf:type owl:Class ;
+  owl:hasKey ( :d
+             )
+] .
+
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ owl:intersectionOf ( :A6
+                                             :B6
+                                           ) ;
+                        rdf:type owl:Class ;
+                        owl:hasKey _:genid14
+                      ] ;
+  owl:annotatedProperty owl:hasKey ;
+  owl:annotatedTarget _:genid14 ;
+  rdfs:comment "annotated key"
+] .
+
+_:genid14 rdf:type rdf:List ;
+           rdf:first :r ;
+           rdf:rest rdf:nil .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf rdf:nil ;
+  owl:hasKey ( :r
+             )
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A1
+                :B1
+              ) ;
+  owl:hasKey ( :r
+             )
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A10
+                :B10
+              ) ;
+  owl:hasKey ( :r
+             )
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A10
+                :B10
+              ) ;
+  owl:hasKey ( :d
+             )
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A12
+                :B12
+              ) ;
+  owl:hasKey ( :r
+             )
+] .
+
+
+[ rdf:type owl:Axiom ;
+  owl:annotatedSource [ rdf:type owl:Class ;
+                        owl:unionOf ( :A13
+                                      :B13
+                                    ) ;
+                        owl:hasKey rdf:nil
+                      ] ;
+  owl:annotatedProperty owl:hasKey ;
+  owl:annotatedTarget rdf:nil ;
+  rdfs:comment "empty key"
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A8
+                :B8
+              ) ;
+  owl:hasKey ( :r
+             )
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:unionOf ( :A9
+                :B9
+              ) ;
+  owl:hasKey rdf:nil
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:complementOf :A5 ;
+  owl:hasKey ( :d
+             )
+] .
+
+
+[ rdf:type owl:Class ;
+  owl:oneOf ( :i7
+              :j7
+            ) ;
+  owl:hasKey ( :r
+             )
+] .
+
+
+[ rdf:type owl:Restriction ;
+  owl:onProperty :r ;
+  owl:someValuesFrom :A4 ;
+  owl:hasKey ( :r
+               :d
+             )
+] .
+
+
+###  Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi

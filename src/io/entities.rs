@@ -32,7 +32,30 @@ pub(crate) enum HeldLabel<'m> {
     Iri(&'m str),
 }
 
+impl HeldLabel<'_> {
+    /// The label as a label provider shows it: a literal's text, or the short
+    /// form of an IRI.
+    pub(crate) fn short_form(&self) -> String {
+        match self {
+            HeldLabel::Literal(text) => text.to_string(),
+            HeldLabel::Iri(iri) => crate::owlapi_hash::iri_short_form(iri),
+        }
+    }
+}
+
 /// The label of every entity of `model` that has one (see [`HeldLabel`]).
+///
+/// An entity's labels are taken in the iteration order of its own set of
+/// annotation assertions: by the axioms' hashes, not by document order and not
+/// by the values. That set is sized by how many annotation assertions the
+/// entity carries, and two of its members in one bucket stand in the order the
+/// ontology's set of every annotation assertion holds them. `oboInOwl:hasDbXref`
+/// carries both "database_cross_reference" and "has cross-reference", and the
+/// order decides which one names it in every artefact.
+///
+/// Two labels in one bucket at both levels stand in the order the document
+/// added them, which it does not record; the lexically smaller is taken first,
+/// so the pick is the same from one run to the next.
 pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
     use horned_owl::model::{AnnotationSubject, AnnotationValue, Component};
     const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
@@ -41,20 +64,34 @@ pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
     let mut candidates: HashMap<&str, Vec<(i32, &AnnotationValue<RcStr>)>> = HashMap::new();
     for ac in model.ont.iter() {
         if let Component::AnnotationAssertion(aa) = &ac.component {
+            assertions += 1;
             if let AnnotationSubject::IRI(s) = &aa.subject {
-                assertions += 1;
                 *per_subject.entry(s.as_ref()).or_default() += 1;
                 if aa.ann.ap.0.as_ref() == RDFS_LABEL {
                     candidates.entry(s.as_ref()).or_default().push((
-                        crate::owlapi_hash::annotation_assertion_hash(s.as_ref(), RDFS_LABEL, &aa.ann.av, &ac.ann),
+                        crate::owlapi_hash::annotation_assertion_hash(
+                            s.as_ref(),
+                            RDFS_LABEL,
+                            &aa.ann.av,
+                            &ac.ann,
+                            model.natural_order(),
+                        ),
                         &aa.ann.av,
                     ));
                 }
             }
         }
     }
+    let text = |av: &AnnotationValue<RcStr>| -> String {
+        match av {
+            AnnotationValue::Literal(l) => l.literal().to_string(),
+            AnnotationValue::IRI(iri) => iri.to_string(),
+            AnnotationValue::AnonymousIndividual(a) => a.0.to_string(),
+        }
+    };
     let mut labels: HashMap<&str, HeldLabel> = HashMap::new();
-    for (subject, cands) in &candidates {
+    for (subject, mut cands) in candidates {
+        cands.sort_by_key(|c| text(c.1));
         let ordered: Vec<usize> = if cands.len() == 1 {
             vec![0]
         } else {
@@ -73,7 +110,7 @@ pub(crate) fn held_labels(model: &Model) -> HashMap<&str, HeldLabel<'_>> {
             }
         }
         if let Some(f) = found {
-            labels.insert(*subject, f);
+            labels.insert(subject, f);
         }
     }
     labels
@@ -278,21 +315,12 @@ pub fn declaration(c: &Component<RcStr>) -> Option<(Kind, &str)> {
     }
 }
 
-/// Whether a declaration of `model` is one its reader supplied for an entity
-/// the source document names without declaring (`Model::materialised_declarations`).
-/// A written document declares such an entity among those it declares for the
-/// ontology, not among the ontology's own declarations.
-pub fn is_materialised(model: &Model, kind: Kind, iri: &str) -> bool {
-    model.materialised_declarations.contains(&closure_key(kind, iri))
-}
-
 /// The entities `model` declares itself.
 pub fn declared(model: &Model) -> HashSet<(Kind, String)> {
     model
         .ont
         .iter()
         .filter_map(|ac| declaration(&ac.component))
-        .filter(|(kind, iri)| !is_materialised(model, *kind, iri))
         .map(|(kind, iri)| (kind, iri.to_string()))
         .collect()
 }
@@ -320,8 +348,7 @@ pub fn illegal_punnings(signature: &BTreeSet<(Kind, String)>) -> HashSet<String>
         .collect()
 }
 
-/// The `kind\0IRI` key of an entity in `Model::imports_closure` and
-/// `Model::materialised_declarations`.
+/// The `kind\0IRI` key of an entity in `Model::imports_closure`.
 pub(crate) fn closure_key(kind: Kind, iri: &str) -> String {
     format!("{}\0{iri}", key_name(kind))
 }
@@ -367,8 +394,12 @@ pub fn missing_type(model: &Model, declared: &HashSet<(Kind, String)>, kind: Kin
 /// The entities a document written from `model` in functional syntax or
 /// OWL/XML declares although the ontology does not: every entity of the
 /// ontology's signature and its imports closure's that is not built in, not
-/// illegally punned across the two, and declared by neither. An ontology that
-/// imports declares none while its closure is unread.
+/// illegally punned across the two, and declared by neither. Once a command has
+/// changed the ontology ([`Model::root_changed`]), the closure's signature is
+/// left out, and only what the ontology names itself is declared. An ontology
+/// that imports nothing has no closure unless it outlives its imports
+/// ([`ImportsClosure::outlives_imports`](crate::model::ImportsClosure)); one
+/// that imports declares none while its closure is unread.
 ///
 /// They come in the order a hash set built from that signature holds them: by
 /// bucket, the table sized for the signature (at least 16 slots, a power of
@@ -378,12 +409,15 @@ pub fn missing_declarations(model: &Model) -> Vec<(Kind, String)> {
     let mut sig = signature(model);
     let mut declared = declared(model);
     let imports = model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)));
-    if imports {
-        let Some(closure) = &model.imports_closure else {
-            return Vec::new();
-        };
-        sig.extend(closure.signature.iter().filter_map(|k| key_entity(k)));
-        declared.extend(closure.declared.iter().filter_map(|k| key_entity(k)));
+    match &model.imports_closure {
+        Some(closure) if imports || closure.outlives_imports => {
+            if !model.root_changed() {
+                sig.extend(closure.signature.iter().filter_map(|k| key_entity(k)));
+            }
+            declared.extend(closure.declared.iter().filter_map(|k| key_entity(k)));
+        }
+        None if imports => return Vec::new(),
+        _ => {}
     }
     let illegal = illegal_punnings(&sig);
     let mut cap = 16usize;

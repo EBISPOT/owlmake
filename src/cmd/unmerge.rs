@@ -111,7 +111,11 @@ pub fn step(
 
     let mut to_remove: HashSet<AnnotatedComponent<RcStr>> = HashSet::new();
     for path in &subtrahends {
-        let second = io::load(path)?;
+        // Read as every input is, with its imports closure: an import that
+        // resolves nowhere fails the load. Only the document's own axioms are
+        // subtracted.
+        let mut second = io::load(path)?;
+        crate::cmd::read_imports_closure(&mut second, Some(path), &args.common)?;
         to_remove.extend(second.ont.iter().cloned());
     }
 

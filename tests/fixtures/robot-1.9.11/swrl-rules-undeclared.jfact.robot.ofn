@@ -1,0 +1,42 @@
+Prefix(:=<http://example.org/rule4#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/rule4>
+
+Declaration(Class(<http://example.org/rule#A>))
+Declaration(Class(<http://example.org/rule#D>))
+Declaration(Class(<http://example.org/rule#E>))
+Declaration(NamedIndividual(<http://example.org/rule#a>))
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/rule#A> (<http://example.org/rule#A>)
+
+SubClassOf(<http://example.org/rule#A> <http://example.org/rule#E>)
+
+# Class: <http://example.org/rule#D> (<http://example.org/rule#D>)
+
+SubClassOf(<http://example.org/rule#D> owl:Thing)
+
+# Class: <http://example.org/rule#E> (<http://example.org/rule#E>)
+
+SubClassOf(<http://example.org/rule#E> owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/rule#a> (<http://example.org/rule#a>)
+
+ClassAssertion(<http://example.org/rule#A> <http://example.org/rule#a>)
+
+
+DLSafeRule(Body(ClassAtom(<http://example.org/rule#A> Variable(<urn:swrl:var#x>)))Head(ClassAtom(<http://example.org/rule#D> Variable(<urn:swrl:var#x>))))
+)

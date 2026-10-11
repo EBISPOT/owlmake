@@ -1,0 +1,48 @@
+Prefix(:=<http://example.org/diff-imports#>)
+Prefix(dc:=<http://purl.org/dc/elements/1.1/>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(child:=<http://example.org/diff-imports-child#>)
+
+
+Ontology(<http://example.org/diff-imports>
+<http://example.org/diff-imports/v1>
+Annotation(dc:title "the input")
+Annotation(rdfs:comment "a comment")
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:T1))
+Declaration(Class(child:L))
+Declaration(Class(obo:GO_0000001))
+Declaration(Class(obo:UBERON_0000001))
+Declaration(AnnotationProperty(dc:title))
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (import label of A)
+
+SubClassOf(:A child:L)
+
+# Class: :B (bee)
+
+AnnotationAssertion(rdfs:label :B "bee")
+
+# Class: :T1 (t one)
+
+AnnotationAssertion(rdfs:label :T1 "t one")
+SubClassOf(:T1 :A)
+
+# Class: obo:GO_0000001 (obo:GO_0000001)
+
+SubClassOf(obo:GO_0000001 obo:UBERON_0000001)
+
+
+)

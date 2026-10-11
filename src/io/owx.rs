@@ -479,7 +479,7 @@ impl<W: Write> Renderer<'_, W> {
             Atom::DataPropertyAtom { pred, args } => {
                 self.xml.start("DataPropertyAtom")?;
                 self.entity("DataProperty", pred.0.as_ref())?;
-                self.darg(&args.0)?;
+                self.iarg(&args.0)?;
                 self.darg(&args.1)?;
             }
             Atom::BuiltInAtom { pred, args } => {
@@ -719,7 +719,7 @@ fn entity_element(kind: Kind) -> &'static str {
 /// Write `model` as OWL/XML, declaring `prefixes` (name → namespace, the default
 /// prefix as the empty name) in the order given.
 pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -> Result<()> {
-    let order = NaturalOrder::new(model.plain_literals_typed);
+    let order = model.natural_order();
     let (iri, viri) = model
         .ont
         .iter()
@@ -807,13 +807,7 @@ pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -
     let mut axioms: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
     for ac in model.ont.iter() {
         match NaturalOrder::axiom_index(&ac.component) {
-            0 => {
-                let supplied = entities::declaration(&ac.component)
-                    .is_some_and(|(kind, iri)| entities::is_materialised(model, kind, iri));
-                if !supplied {
-                    decls.push(ac);
-                }
-            }
+            0 => decls.push(ac),
             99 => {}
             _ => axioms.push(ac),
         }
@@ -844,7 +838,7 @@ pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -
 
 /// Whether `s` is an absolute IRI: it opens with a scheme (a letter, then
 /// letters, digits, `+`, `-` or `.`, then `:`).
-fn has_scheme(s: &str) -> bool {
+pub(crate) fn has_scheme(s: &str) -> bool {
     let Some(colon) = s.find(':') else { return false };
     let scheme = &s[..colon];
     let mut chars = scheme.chars();

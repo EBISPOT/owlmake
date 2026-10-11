@@ -1,0 +1,25 @@
+format-version: 1.2
+idspace: oboInOwl http://www.geneontology.org/formats/oboInOwl# 
+ontology: q
+
+[Term]
+id: Q:1
+comment: a q comment
+is_a: Q:2 ! two
+union_of: Q:2 ! two
+relationship: R:1
+property_value: custom "custom" xsd:string
+domain: Q:2 ! two
+domain: Q:3
+
+[Term]
+id: Q:2
+name: two
+property_value: http://purl.obolibrary.org/obo/name "named by obo/name" xsd:string
+
+[Typedef]
+id: R:1
+domain: Q:2 ! two
+inverse_of: R:9
+relationship: R:1
+

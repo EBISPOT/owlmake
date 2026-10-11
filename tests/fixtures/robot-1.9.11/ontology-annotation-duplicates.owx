@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<Ontology xmlns="http://www.w3.org/2002/07/owl#" ontologyIRI="http://example.org/o">
+    <Annotation>
+        <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <Literal>c</Literal>
+    </Annotation>
+    <Annotation>
+        <Annotation>
+            <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#label"/>
+            <Literal>x</Literal>
+        </Annotation>
+        <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <Literal>c</Literal>
+    </Annotation>
+    <Annotation>
+        <Annotation>
+            <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#label"/>
+            <Literal>y</Literal>
+        </Annotation>
+        <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <Literal>d</Literal>
+    </Annotation>
+    <Annotation>
+        <AnnotationProperty IRI="http://www.w3.org/2000/01/rdf-schema#comment"/>
+        <Literal datatypeIRI="http://www.w3.org/2001/XMLSchema#string">d</Literal>
+    </Annotation>
+</Ontology>

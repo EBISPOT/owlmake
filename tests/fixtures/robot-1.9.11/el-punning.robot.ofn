@@ -1,0 +1,52 @@
+Prefix(:=<http://example.org/el-punning#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/el-punning>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:P))
+Declaration(NamedIndividual(:P))
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A owl:Thing)
+
+# Class: :B (:B)
+
+SubClassOf(:B :A)
+
+# Class: :D (:D)
+
+EquivalentClasses(:D ObjectOneOf(:P))
+SubClassOf(:D :B)
+
+# Class: :E (:E)
+
+SubClassOf(:E owl:Thing)
+
+# Class: :P (:P)
+
+SubClassOf(:P :E)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :P (:P)
+
+ClassAssertion(:B :P)
+
+
+)

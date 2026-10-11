@@ -1,0 +1,80 @@
+Prefix(:=<http://example.org/whelk-expressions#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/whelk-expressions>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:F))
+Declaration(Class(:H))
+Declaration(Class(:U))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(ObjectProperty(:p))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:k))
+
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A :B)
+SubClassOf(:A ObjectHasValue(:p :i))
+
+# Class: :B (:B)
+
+EquivalentClasses(:B ObjectHasValue(:p :i))
+SubClassOf(:B owl:Thing)
+
+# Class: :C (:C)
+
+EquivalentClasses(:C ObjectOneOf(:i :j))
+SubClassOf(:C :E)
+
+# Class: :D (:D)
+
+EquivalentClasses(:D ObjectOneOf(:i))
+SubClassOf(:D :C)
+
+# Class: :E (:E)
+
+EquivalentClasses(:E ObjectOneOf(:i :j :k))
+SubClassOf(:E owl:Thing)
+
+# Class: :F (:F)
+
+SubClassOf(:F owl:Thing)
+SubClassOf(:F ObjectSomeValuesFrom(:p ObjectOneOf(:i :j)))
+
+# Class: :H (:H)
+
+EquivalentClasses(:H ObjectOneOf(:i _:genid2147483648))
+SubClassOf(:H :C)
+
+# Class: :U (:U)
+
+SubClassOf(:U owl:Thing)
+DisjointUnion(:U :X :Y)
+
+# Class: :X (:X)
+
+SubClassOf(:X owl:Thing)
+
+# Class: :Y (:Y)
+
+SubClassOf(:Y owl:Thing)
+
+
+
+)

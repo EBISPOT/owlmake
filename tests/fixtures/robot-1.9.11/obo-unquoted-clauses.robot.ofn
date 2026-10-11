@@ -1,0 +1,189 @@
+Prefix(:=<http://purl.obolibrary.org/obo/q.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/q.owl>
+Annotation(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "hs") <http://purl.obolibrary.org/obo/q#hdr> "h")
+Annotation(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "s") <http://www.geneontology.org/formats/oboInOwl#custom-header> "v")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "1.2")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#saved-by> "me \"q\"")
+Annotation(Annotation(rdfs:comment "c") rdfs:comment "hello {x}")
+
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_0000009>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/R_1>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/R_2>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/R_9>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000115>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0000231>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/IAO_0100001>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/q#hdr>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/q#s1>))
+Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/q#st1>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#SubsetProperty>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#a>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#created_by>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#creation_date>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#custom-header>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#custom_tag>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#disjoint_over>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#foo_bar>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasAlternativeId>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasDbXref>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasOBONamespace>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasScope>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#id>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#inSubset>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#saved-by>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#seeAlso>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#source>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#transitive>))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:label))
+Declaration(AnnotationProperty(rdfs:seeAlso))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://purl.obolibrary.org/obo/IAO_0000115> (definition)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/IAO_0000115> "definition")
+
+# Annotation Property: <http://purl.obolibrary.org/obo/q#s1> (<http://purl.obolibrary.org/obo/q#s1>)
+
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/q#s1> "subset one")
+SubAnnotationPropertyOf(Annotation(rdfs:comment "sc") <http://purl.obolibrary.org/obo/q#s1> <http://www.geneontology.org/formats/oboInOwl#SubsetProperty>)
+
+# Annotation Property: <http://purl.obolibrary.org/obo/q#st1> (type one)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasScope> <http://purl.obolibrary.org/obo/q#st1> <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>)
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/q#st1> "type one")
+SubAnnotationPropertyOf(Annotation(rdfs:comment "tc") <http://purl.obolibrary.org/obo/q#st1> <http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty>)
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#SubsetProperty> (subset_property)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#SubsetProperty> "subset_property")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty> (synonym_type_property)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#SynonymTypeProperty> "synonym_type_property")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#created_by> (created by)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#created_by> "created by")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#creation_date> (creation date)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#creation_date> "creation date")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasAlternativeId> (has_alternative_id)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasAlternativeId> "has_alternative_id")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasDbXref> (database_cross_reference)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasDbXref> "database_cross_reference")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> (has_exact_synonym)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> "has_exact_synonym")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> (has_obo_format_version)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "has_obo_format_version")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> (has_obo_namespace)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> "has_obo_namespace")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> (has_related_synonym)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> "has_related_synonym")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasScope> (has_scope)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasScope> "has_scope")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#id> (id)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#id> "id")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#inSubset> (in_subset)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#inSubset> "in_subset")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://purl.obolibrary.org/obo/R_1> (rel)
+
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#a> "b") <http://www.geneontology.org/formats/oboInOwl#created_by> <http://purl.obolibrary.org/obo/R_1> "z")
+AnnotationAssertion(Annotation(rdfs:comment "x") <http://www.geneontology.org/formats/oboInOwl#custom_tag> <http://purl.obolibrary.org/obo/R_1> "v")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#disjoint_over> <http://purl.obolibrary.org/obo/R_1> "R:2")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/R_1> "R:1")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#inSubset> <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/q#s1>)
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#transitive> <http://purl.obolibrary.org/obo/R_1> "true")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "s") rdfs:comment <http://purl.obolibrary.org/obo/R_1> "c")
+AnnotationAssertion(Annotation(rdfs:comment "x") rdfs:label <http://purl.obolibrary.org/obo/R_1> "rel")
+
+# Object Property: <http://purl.obolibrary.org/obo/R_2> (<http://purl.obolibrary.org/obo/R_2>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/R_2> "R:2")
+
+# Object Property: <http://purl.obolibrary.org/obo/R_9> (<http://purl.obolibrary.org/obo/R_9>)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000231> <http://purl.obolibrary.org/obo/R_9> <http://purl.obolibrary.org/obo/IAO_0000227>)
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0100001> <http://purl.obolibrary.org/obo/R_9> <http://purl.obolibrary.org/obo/R_1>)
+AnnotationAssertion(owl:deprecated <http://purl.obolibrary.org/obo/R_9> "true"^^xsd:boolean)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/Q_0000001> (a b)
+
+AnnotationAssertion(Annotation(rdfs:comment "x") <http://purl.obolibrary.org/obo/IAO_0000115> <http://purl.obolibrary.org/obo/Q_0000001> "d")
+AnnotationAssertion(Annotation(rdfs:comment "q") <http://www.geneontology.org/formats/oboInOwl#created_by> <http://purl.obolibrary.org/obo/Q_0000001> "someone")
+AnnotationAssertion(Annotation(rdfs:comment "d") <http://www.geneontology.org/formats/oboInOwl#creation_date> <http://purl.obolibrary.org/obo/Q_0000001> "2020-01-01T00:00:00Z")
+AnnotationAssertion(Annotation(rdfs:comment "x") Annotation(rdfs:label "z") Annotation(rdfs:seeAlso "y") <http://www.geneontology.org/formats/oboInOwl#foo_bar> <http://purl.obolibrary.org/obo/Q_0000001> "baz{1}")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "s") <http://www.geneontology.org/formats/oboInOwl#hasAlternativeId> <http://purl.obolibrary.org/obo/Q_0000001> "Q:0000009")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> <http://purl.obolibrary.org/obo/Q_0000001> "X:2")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "X:1") <http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> <http://purl.obolibrary.org/obo/Q_0000001> "syn one")
+AnnotationAssertion(Annotation(rdfs:comment "n") <http://www.geneontology.org/formats/oboInOwl#hasOBONamespace> <http://purl.obolibrary.org/obo/Q_0000001> "ns1")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym> <http://purl.obolibrary.org/obo/Q_0000001> "unquoted text")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/Q_0000001> "Q:0000001")
+AnnotationAssertion(Annotation(rdfs:comment "x") <http://www.geneontology.org/formats/oboInOwl#inSubset> <http://purl.obolibrary.org/obo/Q_0000001> <http://purl.obolibrary.org/obo/q#s1>)
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/Q_0000001> "He said \"a")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#seeAlso> "z") Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "s2") Annotation(rdfs:comment "x}y") rdfs:label <http://purl.obolibrary.org/obo/Q_0000001> "a b")
+AnnotationAssertion(rdfs:seeAlso <http://purl.obolibrary.org/obo/Q_0000001> "x")
+SubClassOf(<http://purl.obolibrary.org/obo/Q_0000001> owl:Thing)
+
+# Class: <http://purl.obolibrary.org/obo/Q_0000002> (x	y
+# z)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/Q_0000002> "Q:0000002")
+AnnotationAssertion(Annotation(<http://www.geneontology.org/formats/oboInOwl#hasDbXref> "X:3") rdfs:comment <http://purl.obolibrary.org/obo/Q_0000002> "tabs	and {braces}")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/Q_0000002> "x	y
+z")
+
+# Class: <http://purl.obolibrary.org/obo/Q_0000009> (<http://purl.obolibrary.org/obo/Q_0000009>)
+
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0000231> <http://purl.obolibrary.org/obo/Q_0000009> <http://purl.obolibrary.org/obo/IAO_0000227>)
+AnnotationAssertion(<http://purl.obolibrary.org/obo/IAO_0100001> <http://purl.obolibrary.org/obo/Q_0000009> <http://purl.obolibrary.org/obo/Q_0000001>)
+AnnotationAssertion(owl:deprecated <http://purl.obolibrary.org/obo/Q_0000009> "true"^^xsd:boolean)
+
+
+)

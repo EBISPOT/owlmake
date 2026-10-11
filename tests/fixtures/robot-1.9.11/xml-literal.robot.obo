@@ -1,0 +1,9 @@
+format-version: 1.2
+ontology: http://example.org/xml-literal
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(DataProperty(<http://example.org/xml-literal#dp>))\nDeclaration(NamedIndividual(<http://example.org/xml-literal#i>))\n\n\n############################\n#   Named Individuals\n############################\n\n# Individual: <http://example.org/xml-literal#i> (<http://example.org/xml-literal#i>)\n\nDataPropertyAssertion(<http://example.org/xml-literal#dp> <http://example.org/xml-literal#i> \"<p xmlns=\\\"http://example.org/p\\\"><p>nested</p></p>\"^^rdf:XMLLiteral)\n\n\n)
+
+[Term]
+id: A
+comment: <b xmlns="http://example.org/b">bold &amp; <i>x</i></b>
+property_value: seeAlso "<owl:Thing xmlns:owl=\"http://www.w3.org/2002/07/owl#\"/>" http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral {name="annotated"}
+

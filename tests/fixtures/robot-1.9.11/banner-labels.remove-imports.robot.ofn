@@ -1,0 +1,39 @@
+Prefix(:=<http://purl.obolibrary.org/obo/banner-labels.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/banner-labels.owl>
+
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_1>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_2>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_3>))
+Declaration(Class(<http://purl.obolibrary.org/obo/EX_9>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/EX_1> (one from child)
+
+SubClassOf(<http://purl.obolibrary.org/obo/EX_1> <http://purl.obolibrary.org/obo/EX_9>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_2> (two)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_2> "two")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_2> <http://purl.obolibrary.org/obo/EX_1>)
+SubClassOf(<http://purl.obolibrary.org/obo/EX_2> <http://purl.obolibrary.org/obo/EX_9>)
+
+# Class: <http://purl.obolibrary.org/obo/EX_3> (three
+# lines)
+
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/EX_3> "three
+lines")
+SubClassOf(<http://purl.obolibrary.org/obo/EX_3> <http://purl.obolibrary.org/obo/EX_2>)
+
+
+)

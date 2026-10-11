@@ -1,0 +1,592 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/repair#"
+     xml:base="http://example.org/repair"
+     xmlns:obo="http://purl.obolibrary.org/obo/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:swrl="http://www.w3.org/2003/11/swrl#"
+     xmlns:swrlb="http://www.w3.org/2003/11/swrlb#"
+     xmlns:repair="http://example.org/repair#"
+     xmlns:oboInOwl="http://www.geneontology.org/formats/oboInOwl#">
+    <owl:Ontology rdf:about="http://example.org/repair">
+        <rdfs:comment>about :A</rdfs:comment>
+        <rdfs:seeAlso rdf:resource="http://example.org/repair#B"/>
+    </owl:Ontology>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotation properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/repair#ap -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/repair#ap">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#aq"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://example.org/repair#aq -->
+
+    <owl:AnnotationProperty rdf:about="http://example.org/repair#aq">
+        <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2000/01/rdf-schema#comment"/>
+    </owl:AnnotationProperty>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/IAO_0100001 -->
+
+    <owl:AnnotationProperty rdf:about="http://purl.obolibrary.org/obo/IAO_0100001"/>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasDbXref -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasDbXref"/>
+    
+
+
+    <!-- http://www.geneontology.org/formats/oboInOwl#hasExactSynonym -->
+
+    <owl:AnnotationProperty rdf:about="http://www.geneontology.org/formats/oboInOwl#hasExactSynonym"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/repair#New -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#New"/>
+    
+
+
+    <!-- http://example.org/repair#Pun -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#Pun">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/repair#s"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/repair#p -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#p">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/repair#s"/>
+        <owl:inverseOf rdf:resource="http://example.org/repair#u"/>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+        <rdfs:domain rdf:resource="http://example.org/repair#X"/>
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#q"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/repair#q -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#q"/>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/repair#q"/>
+        <rdfs:subPropertyOf rdf:resource="http://example.org/repair#v"/>
+    </rdf:Description>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/repair#q"/>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    </rdf:Description>
+    <rdf:Description>
+        <owl:inverseOf rdf:resource="http://example.org/repair#q"/>
+        <rdfs:range rdf:resource="http://example.org/repair#Y"/>
+    </rdf:Description>
+    
+
+
+    <!-- http://example.org/repair#s -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#s"/>
+    
+
+
+    <!-- http://example.org/repair#t -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#t">
+        <rdfs:subPropertyOf rdf:resource="http://example.org/repair#q"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://example.org/repair#u -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#u"/>
+    
+
+
+    <!-- http://example.org/repair#v -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#v"/>
+    
+
+
+    <!-- http://example.org/repair#w -->
+
+    <owl:ObjectProperty rdf:about="http://example.org/repair#w">
+        <owl:propertyChainAxiom rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/repair#q"/>
+            <rdf:Description rdf:about="http://example.org/repair#v"/>
+        </owl:propertyChainAxiom>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/repair#dp -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/repair#dp">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#dq"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://example.org/repair#dq -->
+
+    <owl:DatatypeProperty rdf:about="http://example.org/repair#dq">
+        <rdfs:domain rdf:resource="http://example.org/repair#X"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/repair#A -->
+
+    <owl:Class rdf:about="http://example.org/repair#A">
+        <owl:equivalentClass rdf:resource="http://example.org/repair#X"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#D"/>
+        <owl:disjointWith rdf:resource="http://example.org/repair#Y"/>
+        <owl:disjointUnionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/repair#P1"/>
+            <rdf:Description rdf:about="http://example.org/repair#P2"/>
+        </owl:disjointUnionOf>
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#B"/>
+        <oboInOwl:hasDbXref>X:1</oboInOwl:hasDbXref>
+        <oboInOwl:hasExactSynonym>a synonym</oboInOwl:hasExactSynonym>
+        <rdfs:comment>a comment</rdfs:comment>
+        <rdfs:label>obsolete a</rdfs:label>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#D"/>
+        <rdfs:comment>own</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#A"/>
+        <owl:annotatedProperty rdf:resource="http://www.geneontology.org/formats/oboInOwl#hasExactSynonym"/>
+        <owl:annotatedTarget>a synonym</owl:annotatedTarget>
+        <rdfs:comment>source</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/repair#B -->
+
+    <owl:Class rdf:about="http://example.org/repair#B">
+        <owl:hasKey rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/repair#q"/>
+        </owl:hasKey>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#Bare -->
+
+    <owl:Class rdf:about="http://example.org/repair#Bare">
+        <obo:IAO_0100001>New</obo:IAO_0100001>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#C -->
+
+    <owl:Class rdf:about="http://example.org/repair#C">
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#B"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#Mid"/>
+        <rdfs:seeAlso rdf:resource="http://example.org/repair#A"/>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#C"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#B"/>
+        <rdfs:comment>reference</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/repair#D -->
+
+    <owl:Class rdf:about="http://example.org/repair#D">
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#New"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#E -->
+
+    <owl:Class rdf:about="http://example.org/repair#E">
+        <rdfs:subClassOf rdf:resource="http://purl.obolibrary.org/obo/GO_0000001"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/repair#q"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/repair#B"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#F -->
+
+    <owl:Class rdf:about="http://example.org/repair#F">
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#Bare"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#G -->
+
+    <owl:Class rdf:about="http://example.org/repair#G">
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#H"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#Kept"/>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#G"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#H"/>
+        <rdfs:seeAlso rdf:resource="http://example.org/repair#A"/>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/repair#H -->
+
+    <owl:Class rdf:about="http://example.org/repair#H">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/repair#New"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/repair#New"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#Kept -->
+
+    <owl:Class rdf:about="http://example.org/repair#Kept">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#New"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#Lit -->
+
+    <owl:Class rdf:about="http://example.org/repair#Lit">
+        <obo:IAO_0100001>GO:0000001</obo:IAO_0100001>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#Mid -->
+
+    <owl:Class rdf:about="http://example.org/repair#Mid">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#New"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#New -->
+
+    <owl:Class rdf:about="http://example.org/repair#New"/>
+    
+
+
+    <!-- http://example.org/repair#Old -->
+
+    <owl:Class rdf:about="http://example.org/repair#Old">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#Mid"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#P1 -->
+
+    <owl:Class rdf:about="http://example.org/repair#P1"/>
+    
+
+
+    <!-- http://example.org/repair#P2 -->
+
+    <owl:Class rdf:about="http://example.org/repair#P2"/>
+    
+
+
+    <!-- http://example.org/repair#Pun -->
+
+    <owl:Class rdf:about="http://example.org/repair#Pun">
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#X"/>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#U -->
+
+    <owl:Class rdf:about="http://example.org/repair#U">
+        <owl:disjointUnionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/repair#B"/>
+            <rdf:Description rdf:about="http://example.org/repair#V"/>
+        </owl:disjointUnionOf>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#V -->
+
+    <owl:Class rdf:about="http://example.org/repair#V"/>
+    
+
+
+    <!-- http://example.org/repair#W -->
+
+    <owl:Class rdf:about="http://example.org/repair#W">
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#B"/>
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#X"/>
+    </owl:Class>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#W"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#B"/>
+        <rdfs:comment>m1</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#W"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#B"/>
+        <rdfs:comment>m2</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#W"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#X"/>
+        <rdfs:comment>x</rdfs:comment>
+    </owl:Axiom>
+    <owl:Axiom>
+        <owl:annotatedSource rdf:resource="http://example.org/repair#W"/>
+        <owl:annotatedProperty rdf:resource="http://www.w3.org/2000/01/rdf-schema#subClassOf"/>
+        <owl:annotatedTarget rdf:resource="http://example.org/repair#X"/>
+        <rdfs:comment>y</rdfs:comment>
+    </owl:Axiom>
+    
+
+
+    <!-- http://example.org/repair#X -->
+
+    <owl:Class rdf:about="http://example.org/repair#X">
+        <aq>v</aq>
+    </owl:Class>
+    
+
+
+    <!-- http://example.org/repair#Y -->
+
+    <owl:Class rdf:about="http://example.org/repair#Y"/>
+    
+
+
+    <!-- http://example.org/repair#Z -->
+
+    <owl:Class rdf:about="http://example.org/repair#Z">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/repair#B"/>
+                    <rdf:Description rdf:about="http://example.org/repair#W"/>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+    
+
+
+    <!-- http://purl.obolibrary.org/obo/GO_0000001 -->
+
+    <owl:Class rdf:about="http://purl.obolibrary.org/obo/GO_0000001"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://example.org/repair#i -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/repair#i">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#k"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://example.org/repair#j -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/repair#j">
+        <owl:sameAs rdf:resource="http://example.org/repair#k"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://example.org/repair#k -->
+
+    <rdf:Description rdf:about="http://example.org/repair#k"/>
+    
+
+
+    <!-- http://example.org/repair#k -->
+
+    <owl:NamedIndividual rdf:about="http://example.org/repair#k">
+        <rdf:type rdf:resource="http://example.org/repair#B"/>
+        <q rdf:resource="http://example.org/repair#j"/>
+        <dq>x</dq>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Annotations
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description rdf:about="http://example.org/repair#Pun">
+        <obo:IAO_0100001 rdf:resource="http://example.org/repair#New"/>
+        <owl:deprecated rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:deprecated>
+    </rdf:Description>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <owl:Class>
+        <owl:intersectionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/repair#B"/>
+            <rdf:Description rdf:about="http://example.org/repair#F"/>
+        </owl:intersectionOf>
+        <rdfs:subClassOf rdf:resource="http://example.org/repair#H"/>
+    </owl:Class>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Rules
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description rdf:about="urn:swrl:var#x">
+        <rdf:type rdf:resource="http://www.w3.org/2003/11/swrl#Variable"/>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2003/11/swrl#Imp"/>
+        <swrl:body>
+            <rdf:Description>
+                <rdf:type rdf:resource="http://www.w3.org/2003/11/swrl#AtomList"/>
+                <rdf:first>
+                    <rdf:Description>
+                        <rdf:type rdf:resource="http://www.w3.org/2003/11/swrl#ClassAtom"/>
+                        <swrl:classPredicate rdf:resource="http://example.org/repair#New"/>
+                        <swrl:argument1 rdf:resource="urn:swrl:var#x"/>
+                    </rdf:Description>
+                </rdf:first>
+                <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </rdf:Description>
+        </swrl:body>
+        <swrl:head>
+            <rdf:Description>
+                <rdf:type rdf:resource="http://www.w3.org/2003/11/swrl#AtomList"/>
+                <rdf:first>
+                    <rdf:Description>
+                        <rdf:type rdf:resource="http://www.w3.org/2003/11/swrl#ClassAtom"/>
+                        <swrl:classPredicate rdf:resource="http://example.org/repair#X"/>
+                        <swrl:argument1 rdf:resource="urn:swrl:var#x"/>
+                    </rdf:Description>
+                </rdf:first>
+                <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+            </rdf:Description>
+        </swrl:head>
+    </rdf:Description>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29) https://github.com/owlcs/owlapi -->
+

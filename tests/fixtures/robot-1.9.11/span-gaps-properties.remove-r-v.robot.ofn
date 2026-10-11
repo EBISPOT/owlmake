@@ -1,0 +1,82 @@
+Prefix(:=<http://example.org/props2.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/props2.owl>
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/B>))
+Declaration(Class(<http://example.org/C>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(ObjectProperty(<http://example.org/q>))
+Declaration(ObjectProperty(<http://example.org/s>))
+Declaration(ObjectProperty(<http://example.org/t>))
+Declaration(ObjectProperty(<http://example.org/u>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(DataProperty(<http://example.org/e>))
+Declaration(DataProperty(<http://example.org/f>))
+Declaration(AnnotationProperty(<http://example.org/w>))
+Declaration(AnnotationProperty(<http://example.org/x>))
+Declaration(AnnotationProperty(<http://example.org/y>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/x> (<http://example.org/x>)
+
+SubAnnotationPropertyOf(<http://example.org/x> <http://example.org/y>)
+
+# Annotation Property: <http://example.org/y> (<http://example.org/y>)
+
+SubAnnotationPropertyOf(<http://example.org/y> <http://example.org/w>)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/p> (<http://example.org/p>)
+
+SubObjectPropertyOf(<http://example.org/p> <http://example.org/s>)
+SubObjectPropertyOf(<http://example.org/p> ObjectInverseOf(<http://example.org/u>))
+
+# Object Property: <http://example.org/q> (<http://example.org/q>)
+
+SubObjectPropertyOf(<http://example.org/q> <http://example.org/q>)
+SubObjectPropertyOf(<http://example.org/q> ObjectInverseOf(<http://example.org/u>))
+SubObjectPropertyOf(Annotation(rdfs:comment "inv") <http://example.org/q> ObjectInverseOf(<http://example.org/u>))
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/d> (<http://example.org/d>)
+
+SubDataPropertyOf(<http://example.org/d> <http://example.org/e>)
+
+# Data Property: <http://example.org/e> (<http://example.org/e>)
+
+SubDataPropertyOf(<http://example.org/e> <http://example.org/f>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/B> (<http://example.org/B>)
+
+SubClassOf(<http://example.org/B> <http://example.org/A>)
+
+# Class: <http://example.org/C> (<http://example.org/C>)
+
+SubClassOf(<http://example.org/C> <http://example.org/B>)
+
+
+SubObjectPropertyOf(ObjectInverseOf(<http://example.org/q>) <http://example.org/s>)
+)

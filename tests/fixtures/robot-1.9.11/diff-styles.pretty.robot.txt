@@ -1,0 +1,19 @@
+2 axioms in left ontology but not in right ontology:
+- Declaration(Class(<http://example.org/diff-render#Z>))
+- OntologyID(OntologyIRI(<http://example.org/diff-render>) VersionIRI(<http://example.org/diff-render/v1>))
+
+14 axioms in right ontology but not in left ontology:
++ 
++ AnnotationAssertion(<rdfs:label> <http://example.org/diff-styles#A>[a] "a")
++ AnnotationPropertyDomain(<http://example.org/diff-styles#ap> <http://example.org/diff-styles#B>)
++ AnnotationPropertyRange(<http://example.org/diff-styles#ap> <xsd:string>)
++ Declaration(Annotation(AnnotationProperty(<prov:wasDerivedFrom>) Class(<http://example.org/diff-styles/v1>)) Class(<http://example.org/diff-styles#A>[a]))
++ Declaration(AnnotationProperty(<http://example.org/diff-styles#ap>))
++ Declaration(Class(<http://example.org/diff-styles#B>))
++ Declaration(DataProperty(<http://example.org/diff-styles#d>))
++ Declaration(NamedIndividual(<http://example.org/diff-styles#j>))
++ Declaration(ObjectProperty(<http://example.org/diff-styles#p>))
++ OntologyID(OntologyIRI(<http://example.org/diff-styles>) VersionIRI(<null>))
++ SubClassOf(<http://example.org/diff-styles#A>[a] DataMaxCardinality(2 <http://example.org/diff-styles#d>))
++ SubClassOf(<http://example.org/diff-styles#A>[a] ObjectMinCardinality(1 <http://example.org/diff-styles#p>))
++ SubClassOf(<http://example.org/diff-styles#B> ObjectExactCardinality(1 <http://example.org/diff-styles#p> <http://example.org/diff-styles#A>[a]))

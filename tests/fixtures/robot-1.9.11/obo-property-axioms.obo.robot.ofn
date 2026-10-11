@@ -1,0 +1,69 @@
+Prefix(:=<http://purl.obolibrary.org/obo/t.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/t.owl>
+Annotation(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "1.2")
+
+Declaration(Class(<http://purl.obolibrary.org/obo/T_10>))
+Declaration(Class(<http://purl.obolibrary.org/obo/T_11>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_1>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_2>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_3>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_5>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_6>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_8>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/T_9>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#id>))
+Declaration(AnnotationProperty(rdfs:comment))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> (has_obo_format_version)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "has_obo_format_version")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#id> (id)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#id> "id")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://purl.obolibrary.org/obo/T_1> (<http://purl.obolibrary.org/obo/T_1>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/T_1> "T:1")
+EquivalentObjectProperties(Annotation(rdfs:comment "two") <http://purl.obolibrary.org/obo/T_1> <http://purl.obolibrary.org/obo/T_2>)
+
+# Object Property: <http://purl.obolibrary.org/obo/T_3> (<http://purl.obolibrary.org/obo/T_3>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/T_3> "T:3")
+EquivalentObjectProperties(<http://purl.obolibrary.org/obo/T_3> <http://purl.obolibrary.org/obo/T_5>)
+
+# Object Property: <http://purl.obolibrary.org/obo/T_6> (<http://purl.obolibrary.org/obo/T_6>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/T_6> "T:6")
+DisjointObjectProperties(<http://purl.obolibrary.org/obo/T_6> <http://purl.obolibrary.org/obo/T_8>)
+DisjointObjectProperties(<http://purl.obolibrary.org/obo/T_6> ObjectInverseOf(<http://purl.obolibrary.org/obo/T_9>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/T_10> (<http://purl.obolibrary.org/obo/T_10>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/T_10> "T:10")
+EquivalentClasses(Annotation(rdfs:comment "classes") <http://purl.obolibrary.org/obo/T_10> <http://purl.obolibrary.org/obo/T_11>)
+
+
+)

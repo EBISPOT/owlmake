@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/n#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/n>
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(ObjectProperty(:p))
+DLSafeRule(Body(ClassAtom(:X Variable(<urn:swrl:var#x>))) Head(ClassAtom(owl:Nothing Variable(<urn:swrl:var#x>))))
+)

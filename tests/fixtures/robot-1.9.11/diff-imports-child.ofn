@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/diff-imports-child#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Ontology(<http://example.org/diff-imports-child>
+Declaration(Class(:L))
+Declaration(Class(obo:UBERON_0000001))
+AnnotationAssertion(rdfs:label :L "from the import")
+AnnotationAssertion(rdfs:label obo:UBERON_0000001 "imported label")
+AnnotationAssertion(rdfs:label <http://example.org/diff-imports#A> "import label of A")
+)

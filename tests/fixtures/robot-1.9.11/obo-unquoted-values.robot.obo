@@ -1,0 +1,16 @@
+format-version: 1.2
+saved-by: me \{x\} \"q\"
+idspace: oio http://www.geneontology.org/formats/oboInOwl# 
+remark: remark \{x\} \"q\" a\\b
+ontology: q
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://purl.obolibrary.org/obo/Q_0000001>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Q_0000002>))\nDeclaration(Class(<http://purl.obolibrary.org/obo/Q_0000003>))\n\n\n\nSubClassOf(Annotation(rdfs:comment \"a	tab \{b\} \\\"c\\\"\") ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_0000001> <http://purl.obolibrary.org/obo/Q_0000002>) <http://purl.obolibrary.org/obo/Q_0000003>)\n)
+
+[Term]
+id: Q:0000001
+name: x\{y\}z \"q\" a\\b ! c {comment="qual {v} \"w\""}
+namespace: ns\{x\} {comment="c4"}
+comment: c\{d\}e "q" a\\b
+property_value: oio:foo_bar "fb{d}e" xsd:string {comment="c3"}
+created_by: cb\{d\}e \"q\" {comment="c{1}"}
+creation_date: 2020\{x\} {comment="c2"}
+

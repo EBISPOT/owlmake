@@ -21,17 +21,18 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use horned_owl::model::{
-    AnnotatedComponent, ClassExpression as CE, Component, Individual,
+    AnnotatedComponent, ClassExpression as CE, Component, DataProperty, DataRange as DR, Individual,
     ObjectPropertyExpression as OPE, RcStr, SubObjectPropertyExpression as SOPE,
 };
 
-use crate::owlapi_hash::{axiom_hash, owl_cmp};
+use super::manchester_markdown::{Dialect, Renderer};
+use crate::io::natural_order::{sorted_set, NaturalOrder};
+use crate::owlapi_hash::axiom_hash;
 use crate::sig::kind;
 
 type Ax = AnnotatedComponent<RcStr>;
 type Entity = (u8, String);
 
-const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
 
 /// One explanation: the entailment `sub ⊑ sup` and its justification, in the
 /// order the justification search left it.
@@ -133,107 +134,8 @@ fn entity_hash(e: &Entity) -> i32 {
     }
 }
 
-fn ax_hash(ac: &Ax) -> i32 {
-    axiom_hash(&ac.component, &ac.ann).unwrap_or(0)
-}
-
-// ---------------------------------------------------------------------------
-// OWLAPI's object order.
-
-fn axiom_type_index(c: &Component<RcStr>) -> i32 {
-    use Component as C;
-    2000 + match c {
-        C::DeclareClass(_)
-        | C::DeclareObjectProperty(_)
-        | C::DeclareDataProperty(_)
-        | C::DeclareNamedIndividual(_)
-        | C::DeclareAnnotationProperty(_)
-        | C::DeclareDatatype(_) => 0,
-        C::EquivalentClasses(_) => 1,
-        C::SubClassOf(_) => 2,
-        C::DisjointClasses(_) => 3,
-        C::DisjointUnion(_) => 4,
-        C::ClassAssertion(_) => 5,
-        C::SameIndividual(_) => 6,
-        C::DifferentIndividuals(_) => 7,
-        C::ObjectPropertyAssertion(_) => 8,
-        C::NegativeObjectPropertyAssertion(_) => 9,
-        C::DataPropertyAssertion(_) => 10,
-        C::NegativeDataPropertyAssertion(_) => 11,
-        C::EquivalentObjectProperties(_) => 12,
-        C::SubObjectPropertyOf(x) => match x.sub {
-            SOPE::ObjectPropertyExpression(_) => 13,
-            SOPE::ObjectPropertyChain(_) => 25,
-        },
-        C::InverseObjectProperties(_) => 14,
-        C::FunctionalObjectProperty(_) => 15,
-        C::InverseFunctionalObjectProperty(_) => 16,
-        C::SymmetricObjectProperty(_) => 17,
-        C::AsymmetricObjectProperty(_) => 18,
-        C::TransitiveObjectProperty(_) => 19,
-        C::ReflexiveObjectProperty(_) => 20,
-        C::IrreflexiveObjectProperty(_) => 21,
-        C::ObjectPropertyDomain(_) => 22,
-        C::ObjectPropertyRange(_) => 23,
-        C::DisjointObjectProperties(_) => 24,
-        C::EquivalentDataProperties(_) => 26,
-        C::SubDataPropertyOf(_) => 27,
-        C::FunctionalDataProperty(_) => 28,
-        C::DataPropertyDomain(_) => 29,
-        C::DataPropertyRange(_) => 30,
-        C::DisjointDataProperties(_) => 31,
-        C::HasKey(_) => 32,
-        C::Rule(_) => 33,
-        C::AnnotationAssertion(_) => 34,
-        C::SubAnnotationPropertyOf(_) => 35,
-        C::AnnotationPropertyRange(_) => 36,
-        C::AnnotationPropertyDomain(_) => 37,
-        C::DatatypeDefinition(_) => 38,
-        _ => 99,
-    }
-}
-
-fn ope_cmp(a: &OPE<RcStr>, b: &OPE<RcStr>) -> Ordering {
-    let idx = |o: &OPE<RcStr>| match o {
-        OPE::ObjectProperty(_) => 1002,
-        OPE::InverseObjectProperty(_) => 1003,
-    };
-    idx(a).cmp(&idx(b)).then_with(|| {
-        let iri = |o: &OPE<RcStr>| match o {
-            OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p) => p.0.to_string(),
-        };
-        crate::owlapi_hash::iri_cmp(&iri(a), &iri(b))
-    })
-}
-
-fn ind_cmp(a: &Individual<RcStr>, b: &Individual<RcStr>) -> Ordering {
-    match (a, b) {
-        (Individual::Named(x), Individual::Named(y)) => crate::owlapi_hash::iri_cmp(x.0.as_ref(), y.0.as_ref()),
-        (Individual::Named(_), Individual::Anonymous(_)) => Ordering::Less,
-        (Individual::Anonymous(_), Individual::Named(_)) => Ordering::Greater,
-        (Individual::Anonymous(x), Individual::Anonymous(y)) => x.0.as_ref().cmp(y.0.as_ref()),
-    }
-}
-
-fn sorted_ces(v: &[CE<RcStr>]) -> Vec<&CE<RcStr>> {
-    let mut out: Vec<&CE<RcStr>> = Vec::new();
-    for c in v {
-        if !out.iter().any(|x| **x == *c) {
-            out.push(c);
-        }
-    }
-    out.sort_by(|a, b| owl_cmp(a, b));
-    out
-}
-
-fn list_cmp<T>(a: &[T], b: &[T], cmp: impl Fn(&T, &T) -> Ordering) -> Ordering {
-    for (x, y) in a.iter().zip(b.iter()) {
-        let d = cmp(x, y);
-        if d != Ordering::Equal {
-            return d;
-        }
-    }
-    a.len().cmp(&b.len())
+fn ax_hash(ac: &Ax, order: NaturalOrder) -> i32 {
+    axiom_hash(&ac.component, &ac.ann, order).unwrap_or(0)
 }
 
 /// The members of a class equivalence or disjointness.
@@ -254,283 +156,6 @@ fn property_members(c: &Component<RcStr>) -> Option<&[OPE<RcStr>]> {
     }
 }
 
-/// The property of an object property characteristic axiom.
-fn characteristic(c: &Component<RcStr>) -> Option<&OPE<RcStr>> {
-    use Component as C;
-    match c {
-        C::TransitiveObjectProperty(x) => Some(&x.0),
-        C::FunctionalObjectProperty(x) => Some(&x.0),
-        C::InverseFunctionalObjectProperty(x) => Some(&x.0),
-        C::SymmetricObjectProperty(x) => Some(&x.0),
-        C::AsymmetricObjectProperty(x) => Some(&x.0),
-        C::ReflexiveObjectProperty(x) => Some(&x.0),
-        C::IrreflexiveObjectProperty(x) => Some(&x.0),
-        _ => None,
-    }
-}
-
-/// OWLAPI's `OWLAxiom.compareTo`: axiom type first, then the axiom's fields.
-fn axiom_cmp(a: &Ax, b: &Ax) -> Ordering {
-    use Component as C;
-    let d = axiom_type_index(&a.component).cmp(&axiom_type_index(&b.component));
-    if d != Ordering::Equal {
-        return d;
-    }
-    if let (Some(x), Some(y)) = (class_members(&a.component), class_members(&b.component)) {
-        return list_cmp(&sorted_ces(x), &sorted_ces(y), |p, q| owl_cmp(p, q));
-    }
-    if let (Some(x), Some(y)) = (characteristic(&a.component), characteristic(&b.component)) {
-        return ope_cmp(x, y);
-    }
-    match (&a.component, &b.component) {
-        (C::SubClassOf(x), C::SubClassOf(y)) => owl_cmp(&x.sub, &y.sub).then_with(|| owl_cmp(&x.sup, &y.sup)),
-        (C::SubObjectPropertyOf(x), C::SubObjectPropertyOf(y)) => {
-            let sub_cmp = match (&x.sub, &y.sub) {
-                (SOPE::ObjectPropertyExpression(p), SOPE::ObjectPropertyExpression(q)) => ope_cmp(p, q),
-                (SOPE::ObjectPropertyChain(p), SOPE::ObjectPropertyChain(q)) => list_cmp(p, q, ope_cmp),
-                _ => Ordering::Equal,
-            };
-            sub_cmp.then_with(|| ope_cmp(&x.sup, &y.sup))
-        }
-        (C::ObjectPropertyDomain(x), C::ObjectPropertyDomain(y)) => {
-            ope_cmp(&x.ope, &y.ope).then_with(|| owl_cmp(&x.ce, &y.ce))
-        }
-        (C::ObjectPropertyRange(x), C::ObjectPropertyRange(y)) => {
-            ope_cmp(&x.ope, &y.ope).then_with(|| owl_cmp(&x.ce, &y.ce))
-        }
-        (C::InverseObjectProperties(x), C::InverseObjectProperties(y)) => {
-            ope_cmp(&x.0, &y.0).then_with(|| ope_cmp(&x.1, &y.1))
-        }
-        (C::ClassAssertion(x), C::ClassAssertion(y)) => ind_cmp(&x.i, &y.i).then_with(|| owl_cmp(&x.ce, &y.ce)),
-        (C::ObjectPropertyAssertion(x), C::ObjectPropertyAssertion(y)) => ind_cmp(&x.from, &y.from)
-            .then_with(|| ope_cmp(&x.ope, &y.ope))
-            .then_with(|| ind_cmp(&x.to, &y.to)),
-        _ => format!("{:?}", a.component).cmp(&format!("{:?}", b.component)),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Manchester syntax with markdown links.
-
-struct Renderer<'a> {
-    labels: &'a HashMap<String, String>,
-}
-
-fn short_form(iri: &str) -> String {
-    let (ns, rem) = crate::owlapi_hash::iri_split(iri);
-    if !rem.is_empty() {
-        rem.to_string()
-    } else {
-        ns.trim_end_matches(['/', '#']).rsplit(['/', '#']).next().unwrap_or(ns).to_string()
-    }
-}
-
-impl Renderer<'_> {
-    fn link(&self, iri: &str) -> String {
-        let label = self.labels.get(iri).cloned().unwrap_or_else(|| short_form(iri));
-        format!("[{label}]({iri})")
-    }
-
-    fn ope(&self, o: &OPE<RcStr>, out: &mut String) {
-        match o {
-            OPE::ObjectProperty(p) => out.push_str(&self.link(p.0.as_ref())),
-            OPE::InverseObjectProperty(p) => {
-                out.push_str(" inverse (");
-                out.push_str(&self.link(p.0.as_ref()));
-                out.push(')');
-            }
-        }
-    }
-
-    fn ind(&self, i: &Individual<RcStr>, out: &mut String) {
-        match i {
-            Individual::Named(n) => out.push_str(&self.link(n.0.as_ref())),
-            Individual::Anonymous(a) => out.push_str(a.0.as_ref()),
-        }
-    }
-
-    fn operand(&self, c: &CE<RcStr>, out: &mut String) {
-        if matches!(c, CE::Class(_)) {
-            self.ce(c, out);
-        } else {
-            out.push('(');
-            self.ce(c, out);
-            out.push(')');
-        }
-    }
-
-    fn restriction(&self, o: &OPE<RcStr>, keyword: &str, filler: &CE<RcStr>, out: &mut String) {
-        self.ope(o, out);
-        out.push(' ');
-        out.push_str(keyword);
-        out.push(' ');
-        match filler {
-            CE::Class(_) => self.ce(filler, out),
-            CE::ObjectIntersectionOf(_) | CE::ObjectUnionOf(_) => {
-                out.push_str("\n(");
-                self.ce(filler, out);
-                out.push(')');
-            }
-            _ => {
-                out.push('(');
-                self.ce(filler, out);
-                out.push(')');
-            }
-        }
-    }
-
-    fn cardinality(&self, o: &OPE<RcStr>, keyword: &str, n: u32, filler: &CE<RcStr>, out: &mut String) {
-        self.ope(o, out);
-        out.push(' ');
-        out.push_str(keyword);
-        out.push(' ');
-        out.push_str(&n.to_string());
-        out.push(' ');
-        self.operand(filler, out);
-    }
-
-    fn ce(&self, c: &CE<RcStr>, out: &mut String) {
-        match c {
-            CE::Class(x) => out.push_str(&self.link(x.0.as_ref())),
-            CE::ObjectIntersectionOf(ops) | CE::ObjectUnionOf(ops) => {
-                let word = if matches!(c, CE::ObjectIntersectionOf(_)) { " and " } else { " or " };
-                for (i, op) in sorted_ces(ops).into_iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(word);
-                    }
-                    self.operand(op, out);
-                }
-            }
-            CE::ObjectComplementOf(b) => {
-                out.push_str("not (");
-                self.ce(b, out);
-                out.push(')');
-            }
-            CE::ObjectSomeValuesFrom { ope, bce } => self.restriction(ope, "some", bce, out),
-            CE::ObjectAllValuesFrom { ope, bce } => self.restriction(ope, "only", bce, out),
-            CE::ObjectHasValue { ope, i } => {
-                self.ope(ope, out);
-                out.push_str(" value ");
-                self.ind(i, out);
-            }
-            CE::ObjectMinCardinality { n, ope, bce } => self.cardinality(ope, "min", *n, bce, out),
-            CE::ObjectMaxCardinality { n, ope, bce } => self.cardinality(ope, "max", *n, bce, out),
-            CE::ObjectExactCardinality { n, ope, bce } => self.cardinality(ope, "exactly", *n, bce, out),
-            CE::ObjectHasSelf(ope) => {
-                self.ope(ope, out);
-                out.push_str(" Self");
-            }
-            CE::ObjectOneOf(inds) => {
-                let mut v: Vec<&Individual<RcStr>> = inds.iter().collect();
-                v.sort_by(|a, b| ind_cmp(a, b));
-                out.push('{');
-                for (i, x) in v.into_iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(" , ");
-                    }
-                    self.ind(x, out);
-                }
-                out.push('}');
-            }
-            _ => out.push_str(&format!("{c:?}")),
-        }
-    }
-
-    fn pair(&self, members: &[CE<RcStr>], binary: &str, nary: &str) -> String {
-        let sorted = sorted_ces(members);
-        let mut out = String::new();
-        if sorted.len() == 2 {
-            self.ce(sorted[0], &mut out);
-            out.push(' ');
-            out.push_str(binary);
-            out.push(' ');
-            self.ce(sorted[1], &mut out);
-        } else {
-            out.push(' ');
-            out.push_str(nary);
-            out.push_str(": ");
-            for (i, c) in sorted.into_iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                self.ce(c, &mut out);
-            }
-        }
-        out
-    }
-
-    fn axiom(&self, c: &Component<RcStr>) -> String {
-        use Component as C;
-        let mut out = String::new();
-        let section = |out: &mut String, word: &str, o: &OPE<RcStr>| {
-            out.push(' ');
-            out.push_str(word);
-            out.push_str(": ");
-            self.ope(o, out);
-        };
-        match c {
-            C::SubClassOf(x) => {
-                self.ce(&x.sub, &mut out);
-                out.push_str(" SubClassOf ");
-                self.ce(&x.sup, &mut out);
-            }
-            C::EquivalentClasses(x) => out = self.pair(&x.0, "EquivalentTo", "EquivalentClasses"),
-            C::DisjointClasses(x) => out = self.pair(&x.0, "DisjointWith", "DisjointClasses"),
-            C::SubObjectPropertyOf(x) => {
-                match &x.sub {
-                    SOPE::ObjectPropertyExpression(o) => self.ope(o, &mut out),
-                    SOPE::ObjectPropertyChain(chain) => {
-                        for (i, o) in chain.iter().enumerate() {
-                            if i > 0 {
-                                out.push_str(" o ");
-                            }
-                            self.ope(o, &mut out);
-                        }
-                    }
-                }
-                out.push_str(" SubPropertyOf: ");
-                self.ope(&x.sup, &mut out);
-            }
-            C::TransitiveObjectProperty(x) => section(&mut out, "Transitive", &x.0),
-            C::FunctionalObjectProperty(x) => section(&mut out, "Functional", &x.0),
-            C::InverseFunctionalObjectProperty(x) => section(&mut out, "InverseFunctional", &x.0),
-            C::SymmetricObjectProperty(x) => section(&mut out, "Symmetric", &x.0),
-            C::AsymmetricObjectProperty(x) => section(&mut out, "Asymmetric", &x.0),
-            C::ReflexiveObjectProperty(x) => section(&mut out, "Reflexive", &x.0),
-            C::IrreflexiveObjectProperty(x) => section(&mut out, "Irreflexive", &x.0),
-            C::InverseObjectProperties(x) => {
-                self.ope(&x.0, &mut out);
-                out.push_str(" InverseOf ");
-                self.ope(&x.1, &mut out);
-            }
-            C::ObjectPropertyDomain(x) => {
-                self.ope(&x.ope, &mut out);
-                out.push_str(" Domain ");
-                self.ce(&x.ce, &mut out);
-            }
-            C::ObjectPropertyRange(x) => {
-                self.ope(&x.ope, &mut out);
-                out.push_str(" Range ");
-                self.ce(&x.ce, &mut out);
-            }
-            C::ClassAssertion(x) => {
-                self.ind(&x.i, &mut out);
-                out.push_str(" Type ");
-                self.ce(&x.ce, &mut out);
-            }
-            C::ObjectPropertyAssertion(x) => {
-                self.ind(&x.from, &mut out);
-                out.push(' ');
-                self.ope(&x.ope, &mut out);
-                out.push(' ');
-                self.ind(&x.to, &mut out);
-            }
-            other => out.push_str(&format!("{other:?}")),
-        }
-        out
-    }
-}
-
 // ---------------------------------------------------------------------------
 // The explanation tree.
 
@@ -543,9 +168,16 @@ struct Node {
 
 /// The right-hand-side entities of an axiom: the entities its defining side
 /// names, in the order the set that collects them iterates.
-fn rhs_entities(c: &Component<RcStr>) -> Vec<Entity> {
+fn rhs_entities(c: &Component<RcStr>, order: NaturalOrder) -> Vec<Entity> {
     use Component as C;
-    let sig_ce = |ce: &CE<RcStr>| -> Vec<Entity> { signature_order(ce) };
+    let sig_ce = |ce: &CE<RcStr>| -> Vec<Entity> { signature_order(ce, order) };
+    let sig_dp = |p: &DataProperty<RcStr>| -> Entity { (kind::DATA_PROPERTY, p.0.to_string()) };
+    let sig_ind = |i: &Individual<RcStr>| -> Option<Entity> {
+        match i {
+            Individual::Named(n) => Some((kind::NAMED_INDIVIDUAL, n.0.to_string())),
+            Individual::Anonymous(_) => None,
+        }
+    };
     let sig_ope = |o: &OPE<RcStr>| -> Vec<Entity> {
         match o {
             OPE::ObjectProperty(p) | OPE::InverseObjectProperty(p) => vec![(kind::OBJECT_PROPERTY, p.0.to_string())],
@@ -555,7 +187,7 @@ fn rhs_entities(c: &Component<RcStr>) -> Vec<Entity> {
     match c {
         C::SubClassOf(x) if matches!(x.sub, CE::Class(_)) => adds.extend(sig_ce(&x.sup)),
         C::DisjointClasses(_) | C::EquivalentClasses(_) => {
-            for m in sorted_ces(class_members(c).unwrap_or(&[])) {
+            for m in sorted_set(class_members(c).unwrap_or(&[]), |a, b| order.ce(a, b)) {
                 adds.extend(sig_ce(m));
             }
         }
@@ -574,6 +206,21 @@ fn rhs_entities(c: &Component<RcStr>) -> Vec<Entity> {
             adds.extend(sig_ope(&x.1));
         }
         C::ClassAssertion(x) if matches!(x.i, Individual::Named(_)) => adds.extend(sig_ce(&x.ce)),
+        C::DataPropertyDomain(x) => adds.extend(sig_ce(&x.ce)),
+        C::DataPropertyRange(x) => adds.extend(range_datatypes(&x.dr, order)),
+        C::EquivalentDataProperties(x) => adds.extend(x.0.iter().map(sig_dp)),
+        C::DisjointDataProperties(x) => adds.extend(x.0.iter().map(sig_dp)),
+        C::SubDataPropertyOf(x) => adds.push(sig_dp(&x.sup)),
+        C::SameIndividual(x) => adds.extend(sorted_set(&x.0, |a, b| order.individual(a, b)).into_iter().filter_map(sig_ind)),
+        C::DifferentIndividuals(x) => {
+            adds.extend(sorted_set(&x.0, |a, b| order.individual(a, b)).into_iter().filter_map(sig_ind))
+        }
+        C::DataPropertyAssertion(x) => adds.extend(sig_ind(&x.from)),
+        C::HasKey(x) => {
+            if let CE::Class(c) = &x.ce {
+                adds.push((kind::CLASS, c.0.to_string()));
+            }
+        }
         _ => {}
     }
     // A HashSet of entities, filled in that order.
@@ -602,8 +249,8 @@ fn rhs_entities(c: &Component<RcStr>) -> Vec<Entity> {
 /// The entities of a class expression in the order its signature set
 /// iterates: collected in visiting order — operands in their stored order, a
 /// restriction's property before its filler — into a set of entities.
-fn signature_order(ce: &CE<RcStr>) -> Vec<Entity> {
-    fn visit(ce: &CE<RcStr>, out: &mut Vec<Entity>) {
+fn signature_order(ce: &CE<RcStr>, order: NaturalOrder) -> Vec<Entity> {
+    fn visit(ce: &CE<RcStr>, order: NaturalOrder, out: &mut Vec<Entity>) {
         let mut push = |e: Entity| {
             if !out.contains(&e) {
                 out.push(e);
@@ -615,20 +262,20 @@ fn signature_order(ce: &CE<RcStr>) -> Vec<Entity> {
         match ce {
             CE::Class(c) => push((kind::CLASS, c.0.to_string())),
             CE::ObjectIntersectionOf(ops) | CE::ObjectUnionOf(ops) => {
-                for op in sorted_ces(ops) {
-                    visit(op, out);
+                for op in sorted_set(ops, |a, b| order.ce(a, b)) {
+                    visit(op, order, out);
                 }
             }
-            CE::ObjectComplementOf(b) => visit(b, out),
+            CE::ObjectComplementOf(b) => visit(b, order, out),
             CE::ObjectSomeValuesFrom { ope, bce } | CE::ObjectAllValuesFrom { ope, bce } => {
                 push(prop(ope));
-                visit(bce, out);
+                visit(bce, order, out);
             }
             CE::ObjectMinCardinality { ope, bce, .. }
             | CE::ObjectMaxCardinality { ope, bce, .. }
             | CE::ObjectExactCardinality { ope, bce, .. } => {
                 push(prop(ope));
-                visit(bce, out);
+                visit(bce, order, out);
             }
             CE::ObjectHasValue { ope, i } => {
                 push(prop(ope));
@@ -637,6 +284,20 @@ fn signature_order(ce: &CE<RcStr>) -> Vec<Entity> {
                 }
             }
             CE::ObjectHasSelf(ope) => push(prop(ope)),
+            CE::DataSomeValuesFrom { dp, dr }
+            | CE::DataAllValuesFrom { dp, dr }
+            | CE::DataMinCardinality { dp, dr, .. }
+            | CE::DataMaxCardinality { dp, dr, .. }
+            | CE::DataExactCardinality { dp, dr, .. } => {
+                push((kind::DATA_PROPERTY, dp.0.to_string()));
+                for t in range_datatypes(dr, order) {
+                    push(t);
+                }
+            }
+            CE::DataHasValue { dp, l } => {
+                push((kind::DATA_PROPERTY, dp.0.to_string()));
+                push((kind::DATATYPE, order.literal_datatype(l).to_string()));
+            }
             CE::ObjectOneOf(inds) => {
                 for i in inds {
                     if let Individual::Named(n) = i {
@@ -644,25 +305,54 @@ fn signature_order(ce: &CE<RcStr>) -> Vec<Entity> {
                     }
                 }
             }
-            _ => {
-                for (k, iri) in crate::sig::typed_signature(&Component::SubClassOf(horned_owl::model::SubClassOf {
-                    sub: ce.clone(),
-                    sup: ce.clone(),
-                })) {
-                    push((k, iri));
-                }
-            }
         }
     }
     let mut v = Vec::new();
-    visit(ce, &mut v);
+    visit(ce, order, &mut v);
     let hashes: Vec<i32> = v.iter().map(entity_hash).collect();
     hashset_order(&hashes, grown_capacity(v.len())).into_iter().map(|i| v[i].clone()).collect()
 }
 
+/// The datatypes a data range names, in visiting order: a datatype itself, the
+/// operands of a combination in their sorted order, a literal's datatype, and a
+/// restriction's datatype before its facet values'.
+fn range_datatypes(dr: &DR<RcStr>, order: NaturalOrder) -> Vec<Entity> {
+    fn visit(dr: &DR<RcStr>, order: NaturalOrder, out: &mut Vec<Entity>) {
+        let mut push = |iri: &str| {
+            let e = (kind::DATATYPE, iri.to_string());
+            if !out.contains(&e) {
+                out.push(e);
+            }
+        };
+        match dr {
+            DR::Datatype(t) => push(t.0.as_ref()),
+            DR::DataComplementOf(op) => visit(op, order, out),
+            DR::DataIntersectionOf(ops) | DR::DataUnionOf(ops) => {
+                for op in sorted_set(ops, |a, b| order.dr(a, b)) {
+                    visit(op, order, out);
+                }
+            }
+            DR::DataOneOf(lits) => {
+                for l in sorted_set(lits, |a, b| order.literal(a, b)) {
+                    push(order.literal_datatype(l));
+                }
+            }
+            DR::DatatypeRestriction(t, facets) => {
+                push(t.0.as_ref());
+                for f in sorted_set(facets, |a, b| order.facet_restriction(a, b)) {
+                    push(order.literal_datatype(&f.l));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    visit(dr, order, &mut out);
+    out
+}
+
 /// An entity's axioms among the justification's, in the order the
 /// justification's ontology returns them.
-fn entity_axioms(axioms: &[&Ax], e: &Entity) -> Vec<usize> {
+fn entity_axioms(axioms: &[&Ax], e: &Entity, order: NaturalOrder) -> Vec<usize> {
     use Component as C;
     let iri = e.1.as_str();
     let is_class = |ce: &CE<RcStr>| matches!(ce, CE::Class(c) if c.0.as_ref() == iri);
@@ -687,7 +377,7 @@ fn entity_axioms(axioms: &[&Ax], e: &Entity) -> Vec<usize> {
                     }
                 }
             }
-            let hashes: Vec<i32> = groups.iter().map(|&i| ax_hash(axioms[i])).collect();
+            let hashes: Vec<i32> = groups.iter().map(|&i| ax_hash(axioms[i], order)).collect();
             hashset_order(&hashes, grown_capacity(groups.len())).into_iter().map(|k| groups[k]).collect()
         }
         kind::OBJECT_PROPERTY => {
@@ -717,20 +407,50 @@ fn entity_axioms(axioms: &[&Ax], e: &Entity) -> Vec<usize> {
                     }
                 }
             }
-            let hashes: Vec<i32> = groups.iter().map(|&i| ax_hash(axioms[i])).collect();
+            let hashes: Vec<i32> = groups.iter().map(|&i| ax_hash(axioms[i], order)).collect();
             // A set created for fifty.
             hashset_order(&hashes, 64).into_iter().map(|k| groups[k]).collect()
         }
-        kind::NAMED_INDIVIDUAL => {
+        kind::DATA_PROPERTY => {
+            // A linked set: domains, equivalences, disjointness, ranges, the
+            // characteristic, then the property's superproperty axioms.
+            let is_dp = |p: &DataProperty<RcStr>| p.0.as_ref() == iri;
             let mut out: Vec<usize> = Vec::new();
-            for pass in 0..2 {
+            for pass in 0..6 {
+                for (i, ac) in axioms.iter().enumerate() {
+                    let hit = match (&ac.component, pass) {
+                        (C::DataPropertyDomain(x), 0) => is_dp(&x.dp),
+                        (C::EquivalentDataProperties(x), 1) => x.0.iter().any(is_dp),
+                        (C::DisjointDataProperties(x), 2) => x.0.iter().any(is_dp),
+                        (C::DataPropertyRange(x), 3) => is_dp(&x.dp),
+                        (C::FunctionalDataProperty(x), 4) => is_dp(&x.0),
+                        (C::SubDataPropertyOf(x), 5) => is_dp(&x.sub),
+                        _ => false,
+                    };
+                    if hit && !out.contains(&i) {
+                        out.push(i);
+                    }
+                }
+            }
+            out
+        }
+        kind::NAMED_INDIVIDUAL => {
+            // A linked set: class assertions, object, data, negative object and
+            // negative data property assertions, then sameness and difference.
+            let mut out: Vec<usize> = Vec::new();
+            for pass in 0..7 {
                 for (i, ac) in axioms.iter().enumerate() {
                     let hit = match (&ac.component, pass) {
                         (C::ClassAssertion(x), 0) => is_ind(&x.i),
                         (C::ObjectPropertyAssertion(x), 1) => is_ind(&x.from),
+                        (C::DataPropertyAssertion(x), 2) => is_ind(&x.from),
+                        (C::NegativeObjectPropertyAssertion(x), 3) => is_ind(&x.from),
+                        (C::NegativeDataPropertyAssertion(x), 4) => is_ind(&x.from),
+                        (C::SameIndividual(x), 5) => x.0.iter().any(is_ind),
+                        (C::DifferentIndividuals(x), 6) => x.0.iter().any(is_ind),
                         _ => false,
                     };
-                    if hit {
+                    if hit && !out.contains(&i) {
                         out.push(i);
                     }
                 }
@@ -769,6 +489,10 @@ fn is_property_axiom(c: &Component<RcStr>) -> bool {
 
 struct Orderer<'a> {
     axioms: Vec<&'a Ax>,
+    order: NaturalOrder,
+    /// The justification's axiom that is the entailment itself, unannotated:
+    /// the root holds it, so the tree never does.
+    entailment: Option<usize>,
     nodes: Vec<Node>,
     consumed: HashSet<usize>,
     mapped: HashMap<Entity, HashSet<usize>>,
@@ -796,18 +520,18 @@ impl<'a> Orderer<'a> {
 
     fn insert_children(&mut self, e: &Entity, node: usize) {
         let path = self.path_axioms(node);
-        for ax in entity_axioms(&self.axioms, e) {
+        for ax in entity_axioms(&self.axioms, e, self.order) {
             if matches!(self.axioms[ax].component, Component::DisjointClasses(_)) {
                 continue;
             }
             let mapped = self.mapped.entry(e.clone()).or_default();
-            if self.consumed.contains(&ax) || mapped.contains(&ax) || path.contains(&ax) {
+            if self.consumed.contains(&ax) || mapped.contains(&ax) || path.contains(&ax) || self.entailment == Some(ax) {
                 continue;
             }
             mapped.insert(ax);
             self.consumed.insert(ax);
             let child = self.add_child(node, ax);
-            for r in rhs_entities(&self.axioms[ax].component) {
+            for r in rhs_entities(&self.axioms[ax].component, self.order) {
                 self.insert_children(&r, child);
             }
         }
@@ -818,6 +542,7 @@ impl<'a> Orderer<'a> {
         let mut kids = std::mem::take(&mut self.nodes[node].children);
         let nodes = &self.nodes;
         let axioms = &self.axioms;
+        let order = self.order;
         java_sort(&mut kids, &|a, b| {
             let (x, y) = (&axioms[nodes[*a].ax.unwrap()].component, &axioms[nodes[*b].ax.unwrap()].component);
             if matches!(x, Component::EquivalentClasses(_)) {
@@ -835,7 +560,7 @@ impl<'a> Orderer<'a> {
                 return diff;
             }
             if let (Component::SubClassOf(p), Component::SubClassOf(q)) = (x, y) {
-                return match owl_cmp(&p.sup, &q.sup) {
+                return match order.ce(&p.sup, &q.sup) {
                     Ordering::Less => -1,
                     Ordering::Equal => 0,
                     Ordering::Greater => 1,
@@ -849,8 +574,8 @@ impl<'a> Orderer<'a> {
 
 /// The justification's axioms in the order its set iterates: copied twice
 /// into sets sized for it, from the order the search left them in.
-fn justification_order(axioms: &[Ax]) -> Vec<usize> {
-    let hashes: Vec<i32> = axioms.iter().map(ax_hash).collect();
+fn justification_order(axioms: &[Ax], order: NaturalOrder) -> Vec<usize> {
+    let hashes: Vec<i32> = axioms.iter().map(|ac| ax_hash(ac, order)).collect();
     hashset_order(&hashes, copied_capacity(axioms.len()))
 }
 
@@ -881,9 +606,22 @@ fn render_tree(r: &Renderer, o: &Orderer, entailment: &str, node: usize, depth: 
 }
 
 fn render_explanation(r: &Renderer, ex: &Explained) -> String {
-    let order = justification_order(&ex.axioms);
-    let axioms: Vec<&Ax> = order.iter().map(|&i| &ex.axioms[i]).collect();
-    let mut o = Orderer { axioms, nodes: Vec::new(), consumed: HashSet::new(), mapped: HashMap::new() };
+    let sequence = justification_order(&ex.axioms, r.order);
+    let axioms: Vec<&Ax> = sequence.iter().map(|&i| &ex.axioms[i]).collect();
+    let b = horned_owl::model::Build::new();
+    let entailment = Component::SubClassOf(horned_owl::model::SubClassOf {
+        sub: CE::Class(b.class(ex.sub.as_str())),
+        sup: CE::Class(b.class(ex.sup.as_str())),
+    });
+    let entailed = axioms.iter().position(|ac| ac.component == entailment && ac.ann.is_empty());
+    let mut o = Orderer {
+        axioms,
+        order: r.order,
+        entailment: entailed,
+        nodes: Vec::new(),
+        consumed: HashSet::new(),
+        mapped: HashMap::new(),
+    };
     o.nodes.push(Node { ax: None, children: Vec::new(), parent: None });
     let source: Entity = (kind::CLASS, ex.sub.clone());
     o.insert_children(&source, 0);
@@ -897,15 +635,11 @@ fn render_explanation(r: &Renderer, ex: &Explained) -> String {
     // order. (Only an entailment with a named superclass has axioms that sort
     // last among them, and an unsatisfiability has none.)
     for a in 0..o.axioms.len() {
-        if !in_tree.contains(&a) {
+        if !in_tree.contains(&a) && o.entailment != Some(a) {
             o.add_child(0, a);
         }
     }
-    let b = horned_owl::model::Build::new();
-    let entailment = r.axiom(&Component::SubClassOf(horned_owl::model::SubClassOf {
-        sub: CE::Class(b.class(ex.sub.as_str())),
-        sup: CE::Class(b.class(ex.sup.as_str())),
-    }));
+    let entailment = r.axiom(&entailment);
     let mut out = String::new();
     render_tree(r, &o, &entailment, 0, 0, &mut out);
     out
@@ -913,8 +647,13 @@ fn render_explanation(r: &Renderer, ex: &Explained) -> String {
 
 /// The whole report: the explanations in the order their set iterates, then
 /// the axiom impact summary.
-pub(crate) fn report(explained: &[Explained], labels: &HashMap<String, String>, prov: &Provenance) -> String {
-    let r = Renderer { labels };
+pub(crate) fn report(
+    explained: &[Explained],
+    labels: &HashMap<String, String>,
+    prov: &Provenance,
+    order: NaturalOrder,
+) -> String {
+    let r = Renderer { labels, order, dialect: Dialect::Explain, links: true };
     if explained.is_empty() {
         return "No explanations found.".to_string();
     }
@@ -927,13 +666,13 @@ pub(crate) fn report(explained: &[Explained], labels: &HashMap<String, String>, 
                 sub: CE::Class(b.class(e.sub.as_str())),
                 sup: CE::Class(b.class(e.sup.as_str())),
             });
-            e.axioms.iter().fold(axiom_hash(&ent, &Default::default()).unwrap_or(0), |acc, ac| {
-                acc.wrapping_add(ax_hash(ac))
+            e.axioms.iter().fold(axiom_hash(&ent, &Default::default(), order).unwrap_or(0), |acc, ac| {
+                acc.wrapping_add(ax_hash(ac, order))
             })
         })
         .collect();
-    let order = hashset_order(&hashes, grown_capacity(explained.len()));
-    let mut out: String = order
+    let sequence = hashset_order(&hashes, grown_capacity(explained.len()));
+    let mut out: String = sequence
         .iter()
         .map(|&i| render_explanation(&r, &explained[i]))
         .collect::<Vec<_>>()
@@ -952,11 +691,10 @@ pub(crate) fn report(explained: &[Explained], labels: &HashMap<String, String>, 
     let mut levels: Vec<usize> = counts.iter().map(|(_, n)| *n).collect();
     levels.sort_unstable_by(|a, b| b.cmp(a));
     levels.dedup();
-    let short = |iri: &str| short_form(iri);
     let ontology_of = |ac: &Ax| -> (String, String) {
         let iri = if prov.imported.contains(ac) { prov.import.clone() } else { prov.root.clone() };
         match iri {
-            Some(i) => (short(&i), i),
+            Some(i) => (crate::owlapi_hash::iri_short_form(&i), i),
             None => ("O1".to_string(), "unknown.iri".to_string()),
         }
     };
@@ -964,7 +702,7 @@ pub(crate) fn report(explained: &[Explained], labels: &HashMap<String, String>, 
     let mut used: Vec<(String, String)> = Vec::new();
     for level in levels {
         let mut group: Vec<&Ax> = counts.iter().filter(|(_, n)| *n == level).map(|(a, _)| a).collect();
-        group.sort_by(|a, b| axiom_cmp(a, b));
+        group.sort_by(|a, b| r.order.component(&a.component, &b.component));
         out.push_str(&format!("## Axioms used {level} times\n"));
         for ac in group {
             let (abbrev, iri) = ontology_of(ac);

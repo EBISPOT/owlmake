@@ -1,0 +1,126 @@
+Prefix(:=<http://purl.obolibrary.org/obo/q.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/q.owl>
+Annotation(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "1.2")
+
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_1>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_10>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_11>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_12>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_13>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_14>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_15>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_16>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_17>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_18>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_19>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_2>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_20>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_21>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_22>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_23>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_24>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_3>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_30>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_4>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_5>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_6>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_7>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_8>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_9>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/R_1>))
+Declaration(ObjectProperty(<http://purl.obolibrary.org/obo/R_2>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/Q_11>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/Q_17>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/Q_4>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/Q_5>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#id>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_class_level>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#min_cardinality>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#source>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> (has_obo_format_version)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "has_obo_format_version")
+
+# Annotation Property: <http://www.geneontology.org/formats/oboInOwl#id> (id)
+
+AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#id> "id")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://purl.obolibrary.org/obo/R_1> (<http://purl.obolibrary.org/obo/R_1>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/R_1> "R:1")
+
+# Object Property: <http://purl.obolibrary.org/obo/R_2> (<http://purl.obolibrary.org/obo/R_2>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/R_2> "R:2")
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#is_class_level> <http://purl.obolibrary.org/obo/R_2> "true"^^xsd:boolean)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/Q_1> (<http://purl.obolibrary.org/obo/Q_1>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/Q_1> "Q:1")
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectIntersectionOf(ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_9>) ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_9>)))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectIntersectionOf(ObjectMinCardinality(1 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_6>) ObjectMaxCardinality(3 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_6>)))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_12>))
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#min_cardinality> "1") <http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_18>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_23>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_24>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_10>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_14>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> ObjectComplementOf(<http://purl.obolibrary.org/obo/Q_4>)))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> ObjectComplementOf(<http://purl.obolibrary.org/obo/Q_5>)))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectHasValue(<http://purl.obolibrary.org/obo/R_2> <http://purl.obolibrary.org/obo/Q_11>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectMinCardinality(1 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_7>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectMinCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_21>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectExactCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_13>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectExactCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_15>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectExactCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_2>))
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "s") <http://purl.obolibrary.org/obo/Q_1> ObjectExactCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_3>))
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "m") <http://purl.obolibrary.org/obo/Q_1> ObjectMaxCardinality(1 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_22>))
+SubClassOf(<http://purl.obolibrary.org/obo/Q_1> ObjectMaxCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_8>))
+
+# Class: <http://purl.obolibrary.org/obo/Q_20> (<http://purl.obolibrary.org/obo/Q_20>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/Q_20> "Q:20")
+EquivalentClasses(<http://purl.obolibrary.org/obo/Q_20> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_1> ObjectIntersectionOf(ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_6>) ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_6>)) ObjectIntersectionOf(ObjectMinCardinality(1 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_3>) ObjectMaxCardinality(2 <http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_3>)) ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_5>) ObjectAllValuesFrom(<http://purl.obolibrary.org/obo/R_1> ObjectComplementOf(<http://purl.obolibrary.org/obo/Q_2>)) ObjectHasValue(<http://purl.obolibrary.org/obo/R_2> <http://purl.obolibrary.org/obo/Q_4>)))
+
+# Class: <http://purl.obolibrary.org/obo/Q_30> (<http://purl.obolibrary.org/obo/Q_30>)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/Q_30> "Q:30")
+
+# Class: <http://purl.obolibrary.org/obo/Q_6> (<http://purl.obolibrary.org/obo/Q_6>)
+
+DisjointClasses(<http://purl.obolibrary.org/obo/Q_6> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_3>)))
+
+# Class: <http://purl.obolibrary.org/obo/Q_7> (<http://purl.obolibrary.org/obo/Q_7>)
+
+EquivalentClasses(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "e") <http://purl.obolibrary.org/obo/Q_7> ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_30> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_3>)))
+
+
+
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#source> "g") ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_17>)) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_19>))
+SubClassOf(ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_1> ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_3>)) <http://purl.obolibrary.org/obo/Q_2>)
+SubClassOf(ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_1> ObjectHasValue(<http://purl.obolibrary.org/obo/R_2> <http://purl.obolibrary.org/obo/Q_17>)) ObjectSomeValuesFrom(<http://purl.obolibrary.org/obo/R_1> <http://purl.obolibrary.org/obo/Q_16>))
+SubClassOf(ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_1> ObjectHasValue(<http://purl.obolibrary.org/obo/R_2> <http://purl.obolibrary.org/obo/Q_5>)) <http://purl.obolibrary.org/obo/Q_4>)
+)

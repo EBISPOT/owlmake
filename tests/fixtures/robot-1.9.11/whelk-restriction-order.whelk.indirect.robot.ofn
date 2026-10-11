@@ -1,0 +1,109 @@
+Prefix(:=<http://example.org/w#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/w>
+
+Declaration(Class(:max13f376))
+Declaration(Class(:max13p))
+Declaration(Class(:max13q))
+Declaration(Class(:max13x))
+Declaration(Class(:only10f2500))
+Declaration(Class(:only10p))
+Declaration(Class(:only10q))
+Declaration(Class(:only10x))
+Declaration(Class(:only11f436))
+Declaration(Class(:only11p))
+Declaration(Class(:only11q))
+Declaration(Class(:only11x))
+Declaration(Class(:only7f1409))
+Declaration(Class(:only7p))
+Declaration(Class(:only7q))
+Declaration(Class(:only7x))
+Declaration(ObjectProperty(:max13r376))
+Declaration(ObjectProperty(:only10r2500))
+Declaration(ObjectProperty(:only11r436))
+Declaration(ObjectProperty(:only7r1409))
+
+############################
+#   Classes
+############################
+
+# Class: :max13f376 (:max13f376)
+
+SubClassOf(:max13f376 owl:Thing)
+
+# Class: :max13p (:max13p)
+
+EquivalentClasses(:max13p :max13q)
+SubClassOf(:max13p owl:Thing)
+
+# Class: :max13q (:max13q)
+
+SubClassOf(:max13q owl:Thing)
+
+# Class: :max13x (:max13x)
+
+SubClassOf(:max13x :max13q)
+SubClassOf(:max13x ObjectMaxCardinality(1 :max13r376 :max13f376))
+
+# Class: :only10f2500 (:only10f2500)
+
+SubClassOf(:only10f2500 owl:Thing)
+
+# Class: :only10p (:only10p)
+
+EquivalentClasses(:only10p :only10q)
+SubClassOf(:only10p owl:Thing)
+
+# Class: :only10q (:only10q)
+
+SubClassOf(:only10q owl:Thing)
+
+# Class: :only10x (:only10x)
+
+SubClassOf(:only10x :only10p)
+SubClassOf(:only10x ObjectAllValuesFrom(:only10r2500 :only10f2500))
+
+# Class: :only11f436 (:only11f436)
+
+SubClassOf(:only11f436 owl:Thing)
+
+# Class: :only11p (:only11p)
+
+EquivalentClasses(:only11p :only11q)
+SubClassOf(:only11p owl:Thing)
+
+# Class: :only11q (:only11q)
+
+SubClassOf(:only11q owl:Thing)
+
+# Class: :only11x (:only11x)
+
+SubClassOf(:only11x :only11p)
+SubClassOf(:only11x ObjectAllValuesFrom(:only11r436 :only11f436))
+
+# Class: :only7f1409 (:only7f1409)
+
+SubClassOf(:only7f1409 owl:Thing)
+
+# Class: :only7p (:only7p)
+
+EquivalentClasses(:only7p :only7q)
+SubClassOf(:only7p owl:Thing)
+
+# Class: :only7q (:only7q)
+
+SubClassOf(:only7q owl:Thing)
+
+# Class: :only7x (:only7x)
+
+SubClassOf(:only7x :only7q)
+SubClassOf(:only7x ObjectAllValuesFrom(:only7r1409 :only7f1409))
+
+
+)

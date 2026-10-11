@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:1.0:catalog">
+  <uri name="http://example.org/drop-import-child.owl" uri="drop-import-child.ofn"/>
+</catalog>

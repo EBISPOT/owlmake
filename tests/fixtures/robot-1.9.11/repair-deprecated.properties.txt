@@ -1,0 +1,4 @@
+oboInOwl:hasDbXref
+
+# rdfs:comment
+oboInOwl:hasExactSynonym

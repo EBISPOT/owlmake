@@ -1,0 +1,41 @@
+format-version: 1.2
+idspace: oboInOwl http://www.geneontology.org/formats/oboInOwl# 
+ontology: t
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/t#A>))\nDeclaration(ObjectProperty(<http://example.org/t#p>))\nDeclaration(ObjectProperty(<http://example.org/t#q>))\nDeclaration(ObjectProperty(<http://example.org/t#s>))\nDeclaration(AnnotationProperty(<http://example.org/t#m>))\nDeclaration(AnnotationProperty(<http://example.org/t#n>))\n############################\n#   Annotation Properties\n############################\n\n# Annotation Property: <http://example.org/t#m> (<http://example.org/t#m>)\n\nSubAnnotationPropertyOf(<http://example.org/t#m> <http://example.org/t#n>)\n\n\n############################\n#   Object Properties\n############################\n\n# Object Property: <http://example.org/t#q> (<http://example.org/t#q>)\n\nEquivalentObjectProperties(<http://example.org/t#q> owl:bottomObjectProperty)\nInverseObjectProperties(<http://example.org/t#q> ObjectInverseOf(<http://example.org/t#s>))\nObjectPropertyDomain(<http://example.org/t#q> owl:Thing)\n\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/t#A> (  )\n\nAnnotationAssertion(rdfs:label <http://example.org/t#A> \"  \")\n\n\nFunctionalObjectProperty(ObjectInverseOf(<http://example.org/t#p>))\nObjectPropertyDomain(ObjectInverseOf(<http://example.org/t#s>) <http://example.org/t#A>)\nSubObjectPropertyOf(ObjectPropertyChain(<http://example.org/t#p> owl:topObjectProperty) <http://example.org/t#q>)\n)
+
+[Term]
+id: A
+
+[Typedef]
+id: k
+name: k
+is_metadata_tag: false
+
+[Typedef]
+id: m
+name: m
+is_metadata_tag: true
+
+[Typedef]
+id: p
+name: p
+is_transitive: true {comment="t"}
+inverse_of: r {comment="inv"}
+
+[Typedef]
+id: q
+
+[Typedef]
+id: r
+domain: A {comment="d"}
+is_a: q {comment="sub"}
+
+[Typedef]
+id: s
+is_symmetric: true
+is_asymmetric: true {comment="a"}
+
+[Typedef]
+id: u
+is_a: v
+

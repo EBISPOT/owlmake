@@ -1,0 +1,8 @@
+2 axioms in left ontology but not in right ontology:
+- Declaration(Class(<http://example.org/diff-render#Z>))
+- OntologyID(OntologyIRI(<http://example.org/diff-render>) VersionIRI(<http://example.org/diff-render/v1>))
+
+3 axioms in right ontology but not in left ontology:
++ DLSafeRule(Body(ClassAtom(<http://example.org/eh#A> Variable(<http://example.org/eh#x>))) Head())
++ Declaration(Class(<http://example.org/eh#A>))
++ OntologyID(OntologyIRI(<http://example.org/eh>) VersionIRI(<null>))

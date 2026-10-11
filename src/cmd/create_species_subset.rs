@@ -101,8 +101,8 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     let mut model = crate::cmd::take_or_load(piped, args.input.as_deref(), &args.common)?;
     args.common.apply(&mut model)?;
 
-    let taxon = select::expand(&model, &args.taxon);
-    let roots: Vec<String> = args.root.iter().map(|r| select::expand(&model, r)).collect();
+    let taxon = select::expand_with_document_prefixes(&model, &args.taxon);
+    let roots: Vec<String> = args.root.iter().map(|r| select::expand_with_document_prefixes(&model, r)).collect();
 
     let subset = if args.strategy.eq_ignore_ascii_case("precise") {
         precise_subset(&mut model, &roots, &taxon)
@@ -112,9 +112,9 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
 
     // Tagging pass (only when --subset-name is given).
     if let Some(name) = &args.subset_name {
-        let subset_iri = select::expand(&model, name);
+        let subset_iri = select::expand_with_document_prefixes(&model, name);
         let prefixes: Vec<String> =
-            args.only_tag_in.iter().map(|p| select::expand(&model, p)).collect();
+            args.only_tag_in.iter().map(|p| select::expand_with_document_prefixes(&model, p)).collect();
         let annotations = in_subset_annotations(&subset, &subset_iri, &prefixes);
         if let Some(path) = &args.write_tags_to {
             let mut tags = Model::new();
@@ -145,8 +145,8 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
             excluded.extend(excluded_taxa(&model, &taxon).into_iter().filter(|t| !already.contains(t)));
         }
         let opts = TermOptions {
-            preserve_structure: Some(false),
-            trim: Some(true),
+            preserve_structure: Some(false.into()),
+            trim: Some(true.into()),
             // A class this pass drops must not take the assertions that merely POINT
             // at it: the subset keeps `RO_0002175 … NCBITaxon_9606` on the classes it
             // keeps, even though the taxon itself is not a member.

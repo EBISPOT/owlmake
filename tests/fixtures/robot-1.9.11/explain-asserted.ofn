@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/explain-asserted#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/explain-asserted>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:C))
+SubClassOf(:A :B)
+SubClassOf(:A :C)
+SubClassOf(:C :B)
+)

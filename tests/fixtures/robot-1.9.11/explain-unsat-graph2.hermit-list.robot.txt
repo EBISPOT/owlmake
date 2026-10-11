@@ -1,0 +1,12 @@
+GO:0000001
+http://example.org/Z
+obo:W_obo:V
+obo:X_10
+obo:X_12
+obo:X_14
+obo:X_3
+obo:X_4
+obo:X_5
+obo:X_6
+obo:X_7
+obo:X_8

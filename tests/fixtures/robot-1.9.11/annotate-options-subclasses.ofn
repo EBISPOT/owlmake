@@ -1,0 +1,6 @@
+Prefix(:=<http://example.org/>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/sub.owl>
+SubClassOf(Annotation(rdfs:comment "c") :B :A)
+SubClassOf(:C :A)
+)

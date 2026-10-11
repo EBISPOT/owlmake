@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/explain-data-facets#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Ontology(<http://example.org/explain-data-facets>
+Declaration(Class(:U1))
+Declaration(DataProperty(:p))
+SubClassOf(:U1 DataHasValue(:p "1"^^xsd:integer))
+SubClassOf(:U1 DataAllValuesFrom(:p DatatypeRestriction(xsd:integer xsd:minInclusive "5"^^xsd:integer xsd:maxExclusive "10"^^xsd:integer)))
+)

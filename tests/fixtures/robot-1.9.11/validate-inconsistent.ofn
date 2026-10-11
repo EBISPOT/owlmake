@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/inconsistent.owl>
+Declaration(Class(:B))
+Declaration(Class(:C))
+Declaration(NamedIndividual(:a))
+DisjointClasses(:B :C)
+ClassAssertion(:B :a)
+ClassAssertion(:C :a)
+)

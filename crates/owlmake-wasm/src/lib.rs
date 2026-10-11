@@ -113,8 +113,9 @@ impl Ontology {
     /// Remove logically redundant `SubClassOf` axioms (transitive reduction of
     /// the class hierarchy), in place.
     #[wasm_bindgen(js_name = reduce)]
-    pub fn reduce(&mut self) {
-        self.model = api::reduce(&self.model);
+    pub fn reduce(&mut self) -> Result<(), JsError> {
+        self.model = api::reduce(&self.model).map_err(js_err)?;
+        Ok(())
     }
 
     /// Relax equivalence/expression axioms into entailed `SubClassOf` axioms,
@@ -213,9 +214,10 @@ impl Ontology {
     /// Assert inferred existential restrictions, in place. `properties` limits
     /// which object properties to materialize (all if empty).
     #[wasm_bindgen(js_name = materialize)]
-    pub fn materialize(&mut self, properties: Vec<String>) {
+    pub fn materialize(&mut self, properties: Vec<String>) -> Result<(), JsError> {
         let model = self.take();
-        self.model = api::materialize(model, &properties);
+        self.model = api::materialize(model, &properties).map_err(js_err)?;
+        Ok(())
     }
 
     /// Extract a module for a seed term set as a new ontology, leaving this one

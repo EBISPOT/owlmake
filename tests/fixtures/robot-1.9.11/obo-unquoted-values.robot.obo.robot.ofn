@@ -1,0 +1,69 @@
+Prefix(:=<http://purl.obolibrary.org/obo/q.owl#>)
+Prefix(oio:=<http://www.geneontology.org/formats/oboInOwl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://purl.obolibrary.org/obo/q.owl>
+Annotation(oio:hasOBOFormatVersion "1.2")
+Annotation(oio:saved-by "me {x} \"q\"")
+Annotation(rdfs:comment "remark {x} \"q\" a\\b")
+
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_0000001>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_0000002>))
+Declaration(Class(<http://purl.obolibrary.org/obo/Q_0000003>))
+Declaration(AnnotationProperty(oio:created_by))
+Declaration(AnnotationProperty(oio:creation_date))
+Declaration(AnnotationProperty(oio:foo_bar))
+Declaration(AnnotationProperty(oio:hasOBOFormatVersion))
+Declaration(AnnotationProperty(oio:hasOBONamespace))
+Declaration(AnnotationProperty(oio:id))
+Declaration(AnnotationProperty(oio:saved-by))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:label))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: oio:created_by (created by)
+
+AnnotationAssertion(rdfs:label oio:created_by "created by")
+
+# Annotation Property: oio:creation_date (creation date)
+
+AnnotationAssertion(rdfs:label oio:creation_date "creation date")
+
+# Annotation Property: oio:hasOBOFormatVersion (has_obo_format_version)
+
+AnnotationAssertion(rdfs:label oio:hasOBOFormatVersion "has_obo_format_version")
+
+# Annotation Property: oio:hasOBONamespace (has_obo_namespace)
+
+AnnotationAssertion(rdfs:label oio:hasOBONamespace "has_obo_namespace")
+
+# Annotation Property: oio:id (id)
+
+AnnotationAssertion(rdfs:label oio:id "id")
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://purl.obolibrary.org/obo/Q_0000001> (x{y}z "q" a\b)
+
+AnnotationAssertion(Annotation(rdfs:comment "c{1}") oio:created_by <http://purl.obolibrary.org/obo/Q_0000001> "cb{d}e \"q\"")
+AnnotationAssertion(Annotation(rdfs:comment "c2") oio:creation_date <http://purl.obolibrary.org/obo/Q_0000001> "2020{x}")
+AnnotationAssertion(Annotation(rdfs:comment "c3") oio:foo_bar <http://purl.obolibrary.org/obo/Q_0000001> "fb{d}e")
+AnnotationAssertion(Annotation(rdfs:comment "c4") oio:hasOBONamespace <http://purl.obolibrary.org/obo/Q_0000001> "ns{x}")
+AnnotationAssertion(oio:id <http://purl.obolibrary.org/obo/Q_0000001> "Q:0000001")
+AnnotationAssertion(rdfs:comment <http://purl.obolibrary.org/obo/Q_0000001> "c{d}e \"q\" a\\b")
+AnnotationAssertion(rdfs:label <http://purl.obolibrary.org/obo/Q_0000001> "x{y}z \"q\" a\\b")
+
+
+SubClassOf(Annotation(rdfs:comment "a	tab {b} \"c\"") ObjectIntersectionOf(<http://purl.obolibrary.org/obo/Q_0000001> <http://purl.obolibrary.org/obo/Q_0000002>) <http://purl.obolibrary.org/obo/Q_0000003>)
+)

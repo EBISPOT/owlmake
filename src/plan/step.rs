@@ -6,6 +6,7 @@
 //! ([`crate::build`]) knows only these — never where they came from.
 
 use crate::build::recipe::FileOp;
+use crate::cmd::Switch;
 
 /// A mapped, executable operation: one stage of a pipeline, threading the
 /// in-flight ontology model.
@@ -17,10 +18,19 @@ pub enum Op {
         inputs: Vec<String>,
         /// `--collapse-import-closure` (default true): merge the import
         /// closure in and drop the `owl:imports` declarations. When set to false
-        /// (MONDO's `filtered.owl`), the imports are kept as declarations and
-        /// their axioms are NOT merged — they remain a read-only reasoning closure
-        /// until a later collapsing merge.
+        /// the current ontology keeps its imports as declarations and their
+        /// axioms are NOT merged — they remain a read-only reasoning closure
+        /// until a later collapsing merge — and each input gives its own axioms.
         collapse_import_closure: Option<bool>,
+        /// `--include-annotations`: the inputs' ontology annotations join the
+        /// current ontology's.
+        include_annotations: bool,
+        /// `--annotate-defined-by`: each entity with no `rdfs:isDefinedBy` is
+        /// defined by the ontology that names it.
+        annotate_defined_by: bool,
+        /// `--annotate-derived-from`: each axiom says with `prov:wasDerivedFrom`
+        /// which ontology it came from.
+        annotate_derived_from: bool,
     },
     /// `unmerge` — remove a second ontology's axioms from the current one.
     Unmerge {
@@ -78,13 +88,22 @@ pub enum Op {
         /// unless the recipe sets it (e.g. UBERON's
         /// `REDUCE_OPTIONS = --include-subproperties true`).
         include_subproperties: Option<bool>,
+        /// `--preserve-annotated-axioms`: keep a redundant axiom that carries
+        /// annotations.
+        preserve_annotated_axioms: bool,
+        /// `--named-classes-only`: reduce only axioms between named classes.
+        named_classes_only: bool,
     },
     Materialize {
+        /// `-r/--reasoner`: the reasoner the ontology is checked with.
+        reasoner: Option<String>,
+        /// `-n/--create-new-ontology`: check only, and keep the input as it was.
+        create_new_ontology: Option<bool>,
         properties: Vec<String>,
         term_files: Vec<String>,
     },
-    Remove(RemoveSpec),
-    Filter(FilterSpec),
+    Remove(SelectionSpec),
+    Filter(SelectionSpec),
     Annotate(AnnotateSpec),
     Convert {
         format: Option<String>,
@@ -95,13 +114,6 @@ pub enum Op {
         /// tmp/mondo.owl.ofn` — so an explicit `--format` may belong to a
         /// different output than the one being built.
         output: Option<String>,
-        /// `--add-prefixes FILE` (repeatable): JSON-LD context files whose
-        /// prefixes are added to the model's map, so the OFN/OBO output declares
-        /// AND abbreviates with them (e.g. MONDO's `config/prefixes.jsonld` binds
-        /// `Orphanet:` → `http://www.orpha.net/ORDO/Orphanet_`). Without them the
-        /// OFN abbreviates `Orphanet:377788` while declaring no such prefix, and a
-        /// downstream re-read expands it to `obo:Orphanet_377788`.
-        add_prefixes: Vec<String>,
         /// `--check false`: write an OBO document whose frames repeat a
         /// single-valued tag, instead of refusing it.
         check: Option<bool>,
@@ -131,9 +143,16 @@ pub enum Op {
         /// `reports/mondo_release_diff_changed_terms.tsv`.
         tdb: bool,
     },
+    /// `repair`: merge the annotations of axioms that are otherwise the same,
+    /// and migrate every reference to a deprecated entity to its replacement.
     Repair {
         invalid_references: bool,
         merge_axiom_annotations: bool,
+        /// The annotation properties, as written, whose assertions on a
+        /// deprecated entity move to its replacement.
+        annotation_properties: Vec<String>,
+        /// A file listing more of them, one per line.
+        annotation_properties_file: Option<String>,
     },
     /// `upheno:extract-upheno-relations` — materialise uPheno's phenotype
     /// shortcut relations (`UPHENO:0000001`/`0000003`/`0000002`) from the EQ
@@ -155,11 +174,12 @@ pub enum Op {
         id_ranges: Option<String>,
     },
     /// `collapse` — remove intermediate classes with fewer than `threshold`
-    /// named subclasses, bridging the hierarchy across them.
+    /// named subclasses, bridging the hierarchy across them. `threshold` is the
+    /// recipe's text, read as an integer when the step runs.
     Collapse {
         precious: Vec<String>,
         precious_files: Vec<String>,
-        threshold: Option<usize>,
+        threshold: Option<String>,
     },
     /// `normalize` (recipes spell it `odk:normalize`) — inject subset /
     /// synonym-type subproperty declarations.
@@ -172,28 +192,60 @@ pub enum Op {
         /// provenance annotation.
         add_source: bool,
     },
-    /// A prefix binding the LAUNCHER states, before any subcommand — ROBOT's
-    /// global `--prefix`/`--add-prefix "foo: http://bar"`. It binds for the whole
-    /// chain, so it is recorded as the chain's opening step; the document written
-    /// at the end declares it whether or not any axiom uses it. CL's
-    /// `components/hra_subset.owl` is `robot --add-prefix "obo: …" annotate …`,
-    /// and without the binding the component loses its `xmlns:obo` declaration.
-    AddPrefix { prefixes: Vec<String> },
+    /// The prefix options in force from here. The commands that follow read their
+    /// CURIEs with a context made afresh from them ([`crate::context`]): the
+    /// built-in map, or the `--prefixes FILE` in its place, or none with
+    /// `--noprefixes`, then each `--add-prefixes FILE`, `--prefix` and
+    /// `--add-prefix "foo: http://bar"`. What they ADD is declared by the document
+    /// written next, whether or not any axiom uses it, and nothing else they bind
+    /// is.
+    ///
+    /// A chain gives each of its commands the options its command line states
+    /// before the first command, and the command's own, so a step stands wherever
+    /// that set changes: at the head of a chain that states any, before a command
+    /// with options of its own, and before the command after it. CL's
+    /// `components/hra_subset.owl` is `robot --add-prefix "obo: …" annotate …`; a
+    /// repository that uses its context runs every command as
+    /// `robot --add-prefixes config/context.json …`, and ODK's component rule
+    /// runs `template --add-prefixes config/context.json …`, whose bindings the
+    /// `annotate` and `convert` after it do not have. A file is read when the
+    /// step runs, from the repository's directory.
+    Prefixes {
+        prefixes: Option<String>,
+        noprefixes: bool,
+        add_prefixes: Vec<String>,
+        prefix: Vec<String>,
+        add_prefix: Vec<String>,
+    },
     /// `template` — generate axioms from template tables (a row of template
-    /// strings over a table of terms) and merge them in.
+    /// strings over a table of terms). The step yields the generated axioms'
+    /// own ontology, or under `merge` its input with the axioms added.
     Template {
         templates: Vec<String>,
+        /// The input, keeping its IRIs, annotations and prefixes, with the
+        /// generated axioms added, counts as changed whatever they add.
         merge: bool,
-        /// ROBOT `--prefix "foo: http://bar"` bindings, in argv order. These
-        /// resolve the CURIEs in the template's own header directives, so they
-        /// change which IRI each column asserts.
-        prefixes: Vec<String>,
+        /// Under `merge`, the input's imports are taken out of it: the merged
+        /// ontology imports nothing, and the imports' axioms stay out.
+        collapse_import_closure: bool,
+        /// `--ancestors`: the generated axioms' terms the input names come
+        /// with the ancestors the input gives them, and their labels.
+        ancestors: bool,
+        /// `--force true`: a row the tables cannot be read into is reported and
+        /// skipped. Without it such a row fails the step.
+        force: bool,
     },
-    /// `rename` — rewrite entity IRIs from a `old<TAB>new` (or prefix) mapping.
+    /// `rename` — give entities new IRIs, from a mappings table, `--mapping`
+    /// pairs and a prefix-mappings table.
     Rename {
         mappings: Option<String>,
+        /// The `--mapping OLD NEW` pairs, in recipe order.
+        mapping: Vec<(String, String)>,
         prefix_mappings: Option<String>,
         allow_missing: bool,
+        /// `--allow-duplicates true`: two rows of the mappings table may give
+        /// the same new IRI.
+        allow_duplicates: bool,
     },
     /// `extract` — extract a module for a seed term set.
     Extract {
@@ -208,19 +260,27 @@ pub enum Op {
         /// dropping the root left the extract with no seed at all.
         branch_from_terms: Vec<String>,
         branch_from_term_files: Vec<String>,
+        /// MIREOT `--lower-term`/`--lower-terms`: the terms whose ancestors
+        /// are extracted.
+        lower_terms: Vec<String>,
+        lower_term_files: Vec<String>,
+        /// MIREOT `--upper-term`/`--upper-terms`: the terms a climb stops at.
+        upper_terms: Vec<String>,
+        upper_term_files: Vec<String>,
+        /// `--intermediates`: `all`, `minimal` or `none`; `all` when unset.
+        intermediates: Option<String>,
+        /// `--force true`: extract even when the ontology names none of the
+        /// terms, which otherwise fails the step.
+        force: bool,
     },
-    /// Write the in-flight model to `path` and read it back — the round trip a
-    /// recipe performs whenever one command writes a file and the next command
-    /// reads that file back.
+    /// Write the in-flight model to `path`, in the format the path's extension
+    /// names, and go on with it: a command's `-o` part way through a chain. What
+    /// the next command sees is the model, not the file.
     ///
-    /// It is not bookkeeping: an RDF/XML round trip is lossy in ways that reach the
-    /// bytes (the writer derives an `xmlns` block the in-memory model never had, and
-    /// re-reading collapses it back). EFO's mondo import writes
-    /// `mondo_import.owl.tmp.owl` between its `extract` and its `remove`, and
-    /// eliding that write changes the module by 7 MB. The in-memory pipeline elides
-    /// round trips by design, so the ones the recipe *depends on* have to be
-    /// recorded — otherwise they live only in a command line.
-    RoundTrip {
+    /// It is not bookkeeping: the file is the recipe's, and a later invocation
+    /// may read it. EFO's mondo import writes `mondo_import.owl.tmp.owl` with its
+    /// `extract`, and the invocations after it open that file.
+    Write {
         path: String,
     },
     /// `merge-equivalent-sets` — collapse equivalent-class cliques by IRI-prefix
@@ -247,13 +307,12 @@ pub enum Op {
         /// OBO Graphs JSON instead of the table.
         format: Option<String>,
     },
-    /// `expand` — expand OBO/OWL macros (`IAO:0000424` expandExpressionToType).
+    /// `expand` — expand `OMO:0002000` (defined by construct) macros.
     ///
-    /// `expand_terms` is the ALLOW-list: with one, only those properties' macros
-    /// run. CL builds its taxon views with `expand --expand-term RO:0002161`, and
-    /// without the list recorded every macro in `cl-full.owl` ran — including
-    /// `RO:0002175`'s, which mints a named witness class per taxon assertion and
-    /// put 412 of them into `subsets/human-view.owl`.
+    /// `expand_terms` is the ALLOW-list: with one, only those terms' macros run.
+    /// CL builds its taxon views with `expand --expand-term RO:0002161`, which
+    /// leaves `RO:0002175`'s macro, minting a named witness class per taxon
+    /// assertion, unexpanded.
     Expand {
         expand_terms: Vec<String>,
         expand_term_files: Vec<String>,
@@ -330,59 +389,88 @@ pub enum Op {
     },
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct RemoveSpec {
-    pub terms: Vec<String>,
-    pub term_files: Vec<String>,
-    pub axioms: Vec<String>,
-    pub selects: Vec<String>,
-    pub base_iri: Vec<String>,
-    pub trim: Option<bool>,
-    pub preserve_structure: Option<bool>,
-    /// ROBOT `-e,--exclude-term` / `-E,--exclude-terms`: terms that must SURVIVE
-    /// the removal whatever the selectors say. UBERON's `merged-partonomy.owl` is
-    /// `remove --exclude-term BFO:0000050 --select object-properties` — drop every
-    /// object property EXCEPT part_of. Dropping the exclusion removed part_of too,
-    /// leaving 0 `BFO_0000050` restrictions against ROBOT's 15,088 and starving
-    /// every `part_of some X` query that reads the file.
-    pub exclude_terms: Vec<String>,
-    pub exclude_term_files: Vec<String>,
-    /// ROBOT `--signature`: match on the axiom's SIGNATURE rather than its terms.
-    pub signature: Option<bool>,
-    /// ROBOT `--drop-axiom-annotations <selector>` (`all`, `internal`, …).
-    pub drop_axiom_annotations: Option<String>,
+impl Op {
+    /// A `merge` of `inputs` with every option at its default.
+    pub fn plain_merge(inputs: Vec<String>) -> Op {
+        Op::Merge {
+            inputs,
+            collapse_import_closure: None,
+            include_annotations: false,
+            annotate_defined_by: false,
+            annotate_derived_from: false,
+        }
+    }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct FilterSpec {
+/// What `remove` and `filter` select, and how each judges an axiom against
+/// the selection: every option the two commands share, as the recipe gives it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelectionSpec {
+    /// `--term`, `--term-file`: the terms the object set starts from.
     pub terms: Vec<String>,
     pub term_files: Vec<String>,
+    /// `--include-term`, `--include-terms`: terms added to the selection.
+    pub include_terms: Vec<String>,
+    pub include_term_files: Vec<String>,
+    /// `--exclude-term`, `--exclude-terms`: terms taken out of the selection.
+    /// UBERON's `merged-partonomy.owl` is `remove --exclude-term BFO:0000050
+    /// --select object-properties`: every object property but part_of goes.
+    pub exclude_terms: Vec<String>,
+    pub exclude_term_files: Vec<String>,
+    /// `--select`: the selector groups, each mapping the set it is given.
     pub selects: Vec<String>,
-    pub signature: Option<bool>,
-    pub trim: Option<bool>,
-    /// ROBOT `--axioms`: keep only these axiom TYPES. UBERON's
-    /// `composite-*-basic.owl` is `filter --axioms "subclass equivalent
-    /// annotation"`; recording the step with no axioms kept everything.
+    /// `--axioms`: the axiom types acted on. UBERON's `composite-*-basic.owl`
+    /// is `filter --axioms "subclass equivalent annotation"`.
     pub axioms: Vec<String>,
-    /// ROBOT `--base-iri`: the namespaces `--axioms internal|external` judge an
+    /// `--base-iri`: the namespaces `--axioms internal|external` judge an
     /// axiom's subjects by.
     pub base_iri: Vec<String>,
-    /// `--prefix "name: namespace"` bindings, which is how a `--select` CURIE
-    /// resolves. UBERON's `cumbo` term list is
-    /// `filter --prefix 'uberon: …/obo/uberon/core#' --select
-    /// 'oboInOwl:inSubset=uberon:cumbo'`, and without the binding recorded the
-    /// selector matched nothing — which, an empty seed meaning the whole
-    /// ontology, exported all 16,417 terms instead of 14.
-    pub prefixes: Vec<String>,
+    /// `--trim`: whether any selected object takes an axiom (`remove`'s
+    /// default) or every one must be selected (`filter`'s).
+    pub trim: Option<Switch>,
+    /// `--signature`: judge an axiom by the IRIs it names alone.
+    pub signature: Option<Switch>,
+    /// `--preserve-structure`: re-assert the hierarchy across what goes.
+    pub preserve_structure: Option<Switch>,
+    /// `--allow-punning`: a term naming entities of several kinds selects them
+    /// all.
+    pub allow_punning: Option<Switch>,
+    /// `--drop-axiom-annotations`, every value in recipe order.
+    pub drop_axiom_annotations: Vec<String>,
+}
+
+impl SelectionSpec {
+    /// Every term file the step reads.
+    pub fn files(&self) -> impl Iterator<Item = &String> {
+        self.term_files.iter().chain(&self.include_term_files).chain(&self.exclude_term_files)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct AnnotateSpec {
     pub ontology_iri: Option<String>,
     pub version_iri: Option<String>,
+    /// `--annotation PROP VALUE`.
     pub annotations: Vec<(String, String)>,
+    /// `--link-annotation PROP IRI`.
     pub link_annotations: Vec<(String, String)>,
+    /// `--language-annotation PROP VALUE LANG`.
+    pub language_annotations: Vec<(String, String, String)>,
+    /// `--typed-annotation PROP VALUE TYPE`.
+    pub typed_annotations: Vec<(String, String, String)>,
+    /// `--axiom-annotation`: its values as the recipe gives them, read in
+    /// `PROP VALUE` pairs.
+    pub axiom_annotations: Vec<String>,
+    /// `--annotation-file`: ontologies whose axioms and ontology annotations are
+    /// merged in.
+    pub annotation_files: Vec<String>,
     pub remove_annotations: bool,
+    /// `--interpolate true`.
+    pub interpolate: bool,
+    /// `--annotate-defined-by true`.
+    pub annotate_defined_by: bool,
+    /// `--annotate-derived-from true`.
+    pub annotate_derived_from: bool,
 }
 
 /// A parsed `flybase:rewrite-def` invocation.
@@ -420,98 +508,39 @@ pub struct OortSpec {
 /// Options of `remove` owlmake cannot execute (empty = fully covered). Factored
 /// out so the same coverage rule applies whether a step came from ingest or was
 /// hand-written in `owlmake.json`.
-pub fn remove_gaps(spec: &RemoveSpec) -> Vec<String> {
-    let mut gaps = vec![];
-    // The categories `cmd::remove` really applies — the same list its classifier
-    // reads, so a category cannot be executable but reported as a gap, or the
-    // reverse. A category missing from it is reported as a gap, so the artefact is
-    // never rebuilt: its committed copy is consumed as-is and goes stale
-    // unnoticed. For UBERON that artefact is
-    // `remove --axioms "equivalent disjoint type abox"`, the source of
-    // `subsets/merged-partonomy.owl` and so of twenty of its twenty-three subsets.
-    for a in spec.axioms.iter().flat_map(|a| a.split_whitespace()) {
-        if !crate::cmd::select::is_axiom_category(a) {
-            gaps.push(format!("remove --axioms {a}"));
-        }
-    }
-    // Each `--select` value is a group of space-separated selectors. owlmake
-    // covers the special `imports`/`complement`/`ontology` idioms, the typed
-    // entity selectors, and IRI/CURIE patterns (`<…/BFO_*>`, `OBO:*`, full IRIs).
-    for s in spec.selects.iter().flat_map(|s| s.split_whitespace()) {
-        let covered = matches!(
-            s,
-            "imports" | "complement" | "ontology" | "anonymous" | "named" | "classes"
-                | "properties" | "object-properties" | "object-property" | "data-properties"
-                | "data-property" | "annotation-properties" | "annotation-property"
-                | "individuals" | "named-individuals" | "instances" | "datatypes"
-                // The RELATION selectors, which `cmd::remove` expands the removal
-                // seed with (`select::direct_parents`/`ancestors`/`children`/
-                // `descendants`/`equivalents`/`types`/`domains`/`ranges`). `self` is
-                // the identity — the seed already holds the terms themselves — and
-                // `remove --term MONDO:0005583 --select "self descendants"` is how
-                // MONDO builds `subsets/mondo-clingen.owl`.
-                | "self" | "parents" | "ancestors" | "children" | "descendants"
-                | "equivalents" | "types" | "domains" | "ranges"
-        ) || crate::cmd::select::is_pattern(s)
-            // `PROP=VALUE` is covered too, and is NOT a pattern — `is_pattern`
-            // excludes it precisely so it is not glob-matched against entity IRIs.
-            // Both commands implement it, so leaving it out of this list reported
-            // `remove --select owl:deprecated='true'^^xsd:boolean` as an uncovered
-            // step and refused to build `composite-*-basic.owl` at all.
-            || crate::cmd::select::parse_annotation_value(s).is_some();
-        if !covered {
-            gaps.push(format!("remove --select {s}"));
-        }
-    }
-    gaps
+pub fn remove_gaps(spec: &SelectionSpec) -> Vec<String> {
+    axiom_gaps("remove", &spec.axioms)
 }
 
-/// Wrap a [`RemoveSpec`] into a [`Step`], downgrading to [`Step::Partial`] when
-/// it uses uncovered options.
-pub fn remove_step(spec: RemoveSpec) -> Step {
+/// The `--axioms` values the classifier does not know
+/// ([`crate::cmd::select::is_axiom_category`]): `tautologies`, which asks a
+/// reasoner whether each axiom holds of every ontology, and any value that is
+/// no axiom type. Every `--select` value runs — one that is no selector selects
+/// nothing ([`crate::cmd::objects`]) — so none is a gap.
+fn axiom_gaps(command: &str, axioms: &[String]) -> Vec<String> {
+    axioms
+        .iter()
+        .flat_map(|a| a.split_whitespace())
+        .filter(|a| !crate::cmd::select::is_axiom_category(a))
+        .map(|a| format!("{command} --axioms {a}"))
+        .collect()
+}
+
+/// Wrap a `remove` into a [`Step`], downgrading to [`Step::Partial`] when it
+/// uses uncovered options.
+pub fn remove_step(spec: SelectionSpec) -> Step {
     let gaps = remove_gaps(&spec);
     if gaps.is_empty() { Step::Op(Op::Remove(spec)) } else { Step::Partial { op: Op::Remove(spec), gaps } }
 }
 
 /// Options of `filter` owlmake cannot execute (empty = fully covered).
-pub fn filter_gaps(spec: &FilterSpec) -> Vec<String> {
-    let mut gaps = vec![];
-    // `filter --axioms` reads the same classifier `remove --axioms` does.
-    for a in spec.axioms.iter().flat_map(|a| a.split_whitespace()) {
-        if !crate::cmd::select::is_axiom_category(a) {
-            gaps.push(format!("filter --axioms {a}"));
-        }
-    }
-    // The OBO `-simple`/`-basic` signature filter is supported; only
-    // unrecognised selectors are gaps.
-    for s in spec.selects.iter().flat_map(|s| s.split_whitespace()) {
-        let covered = matches!(
-            s,
-            "annotations" | "ontology" | "imports" | "anonymous" | "named" | "self" | "complement"
-                | "classes" | "properties" | "object-properties" | "data-properties"
-                | "annotation-properties" | "individuals" | "named-individuals" | "datatypes"
-                // The relation selectors `filter_core` expands the seed with, the
-                // same set `remove` covers. MONDO's `tmp/hgnc_import.owl` is
-                // `filter --term … --select "self descendants"`.
-                | "parents" | "ancestors" | "children" | "descendants" | "equivalents"
-                | "types" | "instances" | "domains" | "ranges"
-        ) || crate::cmd::select::is_pattern(s)
-            // `PROP=VALUE` is covered too, and is NOT a pattern — `is_pattern`
-            // excludes it precisely so it is not glob-matched against entity IRIs.
-            // Both commands implement it, so leaving it out of this list reported
-            // `remove --select owl:deprecated='true'^^xsd:boolean` as an uncovered
-            // step and refused to build `composite-*-basic.owl` at all.
-            || crate::cmd::select::parse_annotation_value(s).is_some();
-        if !covered {
-            gaps.push(format!("filter --select {s}"));
-        }
-    }
-    gaps
+pub fn filter_gaps(spec: &SelectionSpec) -> Vec<String> {
+    axiom_gaps("filter", &spec.axioms)
 }
 
-/// Wrap a [`FilterSpec`] into a [`Step`], downgrading to [`Step::Partial`] when
-/// it uses uncovered options.
-pub fn filter_step(spec: FilterSpec) -> Step {
+/// Wrap a `filter` into a [`Step`], downgrading to [`Step::Partial`] when it
+/// uses uncovered options.
+pub fn filter_step(spec: SelectionSpec) -> Step {
     let gaps = filter_gaps(&spec);
     if gaps.is_empty() { Step::Op(Op::Filter(spec)) } else { Step::Partial { op: Op::Filter(spec), gaps } }
 }
@@ -547,6 +576,13 @@ pub enum Step {
     Partial { op: Op, gaps: Vec<String> },
     /// A subcommand named by a recipe that owlmake does not implement.
     UnsupportedSubcommand(String),
+    /// Options a recipe gives a command that owlmake does not read, each with
+    /// its values: the plan refuses the command rather than run it without
+    /// them.
+    UnsupportedOptions { command: String, options: Vec<String> },
+    /// A command line its commands cannot read, with the message that says
+    /// why: the step fails as running the line fails.
+    Refused { message: String },
     /// A subcommand owlmake implements as a CLI command but does not model
     /// as a pipeline [`Op`] — `uberon:create-species-subset`, which writes two
     /// products (the tag set and the pruned view) rather than threading one model
@@ -646,6 +682,9 @@ impl Step {
             Step::File(_) | Step::Jq(_) | Step::Sssom(_) | Step::OwlmakeCli { .. } => vec![],
             Step::Partial { gaps, .. } => gaps.clone(),
             Step::UnsupportedSubcommand(name) => vec![format!("unsupported ontology subcommand `{name}`")],
+            Step::UnsupportedOptions { command, options } => unsupported_options(command, options),
+            // A refusal is the command's own failure, run when the step is.
+            Step::Refused { .. } => vec![],
             Step::MayFail(inner) => inner.gaps(),
 
             // A branch is covered exactly when both of its bodies are.
@@ -665,6 +704,7 @@ impl Step {
         match self {
             Step::Partial { gaps, .. } => gaps.clone(),
             Step::UnsupportedSubcommand(name) => vec![format!("unsupported ontology subcommand `{name}`")],
+            Step::UnsupportedOptions { command, options } => unsupported_options(command, options),
             Step::MayFail(inner) => inner.unrunnable_gaps(),
             Step::Branch { then_steps, else_steps, .. } => then_steps
                 .iter()
@@ -683,6 +723,8 @@ impl Step {
                 None => "── new invocation".to_string(),
             },
             Step::UnsupportedSubcommand(n) => format!("{n} (UNSUPPORTED)"),
+            Step::UnsupportedOptions { command, options } => format!("{command} {} (UNSUPPORTED)", options.join(" ")),
+            Step::Refused { message } => format!("refused: {message}"),
             Step::OwlmakeCli { name, .. } => format!("om {name}"),
             Step::File(f) => f.label(),
             Step::Jq(args) => format!("jq {}", args.join(" ")),
@@ -719,14 +761,61 @@ fn first_word(s: &str) -> &str {
     s.split_whitespace().next().unwrap_or(s)
 }
 
+/// One gap per option of `command` owlmake does not read.
+fn unsupported_options(command: &str, options: &[String]) -> Vec<String> {
+    options.iter().map(|o| format!("unsupported option `{command} {o}`")).collect()
+}
+
+/// What a `remove` or `filter` asks for, option by option, for its label.
+fn selection_label(s: &SelectionSpec) -> Vec<String> {
+    let mut bits = vec![];
+    for (name, values) in [
+        ("term", &s.terms),
+        ("term-file", &s.term_files),
+        ("include-term", &s.include_terms),
+        ("include-terms", &s.include_term_files),
+        ("exclude-term", &s.exclude_terms),
+        ("exclude-terms", &s.exclude_term_files),
+    ] {
+        if !values.is_empty() { bits.push(format!("{name}×{}", values.len())); }
+    }
+    if !s.selects.is_empty() { bits.push(format!("select={}", s.selects.join("+"))); }
+    if !s.axioms.is_empty() { bits.push(format!("axioms={}", s.axioms.join("+"))); }
+    if !s.base_iri.is_empty() { bits.push(format!("base-iri={}", s.base_iri.join("|"))); }
+    for (name, value) in [
+        ("trim", &s.trim),
+        ("signature", &s.signature),
+        ("preserve-structure", &s.preserve_structure),
+        ("allow-punning", &s.allow_punning),
+    ] {
+        if let Some(v) = value { bits.push(format!("{name}={v}")); }
+    }
+    if !s.drop_axiom_annotations.is_empty() {
+        bits.push(format!("drop-axiom-annotations={}", s.drop_axiom_annotations.join("+")));
+    }
+    bits
+}
+
 fn op_label(op: &Op) -> String {
     match op {
-        Op::Merge { collapse_import_closure, .. } => {
-            if *collapse_import_closure == Some(false) {
-                "merge (keep imports)".into()
+        Op::Merge { collapse_import_closure, include_annotations, annotate_defined_by, annotate_derived_from, .. } => {
+            let mut label = if *collapse_import_closure == Some(false) {
+                "merge (keep imports".to_string()
             } else {
-                "merge (+resolve imports)".into()
+                "merge (+resolve imports".to_string()
+            };
+            for (on, what) in [
+                (*include_annotations, "+annotations"),
+                (*annotate_defined_by, "defined-by"),
+                (*annotate_derived_from, "derived-from"),
+            ] {
+                if on {
+                    label.push_str(", ");
+                    label.push_str(what);
+                }
             }
+            label.push(')');
+            label
         }
         Op::Unmerge { .. } => "unmerge".into(),
         Op::Reason {
@@ -749,41 +838,42 @@ fn op_label(op: &Op) -> String {
                 "relax".into()
             }
         }
-        Op::Reduce { reasoner, include_subproperties } => format!(
-            "reduce[{}{}]",
+        Op::Reduce { reasoner, include_subproperties, preserve_annotated_axioms, named_classes_only } => format!(
+            "reduce[{}{}{}{}]",
             reasoner.clone().unwrap_or_else(|| "ELK".into()),
             if include_subproperties.unwrap_or(false) { ", +subproperties" } else { "" },
+            if *preserve_annotated_axioms { ", preserve-annotated" } else { "" },
+            if *named_classes_only { ", named-classes-only" } else { "" },
         ),
-        Op::Materialize { properties, term_files } => {
+        Op::Materialize { reasoner, create_new_ontology, properties, term_files } => {
             let mut p = properties.clone();
             for f in term_files { p.push(format!("@{f}")); }
+            if let Some(r) = reasoner { p.push(format!("reasoner={r}")); }
+            if create_new_ontology == &Some(true) { p.push("new-ontology".into()); }
             format!("materialize[{}]", p.join(" "))
         }
-        Op::Remove(s) => {
+        Op::Remove(s) => format!("remove[{}]", selection_label(s).join(", ")),
+        Op::Filter(s) => format!("filter[{}]", selection_label(s).join(", ")),
+        Op::Annotate(s) => {
             let mut bits = vec![];
-            if !s.terms.is_empty() { bits.push(format!("term×{}", s.terms.len())); }
-            if !s.term_files.is_empty() { bits.push(format!("term-file×{}", s.term_files.len())); }
-            if !s.axioms.is_empty() { bits.push(format!("axioms={}", s.axioms.join("+"))); }
-            if !s.selects.is_empty() { bits.push(format!("select={}", s.selects.join("+"))); }
-            if !s.base_iri.is_empty() { bits.push(format!("base-iri={}", s.base_iri.join("|"))); }
-            format!("remove[{}]", bits.join(", "))
+            if s.remove_annotations { bits.push("remove".to_string()); }
+            if s.ontology_iri.is_some() { bits.push("ont-iri".to_string()); }
+            if s.version_iri.is_some() { bits.push("ver-iri".to_string()); }
+            let header = s.annotations.len()
+                + s.link_annotations.len()
+                + s.language_annotations.len()
+                + s.typed_annotations.len();
+            if header > 0 { bits.push(format!("+{header}ann")); }
+            if !s.axiom_annotations.is_empty() { bits.push(format!("axiom-ann×{}", s.axiom_annotations.len() / 2)); }
+            if !s.annotation_files.is_empty() { bits.push(format!("file×{}", s.annotation_files.len())); }
+            if s.interpolate { bits.push("interpolate".to_string()); }
+            if s.annotate_derived_from { bits.push("derived-from".to_string()); }
+            if s.annotate_defined_by { bits.push("defined-by".to_string()); }
+            format!("annotate[{}]", bits.join(", "))
         }
-        Op::Filter(s) => {
-            let mut bits = vec![];
-            if !s.term_files.is_empty() { bits.push(format!("term-file×{}", s.term_files.len())); }
-            if !s.selects.is_empty() { bits.push(format!("select={}", s.selects.join("+"))); }
-            if !s.base_iri.is_empty() { bits.push(format!("base-iri={}", s.base_iri.join("|"))); }
-            format!("filter[{}]", bits.join(", "))
-        }
-        Op::Annotate(s) => format!(
-            "annotate[{}{}+{}ann]",
-            s.ontology_iri.as_ref().map(|_| "ont-iri ").unwrap_or(""),
-            s.version_iri.as_ref().map(|_| "ver-iri ").unwrap_or(""),
-            s.annotations.len() + s.link_annotations.len()
-        ),
         Op::Convert { format, .. } => format!("convert[{}]", format.clone().unwrap_or_else(|| "owl".into())),
         Op::Collapse { threshold, precious, .. } => {
-            format!("collapse[t={}, {} precious]", threshold.unwrap_or(2), precious.len())
+            format!("collapse[t={}, {} precious]", threshold.as_deref().unwrap_or("2"), precious.len())
         }
         Op::Mint { id_range_name, .. } => format!("mint[{id_range_name}]"),
         Op::ExtractUphenoRelations { relations, roots, .. } => {
@@ -795,20 +885,43 @@ fn op_label(op: &Op) -> String {
             if *synonym_decls { bits.push("synonym-decls"); }
             format!("normalize[{}]", bits.join(", "))
         }
-        Op::AddPrefix { prefixes } => format!("add-prefix[{}]", prefixes.len()),
-        Op::Template { templates, merge, prefixes } => {
-            let p =
-                if prefixes.is_empty() { String::new() } else { format!(", +{}pfx", prefixes.len()) };
-            format!("template[×{}{}{}]", templates.len(), if *merge { ", merge" } else { "" }, p)
+        Op::Prefixes { prefixes, noprefixes, add_prefixes, prefix, add_prefix } => {
+            let mut bits = vec![];
+            if let Some(file) = prefixes {
+                bits.push(format!("prefixes={file}"));
+            }
+            if *noprefixes {
+                bits.push("noprefixes".to_string());
+            }
+            bits.extend(add_prefixes.iter().map(|f| format!("add-prefixes={f}")));
+            if !prefix.is_empty() {
+                bits.push(format!("{} bound", prefix.len()));
+            }
+            if !add_prefix.is_empty() {
+                bits.push(format!("{} added", add_prefix.len()));
+            }
+            format!("prefixes[{}]", bits.join(", "))
         }
+        Op::Template { templates, merge, collapse_import_closure, ancestors, force } => format!(
+            "template[×{}{}{}{}{}]",
+            templates.len(),
+            if *merge { ", merge" } else { "" },
+            if *collapse_import_closure { ", collapse imports" } else { "" },
+            if *ancestors { ", ancestors" } else { "" },
+            if *force { ", force" } else { "" }
+        ),
         Op::Rename { mappings, prefix_mappings, .. } => {
             let m = if mappings.is_some() { "mappings" } else if prefix_mappings.is_some() { "prefix-mappings" } else { "" };
             format!("rename[{m}]")
         }
-        Op::Extract { method, terms, term_files, .. } => {
-            format!("extract[{}, term×{}, term-file×{}]", method, terms.len(), term_files.len())
-        }
-        Op::RoundTrip { path } => format!("round-trip[{path}]"),
+        Op::Extract { method, terms, term_files, force, .. } => format!(
+            "extract[{}, term×{}, term-file×{}{}]",
+            method,
+            terms.len(),
+            term_files.len(),
+            if *force { ", forced" } else { "" }
+        ),
+        Op::Write { path } => format!("write[{path}]"),
         Op::Query { updates, selects, constructs, .. } => {
             let mut bits = vec![];
             if !updates.is_empty() { bits.push(format!("update×{}", updates.len())); }
@@ -816,11 +929,13 @@ fn op_label(op: &Op) -> String {
             if !constructs.is_empty() { bits.push(format!("construct×{}", constructs.len())); }
             format!("query[{}]", bits.join(", "))
         }
-        Op::Repair { invalid_references, merge_axiom_annotations } => {
-            let mut bits = vec![];
-            if *invalid_references { bits.push("invalid-references"); }
-            if *merge_axiom_annotations { bits.push("merge-axiom-annotations"); }
-            if bits.is_empty() { bits.push("dedupe"); }
+        Op::Repair { invalid_references, merge_axiom_annotations, annotation_properties, annotation_properties_file } => {
+            let mut bits: Vec<String> = vec![];
+            if *merge_axiom_annotations { bits.push("merge-axiom-annotations".into()); }
+            if *invalid_references { bits.push("invalid-references".into()); }
+            if !annotation_properties.is_empty() { bits.push(format!("annotation-property×{}", annotation_properties.len())); }
+            if let Some(f) = annotation_properties_file { bits.push(format!("annotation-properties-file {f}")); }
+            if bits.is_empty() { bits.push("nothing".into()); }
             format!("repair[{}]", bits.join(", "))
         }
         Op::MergeEquivalentSets { set_prefix, .. } => {

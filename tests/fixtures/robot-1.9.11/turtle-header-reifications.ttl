@@ -1,0 +1,74 @@
+@prefix : <http://example.org/header-reifications#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix obo: <http://purl.obolibrary.org/obo/> .
+
+<http://example.org/header-reifications> a owl:Ontology ;
+    rdfs:comment "c" ;
+    obo:IAO_0000115 "d"^^xsd:string ;
+    rdfs:seeAlso <http://example.org/see> .
+
+[] a owl:Axiom ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty rdfs:comment ;
+    owl:annotatedTarget "c" ;
+    rdfs:label "block a" .
+
+_:n1 a owl:Axiom ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty rdfs:comment ;
+    owl:annotatedTarget "c"^^xsd:string ;
+    rdfs:label "block b" .
+
+[] a owl:Annotation ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty rdfs:comment ;
+    owl:annotatedTarget "c" ;
+    rdfs:label "node c" .
+
+_:n3 a owl:Axiom ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty rdfs:comment ;
+    owl:annotatedTarget "c" ;
+    rdfs:label "block d" .
+
+[] a owl:Annotation ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty rdfs:comment ;
+    owl:annotatedTarget "c"^^xsd:string ;
+    rdfs:label "node e" .
+
+[] a owl:Annotation ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty obo:IAO_0000115 ;
+    owl:annotatedTarget "d" ;
+    rdfs:label "on the definition" .
+
+[] a owl:Axiom ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty rdfs:seeAlso ;
+    owl:annotatedTarget <http://example.org/see> ;
+    rdfs:label "on the IRI" .
+
+[] a owl:Axiom ;
+    owl:annotatedSource <http://example.org/header-reifications> ;
+    owl:annotatedProperty owl:versionInfo ;
+    owl:annotatedTarget "1.0" ;
+    rdfs:label "on the unstated version" .
+
+:A a owl:Class ;
+    rdfs:label "alpha" .
+
+_:label a owl:Axiom ;
+    owl:annotatedSource :A ;
+    owl:annotatedProperty rdfs:label ;
+    owl:annotatedTarget "alpha" ;
+    rdfs:comment "on the label" .
+
+[] a owl:Annotation ;
+    owl:annotatedSource _:label ;
+    owl:annotatedProperty rdfs:comment ;
+    owl:annotatedTarget "on the label"^^xsd:string ;
+    rdfs:label "nested" .

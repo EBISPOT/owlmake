@@ -1,0 +1,209 @@
+Prefix(:=<http://example.org/explain-individuals#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/explain-individuals>
+
+Declaration(Class(:A1))
+Declaration(Class(:A2))
+Declaration(Class(:A3))
+Declaration(Class(:A4))
+Declaration(Class(:A5))
+Declaration(Class(:A6))
+Declaration(Class(:A7))
+Declaration(Class(:A8))
+Declaration(Class(:A9))
+Declaration(Class(:B))
+Declaration(ObjectProperty(:d1))
+Declaration(ObjectProperty(:d2))
+Declaration(ObjectProperty(:d3))
+Declaration(ObjectProperty(:e1))
+Declaration(ObjectProperty(:e2))
+Declaration(ObjectProperty(:e3))
+Declaration(ObjectProperty(:r))
+Declaration(ObjectProperty(:r2))
+Declaration(ObjectProperty(:r3))
+Declaration(DataProperty(:f))
+Declaration(DataProperty(:g))
+Declaration(DataProperty(:h1))
+Declaration(DataProperty(:h2))
+Declaration(DataProperty(:h3))
+Declaration(DataProperty(:k1))
+Declaration(DataProperty(:k2))
+Declaration(DataProperty(:k3))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:j2))
+Declaration(NamedIndividual(:k))
+Declaration(NamedIndividual(:k2))
+Declaration(NamedIndividual(:m2))
+Declaration(NamedIndividual(:s1))
+Declaration(NamedIndividual(:s2))
+Declaration(NamedIndividual(:t))
+Declaration(NamedIndividual(:u1))
+Declaration(NamedIndividual(:u2))
+Declaration(NamedIndividual(:u3))
+Declaration(NamedIndividual(:v))
+Declaration(NamedIndividual(:w))
+############################
+#   Object Properties
+############################
+
+# Object Property: :d1 (:d1)
+
+DisjointObjectProperties(:d1 :d2 :d3)
+
+# Object Property: :e1 (:e1)
+
+EquivalentObjectProperties(:e1 :e2 :e3)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :g (:g)
+
+FunctionalDataProperty(:g)
+
+# Data Property: :h1 (:h1)
+
+EquivalentDataProperties(:h1 :h2 :h3)
+
+# Data Property: :k1 (:k1)
+
+DisjointDataProperties(:k1 :k2 :k3)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A1 (:A1)
+
+SubClassOf(:A1 owl:Thing)
+SubClassOf(:A1 ObjectAllValuesFrom(:r ObjectOneOf(:k)))
+SubClassOf(:A1 ObjectHasValue(:r :j))
+
+# Class: :A2 (:A2)
+
+SubClassOf(:A2 owl:Thing)
+SubClassOf(:A2 ObjectAllValuesFrom(:r2 ObjectOneOf(:k2)))
+SubClassOf(:A2 ObjectHasValue(:r2 :j2))
+
+# Class: :A3 (:A3)
+
+SubClassOf(:A3 owl:Thing)
+SubClassOf(:A3 ObjectOneOf(:s2))
+SubClassOf(:A3 ObjectHasValue(:r3 :t))
+
+# Class: :A4 (:A4)
+
+SubClassOf(:A4 owl:Thing)
+SubClassOf(:A4 ObjectOneOf(:u3))
+SubClassOf(:A4 DataHasValue(:f "a"))
+
+# Class: :A5 (:A5)
+
+SubClassOf(:A5 owl:Thing)
+SubClassOf(:A5 ObjectOneOf(:v))
+SubClassOf(:A5 DataHasValue(:g "6"^^xsd:integer))
+
+# Class: :A6 (:A6)
+
+SubClassOf(:A6 owl:Thing)
+SubClassOf(:A6 ObjectSomeValuesFrom(:e1 :B))
+SubClassOf(:A6 ObjectAllValuesFrom(:e3 ObjectComplementOf(:B)))
+
+# Class: :A7 (:A7)
+
+SubClassOf(:A7 owl:Thing)
+SubClassOf(:A7 ObjectHasValue(:d1 :w))
+SubClassOf(:A7 ObjectHasValue(:d3 :w))
+
+# Class: :A8 (:A8)
+
+SubClassOf(:A8 owl:Thing)
+SubClassOf(:A8 DataAllValuesFrom(:h3 xsd:integer))
+SubClassOf(:A8 DataHasValue(:h1 "a"))
+
+# Class: :A9 (:A9)
+
+SubClassOf(:A9 owl:Thing)
+SubClassOf(:A9 DataHasValue(:k1 "a"))
+SubClassOf(:A9 DataHasValue(:k3 "a"))
+
+# Class: :B (:B)
+
+SubClassOf(:B owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :j (:j)
+
+ClassAssertion(owl:Thing :j)
+
+# Individual: :j2 (:j2)
+
+ClassAssertion(owl:Thing :j2)
+
+# Individual: :k (:k)
+
+ClassAssertion(owl:Thing :k)
+
+# Individual: :k2 (:k2)
+
+ClassAssertion(owl:Thing :k2)
+
+# Individual: :m2 (:m2)
+
+ClassAssertion(owl:Thing :m2)
+
+# Individual: :s1 (:s1)
+
+ClassAssertion(owl:Thing :s1)
+SameIndividual(:s1 :s2)
+NegativeObjectPropertyAssertion(:r3 :s1 :t)
+
+# Individual: :s2 (:s2)
+
+ClassAssertion(owl:Thing :s2)
+
+# Individual: :t (:t)
+
+ClassAssertion(owl:Thing :t)
+
+# Individual: :u1 (:u1)
+
+ClassAssertion(owl:Thing :u1)
+SameIndividual(:u1 :u2 :u3)
+NegativeDataPropertyAssertion(:f :u1 "a")
+
+# Individual: :u2 (:u2)
+
+ClassAssertion(owl:Thing :u2)
+
+# Individual: :u3 (:u3)
+
+ClassAssertion(owl:Thing :u3)
+
+# Individual: :v (:v)
+
+ClassAssertion(owl:Thing :v)
+DataPropertyAssertion(:g :v "5"^^xsd:integer)
+
+# Individual: :w (:w)
+
+ClassAssertion(owl:Thing :w)
+
+
+DifferentIndividuals(:j :k)
+DifferentIndividuals(:j2 :k2 :m2)
+)

@@ -1,0 +1,235 @@
+Prefix(:=<http://example.org/repair#>)
+Prefix(obo:=<http://purl.obolibrary.org/obo/>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Prefix(oboInOwl:=<http://www.geneontology.org/formats/oboInOwl#>)
+
+
+Ontology(<http://example.org/repair>
+Annotation(rdfs:comment "about :A")
+Annotation(rdfs:seeAlso :B)
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:Bare))
+Declaration(Class(:C))
+Declaration(Class(:D))
+Declaration(Class(:E))
+Declaration(Class(:F))
+Declaration(Class(:G))
+Declaration(Class(:H))
+Declaration(Class(:Kept))
+Declaration(Class(:Lit))
+Declaration(Class(:Mid))
+Declaration(Class(:New))
+Declaration(Class(:Old))
+Declaration(Class(:P1))
+Declaration(Class(:P2))
+Declaration(Class(:Pun))
+Declaration(Class(:U))
+Declaration(Class(:V))
+Declaration(Class(:W))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
+Declaration(Class(obo:GO_0000001))
+Declaration(ObjectProperty(:New))
+Declaration(ObjectProperty(:Pun))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:q))
+Declaration(ObjectProperty(:s))
+Declaration(ObjectProperty(:t))
+Declaration(ObjectProperty(:u))
+Declaration(ObjectProperty(:v))
+Declaration(ObjectProperty(:w))
+Declaration(DataProperty(:dp))
+Declaration(DataProperty(:dq))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:k))
+Declaration(AnnotationProperty(:ap))
+Declaration(AnnotationProperty(:aq))
+Declaration(AnnotationProperty(obo:IAO_0100001))
+Declaration(AnnotationProperty(oboInOwl:hasDbXref))
+Declaration(AnnotationProperty(oboInOwl:hasExactSynonym))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: :ap (:ap)
+
+AnnotationAssertion(obo:IAO_0100001 :ap :aq)
+AnnotationAssertion(owl:deprecated :ap "true"^^xsd:boolean)
+
+# Annotation Property: :aq (:aq)
+
+SubAnnotationPropertyOf(:aq rdfs:comment)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :Pun (:Pun)
+
+AnnotationAssertion(obo:IAO_0100001 :Pun :New)
+AnnotationAssertion(owl:deprecated :Pun "true"^^xsd:boolean)
+SubObjectPropertyOf(:Pun :s)
+
+# Object Property: :p (:p)
+
+AnnotationAssertion(obo:IAO_0100001 :p :q)
+AnnotationAssertion(owl:deprecated :p "true"^^xsd:boolean)
+SubObjectPropertyOf(:p :s)
+InverseObjectProperties(:p :u)
+FunctionalObjectProperty(:p)
+ObjectPropertyDomain(:p :X)
+
+# Object Property: :t (:t)
+
+SubObjectPropertyOf(:t :q)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :dp (:dp)
+
+AnnotationAssertion(obo:IAO_0100001 :dp :dq)
+AnnotationAssertion(owl:deprecated :dp "true"^^xsd:boolean)
+
+# Data Property: :dq (:dq)
+
+DataPropertyDomain(:dq :X)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :A (obsolete a)
+
+AnnotationAssertion(obo:IAO_0100001 :A :B)
+AnnotationAssertion(Annotation(rdfs:comment "source") oboInOwl:hasExactSynonym :A "a synonym")
+AnnotationAssertion(rdfs:comment :A "a comment")
+AnnotationAssertion(rdfs:label :A "obsolete a")
+AnnotationAssertion(owl:deprecated :A "true"^^xsd:boolean)
+EquivalentClasses(:A :X)
+SubClassOf(Annotation(rdfs:comment "own") :A :D)
+DisjointClasses(:A :Y)
+DisjointUnion(:A :P1 :P2)
+
+# Class: :B (:B)
+
+AnnotationAssertion(oboInOwl:hasDbXref :B "X:1")
+
+# Class: :Bare (:Bare)
+
+AnnotationAssertion(obo:IAO_0100001 :Bare "New")
+AnnotationAssertion(owl:deprecated :Bare "true"^^xsd:boolean)
+
+# Class: :C (:C)
+
+AnnotationAssertion(rdfs:seeAlso :C :A)
+SubClassOf(Annotation(rdfs:comment "reference") :C :B)
+SubClassOf(:C :Mid)
+
+# Class: :D (:D)
+
+SubClassOf(:D :New)
+
+# Class: :E (:E)
+
+SubClassOf(:E obo:GO_0000001)
+SubClassOf(:E ObjectSomeValuesFrom(:q :B))
+
+# Class: :F (:F)
+
+SubClassOf(:F :Bare)
+
+# Class: :G (:G)
+
+SubClassOf(Annotation(rdfs:seeAlso :A) :G :H)
+SubClassOf(:G :Kept)
+
+# Class: :H (:H)
+
+SubClassOf(:H ObjectSomeValuesFrom(:New :New))
+
+# Class: :Kept (:Kept)
+
+AnnotationAssertion(obo:IAO_0100001 :Kept :New)
+
+# Class: :Lit (:Lit)
+
+AnnotationAssertion(obo:IAO_0100001 :Lit "GO:0000001")
+AnnotationAssertion(owl:deprecated :Lit "true"^^xsd:boolean)
+
+# Class: :Mid (:Mid)
+
+AnnotationAssertion(obo:IAO_0100001 :Mid :New)
+AnnotationAssertion(owl:deprecated :Mid "true"^^xsd:boolean)
+
+# Class: :Old (:Old)
+
+AnnotationAssertion(obo:IAO_0100001 :Old :Mid)
+AnnotationAssertion(owl:deprecated :Old "true"^^xsd:boolean)
+
+# Class: :Pun (:Pun)
+
+SubClassOf(:Pun :X)
+
+# Class: :U (:U)
+
+DisjointUnion(:U :B :V)
+
+# Class: :W (:W)
+
+SubClassOf(Annotation(rdfs:comment "m1") :W :B)
+SubClassOf(Annotation(rdfs:comment "m2") :W :B)
+SubClassOf(:W :X)
+SubClassOf(Annotation(rdfs:comment "x") :W :X)
+SubClassOf(Annotation(rdfs:comment "y") :W :X)
+
+# Class: :X (:X)
+
+AnnotationAssertion(:aq :X "v")
+
+# Class: :Z (:Z)
+
+EquivalentClasses(:Z ObjectIntersectionOf(:B :W))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :i (:i)
+
+AnnotationAssertion(obo:IAO_0100001 :i :k)
+AnnotationAssertion(owl:deprecated :i "true"^^xsd:boolean)
+
+# Individual: :j (:j)
+
+SameIndividual(:j :k)
+
+# Individual: :k (:k)
+
+ClassAssertion(:B :k)
+ObjectPropertyAssertion(:q :k :j)
+DataPropertyAssertion(:dq :k "x")
+
+
+SubClassOf(ObjectIntersectionOf(:B :F) :H)
+SubObjectPropertyOf(ObjectInverseOf(:q) :v)
+FunctionalObjectProperty(ObjectInverseOf(:q))
+ObjectPropertyRange(ObjectInverseOf(:q) :Y)
+SubObjectPropertyOf(ObjectPropertyChain(:q :v) :w)
+HasKey(:B (:q) ())
+DLSafeRule(Body(ClassAtom(:New Variable(<urn:swrl:var#x>)))Head(ClassAtom(:X Variable(<urn:swrl:var#x>))))
+)

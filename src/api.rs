@@ -103,10 +103,8 @@ pub use crate::sparql::QueryTable;
 // Operation option structs + the operations whose signature is already the
 // canonical `Model`-shape, re-exported under one namespace.
 pub use crate::cmd::merge::MergeOptions;
-pub use crate::cmd::reason::ReasonOptions;
-pub use crate::cmd::reduce::{
-    reduce, reduce_exact, reduce_with_opts, reduce_with_options, ReduceOptions,
-};
+pub use crate::cmd::reason::{ReasonOptions, ReasonerKind};
+pub use crate::cmd::reduce::{reduce, reduce_exact, reduce_with_options, ReduceOptions};
 pub use crate::cmd::relax::{relax, relax_with, RelaxOptions};
 
 /// Parse an ontology from in-memory bytes in the given serialization format.
@@ -321,30 +319,24 @@ pub fn rename(model: Model, mapping: &std::collections::HashMap<String, String>)
 }
 
 /// Assert inferred existential restrictions (`om materialize`). `properties`
-/// limits which object properties to materialize (all when empty).
-pub fn materialize(model: Model, properties: &[String]) -> Model {
+/// limits which object properties to materialize (all when empty). An
+/// inconsistent or incoherent ontology is refused.
+pub fn materialize(model: Model, properties: &[String]) -> Result<Model> {
     let props: std::collections::HashSet<String> = properties.iter().cloned().collect();
-    crate::cmd::materialize::materialize(model, &props)
+    Ok(crate::cmd::materialize::materialize(model, &props)?)
 }
 
 /// Extract a module for a seed term set (`om extract`). `method` is one of
-/// `BOT`, `TOP`, `STAR` (syntactic locality) or `MIREOT`.
+/// `BOT`, `TOP`, `STAR` (syntactic locality) or `MIREOT`, whose seed terms are
+/// its lower terms: each with its ancestors.
 pub fn extract(model: &Model, terms: &[String], method: &str) -> Result<Model> {
-    let seed: std::collections::HashSet<String> = terms.iter().cloned().collect();
-    let opts = crate::extract::ExtractOptions::default();
     if method.eq_ignore_ascii_case("MIREOT") {
-        Ok(crate::extract::mireot_with(
-            model,
-            &seed,
-            &std::collections::HashSet::new(),
-            &std::collections::HashSet::new(),
-            &opts,
-        ))
-    } else {
-        let m = crate::extract::Method::parse(method)
-            .ok_or_else(|| Error::Unknown { param: "method", value: method.to_string() })?;
-        Ok(crate::extract::extract_with(model, &seed, m, &opts))
+        return Ok(crate::extract::mireot(model, terms, &[], &[], false, crate::extract::Intermediates::All)?);
     }
+    let seed: std::collections::HashSet<String> = terms.iter().cloned().collect();
+    let m = crate::extract::Method::parse(method)
+        .ok_or_else(|| Error::Unknown { param: "method", value: method.to_string() })?;
+    Ok(crate::extract::extract_with(model, &seed, m, &crate::extract::ExtractOptions::default())?)
 }
 
 /// A human-readable diff of two ontologies (`om diff`), in the default
@@ -560,8 +552,12 @@ pub fn dl_query(model: &Model, expression: &str, kind: &str, reasoner: &str) -> 
 
     let lc = reasoner.to_ascii_lowercase();
     if matches!(lc.as_str(), "hermit" | "jfact") {
-        let r = crate::reason::DlReasoner::classify(&clone);
-        // The DL reasoner answers instance membership by full entailment.
+        let dl = crate::cmd::reason::ReasonerKind::parse(&lc).expect("hermit and jfact are reasoner names");
+        // The ontology as the reasoner reads it, over which it answers instance
+        // membership by full entailment.
+        let rules = dl.rules();
+        clone.ont = clone.ont.iter().filter(|ac| rules.reads(&ac.component)).cloned().collect();
+        let r = dl.dl_reasoner(&clone);
         let instances = crate::reason::instances(&clone, DL_QUERY_IRI);
         return Ok(dl_select(&r.all_subsumptions(), &r.direct_subsumptions(), kind, &instances));
     }

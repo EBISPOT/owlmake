@@ -156,8 +156,9 @@ impl Ontology {
 
     /// Remove logically redundant `SubClassOf` axioms (transitive reduction of
     /// the class hierarchy), in place.
-    fn reduce(&mut self) {
-        self.model = api::reduce(&self.model);
+    fn reduce(&mut self) -> PyResult<()> {
+        self.model = api::reduce(&self.model).map_err(|e| pyerr(e.into()))?;
+        Ok(())
     }
 
     /// Relax equivalence/expression axioms into entailed `SubClassOf` axioms
@@ -221,9 +222,10 @@ impl Ontology {
     /// Assert inferred existential restrictions (`om materialize`), in place.
     /// `properties` limits which object properties to materialize (all if empty).
     #[pyo3(signature = (properties=None))]
-    fn materialize(&mut self, properties: Option<Vec<String>>) {
+    fn materialize(&mut self, properties: Option<Vec<String>>) -> PyResult<()> {
         let model = std::mem::replace(&mut self.model, Model::new());
-        self.model = api::materialize(model, &properties.unwrap_or_default());
+        self.model = api::materialize(model, &properties.unwrap_or_default()).map_err(pyerr)?;
+        Ok(())
     }
 
     /// Extract a module for a seed term set (`om extract`) as a new ontology,

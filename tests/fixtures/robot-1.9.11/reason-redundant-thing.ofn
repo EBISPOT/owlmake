@@ -1,0 +1,9 @@
+Prefix(:=<http://example.org/r#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/r>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:X))
+SubClassOf(:A :B)
+SubClassOf(:A owl:Thing)
+)

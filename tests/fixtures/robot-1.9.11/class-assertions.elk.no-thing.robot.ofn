@@ -1,0 +1,49 @@
+Prefix(:=<http://example.org/class-assertions#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/class-assertions>
+
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(ObjectProperty(:p))
+Declaration(NamedIndividual(:i))
+Declaration(NamedIndividual(:j))
+Declaration(NamedIndividual(:k))
+Declaration(NamedIndividual(:l))
+Declaration(NamedIndividual(:m))
+Declaration(NamedIndividual(:n))
+
+############################
+#   Classes
+############################
+
+# Class: :A (:A)
+
+SubClassOf(:A :B)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :j (:j)
+
+ClassAssertion(:A :j)
+ObjectPropertyAssertion(:p :j :k)
+ObjectPropertyAssertion(:p :j :m)
+
+# Individual: :l (:l)
+
+ClassAssertion(ObjectSomeValuesFrom(:p :A) :l)
+
+# Individual: :n (:n)
+
+ClassAssertion(owl:Thing :n)
+
+
+)

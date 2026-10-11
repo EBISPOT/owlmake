@@ -3,23 +3,26 @@
 //! nodes (entities with metadata) and edges (subClassOf as `is_a`, and
 //! existential relationships as property edges).
 //!
-//! The writer emits the layout OBO Graphs consumers expect: entities grouped by
-//! kind and sorted by (namespace, NCName remainder), `" : "` key separators and
-//! bracketed arrays, and the obographs field order. Every list is totally
-//! ordered, so a release diff shows real content changes and never a reshuffle.
+//! The writer builds one graph per ontology of the imports closure, each from
+//! that ontology's axioms taken in their sorted order (see [`generate_graph`]),
+//! so the same ontology always writes the same bytes. The layout is the OBO
+//! Graphs one: `" : "` key separators, bracketed arrays and the obographs
+//! field order.
 
-use std::collections::BTreeMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
 
 use anyhow::Result;
 use horned_owl::model::{
-    AnnotationSubject, AnnotationValue, Build, ClassExpression as CE, Component, DeclareClass,
-    Individual, Literal, MutableOntology, ObjectPropertyExpression as OPE, RcStr, SubClassOf,
+    AnnotatedComponent, Annotation, AnnotationSubject, AnnotationValue, Build, ClassExpression as CE, Component,
+    DeclareClass, Individual, Literal, MutableOntology, ObjectPropertyExpression as OPE, RcStr, SubClassOf,
+    SubObjectPropertyExpression as SOPE,
 };
 use horned_owl::ontology::set::SetOntology;
 use serde::{Deserialize, Serialize};
 
-use crate::io::obo::{expand_id, ncname_suffix_index};
+use crate::io::obo::expand_id;
+use crate::io::owlfunc::cmp_ce;
 use crate::model::{default_prefixes, Model, XSD_BOOLEAN};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -47,16 +50,6 @@ const IAO_DEF: &str = "http://purl.obolibrary.org/obo/IAO_0000115";
 const OIO: &str = "http://www.geneontology.org/formats/oboInOwl#";
 const OWL_DEPRECATED: &str = "http://www.w3.org/2002/07/owl#deprecated";
 
-/// Split an IRI into (namespace, remainder) at its XML NCName-suffix boundary.
-/// Entities compare on this pair rather than on the raw IRI string, which is what
-/// orders both the obographs node list and the RDF/XML entity list.
-fn ns_rem(iri: &str) -> (&str, &str) {
-    match ncname_suffix_index(iri) {
-        Some(i) => (&iri[..i], &iri[i..]),
-        None => (iri, ""),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // obographs data model (serde field order == emitted field order)
 // ---------------------------------------------------------------------------
@@ -71,7 +64,7 @@ struct Graph {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<GraphMeta>,
+    meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<Node>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -94,7 +87,8 @@ struct PropertyChainAxiom {
     chain_predicate_ids: Vec<String>,
 }
 
-/// One `domainRangeAxioms` entry (per predicate). Field order matches obographs.
+/// One `domainRangeAxioms` entry: a predicate's domains, ranges and the
+/// universal restrictions on it, each held once.
 #[derive(Serialize, Deserialize, Default)]
 struct DomainRangeAxiom {
     #[serde(rename = "predicateId")]
@@ -105,23 +99,6 @@ struct DomainRangeAxiom {
     range_class_ids: Vec<String>,
     #[serde(rename = "allValuesFromEdges", default, skip_serializing_if = "Vec::is_empty")]
     all_values_from_edges: Vec<Edge>,
-}
-
-/// Accumulator for a predicate's domain/range/allValuesFrom data during the pass.
-#[derive(Default)]
-struct DrEntry {
-    domain_class_ids: Vec<String>,
-    range_class_ids: Vec<String>,
-    all_values_from_edges: Vec<Edge>,
-}
-
-
-#[derive(Serialize, Deserialize, Default)]
-struct GraphMeta {
-    #[serde(rename = "basicPropertyValues", default, skip_serializing_if = "Vec::is_empty")]
-    basic_property_values: Vec<Bpv>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    version: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -137,7 +114,8 @@ struct Node {
     meta: Option<Meta>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+/// The metadata of a graph, a node, an edge or a property value.
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     definition: Option<Definition>,
@@ -151,37 +129,23 @@ struct Meta {
     xrefs: Vec<Xref>,
     #[serde(rename = "basicPropertyValues", default, skip_serializing_if = "Vec::is_empty")]
     basic_property_values: Vec<Bpv>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    version: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     deprecated: bool,
 }
 
-impl Meta {
-    fn is_empty(&self) -> bool {
-        self.definition.is_none()
-            && self.comments.is_empty()
-            && self.subsets.is_empty()
-            && self.synonyms.is_empty()
-            && self.xrefs.is_empty()
-            && self.basic_property_values.is_empty()
-            && !self.deprecated
-    }
-}
-
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct Definition {
-    // A missing definition value is absent from the JSON rather than empty,
-    // leaving `{ }`; skip an empty value so it never appears as `"val" : ""`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     val: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     xrefs: Vec<String>,
-    /// Axiom annotations (`oboInOwl:source`, …) on the definition assertion,
-    /// emitted as the definition's own `meta.basicPropertyValues`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<EdgeMeta>,
+    meta: Option<Box<Meta>>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct Synonym {
     #[serde(rename = "synonymType", default, skip_serializing_if = "String::is_empty")]
     synonym_type: String,
@@ -190,172 +154,35 @@ struct Synonym {
     val: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     xrefs: Vec<String>,
-    /// Non-xref/non-synonymType axiom annotations (e.g. `OMO_0002001`), emitted
-    /// as the synonym's own `meta.basicPropertyValues`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<EdgeMeta>,
-    /// The underlying axiom's annotation-list comparison key, which breaks the tie
-    /// between two synonyms sharing a (pred, val) so their order is total.
-    #[serde(skip)]
-    ann_key: AnnKey,
+    meta: Option<Box<Meta>>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct Xref {
     val: String,
-    /// Axiom annotations (`oboInOwl:source`, …) on the `hasDbXref` assertion,
-    /// emitted as the xref's own `meta.basicPropertyValues`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<EdgeMeta>,
+    meta: Option<Box<Meta>>,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct Bpv {
     pred: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     val: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     xrefs: Vec<String>,
-    /// Axiom annotations (`oboInOwl:source`, …) on this property-value assertion,
-    /// emitted as the value's own `meta.basicPropertyValues`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<EdgeMeta>,
-    #[serde(skip)]
-    val_is_iri: bool,
-    /// The literal value's datatype IRI (empty for an IRI value). Two typed
-    /// values under one predicate order by datatype before lexical form.
-    #[serde(skip)]
-    datatype: String,
-    /// True for a plain `xsd:string` literal value, false for an IRI or a typed
-    /// literal (e.g. `xsd:anyURI`). Within one predicate a plain-string value
-    /// sorts before a typed one.
-    #[serde(skip)]
-    plain: bool,
+    meta: Option<Box<Meta>>,
 }
 
-/// The `(property, value)` sort key for a basicPropertyValue: both the
-/// property IRI and (when the value is an IRI) the value compare on their
-/// (namespace, NCName remainder) split, so `.../Languages_of_Mauritius` orders
-/// before `.../ISO_3166-2:MU` (its namespace, cut at the `:`, is longer). Within
-/// a property an IRI value sorts before a literal, and a plain `xsd:string`
-/// literal before a typed one (e.g. an `xsd:anyURI` term-tracker URL).
-fn bpv_key(b: &Bpv) -> (String, String, u8, String, String, String) {
-    let (pns, prem) = ns_rem(&b.pred);
-    let (vns, vrem) = if b.val_is_iri {
-        let (a, c) = ns_rem(&b.val);
-        (a.to_string(), c.to_string())
-    } else {
-        (b.val.clone(), String::new())
-    };
-    (
-        pns.to_string(),
-        prem.to_string(),
-        (!b.val_is_iri) as u8,
-        b.datatype.clone(),
-        vns,
-        vrem,
-    )
-}
-
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
 struct Edge {
     sub: String,
     pred: String,
     obj: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<EdgeMeta>,
-}
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-struct EdgeMeta {
-    // Before `basicPropertyValues`, the order these two also take in a `Meta`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    xrefs: Vec<Xref>,
-    #[serde(rename = "basicPropertyValues", default, skip_serializing_if = "Vec::is_empty")]
-    basic_property_values: Vec<Bpv>,
-}
-
-/// An edge (SubClassOf axiom) carries `basicPropertyValues` from its axiom
-/// annotations (`oboInOwl:source`, etc.).
-fn edge_meta(
-    anns: &std::collections::BTreeSet<horned_owl::model::Annotation<RcStr>>,
-) -> Option<EdgeMeta> {
-    // `hasDbXref` is surfaced through the dedicated `xrefs` list, exactly as it is
-    // on a node's meta — an `is_a` carrying `Annotation(hasDbXref "PMID:3972225")`
-    // comes out as `"xrefs": [{"val": "PMID:3972225"}]`, not as a
-    // `basicPropertyValues` entry naming the property.
-    let hasdbxref = format!("{OIO}hasDbXref");
-    let xrefs: Vec<Xref> = anns
-        .iter()
-        .filter(|a| a.ap.0.as_ref() == hasdbxref)
-        .filter_map(|a| match &a.av {
-            AnnotationValue::Literal(l) => Some(Xref { val: literal_text(l), meta: None }),
-            AnnotationValue::IRI(i) => Some(Xref { val: i.as_ref().to_string(), meta: None }),
-            _ => None,
-        })
-        .collect();
-    let mut bpv: Vec<Bpv> = anns
-        .iter()
-        .filter(|a| a.ap.0.as_ref() != hasdbxref)
-        .filter_map(|a| {
-            let (val, is_iri) = match &a.av {
-                AnnotationValue::Literal(l) => (literal_text(l), false),
-                AnnotationValue::IRI(i) => (i.as_ref().to_string(), true),
-                _ => return None,
-            };
-            let plain = is_xsd_string(&a.av);
-            Some(Bpv { pred: a.ap.0.as_ref().to_string(), val, xrefs: vec![], meta: None, val_is_iri: is_iri, datatype: value_datatype(&a.av), plain })
-        })
-        .collect();
-    if bpv.is_empty() && xrefs.is_empty() {
-        return None;
-    }
-    bpv.sort_by(|a, b| bpv_key(a).cmp(&bpv_key(b)));
-    Some(EdgeMeta { xrefs, basic_property_values: bpv })
-}
-
-/// Axiom annotations nested as a definition's / synonym's / xref's /
-/// property-value's own `meta.basicPropertyValues`. Same conversion as
-/// `edge_meta`, but `hasDbXref` (consumed into the element's `xrefs` list) and
-/// `hasSynonymType` (consumed into a synonym's `synonymType`) are dropped, since
-/// those reach the reader through the dedicated fields rather than as a bpv.
-fn nested_meta(
-    anns: &std::collections::BTreeSet<horned_owl::model::Annotation<RcStr>>,
-) -> Option<EdgeMeta> {
-    if !NEST_AXIOM_ANNS.load(Ordering::Relaxed) {
-        return None;
-    }
-    let hasdbxref = format!("{OIO}hasDbXref");
-    let hassyntype = format!("{OIO}hasSynonymType");
-    let mut bpv: Vec<Bpv> = anns
-        .iter()
-        .filter(|a| {
-            let p = a.ap.0.as_ref();
-            p != hasdbxref && p != hassyntype
-        })
-        .filter_map(|a| {
-            let (val, is_iri) = match &a.av {
-                AnnotationValue::Literal(l) => (literal_text(l), false),
-                AnnotationValue::IRI(i) => (i.as_ref().to_string(), true),
-                _ => return None,
-            };
-            let plain = is_xsd_string(&a.av);
-            Some(Bpv {
-                pred: a.ap.0.as_ref().to_string(),
-                val,
-                xrefs: vec![],
-                meta: None,
-                val_is_iri: is_iri,
-                datatype: value_datatype(&a.av),
-                plain,
-            })
-        })
-        .collect();
-    if bpv.is_empty() {
-        return None;
-    }
-    bpv.sort_by(|a, b| bpv_key(a).cmp(&bpv_key(b)));
-    Some(EdgeMeta { xrefs: Vec::new(), basic_property_values: bpv })
+    meta: Option<Meta>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -364,6 +191,10 @@ struct EquivalentNodesSet {
     representative_node_id: String,
     #[serde(rename = "nodeIds")]
     node_ids: Vec<String>,
+    /// The equivalence axiom's annotations, under the nested-`meta` convention
+    /// (see `NEST_AXIOM_ANNS`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    meta: Option<Meta>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -374,12 +205,6 @@ struct LogicalDefinition {
     genus_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     restrictions: Vec<Restriction>,
-    /// Sort tie-break only: `definedClassId` alone is not a total order, because one
-    /// class can carry several equivalence axioms — EFO has classes with a genus-only
-    /// definition alongside ones carrying restrictions. The axioms' class-expression
-    /// lists, compared element by element, decide between them.
-    #[serde(skip)]
-    order: Vec<CE<RcStr>>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -389,6 +214,24 @@ struct Restriction {
     #[serde(rename = "fillerId")]
     filler_id: String,
 }
+
+// ---------------------------------------------------------------------------
+// Building a graph
+// ---------------------------------------------------------------------------
+
+const OIO_ID: &str = "http://www.geneontology.org/formats/oboInOwl#id";
+const HAS_DB_XREF: &str = "http://www.geneontology.org/formats/oboInOwl#hasDbXref";
+const IN_SUBSET: &str = "http://www.geneontology.org/formats/oboInOwl#inSubset";
+const HAS_SYNONYM_TYPE: &str = "http://www.geneontology.org/formats/oboInOwl#hasSynonymType";
+const RDF_PLAIN_LITERAL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral";
+
+/// A node's `type` and `propertyType`.
+type NodeType = (&'static str, &'static str);
+const CLASS: NodeType = ("CLASS", "");
+const INDIVIDUAL: NodeType = ("INDIVIDUAL", "");
+const OBJECT_PROPERTY: NodeType = ("PROPERTY", "OBJECT");
+const DATA_PROPERTY: NodeType = ("PROPERTY", "DATA");
+const ANNOTATION_PROPERTY: NodeType = ("PROPERTY", "ANNOTATION");
 
 /// The synonym-scope predicates, mapped to their obographs short name.
 fn synonym_pred(iri: &str) -> Option<&'static str> {
@@ -401,933 +244,240 @@ fn synonym_pred(iri: &str) -> Option<&'static str> {
     }
 }
 
-/// The `hasDbXref` values annotating an axiom (a definition's or synonym's
-/// source references live on the annotation assertion itself).
-/// A comparison key for an axiom's annotation list: element-wise over the sorted
-/// annotations, then by length. Each annotation is `(prop_ns, prop_rem,
-/// value_rank, value_a, value_b)`: the property splits on its NCName suffix like
-/// any IRI; an IRI value (rank 0) sorts before a literal value (rank 1) and
-/// splits the same way, a literal keeps its text in `value_a`. Rust's `Vec`
-/// ordering over that gives the list a total order, so two synonyms with the same
-/// (predicate, value) come out ordered by their xref/synonymType annotations
-/// rather than in whatever order the axiom set iterated.
-type AnnKey = Vec<(String, String, u8, String, String)>;
-
-fn ann_sort_key(anns: &std::collections::BTreeSet<horned_owl::model::Annotation<RcStr>>) -> AnnKey {
-    let mut v: AnnKey = anns
-        .iter()
-        .map(|a| {
-            let (pns, prem) = ns_rem(a.ap.0.as_ref());
-            let (rank, va, vb) = match &a.av {
-                AnnotationValue::IRI(i) => {
-                    let (n, r) = ns_rem(i.as_ref());
-                    (0u8, n.to_string(), r.to_string())
-                }
-                AnnotationValue::Literal(l) => (1u8, literal_text(l), String::new()),
-                _ => (2u8, String::new(), String::new()),
-            };
-            (pns.to_string(), prem.to_string(), rank, va, vb)
-        })
-        .collect();
-    v.sort();
-    v
-}
-
-const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
-
-/// Whether an annotation value sorts in the "string-like" bpv group — a plain
-/// (`Simple`) literal, one explicitly typed `xsd:string`, or a language-tagged
-/// literal. Within a predicate these sort together by value; only a genuinely
-/// non-string typed literal (e.g. `xsd:anyURI`) sorts after them.
-/// A literal value's datatype IRI; empty for an IRI value.
-fn value_datatype(av: &AnnotationValue<RcStr>) -> String {
-    match av {
-        AnnotationValue::Literal(Literal::Datatype { datatype_iri, .. }) => {
-            datatype_iri.as_ref().to_string()
-        }
-        // A literal written with no datatype is a plain one, and sorts ahead of
-        // every `xsd:` type — including an explicitly `xsd:string`-typed literal
-        // with the same text.
-        AnnotationValue::Literal(Literal::Language { .. })
-        | AnnotationValue::Literal(Literal::Simple { .. }) => {
-            "http://www.w3.org/1999/02/22-rdf-syntax-ns#PlainLiteral".to_string()
-        }
-        _ => String::new(),
-    }
-}
-
-fn is_xsd_string(av: &AnnotationValue<RcStr>) -> bool {
-    match av {
-        AnnotationValue::Literal(Literal::Simple { .. }) => true,
-        AnnotationValue::Literal(Literal::Language { .. }) => true,
-        AnnotationValue::Literal(Literal::Datatype { datatype_iri, .. }) => {
-            datatype_iri.as_ref() == XSD_STRING
-        }
-        _ => false,
-    }
-}
-
-/// An xref's annotation signature for ordering: its nested `basicPropertyValues`
-/// under the same key the values themselves sort by, so an IRI-valued source
-/// ranks before a literal one and the comparison within a kind is exact. Ordering
-/// them as plain strings instead cannot satisfy both of EFO's cases at once —
-/// `http://icb…` before `ISBN:…` (IRI before literal) and `MONDO:i2s` before
-/// `i2s` (exact, not case-folded).
-fn xref_meta_key(x: &Xref) -> Vec<(String, String, u8, String, String, String)> {
-    let mut parts: Vec<_> = x
-        .meta
-        .as_ref()
-        .map(|m| m.basic_property_values.iter().map(bpv_key).collect())
-        .unwrap_or_default();
-    parts.sort();
-    parts
-}
-
-fn axiom_xrefs(anns: &std::collections::BTreeSet<horned_owl::model::Annotation<RcStr>>) -> Vec<String> {
-    let mut out: Vec<(bool, String)> = anns
-        .iter()
-        .filter(|a| a.ap.0.as_ref() == format!("{OIO}hasDbXref"))
-        .filter_map(|a| match &a.av {
-            AnnotationValue::Literal(l) => Some((false, literal_text(l))),
-            // A `hasDbXref` may be IRI-valued (`rdf:resource="…orcid…"`).
-            AnnotationValue::IRI(i) => Some((true, i.as_ref().to_string())),
-            _ => None,
-        })
-        .collect();
-    // Annotation values order IRI-first, then literal; within each, by value — so
-    // an ORCID `rdf:resource` xref precedes `ISBN:…`/`PMID:…` literals.
-    //
-    // An IRI compares as NAMESPACE then remainder, split at the NCName boundary,
-    // not as a raw string. MP:0014518's definition carries
-    // `…/10.1161/circ.105.9.e5` and `…/10.1161/01.CIR.0000132478.60674.D`: the
-    // second's remainder starts with a digit, so its namespace runs on to
-    // `…/10.1161/01.` and the shorter namespace sorts first, which is the opposite
-    // of what comparing the two IRIs as strings gives.
-    out.sort_by(|a, b| {
-        (!a.0).cmp(&(!b.0)).then_with(|| {
-            if a.0 && b.0 {
-                crate::io::owlrdf::iri_key(&a.1).cmp(&crate::io::owlrdf::iri_key(&b.1))
-            } else {
-                a.1.cmp(&b.1)
-            }
-        })
-    });
-    out.into_iter().map(|(_, v)| v).collect()
-}
-
+/// One graph as it is built. A node takes its place when something first names
+/// it and keeps the last type and label given to it; the edges and every axiom
+/// list stand in the order they are added.
 #[derive(Default)]
-struct EntityData {
-    label: Option<String>,
-    /// Comparison key `(value, annotation-list)` of the axiom the current `label`
-    /// came from — a node carries one `lbl`, so of several `rdfs:label` axioms the
-    /// one kept is the maximum by this key.
-    label_key: (String, AnnKey),
-    definition: Option<Definition>,
-    /// Same idea for the winning `IAO_0000115` definition axiom.
-    def_key: (String, AnnKey),
-    comments: Vec<String>,
-    subsets: Vec<String>,
-    synonyms: Vec<Synonym>,
-    xrefs: Vec<Xref>,
-    deprecated: bool,
-    bpv: Vec<Bpv>,
+struct GraphBuilder {
+    node_ids: Vec<String>,
+    named: HashSet<String>,
+    node_types: HashMap<String, NodeType>,
+    labels: HashMap<String, String>,
+    metas: HashMap<String, Meta>,
+    edges: Vec<Edge>,
+    equivalent_nodes_sets: Vec<EquivalentNodesSet>,
+    logical_definitions: Vec<LogicalDefinition>,
+    domain_range: Vec<DomainRangeAxiom>,
+    domain_range_of: HashMap<String, usize>,
+    property_chains: Vec<PropertyChainAxiom>,
 }
 
-
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    Class,
-    ObjectProperty,
-    Individual,
-    AnnotationProperty,
-    DataProperty,
-}
-
-fn kind_rank(k: Kind) -> u8 {
-    // Nodes group by entity kind in this order: class < object property < data
-    // property < named individual < annotation property; referenced-only
-    // (typeless) IRIs come last.
-    match k {
-        Kind::Class => 0,
-        Kind::ObjectProperty => 1,
-        Kind::DataProperty => 2,
-        Kind::Individual => 3,
-        Kind::AnnotationProperty => 4,
+impl GraphBuilder {
+    fn add_node(&mut self, id: &str) {
+        if self.named.insert(id.to_string()) {
+            self.node_ids.push(id.to_string());
+        }
     }
-}
 
-fn node_type_str(k: Kind) -> &'static str {
-    match k {
-        Kind::Class => "CLASS",
-        Kind::ObjectProperty | Kind::AnnotationProperty | Kind::DataProperty => "PROPERTY",
-        Kind::Individual => "INDIVIDUAL",
+    fn set_type(&mut self, id: &str, node_type: NodeType) {
+        self.add_node(id);
+        self.node_types.insert(id.to_string(), node_type);
     }
-}
 
-fn property_type_str(k: Kind) -> &'static str {
-    match k {
-        Kind::ObjectProperty => "OBJECT",
-        Kind::DataProperty => "DATA",
-        Kind::AnnotationProperty => "ANNOTATION",
-        _ => "",
+    fn set_label(&mut self, id: &str, label: String) {
+        self.add_node(id);
+        self.labels.insert(id.to_string(), label);
     }
-}
 
-/// Write an ontology to OBO Graphs JSON. Nodes, edges and every axiom list are
-/// totally ordered, so the same model always writes the same bytes.
-pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
-    let mut graph_id = String::new();
-    let mut version = String::new();
-    let mut kinds: BTreeMap<String, Kind> = BTreeMap::new();
-    let mut data: BTreeMap<String, EntityData> = BTreeMap::new();
-    let mut referenced: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut edges: Vec<Edge> = Vec::new();
-    // `ObjectPropertyAssertion` edges: their own group, spliced in between the
-    // class edges and `subPropertyOf` (OBI's `IAO_0000136` assertions sit after
-    // the last `type` edge and before the first `subPropertyOf` one).
-    let mut prop_edges: Vec<Edge> = Vec::new();
-    let mut logical_defs: Vec<LogicalDefinition> = Vec::new();
-    let mut equivalent_nodes_sets: Vec<EquivalentNodesSet> = Vec::new();
-    let mut property_chain_axioms: Vec<PropertyChainAxiom> = Vec::new();
-    let mut graph_bpv: Vec<Bpv> = Vec::new();
-    // domainRangeAxioms: per-predicate domains (ObjectPropertyDomain), ranges
-    // (ObjectPropertyRange) and allValuesFromEdges (SubClassOf → ObjectAllValues
-    // From), collected per predicate IRI and ordered on the way out.
-    let mut dr_map: BTreeMap<String, DrEntry> = BTreeMap::new();
+    /// The metadata of a node, naming the node.
+    fn meta(&mut self, id: &str) -> &mut Meta {
+        self.add_node(id);
+        self.metas.entry(id.to_string()).or_default()
+    }
 
-    let ent = |data: &mut BTreeMap<String, EntityData>, iri: &str| -> () {
-        data.entry(iri.to_string()).or_default();
-    };
-    let _ = ent;
+    fn add_edge(&mut self, sub: &str, pred: &str, obj: &str, meta: &Meta) {
+        self.edges.push(edge(sub, pred, obj, meta));
+    }
 
-    // A node whose CLASS kind comes only from being the named subclass of a
-    // `SubClassOf` — nothing declares it and it is not in the signature — sits in a
-    // tier of its own, after every entity the ontology names and before the
-    // referenced-only typeless ones. `owl:Nothing` in a graph asserting
-    // `SubClassOf(owl:Nothing owl:Nothing)` is the case that shows it.
-    let mut subclass_typed: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Every entity the ontology names outright: in the signature, or carrying a
-    // `Declaration`. A `subclass_typed` IRI absent from this is the tier-1 case.
-    let mut named: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // Node kinds come from the ontology SIGNATURE, not from `Declaration` axioms,
-    // the same rule the RDF/XML writer applies. MONDO's `mondo-base.json` needs
-    // `BFO_0000050`/`BFO_0000051` as `"type": "PROPERTY"` nodes even though the
-    // step's `remove --select imports` stripped the import that declared them.
-    // Seed the kinds from the signature first so a later real `Declaration` still
-    // wins. Built-ins are excluded on the same rule as there.
-    {
-        let sig = crate::cmd::select::signature_entities(model);
-        let builtin = |iri: &str| {
-            iri.starts_with("http://www.w3.org/2001/XMLSchema#")
-                || iri.starts_with("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
-                || iri.starts_with("http://www.w3.org/2000/01/rdf-schema#")
-                || iri.starts_with("http://www.w3.org/2002/07/owl#")
+    fn domain_range(&mut self, predicate: &str) -> &mut DomainRangeAxiom {
+        let at = match self.domain_range_of.get(predicate) {
+            Some(&at) => at,
+            None => {
+                self.domain_range.push(DomainRangeAxiom { predicate_id: predicate.to_string(), ..Default::default() });
+                self.domain_range_of.insert(predicate.to_string(), self.domain_range.len() - 1);
+                self.domain_range.len() - 1
+            }
         };
-        for (set, kind) in [
-            (&sig.object_properties, Kind::ObjectProperty),
-            (&sig.annotation_properties, Kind::AnnotationProperty),
-            (&sig.data_properties, Kind::DataProperty),
-        ] {
-            for iri in set {
-                if !builtin(iri) {
-                    kinds.entry(iri.clone()).or_insert(kind);
-                    named.insert(iri.clone());
-                }
-            }
-        }
+        &mut self.domain_range[at]
     }
 
-    for ac in model.ont.iter() {
-        match &ac.component {
-            Component::OntologyID(id) => {
-                if let Some(iri) = &id.iri {
-                    graph_id = iri.as_ref().to_string();
+    fn build(mut self, id: String, meta: Option<Meta>) -> Graph {
+        let nodes = self
+            .node_ids
+            .iter()
+            .map(|n| {
+                let (node_type, property_type) = self.node_types.get(n).copied().unwrap_or(("", ""));
+                Node {
+                    id: n.clone(),
+                    lbl: self.labels.remove(n).unwrap_or_default(),
+                    node_type: node_type.to_string(),
+                    property_type: if node_type == "PROPERTY" { property_type.to_string() } else { String::new() },
+                    meta: self.metas.remove(n).and_then(non_empty),
                 }
-                if let Some(v) = &id.viri {
-                    version = v.as_ref().to_string();
-                }
-            }
-            Component::DeclareClass(d) => {
-                kinds.insert(d.0 .0.as_ref().to_string(), Kind::Class);
-                named.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareObjectProperty(d) => {
-                kinds.insert(d.0 .0.as_ref().to_string(), Kind::ObjectProperty);
-                named.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareAnnotationProperty(d) => {
-                kinds
-                    .entry(d.0 .0.as_ref().to_string())
-                    .or_insert(Kind::AnnotationProperty);
-                named.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareDataProperty(d) => {
-                kinds
-                    .entry(d.0 .0.as_ref().to_string())
-                    .or_insert(Kind::DataProperty);
-                named.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::DeclareNamedIndividual(d) => {
-                kinds.insert(d.0 .0.as_ref().to_string(), Kind::Individual);
-                named.insert(d.0 .0.as_ref().to_string());
-            }
-            Component::AnnotationAssertion(aa) => {
-                let subj = match &aa.subject {
-                    AnnotationSubject::IRI(s) => s.as_ref().to_string(),
-                    _ => continue,
-                };
-                let prop = aa.ann.ap.0.as_ref().to_string();
-                let e = data.entry(subj.clone()).or_default();
-                // A definition's / synonym's source references are the
-                // `hasDbXref` annotations ON THE AXIOM (the AnnotatedComponent),
-                // not annotations nested on the value.
-                let ax_xrefs = axiom_xrefs(&ac.ann);
-                let (val_lit, val_is_iri) = match &aa.ann.av {
-                    AnnotationValue::Literal(l) => (Some(literal_text(l)), false),
-                    AnnotationValue::IRI(i) => (Some(i.as_ref().to_string()), true),
-                    // An anonymous individual is named by the node id the
-                    // document gives it — `_:genid…` — and is neither an IRI nor
-                    // a literal. uPheno's mapping sets hang 112,352 of these off
-                    // `sssom:mappings`, and dropping them cost `upheno.json`
-                    // 11,796,960 bytes against what the recipe writes.
-                    AnnotationValue::AnonymousIndividual(a) => {
-                        (Some(format!("_:{}", a.0.as_ref())), false)
-                    }
-                };
-                let val_plain = is_xsd_string(&aa.ann.av);
-                let val_datatype = value_datatype(&aa.ann.av);
-                if prop == RDFS_LABEL {
-                    if let Some(v) = val_lit {
-                        // A node carries a single `lbl`, so of several `rdfs:label`
-                        // axioms the one kept is the maximum by (value,
-                        // annotation-list).
-                        let key = (v.clone(), ann_sort_key(&ac.ann));
-                        if e.label.is_none() || key > e.label_key {
-                            e.label = Some(v);
-                            e.label_key = key;
-                        }
-                    }
-                } else if prop == IAO_DEF {
-                    if let Some(v) = val_lit {
-                        // A definition may be reified by several owl:Axiom blocks
-                        // with different `hasDbXref` sources; a node carries a
-                        // single definition, so the one kept is the maximum by
-                        // (value, annotation-list).
-                        let key = (v.clone(), ann_sort_key(&ac.ann));
-                        if e.definition.is_none() || key > e.def_key {
-                            e.definition = Some(Definition { val: v, xrefs: ax_xrefs, meta: nested_meta(&ac.ann) });
-                            e.def_key = key;
-                        }
-                    }
-                } else if let Some(sp) = synonym_pred(&prop) {
-                    // Only a LITERAL synonym is a synonym. An IRI-valued
-                    // `hasExactSynonym` — ECTO has one pointing at IAO_0000122 —
-                    // falls through to `basicPropertyValues`, exactly as an
-                    // IRI-valued `hasDbXref` does.
-                    if val_is_iri {
-                        if let Some(v) = val_lit {
-                            e.bpv.push(Bpv {
-                                pred: prop,
-                                val: v,
-                                xrefs: vec![],
-                                meta: nested_meta(&ac.ann),
-                                val_is_iri,
-                                datatype: val_datatype.clone(),
-                                plain: val_plain,
-                            });
-                        }
-                    } else if let Some(v) = val_lit {
-                        // An axiom may carry several `hasSynonymType` annotations,
-                        // but a synonym has a single `synonymType` field, so the
-                        // one kept is the maximum value.
-                        let syn_type = ac
-                            .ann
-                            .iter()
-                            .filter(|a| a.ap.0.as_ref() == format!("{OIO}hasSynonymType"))
-                            .filter_map(|a| match &a.av {
-                                AnnotationValue::IRI(i) => Some(i.as_ref().to_string()),
-                                AnnotationValue::Literal(l) => Some(literal_text(l)),
-                                _ => None,
-                            })
-                            .max()
-                            .unwrap_or_default();
-                        let ann_key = ann_sort_key(&ac.ann);
-                        e.synonyms.push(Synonym {
-                            synonym_type: syn_type,
-                            pred: sp.to_string(),
-                            val: v,
-                            xrefs: ax_xrefs,
-                            meta: nested_meta(&ac.ann),
-                            ann_key,
-                        });
-                    }
-                } else if prop == format!("{OIO}hasDbXref") {
-                    // Only a LITERAL `hasDbXref` is an xref. An IRI-valued one
-                    // (ECTO carries `<http://sweetontology.net/realmSoil/Permafrost>`
-                    // on 715 classes) is not a literal, so it is recorded as a
-                    // `basicPropertyValues` entry instead of an xref.
-                    if let Some(v) = val_lit {
-                        if val_is_iri {
-                            e.bpv.push(Bpv {
-                                pred: prop,
-                                val: v,
-                                xrefs: vec![],
-                                meta: nested_meta(&ac.ann),
-                                val_is_iri,
-                                datatype: val_datatype.clone(),
-                                plain: val_plain,
-                            });
-                        } else {
-                            e.xrefs.push(Xref { val: v, meta: nested_meta(&ac.ann) });
-                        }
-                    }
-                } else if prop == RDFS_COMMENT {
-                    if let Some(v) = val_lit {
-                        e.comments.push(v);
-                    }
-                } else if prop == format!("{OIO}inSubset") {
-                    // An IRI-valued subset is its IRI; a literal-valued one is
-                    // rendered as the literal's text, quoted.
-                    if let Some(v) = val_lit {
-                        e.subsets.push(if val_is_iri { v } else { format!("\"{v}\"") });
-                    }
-                } else if prop == OWL_DEPRECATED {
-                    // A TYPED boolean marks deprecation. An untyped `"true"` is a
-                    // string that happens to spell it and marks nothing, so the
-                    // datatype is the test rather than the lexical form.
-                    if matches!(val_lit.as_deref(), Some("true"))
-                        && val_datatype == XSD_BOOLEAN
-                    {
-                        e.deprecated = true;
-                    }
-                } else if prop == format!("{OIO}id") {
-                    // The OBO id is dropped: it is redundant with the node id.
-                } else {
-                    // A basicPropertyValue carries no xrefs of its own.
-                    if let Some(v) = val_lit {
-                        e.bpv.push(Bpv { pred: prop, val: v, xrefs: vec![], meta: nested_meta(&ac.ann), val_is_iri, datatype: val_datatype, plain: val_plain });
-                    }
-                }
-            }
-            Component::OntologyAnnotation(oa) => {
-                let (val, is_iri) = match &oa.0.av {
-                    AnnotationValue::Literal(l) => (literal_text(l), false),
-                    AnnotationValue::IRI(i) => (i.as_ref().to_string(), true),
-                    _ => continue,
-                };
-                graph_bpv.push(Bpv {
-                    pred: oa.0.ap.0.as_ref().to_string(),
-                    val,
-                    xrefs: vec![],
-                    meta: None,
-                    val_is_iri: is_iri,
-                    datatype: value_datatype(&oa.0.av),
-                    plain: is_xsd_string(&oa.0.av),
-                });
-            }
-            // An edge END is not a node. `FromOwl.generateGraph` types the NAMED
-            // subclass of a `SubClassOf` and skips the axiom outright when the
-            // subclass is anonymous; its `addEdge` never touches the node set, so
-            // a superclass, a restriction's filler and an edge's predicate become
-            // nodes only if something else — a declaration, an assertion, an
-            // annotation — introduces them. Adding them here gave `owl:Nothing` a
-            // node in the graphs where it is only ever an anonymous class's
-            // superclass, and the reference has none.
-            Component::SubClassOf(sc) => {
-                if let CE::Class(sub) = &sc.sub {
-                    let s = sub.0.as_ref().to_string();
-                    // The named subclass is TYPED a class by the axiom itself, not
-                    // merely referenced by it — `owl:Nothing` is a `CLASS` node in a
-                    // graph that asserts `SubClassOf(owl:Nothing owl:Nothing)`, with
-                    // nothing declaring it.
-                    kinds.entry(s.clone()).or_insert(Kind::Class);
-                    subclass_typed.insert(s.clone());
-                    referenced.insert(s.clone());
-                    match &sc.sup {
-                        CE::Class(sup) => {
-                            edges.push(Edge {
-                                sub: s,
-                                pred: "is_a".to_string(),
-                                obj: sup.0.as_ref().to_string(),
-                                meta: edge_meta(&ac.ann),
-                            });
-                        }
-                        CE::ObjectSomeValuesFrom { ope, bce } => {
-                            if let (OPE::ObjectProperty(r), CE::Class(t)) = (ope, bce.as_ref()) {
-                                edges.push(Edge {
-                                    sub: s,
-                                    pred: r.0.as_ref().to_string(),
-                                    obj: t.0.as_ref().to_string(),
-                                    meta: edge_meta(&ac.ann),
-                                });
-                            }
-                        }
-                        // A universal restriction `A ⊑ ∀p.B` is an
-                        // `allValuesFromEdge` under the predicate `p`.
-                        CE::ObjectAllValuesFrom { ope, bce } => {
-                            if let (OPE::ObjectProperty(r), CE::Class(t)) = (ope, bce.as_ref()) {
-                                let p = r.0.as_ref().to_string();
-                                dr_map.entry(p.clone()).or_default().all_values_from_edges.push(Edge {
-                                    sub: s,
-                                    pred: p,
-                                    obj: t.0.as_ref().to_string(),
-                                    meta: None,
-                                });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            // `ClassAssertion(C i)` → a `type` edge (`{"sub": i, "pred": "type",
-            // "obj": C}`). MONDO's IAO curation-status individuals (IAO_0000002 a
-            // IAO_0000078, …) arrive via the OMO import.
-            // `ObjectPropertyAssertion(p, a, b)` → an edge `a --p--> b`.
-            Component::ObjectPropertyAssertion(opa) => {
-                if let (OPE::ObjectProperty(p), Individual::Named(s), Individual::Named(o)) =
-                    (&opa.ope, &opa.from, &opa.to)
-                {
-                    referenced.insert(s.0.as_ref().to_string());
-                    referenced.insert(p.0.as_ref().to_string());
-                    referenced.insert(o.0.as_ref().to_string());
-                    prop_edges.push(Edge {
-                        sub: s.0.as_ref().to_string(),
-                        pred: p.0.as_ref().to_string(),
-                        obj: o.0.as_ref().to_string(),
-                        meta: None,
-                    });
-                }
-            }
-            Component::ClassAssertion(ca) => {
-                if let (CE::Class(c), Individual::Named(i)) = (&ca.ce, &ca.i) {
-                    let s = i.0.as_ref().to_string();
-                    referenced.insert(s.clone());
-                    referenced.insert(c.0.as_ref().to_string());
-                    edges.push(Edge {
-                        sub: s,
-                        pred: "type".to_string(),
-                        obj: c.0.as_ref().to_string(),
-                        meta: edge_meta(&ac.ann),
-                    });
-                }
-            }
-            Component::EquivalentClasses(eq) => {
-                // All-named equivalence → equivalentNodesSet; a defined class
-                // ≡ genus ⊓ ∃p.filler ⊓ … → logicalDefinitionAxiom.
-                if eq.0.iter().all(|c| matches!(c, CE::Class(_))) && eq.0.len() >= 2 {
-                    let mut ids: Vec<String> = eq
-                        .0
-                        .iter()
-                        .filter_map(|c| match c {
-                            CE::Class(c) => Some(c.0.as_ref().to_string()),
-                            _ => None,
-                        })
-                        .collect();
-                    ids.sort();
-                    equivalent_nodes_sets.push(EquivalentNodesSet {
-                        representative_node_id: ids[0].clone(),
-                        node_ids: ids,
-                    });
-                } else if let Some(mut ld) = logical_definition(&eq.0) {
-                    let mut key: Vec<CE<RcStr>> = eq.0.iter().cloned().collect();
-                    key.sort_by(crate::io::owlfunc::cmp_ce);
-                    ld.order = key;
-                    logical_defs.push(ld);
-                }
-            }
-            Component::SubObjectPropertyOf(sp) => {
-                match &sp.sub {
-                    // A property chain `p1 ∘ p2 ⊑ q` → propertyChainAxiom.
-                    horned_owl::model::SubObjectPropertyExpression::ObjectPropertyChain(chain) => {
-                        if let OPE::ObjectProperty(sup) = &sp.sup {
-                            // A propertyChainAxiom carries only plain named
-                            // properties. A chain with an `ObjectInverseOf(…)` member
-                            // (e.g. `inverse(part_of) ∘ part_of ⊑ overlaps`) has no
-                            // representation, and a shortened chain would assert
-                            // something the ontology does not — so emit the axiom ONLY
-                            // when EVERY member is a named object property.
-                            let chain_ids: Vec<String> = chain
-                                .iter()
-                                .filter_map(|c| match c {
-                                    OPE::ObjectProperty(p) => Some(p.0.as_ref().to_string()),
-                                    _ => None,
-                                })
-                                .collect();
-                            if chain_ids.len() == chain.len() {
-                                property_chain_axioms.push(PropertyChainAxiom {
-                                    predicate_id: sup.0.as_ref().to_string(),
-                                    chain_predicate_ids: chain_ids,
-                                });
-                            }
-                        }
-                    }
-                    // A simple `p ⊑ q` → a `subPropertyOf` edge.
-                    horned_owl::model::SubObjectPropertyExpression::ObjectPropertyExpression(
-                        OPE::ObjectProperty(sub),
-                    ) => {
-                        if let OPE::ObjectProperty(sup) = &sp.sup {
-                            edges.push(Edge {
-                                sub: sub.0.as_ref().to_string(),
-                                pred: "subPropertyOf".to_string(),
-                                obj: sup.0.as_ref().to_string(),
-                                meta: edge_meta(&ac.ann),
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Component::InverseObjectProperties(iop) => {
-                // `InverseObjectProperties(p, q)` → an `inverseOf` edge.
-                if let (OPE::ObjectProperty(sub), OPE::ObjectProperty(obj)) = (&iop.0, &iop.1) {
-                    edges.push(Edge {
-                        sub: sub.0.as_ref().to_string(),
-                        pred: "inverseOf".to_string(),
-                        obj: obj.0.as_ref().to_string(),
-                        meta: edge_meta(&ac.ann),
-                    });
-                }
-            }
-            Component::ObjectPropertyDomain(d) => {
-                if let (OPE::ObjectProperty(p), CE::Class(c)) = (&d.ope, &d.ce) {
-                    let p = p.0.as_ref().to_string();
-                    referenced.insert(p.clone());
-                    referenced.insert(c.0.as_ref().to_string());
-                    dr_map.entry(p).or_default().domain_class_ids.push(c.0.as_ref().to_string());
-                }
-            }
-            Component::ObjectPropertyRange(r) => {
-                if let (OPE::ObjectProperty(p), CE::Class(c)) = (&r.ope, &r.ce) {
-                    let p = p.0.as_ref().to_string();
-                    referenced.insert(p.clone());
-                    referenced.insert(c.0.as_ref().to_string());
-                    dr_map.entry(p).or_default().range_class_ids.push(c.0.as_ref().to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Every declared entity, plus every entity carrying annotations, plus every
-    // referenced entity, is a node. Kind defaults to Class for a referenced-only
-    // IRI (obographs' `type` is then omitted → typeless).
-    // `owl:Thing` carries no exception. Being an edge's target does not make it a
-    // node — but nothing about the implicit top is special here, and an annotation
-    // assertion on it gives it a node of its own, typeless, since a built-in takes
-    // no kind from the signature.
-    let mut all: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    all.extend(kinds.keys().cloned());
-    all.extend(data.keys().cloned());
-    all.extend(referenced.iter().cloned());
-
-    // (tier, kind_rank, ns, rem, node). Three tiers: everything the ontology names,
-    // then the classes only a `SubClassOf` typed, then the referenced-only typeless.
-    let mut nodes: Vec<(u8, u8, String, String, Node)> = Vec::new();
-    for iri in &all {
-        let kind = kinds.get(iri).copied();
-        let (rank, type_str, prop_type) = match kind {
-            Some(k) => (
-                kind_rank(k),
-                node_type_str(k).to_string(),
-                property_type_str(k).to_string(),
-            ),
-            None => (5, String::new(), String::new()), // referenced-only → typeless, last
-        };
-        let tier = match kind {
-            None => 2,
-            Some(_) if subclass_typed.contains(iri) && !named.contains(iri) => 1,
-            Some(_) => 0,
-        };
-        let d = data.get(iri);
-        let meta = d.map(build_meta).filter(|m| !m.is_empty());
-        let lbl = d.and_then(|d| d.label.clone()).unwrap_or_default();
-        let (ns, rem) = ns_rem(iri);
-        nodes.push((
-            tier,
-            rank,
-            ns.to_string(),
-            rem.to_string(),
-            Node {
-                id: iri.clone(),
-                lbl,
-                node_type: type_str,
-                property_type: prop_type,
-                meta,
-            },
-        ));
-    }
-    // A `SubClassOf` edge sorts by its subject's place in the KIND-ranked order —
-    // the tier plays no part. `owl:Nothing` is last in the node list and its
-    // `is_a` edge is not last among the edges; it sits where a class in the `owl#`
-    // namespace belongs. So the two orders are taken separately.
-    let mut edge_order: Vec<&(u8, u8, String, String, Node)> = nodes.iter().collect();
-    edge_order.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(&b.2)).then_with(|| a.3.cmp(&b.3)));
-    let node_pos: BTreeMap<&str, usize> =
-        edge_order.iter().enumerate().map(|(i, n)| (n.4.id.as_str(), i)).collect();
-    let node_pos: BTreeMap<String, usize> =
-        node_pos.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-
-    nodes.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-            .then_with(|| a.3.cmp(&b.3))
-    });
-    let nodes: Vec<Node> = nodes.into_iter().map(|(_, _, _, _, n)| n).collect();
-
-    // Edges group by the kind of axiom they came from: first every
-    // SubClassOf-derived edge (`is_a` and property restrictions), then
-    // `subPropertyOf` (SubObjectPropertyOf), then `inverseOf`
-    // (InverseObjectProperties). Within the SubClassOf group an edge sorts by
-    // subject (node order), then the superclass expression — a named `is_a`
-    // superclass before a restriction — then by (pred, obj). The property-axiom
-    // groups sort by their (subject, object) IRIs.
-    let edge_group = |pred: &str| -> u8 {
-        match pred {
-            "subPropertyOf" => 1,
-            "inverseOf" => 2,
-            _ => 0,
-        }
-    };
-    edges.sort_by(|a, b| {
-        let ga = edge_group(&a.pred);
-        let gb = edge_group(&b.pred);
-        if ga != gb {
-            return ga.cmp(&gb);
-        }
-        if ga == 0 {
-            let pa = node_pos.get(a.sub.as_str()).copied().unwrap_or(usize::MAX);
-            let pb = node_pos.get(b.sub.as_str()).copied().unwrap_or(usize::MAX);
-            pa.cmp(&pb)
-                .then_with(|| (a.pred != "is_a").cmp(&(b.pred != "is_a")))
-                .then_with(|| a.pred.cmp(&b.pred))
-                .then_with(|| a.obj.cmp(&b.obj))
-                // Two edges can share (sub, pred, obj) and differ only in their
-                // metadata — the asserted edge and its `is_inferred` twin. The bare
-                // one comes first; without this the pair's order is whatever the
-                // sort happened to leave (2,333 such pairs in `human-view.json`,
-                // om splitting them roughly half and half).
-                .then_with(|| a.meta.is_some().cmp(&b.meta.is_some()))
-        } else {
-            ns_rem(&a.sub)
-                .cmp(&ns_rem(&b.sub))
-                .then_with(|| ns_rem(&a.obj).cmp(&ns_rem(&b.obj)))
-        }
-    });
-
-    if !prop_edges.is_empty() {
-        prop_edges.sort_by(|a, b| {
-            ns_rem(&a.sub)
-                .cmp(&ns_rem(&b.sub))
-                .then_with(|| ns_rem(&a.pred).cmp(&ns_rem(&b.pred)))
-                .then_with(|| ns_rem(&a.obj).cmp(&ns_rem(&b.obj)))
-        });
-        let at = edges.iter().position(|e| edge_group(&e.pred) != 0).unwrap_or(edges.len());
-        edges.splice(at..at, prop_edges);
-    }
-
-    // These axiom lists order by their defining/representative IRI, on the same
-    // (namespace, remainder) key as entities.
-    let nrk = |s: &str| -> (String, String) {
-        let (a, b) = ns_rem(s);
-        (a.to_string(), b.to_string())
-    };
-    // Two distinct EquivalentClasses axioms (e.g. differing only in annotations, or
-    // one from the edit file and one from the `owl-axioms:` block) can yield the same
-    // logicalDefinitionAxiom; the list carries each distinct definition once, so
-    // dedupe on full content (definedClassId + genusIds + restrictions), keeping
-    // first order.
-    {
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        logical_defs.retain(|ld| {
-            let key = format!(
-                "{}|{}|{}",
-                ld.defined_class_id,
-                ld.genus_ids.join(","),
-                ld.restrictions
-                    .iter()
-                    .map(|r| format!("{}={}", r.property_id, r.filler_id))
-                    .collect::<Vec<_>>()
-                    .join(";")
-            );
-            seen.insert(key)
-        });
-    }
-    logical_defs.sort_by(|a, b| {
-        nrk(&a.defined_class_id).cmp(&nrk(&b.defined_class_id)).then_with(|| {
-            for (x, y) in a.order.iter().zip(b.order.iter()) {
-                let c = crate::io::owlfunc::cmp_ce(x, y);
-                if c != std::cmp::Ordering::Equal {
-                    return c;
-                }
-            }
-            a.order.len().cmp(&b.order.len())
-        })
-    });
-    equivalent_nodes_sets
-        .sort_by(|a, b| nrk(&a.representative_node_id).cmp(&nrk(&b.representative_node_id)));
-    // A propertyChainAxiom sorts on its property chain first, then on the
-    // super-property, each IRI on the (namespace, remainder) key.
-    let chain_key = |c: &PropertyChainAxiom| -> (Vec<(String, String)>, (String, String)) {
-        (c.chain_predicate_ids.iter().map(|s| nrk(s)).collect(), nrk(&c.predicate_id))
-    };
-    property_chain_axioms.sort_by(|a, b| chain_key(a).cmp(&chain_key(b)));
-    // A propertyChainAxiom records only the predicate and the chain, so two
-    // SubPropertyChainOf axioms differing only in annotations collapse to one.
-    property_chain_axioms
-        .dedup_by(|a, b| a.predicate_id == b.predicate_id && a.chain_predicate_ids == b.chain_predicate_ids);
-
-    // domainRangeAxioms appear in the order each predicate is first met while
-    // walking the axioms in sorted order. `SubClassOf` (holding the `∀p.C`
-    // restrictions → allValuesFromEdges) sorts ahead of
-    // `ObjectPropertyDomain`/`ObjectPropertyRange`, so every predicate with an
-    // allValuesFromEdge is encountered — and emitted — before any predicate with
-    // only a domain/range, the former ordered by the least of their edges'
-    // (subject, object) IRIs and the latter by the predicate IRI.
-    let mut domain_range_axioms: Vec<DomainRangeAxiom> = dr_map
-        .into_iter()
-        .map(|(pred, mut e)| {
-            e.all_values_from_edges.sort_by(|a, b| {
-                ns_rem(&a.sub).cmp(&ns_rem(&b.sub)).then_with(|| ns_rem(&a.obj).cmp(&ns_rem(&b.obj)))
-            });
-            DomainRangeAxiom {
-                predicate_id: pred,
-                domain_class_ids: e.domain_class_ids,
-                range_class_ids: e.range_class_ids,
-                all_values_from_edges: e.all_values_from_edges,
-            }
-        })
-        .collect();
-    // First encounter is set by the earliest-sorting kind among a predicate's
-    // contributing axioms: SubClassOf (allValuesFrom) < ObjectPropertyDomain <
-    // ObjectPropertyRange. So predicates with an allValuesFromEdge come first
-    // (ordered by their least edge (sub, obj)), then domain-bearing predicates,
-    // then range-only predicates — the latter two by predicate IRI.
-    let dr_key = |dra: &DomainRangeAxiom| -> (u8, (String, String), (String, String)) {
-        if let Some(e) = dra.all_values_from_edges.first() {
-            (0, nrk(&e.sub), nrk(&e.obj))
-        } else if !dra.domain_class_ids.is_empty() {
-            (1, nrk(&dra.predicate_id), (String::new(), String::new()))
-        } else {
-            (2, nrk(&dra.predicate_id), (String::new(), String::new()))
-        }
-    };
-    domain_range_axioms.sort_by(|a, b| dr_key(a).cmp(&dr_key(b)));
-
-    let meta = if graph_bpv.is_empty() && version.is_empty() {
-        None
-    } else {
-        graph_bpv.sort_by(|a, b| bpv_key(a).cmp(&bpv_key(b)));
-        Some(GraphMeta { basic_property_values: graph_bpv, version })
-    };
-
-    let doc = GraphDoc {
-        graphs: vec![Graph {
-            id: graph_id,
+            })
+            .collect();
+        Graph {
+            id,
             meta,
             nodes,
-            edges,
-            equivalent_nodes_sets,
-            logical_definition_axioms: logical_defs,
-            domain_range_axioms,
-            property_chain_axioms,
-        }],
-    };
-
-    // The OBO Graphs pretty-print layout, not serde_json's.
-    let mut ser = serde_json::Serializer::with_formatter(&mut *writer, JacksonFormatter::default());
-    doc.serialize(&mut ser)?;
-    Ok(())
-}
-
-fn build_meta(d: &EntityData) -> Meta {
-    let mut synonyms = d.synonyms.clone();
-    // Synonyms come out by (predicate, value, annotation-list) — the last being
-    // the element-wise comparison over the axiom's xref/synonymType annotations.
-    synonyms.sort_by(|a, b| {
-        a.pred
-            .cmp(&b.pred)
-            .then_with(|| a.val.cmp(&b.val))
-            // An ANNOTATED synonym precedes an otherwise-identical bare one. HPO
-            // asserts the same text twice — once carrying `hasSynonymType`
-            // (`hp#layperson`, `hp#abbreviation`, `hp#allelic_requirement`) and once
-            // plain — and its released `hp-international.json` puts the typed member
-            // first in all 7641 such adjacent pairs. A bare `Vec` compare gets this
-            // backwards, since Rust (like any lexicographic list compare) orders the
-            // EMPTY annotation key first.
-            .then_with(|| a.ann_key.is_empty().cmp(&b.ann_key.is_empty()))
-            .then_with(|| a.ann_key.cmp(&b.ann_key))
-    });
-    let mut xrefs: Vec<Xref> = d.xrefs.clone();
-    // Two `hasDbXref` axioms can share a value and differ only in their axiom
-    // annotations — CHEBI records `CAS:70458-96-7` once per source. Sorting on the
-    // value alone leaves those in whatever order the axiom set iterated, so break
-    // the tie on the annotation key, which ranks an IRI-valued source before a
-    // literal one and compares the rest exactly.
-    xrefs.sort_by(|a, b| a.val.cmp(&b.val).then_with(|| xref_meta_key(a).cmp(&xref_meta_key(b))));
-    let mut bpv = d.bpv.clone();
-    bpv.sort_by(|a, b| bpv_key(a).cmp(&bpv_key(b)));
-    let mut subsets = d.subsets.clone();
-    // Subsets sort an IRI value (rank 0) on its (namespace, remainder) key before
-    // a literal value (rank 1, a `"…"` string).
-    subsets.sort_by(|a, b| {
-        let key = |s: &str| -> (u8, String, String) {
-            if s.starts_with('"') {
-                (1, s.to_string(), String::new())
-            } else {
-                let (n, r) = ns_rem(s);
-                (0, n.to_string(), r.to_string())
-            }
-        };
-        key(a).cmp(&key(b))
-    });
-    let mut comments = d.comments.clone();
-    comments.sort();
-    Meta {
-        definition: d.definition.as_ref().map(|df| Definition {
-            val: df.val.clone(),
-            xrefs: df.xrefs.clone(),
-            meta: df.meta.clone(),
-        }),
-        comments,
-        subsets,
-        synonyms,
-        xrefs,
-        basic_property_values: bpv,
-        deprecated: d.deprecated,
+            edges: self.edges,
+            equivalent_nodes_sets: self.equivalent_nodes_sets,
+            logical_definition_axioms: self.logical_definitions,
+            domain_range_axioms: self.domain_range,
+            property_chain_axioms: self.property_chains,
+        }
     }
 }
 
-/// Turn an `EquivalentClasses` clique `[C, genus ⊓ ∃p.f ⊓ …]` into an obographs
-/// logicalDefinitionAxiom, when it has that genus-differentia shape.
-fn logical_definition(members: &[CE<RcStr>]) -> Option<LogicalDefinition> {
-    if members.len() != 2 {
+fn non_empty(meta: Meta) -> Option<Meta> {
+    if meta == Meta::default() {
+        None
+    } else {
+        Some(meta)
+    }
+}
+
+fn edge(sub: &str, pred: &str, obj: &str, meta: &Meta) -> Edge {
+    Edge { sub: sub.to_string(), pred: pred.to_string(), obj: obj.to_string(), meta: non_empty(meta.clone()) }
+}
+
+fn push_once(ids: &mut Vec<String>, id: &str) {
+    if !ids.iter().any(|i| i == id) {
+        ids.push(id.to_string());
+    }
+}
+
+/// The id an individual's node takes: its IRI, or the node id of an anonymous
+/// individual (`_:genid…`).
+fn individual_id(i: &Individual<RcStr>) -> String {
+    match i {
+        Individual::Named(n) => n.0.as_ref().to_string(),
+        Individual::Anonymous(a) => anonymous_id(a.0.as_ref()),
+    }
+}
+
+fn anonymous_id(label: &str) -> String {
+    if label.starts_with("_:") {
+        label.to_string()
+    } else {
+        format!("_:{label}")
+    }
+}
+
+/// An annotation value as a property value's `val`: an IRI, a literal's lexical
+/// form, or an anonymous individual's node id.
+fn value_text(av: &AnnotationValue<RcStr>) -> String {
+    match av {
+        AnnotationValue::IRI(i) => i.as_ref().to_string(),
+        AnnotationValue::Literal(l) => literal_text(l),
+        AnnotationValue::AnonymousIndividual(a) => anonymous_id(a.0.as_ref()),
+    }
+}
+
+/// An annotation value as a subset or a synonym type names it: an IRI or an
+/// anonymous individual's node id as it stands, a literal quoted, with its
+/// language or, unless it is a plain literal, its datatype.
+fn value_rendering(av: &AnnotationValue<RcStr>) -> String {
+    let quoted = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+    let datatype = |iri: &str| -> String {
+        for (prefix, ns) in [
+            ("owl", "http://www.w3.org/2002/07/owl#"),
+            ("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
+            ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
+            ("xml", "http://www.w3.org/XML/1998/namespace"),
+            ("xsd", "http://www.w3.org/2001/XMLSchema#"),
+        ] {
+            if let Some(local) = iri.strip_prefix(ns) {
+                return format!("{prefix}:{local}");
+            }
+        }
+        format!("<{iri}>")
+    };
+    match av {
+        AnnotationValue::Literal(Literal::Language { literal, lang }) => format!("{}@{lang}", quoted(literal)),
+        AnnotationValue::Literal(Literal::Simple { literal }) => {
+            let dt = crate::io::owlrdf::plain_datatype();
+            if dt == RDF_PLAIN_LITERAL {
+                quoted(literal)
+            } else {
+                format!("{}^^{}", quoted(literal), datatype(dt))
+            }
+        }
+        AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri }) => {
+            if datatype_iri.as_ref() == RDF_PLAIN_LITERAL {
+                quoted(literal)
+            } else {
+                format!("{}^^{}", quoted(literal), datatype(datatype_iri.as_ref()))
+            }
+        }
+        _ => value_text(av),
+    }
+}
+
+/// Whether an annotation marks what it annotates deprecated: `owl:deprecated`
+/// with the boolean `true`. Any other value is a property value like any other.
+fn is_deprecation(a: &Annotation<RcStr>) -> bool {
+    a.ap.0.as_ref() == OWL_DEPRECATED
+        && matches!(&a.av, AnnotationValue::Literal(Literal::Datatype { literal, datatype_iri })
+            if datatype_iri.as_ref() == XSD_BOOLEAN && literal.eq_ignore_ascii_case("true"))
+}
+
+/// Annotations in their order: by property, then by value.
+fn sorted_annotations<'a>(anns: impl IntoIterator<Item = &'a Annotation<RcStr>>) -> Vec<&'a Annotation<RcStr>> {
+    let mut sorted: Vec<&Annotation<RcStr>> = anns.into_iter().collect();
+    sorted.sort_by(|a, b| {
+        crate::owlapi_hash::iri_cmp(a.ap.0.as_ref(), b.ap.0.as_ref())
+            .then_with(|| crate::io::owlfunc::cmp_annotation_value(&a.av, &b.av))
+    });
+    sorted
+}
+
+/// What annotations say about the axiom, node or ontology they annotate: an
+/// `owl:deprecated true` deprecates it, a `hasDbXref` is an xref, an
+/// `inSubset` or `hasSynonymType` a subset, and any other annotation a
+/// property value.
+fn annotations_meta<'a>(anns: impl IntoIterator<Item = &'a Annotation<RcStr>>) -> Meta {
+    let mut meta = Meta::default();
+    for a in sorted_annotations(anns) {
+        let val = value_text(&a.av);
+        let prop = a.ap.0.as_ref();
+        if is_deprecation(a) {
+            meta.deprecated = true;
+        } else if prop == HAS_DB_XREF {
+            meta.xrefs.push(Xref { val, meta: None });
+        } else if prop == IN_SUBSET || prop == HAS_SYNONYM_TYPE {
+            meta.subsets.push(val);
+        } else {
+            meta.basic_property_values.push(Bpv { pred: prop.to_string(), val, xrefs: Vec::new(), meta: None });
+        }
+    }
+    meta
+}
+
+/// The metadata a node's definition, xref, synonym or property value carries
+/// from the annotations of its assertion: their property values, under the
+/// nested-`meta` convention (see `NEST_AXIOM_ANNS`).
+fn value_meta(meta: &Meta) -> Option<Box<Meta>> {
+    if !NEST_AXIOM_ANNS.load(Ordering::Relaxed) || meta.basic_property_values.is_empty() {
         return None;
     }
-    let (named, expr) = match (&members[0], &members[1]) {
-        (CE::Class(c), other) => (c, other),
-        (other, CE::Class(c)) => (c, other),
-        _ => return None,
-    };
-    let conjs: Vec<&CE<RcStr>> = match expr {
-        CE::ObjectIntersectionOf(v) => v.iter().collect(),
-        _ => return None,
-    };
+    Some(Box::new(Meta { basic_property_values: meta.basic_property_values.clone(), ..Default::default() }))
+}
+
+/// A defined class's logical definition from the operands of the intersection
+/// it is equivalent to: a named operand is a genus and an existential
+/// restriction on a named property to a named class a restriction. An
+/// existential restriction of any other shape is left out and the definition
+/// stands without it; an operand of any other kind leaves no definition.
+fn logical_definition(defined: &str, operands: &[CE<RcStr>]) -> Option<LogicalDefinition> {
+    let mut sorted: Vec<&CE<RcStr>> = operands.iter().collect();
+    sorted.sort_by(|a, b| cmp_ce(a, b));
+    sorted.dedup();
     let mut genus_ids = Vec::new();
     let mut restrictions = Vec::new();
-    // A conjunct the logicalDefinitionAxiom shape cannot express is handled two
-    // ways, and the difference is which one. A `someValuesFrom` over a COMPLEX
-    // filler is simply dropped and the rest of the definition still stands —
-    // HP_0000532, every one of whose conjuncts is `∃R.(nested intersection)`,
-    // comes out as a bare `{"definedClassId": …}` with neither genus nor
-    // restrictions. Any OTHER complex conjunct (a nested intersection, a
-    // cardinality, a union) abandons the whole axiom: OBA_2045455 is
-    // `(PATO_0001470 ⊓ ∃… ⊓ ∃…) ⊓ ∃RO_0002314.UBERON_0001062` and nothing is
-    // emitted for it, not the one expressible restriction.
-    for c in conjs {
-        match c {
-            CE::Class(g) => genus_ids.push(g.0.as_ref().to_string()),
+    for operand in sorted {
+        match operand {
+            CE::Class(c) => genus_ids.push(c.0.as_ref().to_string()),
             CE::ObjectSomeValuesFrom { ope, bce } => {
                 if let (OPE::ObjectProperty(p), CE::Class(f)) = (ope, bce.as_ref()) {
                     restrictions.push(Restriction {
@@ -1339,18 +489,285 @@ fn logical_definition(members: &[CE<RcStr>]) -> Option<LogicalDefinition> {
             _ => return None,
         }
     }
-    genus_ids.sort_by(|a, b| ns_rem(a).cmp(&ns_rem(b)));
-    restrictions.sort_by(|a, b| {
-        ns_rem(&a.property_id)
-            .cmp(&ns_rem(&b.property_id))
-            .then_with(|| ns_rem(&a.filler_id).cmp(&ns_rem(&b.filler_id)))
+    Some(LogicalDefinition { defined_class_id: defined.to_string(), genus_ids, restrictions })
+}
+
+/// What an annotation assertion on `subject` writes into its node.
+fn annotate(g: &mut GraphBuilder, subject: &str, ann: &Annotation<RcStr>, axiom: &AnnotatedComponent<RcStr>, meta: &Meta) {
+    let prop = ann.ap.0.as_ref();
+    let lexical = match &ann.av {
+        AnnotationValue::Literal(l) => Some(literal_text(l)),
+        _ => None,
+    };
+    let xrefs = || meta.xrefs.iter().map(|x| x.val.clone()).collect::<Vec<_>>();
+    match (prop, lexical) {
+        (RDFS_LABEL, Some(v)) => g.set_label(subject, v),
+        (IAO_DEF, Some(v)) => {
+            g.meta(subject).definition = Some(Definition { val: v, xrefs: xrefs(), meta: value_meta(meta) });
+        }
+        (HAS_DB_XREF, Some(v)) => g.meta(subject).xrefs.push(Xref { val: v, meta: value_meta(meta) }),
+        _ if is_deprecation(ann) => g.meta(subject).deprecated = true,
+        (RDFS_COMMENT, Some(v)) => g.meta(subject).comments.push(v),
+        (OIO_ID, _) => {}
+        (IN_SUBSET, _) => g.meta(subject).subsets.push(value_rendering(&ann.av)),
+        (p, Some(v)) if synonym_pred(p).is_some() => {
+            // Of several synonym types, the last in annotation order is the one
+            // the synonym has.
+            let synonym_type = sorted_annotations(&axiom.ann)
+                .into_iter()
+                .rfind(|a| a.ap.0.as_ref() == HAS_SYNONYM_TYPE)
+                .map(|a| value_rendering(&a.av))
+                .unwrap_or_default();
+            let synonym = Synonym {
+                synonym_type,
+                pred: synonym_pred(p).unwrap_or_default().to_string(),
+                val: v,
+                xrefs: xrefs(),
+                meta: value_meta(meta),
+            };
+            g.meta(subject).synonyms.push(synonym);
+        }
+        _ => {
+            let bpv = Bpv { pred: prop.to_string(), val: value_text(&ann.av), xrefs: Vec::new(), meta: value_meta(meta) };
+            g.meta(subject).basic_property_values.push(bpv);
+        }
+    }
+}
+
+/// Why an axiom keeps the ontology from being written as a graph, if it does:
+/// an annotation of it whose value is an anonymous individual, which no `meta`
+/// entry can hold, or a domain or range given to an inverse property, which
+/// names no predicate.
+fn unwritable_in_a_graph(ac: &AnnotatedComponent<RcStr>) -> Option<&'static str> {
+    match &ac.component {
+        Component::OntologyAnnotation(oa) if matches!(oa.0.av, AnnotationValue::AnonymousIndividual(_)) => {
+            Some("annotates the ontology with an anonymous individual")
+        }
+        Component::ObjectPropertyDomain(d)
+            if matches!(d.ope, OPE::InverseObjectProperty(_)) && matches!(d.ce, CE::Class(_)) =>
+        {
+            Some("states the domain of an inverse property")
+        }
+        Component::ObjectPropertyRange(r)
+            if matches!(r.ope, OPE::InverseObjectProperty(_)) && matches!(r.ce, CE::Class(_)) =>
+        {
+            Some("states the range of an inverse property")
+        }
+        _ if ac.ann.iter().any(|a| matches!(a.av, AnnotationValue::AnonymousIndividual(_))) => {
+            Some("is annotated with an anonymous individual")
+        }
+        _ => None,
+    }
+}
+
+/// The graph of one ontology. Its axioms are taken in their sorted order, and
+/// each adds what it says to the graph:
+///
+/// - a declaration types its entity's node;
+/// - `SubClassOf` with a named subclass types it a class and is an `is_a` edge
+///   to a named superclass, an edge on the property of an existential
+///   restriction to a named class, or an `allValuesFromEdges` entry of a
+///   universal one;
+/// - a class assertion of a named class is a `type` edge, and names both
+///   nodes; an object property assertion is an edge on its property, and names
+///   its subject's node;
+/// - an equivalence of named classes is an `equivalentNodesSets` entry, and
+///   one of a named class and an intersection a logical definition;
+/// - a sub-property, inverse pair or chain, domain or range of named
+///   properties is an edge or an axiom entry;
+/// - an annotation assertion on an IRI writes into that node.
+///
+/// Nothing else is written.
+fn generate_graph(model: &Model) -> Graph {
+    let mut graph_id = String::new();
+    let mut version = String::new();
+    let mut ontology_annotations: Vec<&Annotation<RcStr>> = Vec::new();
+    let mut axioms: Vec<&AnnotatedComponent<RcStr>> = Vec::new();
+    for ac in model.ont.iter() {
+        match &ac.component {
+            Component::OntologyID(id) => {
+                if let Some(iri) = &id.iri {
+                    graph_id = iri.as_ref().to_string();
+                }
+                if let Some(v) = &id.viri {
+                    version = v.as_ref().to_string();
+                }
+            }
+            Component::OntologyAnnotation(oa) => ontology_annotations.push(&oa.0),
+            Component::DocIRI(_) | Component::Import(_) => {}
+            _ => axioms.push(ac),
+        }
+    }
+    axioms.sort_by(|a, b| crate::io::genid::cmp_annotated_axiom(a, b));
+
+    let mut g = GraphBuilder::default();
+    for ac in axioms {
+        let meta = annotations_meta(&ac.ann);
+        match &ac.component {
+            Component::DeclareClass(d) => g.set_type(d.0 .0.as_ref(), CLASS),
+            Component::DeclareObjectProperty(d) => g.set_type(d.0 .0.as_ref(), OBJECT_PROPERTY),
+            Component::DeclareDataProperty(d) => g.set_type(d.0 .0.as_ref(), DATA_PROPERTY),
+            Component::DeclareAnnotationProperty(d) => g.set_type(d.0 .0.as_ref(), ANNOTATION_PROPERTY),
+            Component::DeclareNamedIndividual(d) => g.set_type(d.0 .0.as_ref(), INDIVIDUAL),
+            Component::SubClassOf(sc) => {
+                let CE::Class(sub) = &sc.sub else { continue };
+                let sub = sub.0.as_ref();
+                g.set_type(sub, CLASS);
+                match &sc.sup {
+                    CE::Class(sup) => g.add_edge(sub, "is_a", sup.0.as_ref(), &meta),
+                    CE::ObjectSomeValuesFrom { ope: OPE::ObjectProperty(p), bce } => {
+                        if let CE::Class(filler) = bce.as_ref() {
+                            g.add_edge(sub, p.0.as_ref(), filler.0.as_ref(), &meta);
+                        }
+                    }
+                    CE::ObjectAllValuesFrom { ope: OPE::ObjectProperty(p), bce } => {
+                        if let CE::Class(filler) = bce.as_ref() {
+                            let p = p.0.as_ref();
+                            let e = edge(sub, p, filler.0.as_ref(), &meta);
+                            let entry = g.domain_range(p);
+                            if !entry.all_values_from_edges.contains(&e) {
+                                entry.all_values_from_edges.push(e);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Component::ClassAssertion(ca) => {
+                if let CE::Class(c) = &ca.ce {
+                    let i = individual_id(&ca.i);
+                    g.add_edge(&i, "type", c.0.as_ref(), &meta);
+                    g.add_node(&i);
+                    g.add_node(c.0.as_ref());
+                }
+            }
+            Component::ObjectPropertyAssertion(opa) => {
+                let from = individual_id(&opa.from);
+                if let OPE::ObjectProperty(p) = &opa.ope {
+                    g.add_edge(&from, p.0.as_ref(), &individual_id(&opa.to), &meta);
+                }
+                g.add_node(&from);
+            }
+            Component::EquivalentClasses(eq) => {
+                let mut members: Vec<&CE<RcStr>> = eq.0.iter().collect();
+                members.sort_by(|a, b| cmp_ce(a, b));
+                members.dedup();
+                let named: Vec<&str> = members
+                    .iter()
+                    .filter_map(|m| match m {
+                        CE::Class(c) => Some(c.0.as_ref()),
+                        _ => None,
+                    })
+                    .collect();
+                let anonymous: Vec<&CE<RcStr>> = members.iter().copied().filter(|m| !matches!(m, CE::Class(_))).collect();
+                if anonymous.is_empty() {
+                    let Some(first) = named.first() else { continue };
+                    g.equivalent_nodes_sets.push(EquivalentNodesSet {
+                        representative_node_id: first.to_string(),
+                        node_ids: named.iter().map(|n| n.to_string()).collect(),
+                        meta: if NEST_AXIOM_ANNS.load(Ordering::Relaxed) { non_empty(meta.clone()) } else { None },
+                    });
+                } else if let ([defined], [CE::ObjectIntersectionOf(operands)]) = (named.as_slice(), anonymous.as_slice()) {
+                    if let Some(ld) = logical_definition(defined, operands) {
+                        g.logical_definitions.push(ld);
+                    }
+                }
+            }
+            Component::SubObjectPropertyOf(sp) => match (&sp.sub, &sp.sup) {
+                (SOPE::ObjectPropertyExpression(OPE::ObjectProperty(sub)), OPE::ObjectProperty(sup)) => {
+                    g.add_edge(sub.0.as_ref(), "subPropertyOf", sup.0.as_ref(), &meta);
+                }
+                (SOPE::ObjectPropertyChain(chain), OPE::ObjectProperty(sup)) => {
+                    let ids: Option<Vec<String>> = chain
+                        .iter()
+                        .map(|p| match p {
+                            OPE::ObjectProperty(p) => Some(p.0.as_ref().to_string()),
+                            OPE::InverseObjectProperty(_) => None,
+                        })
+                        .collect();
+                    if let Some(ids) = ids {
+                        g.property_chains.push(PropertyChainAxiom {
+                            predicate_id: sup.0.as_ref().to_string(),
+                            chain_predicate_ids: ids,
+                        });
+                    }
+                }
+                _ => {}
+            },
+            Component::InverseObjectProperties(iop) => {
+                if let (OPE::ObjectProperty(p), OPE::ObjectProperty(q)) = (&iop.0, &iop.1) {
+                    g.add_edge(p.0.as_ref(), "inverseOf", q.0.as_ref(), &meta);
+                }
+            }
+            Component::ObjectPropertyDomain(d) => {
+                if let (OPE::ObjectProperty(p), CE::Class(c)) = (&d.ope, &d.ce) {
+                    push_once(&mut g.domain_range(p.0.as_ref()).domain_class_ids, c.0.as_ref());
+                }
+            }
+            Component::ObjectPropertyRange(r) => {
+                if let (OPE::ObjectProperty(p), CE::Class(c)) = (&r.ope, &r.ce) {
+                    push_once(&mut g.domain_range(p.0.as_ref()).range_class_ids, c.0.as_ref());
+                }
+            }
+            Component::AnnotationAssertion(aa) => {
+                if let AnnotationSubject::IRI(subject) = &aa.subject {
+                    annotate(&mut g, subject.as_ref(), &aa.ann, ac, &meta);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut graph_meta = annotations_meta(ontology_annotations);
+    graph_meta.version = version;
+    g.build(graph_id, non_empty(graph_meta))
+}
+
+/// The order of the graphs of an imports closure: by ontology id, as its text
+/// `OntologyID(OntologyIRI(<iri>) VersionIRI(<version>))` sorts, an anonymous
+/// ontology first.
+fn graph_order_key(model: &Model) -> (bool, Vec<u16>) {
+    let id = model.ont.iter().find_map(|ac| match &ac.component {
+        Component::OntologyID(id) => id.iri.as_ref().map(|iri| (iri, id.viri.as_ref())),
+        _ => None,
     });
-    Some(LogicalDefinition {
-        defined_class_id: named.0.as_ref().to_string(),
-        genus_ids,
-        restrictions,
-        order: Vec::new(),
-    })
+    match id {
+        Some((iri, version)) => {
+            let text = format!(
+                "OntologyID(OntologyIRI(<{}>) VersionIRI(<{}>))",
+                iri.as_ref(),
+                version.map_or("null", |v| v.as_ref())
+            );
+            (true, text.encode_utf16().collect())
+        }
+        None => (false, Vec::new()),
+    }
+}
+
+/// Write an ontology to OBO Graphs JSON: a graph for the ontology and one for
+/// each ontology of its imports closure (`imports`), in the order of their
+/// ontology ids.
+pub fn save<W: Write>(model: &Model, writer: &mut W) -> Result<()> {
+    save_closure(model, &[], writer)
+}
+
+/// [`save`], with the documents of the ontology's imports closure.
+pub fn save_closure<W: Write>(model: &Model, imports: &[Model], writer: &mut W) -> Result<()> {
+    let mut ontologies: Vec<&Model> = std::iter::once(model).chain(imports.iter()).collect();
+    for ont in &ontologies {
+        if let Some((ac, why)) = ont.ont.iter().find_map(|ac| unwritable_in_a_graph(ac).map(|why| (ac, why))) {
+            anyhow::bail!(
+                "the ontology cannot be written as an OBO graph: {} {why}",
+                crate::io::owlfunc::render_component_line(ac)
+            );
+        }
+    }
+    ontologies.sort_by_cached_key(|m| graph_order_key(m));
+    let doc = GraphDoc { graphs: ontologies.into_iter().map(generate_graph).collect() };
+
+    // The OBO Graphs pretty-print layout, not serde_json's.
+    let mut ser = serde_json::Serializer::with_formatter(&mut *writer, JacksonFormatter::default());
+    doc.serialize(&mut ser)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1359,6 +776,9 @@ fn logical_definition(members: &[CE<RcStr>]) -> Option<LogicalDefinition> {
 // Differences from serde_json's PrettyFormatter: object field separator is
 // `" : "`; an array adds no newlines of its own, only spaces inside its brackets
 // (`[ a, b ]`); only object nesting drives indentation (arrays are transparent).
+// In a string, a control character is escaped in upper-case hex (`\u001F`), and
+// a character outside the Basic Multilingual Plane as its two UTF-16 surrogates
+// (`\uD83D\uDE00`).
 // ---------------------------------------------------------------------------
 struct JacksonFormatter {
     depth: usize,
@@ -1425,6 +845,38 @@ impl serde_json::ser::Formatter for JacksonFormatter {
     fn end_array_value<W: ?Sized + Write>(&mut self, w: &mut W) -> std::io::Result<()> {
         self.has_value = true;
         Ok(())
+    }
+    fn write_string_fragment<W: ?Sized + Write>(&mut self, w: &mut W, fragment: &str) -> std::io::Result<()> {
+        let mut start = 0;
+        for (i, c) in fragment.char_indices() {
+            if u32::from(c) > 0xFFFF {
+                w.write_all(&fragment.as_bytes()[start..i])?;
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    write!(w, "\\u{unit:04X}")?;
+                }
+                start = i + c.len_utf8();
+            }
+        }
+        w.write_all(&fragment.as_bytes()[start..])
+    }
+    fn write_char_escape<W: ?Sized + Write>(
+        &mut self,
+        w: &mut W,
+        escape: serde_json::ser::CharEscape,
+    ) -> std::io::Result<()> {
+        use serde_json::ser::CharEscape;
+        match escape {
+            CharEscape::Quote => w.write_all(b"\\\""),
+            CharEscape::ReverseSolidus => w.write_all(b"\\\\"),
+            CharEscape::Solidus => w.write_all(b"\\/"),
+            CharEscape::Backspace => w.write_all(b"\\b"),
+            CharEscape::FormFeed => w.write_all(b"\\f"),
+            CharEscape::LineFeed => w.write_all(b"\\n"),
+            CharEscape::CarriageReturn => w.write_all(b"\\r"),
+            CharEscape::Tab => w.write_all(b"\\t"),
+            CharEscape::AsciiControl(byte) => write!(w, "\\u{byte:04X}"),
+        }
     }
 }
 

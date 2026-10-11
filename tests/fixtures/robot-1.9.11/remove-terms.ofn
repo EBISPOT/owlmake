@@ -1,0 +1,14 @@
+Prefix(:=<http://example.org/curies#>)
+Prefix(ex:=<http://example.org/ex#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<http://example.org/curies.owl>
+Annotation(rdfs:comment "header")
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(Class(ex:C))
+AnnotationAssertion(rdfs:label ex:A "a")
+AnnotationAssertion(rdfs:label ex:B "b")
+SubClassOf(ex:B ex:A)
+SubClassOf(ex:C ex:B)
+)

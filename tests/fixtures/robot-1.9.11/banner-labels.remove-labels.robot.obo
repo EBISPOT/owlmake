@@ -1,0 +1,18 @@
+format-version: 1.2
+import: http://purl.obolibrary.org/obo/banner-labels-child.owl
+ontology: banner-labels
+
+[Term]
+id: EX:1 ! one from child
+is_a: EX:9 ! nine from child
+
+[Term]
+id: EX:2
+is_a: EX:1 ! one from child
+
+[Term]
+id: EX:3
+name: three\nlines
+is_a: EX:2
+is_a: EX:9 ! nine from child
+

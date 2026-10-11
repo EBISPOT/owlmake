@@ -1,0 +1,12 @@
+Prefix(:=<http://example.org/repair#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<http://example.org/repair-import.owl>
+Import(<http://example.org/repair-import-child.owl>)
+
+# The root's reference moves to the replacement its import gives.
+Declaration(Class(:D))
+SubClassOf(:D :IA)
+SubClassOf(Annotation(rdfs:comment "r1") :D :IC)
+SubClassOf(Annotation(rdfs:comment "r2") :D :IC)
+)

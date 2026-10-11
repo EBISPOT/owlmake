@@ -1,0 +1,45 @@
+format-version: 1.2
+saved-by: me \"q\"
+subsetdef: s1 "subset one" {comment="sc"}
+synonymtypedef: st1 "type one" EXACT {comment="tc"}
+remark: hello \{x\} {comment="c"}
+ontology: q
+property_value: custom-header "v" xsd:string {source="s"}
+property_value: hdr "h" xsd:string {source="hs"}
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://purl.obolibrary.org/obo/Q_0000001>))\n############################\n#   Classes\n############################\n\n# Class: <http://purl.obolibrary.org/obo/Q_0000001> (<http://purl.obolibrary.org/obo/Q_0000001>)\n\nSubClassOf(<http://purl.obolibrary.org/obo/Q_0000001> owl:Thing)\n\n\n)
+
+[Term]
+id: Q:0000001
+name: a b {comment="x}y", seeAlso="z", source="s2"}
+namespace: ns1 {comment="n"}
+alt_id: Q:0000009 {source="s"}
+def: "d" [] {comment="x"}
+comment: He said "a
+subset: s1 {comment="x"}
+synonym: "syn one" EXACT [X:1]
+synonym: "unquoted text" RELATED []
+xref: X:2
+property_value: foo_bar "baz{1}" xsd:string {comment="x", name="z", seeAlso="y"}
+property_value: seeAlso "x" xsd:string
+created_by: someone {comment="q"}
+creation_date: 2020-01-01T00:00:00Z {comment="d"}
+
+[Term]
+id: Q:0000002
+name: x	y\nz
+comment: tabs	and \{braces\} {xref="X:3"}
+
+[Typedef]
+id: R:1
+name: rel {comment="x"}
+alt_id: R:9
+comment: c {source="s"}
+subset: s1
+property_value: custom_tag "v" xsd:string {comment="x"}
+property_value: transitive "true" xsd:string
+disjoint_over: R:2
+created_by: z {a="b"}
+
+[Typedef]
+id: R:2
+

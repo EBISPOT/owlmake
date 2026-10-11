@@ -1,0 +1,70 @@
+Prefix(:=<http://example.org/p#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(prov:=<http://www.w3.org/ns/prov#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/p>
+<http://example.org/p/v1>
+Import(<http://example.org/i>)
+Annotation(rdfs:comment "p header")
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/B>))
+Declaration(Class(<http://example.org/Shared>))
+Declaration(Class(<http://example.org/X>))
+Declaration(Class(<http://example.org/Z>))
+Declaration(AnnotationProperty(<http://example.org/ap>))
+Declaration(AnnotationProperty(prov:wasDerivedFrom))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/ap> (<http://example.org/ap>)
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/ap> <http://example.org/p>)
+
+# Annotation Property: prov:wasDerivedFrom (prov:wasDerivedFrom)
+
+AnnotationAssertion(rdfs:isDefinedBy prov:wasDerivedFrom <http://example.org/p>)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (A)
+
+AnnotationAssertion(<http://example.org/ap> <http://example.org/A> "v")
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/A> <http://example.org/p>)
+AnnotationAssertion(rdfs:label <http://example.org/A> "A")
+SubClassOf(<http://example.org/A> <http://example.org/B>)
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/orig>) <http://example.org/A> <http://example.org/X>)
+
+# Class: <http://example.org/B> (<http://example.org/B>)
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/B> <http://example.org/elsewhere>)
+SubClassOf(Annotation(rdfs:comment "c") <http://example.org/B> <http://example.org/X>)
+
+# Class: <http://example.org/Shared> (<http://example.org/Shared>)
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/Shared> <http://example.org/p>)
+SubClassOf(<http://example.org/Shared> <http://example.org/B>)
+
+# Class: <http://example.org/X> (X)
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/X> <http://example.org/p>)
+
+# Class: <http://example.org/Z> (<http://example.org/Z>)
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/Z> <http://example.org/s>)
+SubClassOf(<http://example.org/Z> <http://example.org/A>)
+SubClassOf(Annotation(prov:wasDerivedFrom <http://example.org/orig2>) <http://example.org/Z> <http://example.org/B>)
+
+
+AnnotationAssertion(rdfs:isDefinedBy <http://example.org/W> <http://example.org/s>)
+)

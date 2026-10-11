@@ -110,7 +110,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
 
     let mut roots: HashSet<String> = HashSet::new();
     for t in &args.term {
-        roots.insert(crate::cmd::select::expand(&model, t));
+        roots.insert(crate::cmd::select::expand_with_document_prefixes(&model, t));
     }
     for file in &args.term_file {
         let text = std::fs::read_to_string(file)
@@ -118,7 +118,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
         roots.extend(
             text.lines()
                 .filter_map(crate::cmd::select::term_line)
-                .map(|t| crate::cmd::select::expand(&model, t.trim())),
+                .map(|t| crate::cmd::select::expand_with_document_prefixes(&model, t.trim())),
         );
     }
     if args.use_self.unwrap_or(false) {
@@ -168,7 +168,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> anyhow::Result<Option<Model>> 
     let kind = ReasonerKind::parse(args.reasoner.as_deref().unwrap_or("elk"))?;
     let (subsumptions, equivalences) = match kind {
         ReasonerKind::Hermit | ReasonerKind::JFact => {
-            let r = crate::reason::DlReasoner::classify(&classified);
+            let r = kind.dl_reasoner(&classified);
             (r.all_subsumptions(), r.equivalent_class_pairs())
         }
         _ => {

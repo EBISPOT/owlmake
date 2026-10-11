@@ -1,0 +1,12 @@
+format-version: 1.2
+ontology: rel
+
+[Term]
+id: REL:1
+name: one
+relationship: part_of REL:2
+
+[Term]
+id: REL:2
+name: two
+property_value: IAO:0000233 "x" xsd:string

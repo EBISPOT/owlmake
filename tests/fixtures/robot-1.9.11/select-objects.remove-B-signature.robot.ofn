@@ -1,0 +1,96 @@
+Prefix(:=<http://example.org/select-objects#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/select-objects>
+Annotation(rdfs:comment "header")
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/C>))
+Declaration(Class(<http://example.org/D>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(ObjectProperty(<http://example.org/q>))
+Declaration(DataProperty(<http://example.org/d>))
+Declaration(NamedIndividual(<http://example.org/A>))
+Declaration(NamedIndividual(<http://example.org/i>))
+Declaration(AnnotationProperty(<http://example.org/ap>))
+Declaration(AnnotationProperty(<http://example.org/ap2>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/ap> (<http://example.org/ap>)
+
+AnnotationPropertyRange(<http://example.org/ap> <http://example.org/B>)
+AnnotationPropertyDomain(<http://example.org/ap> <http://example.org/A>)
+
+# Annotation Property: <http://example.org/ap2> (<http://example.org/ap2>)
+
+SubAnnotationPropertyOf(<http://example.org/ap2> <http://example.org/ap>)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/p> (<http://example.org/p>)
+
+ObjectPropertyDomain(<http://example.org/p> <http://example.org/A>)
+
+# Object Property: <http://example.org/q> (<http://example.org/q>)
+
+SubObjectPropertyOf(<http://example.org/q> <http://example.org/p>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/d> (<http://example.org/d>)
+
+DataPropertyDomain(<http://example.org/d> <http://example.org/D>)
+DataPropertyRange(<http://example.org/d> xsd:integer)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (A)
+
+AnnotationAssertion(rdfs:label <http://example.org/A> "A")
+SubClassOf(<http://example.org/A> owl:Thing)
+SubClassOf(Annotation(rdfs:comment "why") <http://example.org/A> owl:Thing)
+
+# Class: <http://example.org/C> (C)
+
+AnnotationAssertion(<http://example.org/ap> <http://example.org/C> <http://example.org/A>)
+AnnotationAssertion(Annotation(rdfs:comment "src") rdfs:label <http://example.org/C> "C")
+SubClassOf(<http://example.org/C> <http://example.org/A>)
+SubClassOf(<http://example.org/C> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/A>))
+
+# Class: <http://example.org/D> (<http://example.org/D>)
+
+SubClassOf(<http://example.org/D> <http://example.org/C>)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/i> (<http://example.org/i>)
+
+ClassAssertion(<http://example.org/D> <http://example.org/i>)
+ObjectPropertyAssertion(<http://example.org/p> <http://example.org/i> <http://example.org/A>)
+DataPropertyAssertion(<http://example.org/d> <http://example.org/i> "5"^^xsd:integer)
+
+
+ClassAssertion(ObjectOneOf(<http://example.org/A> _:genid2147483648) _:genid2147483649)
+SameIndividual(_:genid2147483649 _:genid2147483648)
+AnnotationAssertion(<http://example.org/ap2> _:genid2147483648 "anon")
+)

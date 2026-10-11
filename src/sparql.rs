@@ -518,28 +518,47 @@ impl ObjectOrder {
     }
 }
 
+/// Type as an `rdf:List` every list cell the document leaves untyped. The
+/// RDF/XML layout writes a list as a collection, whose cells it states no type
+/// of, while the graph it renders types each one.
+pub(crate) fn type_list_cells(store: &Store) -> Result<()> {
+    use oxigraph::model::{vocab::rdf, GraphName, Quad};
+    let mut untyped = Vec::new();
+    for q in store.quads_for_pattern(None, Some(rdf::FIRST), None, None) {
+        let q = q.map_err(|e| anyhow!("scanning list cells: {e}"))?;
+        if store.quads_for_pattern(Some(q.subject.as_ref()), Some(rdf::TYPE), None, None).next().is_none() {
+            untyped.push(q.subject);
+        }
+    }
+    for cell in untyped {
+        store
+            .insert(&Quad::new(cell, rdf::TYPE, rdf::LIST, GraphName::DefaultGraph))
+            .map_err(|e| anyhow!("typing a list cell: {e}"))?;
+    }
+    Ok(())
+}
+
 impl Queryable {
-    /// Build a queryable store from a model by serializing to RDF/XML and
-    /// loading it.
+    /// Build a queryable store from a model's RDF rendering (see
+    /// [`crate::io::rendering`]).
     ///
-    /// The RDF/XML writer materialises a declaration triple for an entity the
-    /// ontology only REFERENCES — an undeclared property used in a restriction, or
-    /// named as a property-chain member. That is right for a self-contained
-    /// ontology, but wrong once the ontology has IMPORTS: the entity's type is
-    /// declared in the import closure, so the root graph must carry no such
-    /// triple of its own.
+    /// The rendering states the type of an entity the ontology only REFERENCES
+    /// (an undeclared property used in a restriction, or named as a
+    /// property-chain member) unless an ontology it imports has the entity in
+    /// its signature. An ontology that imports is therefore queried with its
+    /// imports closure read; while it is unread, no entity the ontology names
+    /// without declaring it is typed.
     ///
     /// That difference is not academic. MONDO's `tmp/simple_seed.txt` is built by
     /// `query --query simple-seed.sparql -i reasoned.owl`, whose first clauses are
     /// `?cls a owl:AnnotationProperty` / `owl:ObjectProperty`. `reasoned.owl` keeps
     /// its four imports and mentions `BFO_0000050`/`BFO_0000051` only as
-    /// `owl:propertyChainAxiom` members, so a synthesised type triple would put two
+    /// `owl:propertyChainAxiom` members, so a type triple for them would put two
     /// object properties into the seed that the ontology does not declare. A seed
     /// carrying them then keeps axioms `filter` should drop, all the way into
     /// `mondo-simple.owl`.
     pub fn from_model(model: &Model) -> Result<Queryable> {
-        let mut rdf = Vec::new();
-        crate::io::write_to_ref(model, &mut rdf, Format::RdfXml)?;
+        let rdf = crate::io::rendering(model)?;
         let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
         // The parser names an unlabelled blank node for itself, and those names are
         // drawn fresh every run — so a query that returns one would answer
@@ -573,6 +592,7 @@ impl Queryable {
                     .map_err(|e| anyhow!("loading ontology triples: {e}"))?;
             }
         }
+        type_list_cells(&store)?;
         let q = Queryable {
             store,
             type_order: scan_type_order(&rdf),
@@ -584,12 +604,15 @@ impl Queryable {
         Ok(q)
     }
 
-    /// Remove the writer's synthesised `rdf:type` triples for entities the model
-    /// does not itself declare, when the ontology has imports — see `from_model`.
+    /// Remove the rendering's `rdf:type` triples for entities the model does not
+    /// itself declare, when the ontology has imports and its closure is unread —
+    /// see `from_model`.
     fn drop_synthesised_types(&self, model: &Model) -> Result<()> {
         use horned_owl::model::Component;
         use std::collections::HashSet;
-        if !model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_))) {
+        if model.imports_closure.is_some()
+            || !model.ont.iter().any(|ac| matches!(ac.component, Component::Import(_)))
+        {
             return Ok(());
         }
         // EVERY entity the model does not declare itself, not just the ones whose

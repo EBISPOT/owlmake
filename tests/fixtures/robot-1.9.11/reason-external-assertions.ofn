@@ -1,0 +1,11 @@
+Prefix(:=<http://example.org/ext2#>)
+Prefix(e:=<http://example.org/other#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/ext2>
+Declaration(ObjectProperty(:q))
+Declaration(ObjectProperty(:q2))
+Declaration(NamedIndividual(:i))
+SubObjectPropertyOf(:q :q2)
+ObjectPropertyAssertion(:q e:i3 :i)
+ObjectPropertyAssertion(:q :i e:i4)
+)

@@ -6,10 +6,10 @@
 //! locational metadata (the ontology IRI/version and document IRI) which
 //! legitimately varies by serialization source.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use horned_owl::model::{
-    AnnotatedComponent, ClassExpression as CE, Component, DataRange as DR, Kinded, RcStr,
+    AnnotatedComponent, ClassExpression as CE, Component, DataRange as DR, RcStr,
 };
 
 use crate::model::Model;
@@ -63,7 +63,8 @@ fn canon_ce(ce: &mut CE<RcStr>) {
 
 /// Put a component into canonical form so that order-insensitive constructs
 /// (set-like class/property/individual lists and the class expressions they
-/// contain) compare equal regardless of operand order.
+/// contain) compare equal regardless of operand order, following OWL 2's set
+/// semantics rather than horned-owl's incidental `Vec` ordering.
 fn canon_component(c: &mut Component<RcStr>) {
     match c {
         Component::SubClassOf(a) => {
@@ -86,32 +87,22 @@ fn canon_component(c: &mut Component<RcStr>) {
         Component::ObjectPropertyRange(a) => canon_ce(&mut a.ce),
         Component::DataPropertyDomain(a) => canon_ce(&mut a.ce),
         Component::DataPropertyRange(a) => canon_dr(&mut a.dr),
+        Component::DatatypeDefinition(a) => canon_dr(&mut a.range),
         Component::ClassAssertion(a) => canon_ce(&mut a.ce),
         Component::HasKey(a) => canon_ce(&mut a.ce),
         Component::EquivalentObjectProperties(a) => a.0.sort(),
         Component::DisjointObjectProperties(a) => a.0.sort(),
         Component::EquivalentDataProperties(a) => a.0.sort(),
         Component::DisjointDataProperties(a) => a.0.sort(),
+        Component::InverseObjectProperties(a) => {
+            if a.1 < a.0 {
+                std::mem::swap(&mut a.0, &mut a.1);
+            }
+        }
         Component::SameIndividual(a) => a.0.sort(),
         Component::DifferentIndividuals(a) => a.0.sort(),
         _ => {}
     }
-}
-
-/// The comparable component set of a model. Each component is put into canonical
-/// form (operands of commutative constructs sorted) so the comparison follows
-/// OWL 2's set semantics rather than horned-owl's incidental `Vec` ordering.
-pub fn component_set(model: &Model) -> BTreeSet<AnnotatedComponent<RcStr>> {
-    model
-        .ont
-        .iter()
-        .filter(|ac| !is_locational(&ac.component))
-        .map(|ac| {
-            let mut ac = ac.clone();
-            canon_component(&mut ac.component);
-            ac
-        })
-        .collect()
 }
 
 /// The difference between two ontologies: components only in `left` and only in
@@ -127,18 +118,69 @@ impl Diff {
     }
 }
 
-/// Compute the component-level diff between two models.
+/// Compute the component-level diff between two models. A component compares
+/// with a literal typed `xsd:string` as the untyped literal it equals, and is
+/// reported as its side states it ([`stated_components`]).
 pub fn diff(left: &Model, right: &Model) -> Diff {
-    let l = component_set(left);
-    let r = component_set(right);
-    Diff {
-        only_left: l.difference(&r).cloned().collect(),
-        only_right: r.difference(&l).cloned().collect(),
+    let l = stated_components(left);
+    let r = stated_components(right);
+    let only = |a: &BTreeMap<_, AnnotatedComponent<RcStr>>, b: &BTreeMap<_, _>| {
+        a.iter().filter(|(key, _)| !b.contains_key(*key)).map(|(_, stated)| stated.clone()).collect()
+    };
+    Diff { only_left: only(&l, &r), only_right: only(&r, &l) }
+}
+
+const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+
+/// The comparable components of a model, each keyed by the form it compares
+/// in, every literal typed `xsd:string` untyped, to the form the model states
+/// it in, every untyped literal typed `xsd:string` where the model's untyped
+/// literals are ([`Model::plain_literals_typed`]). Both are in canonical form
+/// ([`canon_component`]).
+fn stated_components(model: &Model) -> BTreeMap<AnnotatedComponent<RcStr>, AnnotatedComponent<RcStr>> {
+    use horned_owl::model::{Build, Literal};
+    use horned_owl::visitor::mutable::{VisitMut, WalkMut};
+
+    struct Untype;
+    impl VisitMut<RcStr> for Untype {
+        fn visit_literal(&mut self, l: &mut Literal<RcStr>) {
+            if let Literal::Datatype { literal, datatype_iri } = l {
+                if datatype_iri.as_ref() as &str == XSD_STRING {
+                    *l = Literal::Simple { literal: std::mem::take(literal) };
+                }
+            }
+        }
     }
+    struct Type(horned_owl::model::IRI<RcStr>);
+    impl VisitMut<RcStr> for Type {
+        fn visit_literal(&mut self, l: &mut Literal<RcStr>) {
+            if let Literal::Simple { literal } = l {
+                *l = Literal::Datatype { literal: std::mem::take(literal), datatype_iri: self.0.clone() };
+            }
+        }
+    }
+    let mut untype = WalkMut::new(Untype);
+    let mut typed = model.plain_literals_typed.then(|| WalkMut::new(Type(Build::new().iri(XSD_STRING))));
+    model
+        .ont
+        .iter()
+        .filter(|ac| !is_locational(&ac.component))
+        .map(|ac| {
+            let mut key = ac.clone();
+            untype.annotated_component(&mut key);
+            canon_component(&mut key.component);
+            let mut stated = ac.clone();
+            if let Some(typed) = typed.as_mut() {
+                typed.annotated_component(&mut stated);
+            }
+            canon_component(&mut stated.component);
+            (key, stated)
+        })
+        .collect()
 }
 
 /// The ontology IRI and version IRI of a model, read from its `OntologyID`
-/// component (if any). They stay out of [`component_set`] (so a comparison of
+/// component (if any). They stay out of [`stated_components`] (so a comparison of
 /// ontology content ignores version stamps); the `diff` command reports them
 /// separately via [`ontology_id_change`].
 pub fn ontology_id(model: &Model) -> (Option<String>, Option<String>) {
@@ -179,13 +221,12 @@ pub fn ontology_id_change(left: &Model, right: &Model) -> Option<String> {
     Some(s)
 }
 
-/// One component as a diff report names it: OWL functional syntax, with every
-/// IRI written in full inside angle brackets except the five built-in prefixes,
-/// which are written as CURIEs. That is the serialization the report is read
-/// against, so it is produced by the functional writer rather than by a second
-/// renderer that would drift from it — an axiom's annotations included, since
-/// functional syntax carries them inside the axiom.
+/// One component as a plain diff report names it, and as the Markdown report
+/// orders it: in the functional writer's
+/// [`Simple`](horned_owl::io::ofn::writer::Style::Simple) style, every IRI
+/// written in full inside angle brackets except the five built-in prefixes,
+/// which are written as CURIEs, and the axiom's annotations inside it.
 pub fn describe(ac: &AnnotatedComponent<RcStr>) -> String {
-    crate::io::owlfunc::render_component_line(ac)
+    crate::io::owlfunc::render_component_simple(ac)
 }
 

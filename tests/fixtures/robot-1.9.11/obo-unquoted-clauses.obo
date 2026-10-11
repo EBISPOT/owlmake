@@ -1,0 +1,44 @@
+format-version: 1.2
+ontology: q
+remark: hello \{x\} {comment="c"}
+saved-by: me \"q\" ! not part of the value
+custom-header: v {source="s"}
+subsetdef: s1 "subset one" {comment="sc"}
+synonymtypedef: st1 "type one" EXACT {comment="tc"}
+property_value: hdr "h" xsd:string {source="hs"}
+
+[Term]
+id: Q:0000001
+name: a\Wb {comment="x}y", source=s2} {seeAlso="z"} ! hidden
+comment: He said "a ! b" here
+created_by: someone {comment="q"}
+creation_date: 2020-01-01T00:00:00Z {comment="d"}
+namespace: ns1 {comment="n"}
+alt_id: Q:0000009 {source="s"}
+subset: s1 {comment="x"}
+foo_bar: baz\{1\} {comment="x", rdfs:seeAlso="y", name="z"}
+exact_synonym: "syn one" [X:1]
+narrow_synonym: unquoted text
+xref_analog: X:2
+property_value: rdfs:seeAlso "x" xsd:string
+is_a: owl:Thing
+def: "d" [] {comment=x}
+
+[Term]
+id: Q:0000002
+name: x\ty\nz
+comment: tabs\tand \{braces\} {xref="X:3"}
+
+[Typedef]
+id: R:1
+name: rel {comment="x"}
+comment: c {source="s"}
+created_by: z {a="b"}
+alt_id: R:9
+subset: s1
+disjoint_over: R:2
+transitive: true
+custom_tag: v {comment="x"}
+
+[Typedef]
+id: R:2

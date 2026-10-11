@@ -1,0 +1,23 @@
+{
+  "graphs" : [ {
+    "id" : "http://example.org/edit",
+    "nodes" : [ {
+      "id" : "http://example.org/sub#S",
+      "type" : "CLASS"
+    } ],
+    "edges" : [ {
+      "sub" : "http://example.org/sub#S",
+      "pred" : "is_a",
+      "obj" : "http://example.org/edit#A"
+    } ]
+  }, {
+    "id" : "http://example.org/mid.owl"
+  }, {
+    "id" : "http://example.org/sub",
+    "nodes" : [ {
+      "id" : "http://example.org/sub#S",
+      "lbl" : "from a nested import",
+      "type" : "CLASS"
+    } ]
+  } ]
+}

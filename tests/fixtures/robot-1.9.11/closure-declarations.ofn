@@ -1,0 +1,18 @@
+Prefix(:=<http://example.org/c#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+Ontology(<http://example.org/closure-declarations.owl>
+Import(<http://example.org/closure-declarations-child.owl>)
+
+# The import names :U, :q, :r and obo:IAO_0000115 and declares none of them.
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(Class(:M))
+Declaration(ObjectProperty(:p))
+AnnotationAssertion(rdfs:label :A "a")
+SubClassOf(:A :M)
+SubClassOf(:M :B)
+SubClassOf(:A :B)
+EquivalentClasses(:A ObjectIntersectionOf(:B ObjectSomeValuesFrom(:p :M)))
+ClassAssertion(:B _:x)
+)

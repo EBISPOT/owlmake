@@ -5,9 +5,10 @@
 //! the iteration order of a hash set over all of the ontology's axioms, keyed on
 //! [`axiom_hash`]. Within one axiom it converts the parts left to right: subclass
 //! before superclass, a restriction's property before its filler, and the members
-//! of an n-ary expression or axiom in their sorted order ([`owl_cmp`]). It stops
-//! at the first construct outside the EL profile. So a class that an axiom names
-//! only after such a construct is not queued by that axiom.
+//! of an n-ary expression or axiom in the document's natural order
+//! ([`NaturalOrder`]). It stops at the first construct outside the EL profile. So
+//! a class that an axiom names only after such a construct is not queued by that
+//! axiom.
 //!
 //! Each unsatisfiable class enters the bottom node in queue order. The node holds
 //! its members in a concurrent hash table keyed on the IRI's string hash
@@ -23,7 +24,8 @@ use horned_owl::model::{
 };
 
 use crate::model::Onto;
-use crate::owlapi_hash::{axiom_hash, class_hash, java_hashset_capacity, java_string_hash, owl_cmp};
+use crate::io::natural_order::NaturalOrder;
+use crate::owlapi_hash::{axiom_hash, class_hash, java_hashset_capacity, java_string_hash};
 
 const OWL_THING: &str = "http://www.w3.org/2002/07/owl#Thing";
 const OWL_NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
@@ -57,17 +59,18 @@ fn is_indexed(c: &Component<RcStr>) -> bool {
 }
 
 /// Members of an n-ary expression or axiom in the order the index converts
-/// them: sorted, duplicates dropped.
-fn sorted_members(v: &[CE<RcStr>]) -> Vec<&CE<RcStr>> {
+/// them: sorted in the document's natural order, duplicates dropped.
+fn sorted_members(v: &[CE<RcStr>], order: NaturalOrder) -> Vec<&CE<RcStr>> {
     let mut out: Vec<&CE<RcStr>> = v.iter().collect();
-    out.sort_by(|a, b| owl_cmp(a, b));
-    out.dedup_by(|a, b| owl_cmp(a, b).is_eq());
+    out.sort_by(|a, b| order.ce(a, b));
+    out.dedup_by(|a, b| order.ce(a, b).is_eq());
     out
 }
 
 struct Queue {
     seen: HashSet<IRI<RcStr>>,
     order: Vec<IRI<RcStr>>,
+    natural: NaturalOrder,
 }
 
 impl Queue {
@@ -103,7 +106,7 @@ impl Queue {
     }
 
     fn members(&mut self, v: &[CE<RcStr>]) -> Walk {
-        for m in sorted_members(v) {
+        for m in sorted_members(v, self.natural) {
             self.ce(m)?;
         }
         Ok(())
@@ -188,15 +191,16 @@ impl Queue {
 /// The ontology's declarations and logical axioms in the order the index takes
 /// them, each with its bucket: the bucket of [`axiom_hash`] in a hash set sized
 /// for every axiom of the ontology. Two in one bucket are taken in hash order,
-/// then in component order, so the order is a function of the ontology alone.
-pub fn index_order(ont: &Onto) -> Vec<(u32, &AnnotatedComponent<RcStr>)> {
+/// then in component order, so the order is a function of the ontology and its
+/// natural order alone.
+pub fn index_order(ont: &Onto, order: NaturalOrder) -> Vec<(u32, &AnnotatedComponent<RcStr>)> {
     let total = ont.iter().filter(|ac| is_axiom(&ac.component)).count();
     let cap = java_hashset_capacity(total) as u32;
     let mut indexed: Vec<(u32, i32, &AnnotatedComponent<RcStr>)> = ont
         .iter()
         .filter(|ac| is_indexed(&ac.component))
         .filter_map(|ac| {
-            let h = axiom_hash(&ac.component, &ac.ann)?;
+            let h = axiom_hash(&ac.component, &ac.ann, order)?;
             let u = h as u32;
             Some(((u ^ (u >> 16)) & (cap - 1), h, ac))
         })
@@ -206,8 +210,8 @@ pub fn index_order(ont: &Onto) -> Vec<(u32, &AnnotatedComponent<RcStr>)> {
 }
 
 /// The classes `axioms` name, in the order the index first meets them.
-pub fn queue_of<'a>(axioms: impl IntoIterator<Item = &'a Component<RcStr>>) -> Vec<IRI<RcStr>> {
-    let mut q = Queue { seen: HashSet::new(), order: Vec::new() };
+pub fn queue_of<'a>(axioms: impl IntoIterator<Item = &'a Component<RcStr>>, order: NaturalOrder) -> Vec<IRI<RcStr>> {
+    let mut q = Queue { seen: HashSet::new(), order: Vec::new(), natural: order };
     for c in axioms {
         // An axiom cut short still queued what it named before the cut.
         let _ = q.axiom(c);
@@ -216,9 +220,9 @@ pub fn queue_of<'a>(axioms: impl IntoIterator<Item = &'a Component<RcStr>>) -> V
 }
 
 /// The ontology's classes in the order the reasoner queues them for
-/// classification.
-pub fn class_queue(ont: &Onto) -> Vec<IRI<RcStr>> {
-    queue_of(index_order(ont).into_iter().map(|(_, ac)| &ac.component))
+/// classification, its sets stored in `order`.
+pub fn class_queue(ont: &Onto, order: NaturalOrder) -> Vec<IRI<RcStr>> {
+    queue_of(index_order(ont, order).into_iter().map(|(_, ac)| &ac.component), order)
 }
 
 /// A concurrent hash table filled from one thread: power-of-two bins of
@@ -468,14 +472,14 @@ mod tests {
     #[test]
     fn index_order_takes_the_axioms_bucket_by_bucket() {
         let model = crate::io::load(&fixtures().join("bottom-order.ofn")).unwrap();
-        let ours = index_order(&model.ont);
+        let ours = index_order(&model.ont, model.natural_order());
         let traced = traced_load();
         let total = model.ont.iter().filter(|ac| is_axiom(&ac.component)).count();
         let cap = java_hashset_capacity(total) as u32;
         let traced_buckets: Vec<u32> = traced
             .iter()
             .map(|c| {
-                let u = axiom_hash(c, &Default::default()).unwrap() as u32;
+                let u = axiom_hash(c, &Default::default(), model.natural_order()).unwrap() as u32;
                 (u ^ (u >> 16)) & (cap - 1)
             })
             .collect();
@@ -483,8 +487,9 @@ mod tests {
         assert_eq!(our_buckets, traced_buckets);
         // The same axioms: the trace writes an n-ary axiom's members sorted,
         // the document in its own order, and the hash does not see the order.
-        let mut a: Vec<i32> = ours.iter().map(|(_, ac)| axiom_hash(&ac.component, &ac.ann).unwrap()).collect();
-        let mut b: Vec<i32> = traced.iter().map(|c| axiom_hash(c, &Default::default()).unwrap()).collect();
+        let order = model.natural_order();
+        let mut a: Vec<i32> = ours.iter().map(|(_, ac)| axiom_hash(&ac.component, &ac.ann, order).unwrap()).collect();
+        let mut b: Vec<i32> = traced.iter().map(|c| axiom_hash(c, &Default::default(), order).unwrap()).collect();
         a.sort();
         b.sort();
         assert_eq!(a, b);
@@ -498,10 +503,11 @@ mod tests {
     #[test]
     fn class_queue_is_the_order_the_index_names_classes() {
         let want = lines("bottom-order.queue.txt");
-        let walked: Vec<String> = queue_of(traced_load().iter()).iter().map(|i| i.to_string()).collect();
-        assert_eq!(walked, want);
         let model = crate::io::load(&fixtures().join("bottom-order.ofn")).unwrap();
-        let queued: Vec<String> = class_queue(&model.ont).iter().map(|i| i.to_string()).collect();
+        let walked: Vec<String> =
+            queue_of(traced_load().iter(), model.natural_order()).iter().map(|i| i.to_string()).collect();
+        assert_eq!(walked, want);
+        let queued: Vec<String> = class_queue(&model.ont, model.natural_order()).iter().map(|i| i.to_string()).collect();
         assert_eq!(queued, want);
     }
 }

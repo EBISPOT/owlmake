@@ -1,0 +1,111 @@
+Prefix(:=<http://example.org/mireot#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/mireot>
+<http://example.org/mireot/v1>
+
+Declaration(Class(:Br))
+Declaration(Class(:C2))
+Declaration(Class(:G2))
+Declaration(Class(:H))
+Declaration(Class(:X))
+Declaration(Class(:Z))
+Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:p3))
+Declaration(DataProperty(:d4))
+Declaration(DataProperty(:dd))
+Declaration(DataProperty(:dup))
+Declaration(AnnotationProperty(:a1))
+Declaration(AnnotationProperty(:ac))
+Declaration(AnnotationProperty(:apb))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym>))
+Declaration(AnnotationProperty(rdfs:comment))
+Declaration(AnnotationProperty(rdfs:label))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: :a1 (:a1)
+
+SubAnnotationPropertyOf(:a1 :apb)
+
+# Annotation Property: :ac (:ac)
+
+SubAnnotationPropertyOf(:ac :apb)
+
+# Annotation Property: :apb (ay pee branch)
+
+AnnotationAssertion(rdfs:label :apb "ay pee branch")
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: :p (:p)
+
+SubObjectPropertyOf(:p :p3)
+
+# Object Property: :p3 (pee three)
+
+AnnotationAssertion(rdfs:label :p3 "pee three")
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: :d4 (:d4)
+
+SubDataPropertyOf(:d4 :dup)
+
+# Data Property: :dd (:dd)
+
+SubDataPropertyOf(:dd :dup)
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :Br (branch root)
+
+AnnotationAssertion(rdfs:label :Br "branch root")
+
+# Class: :C2 (:C2)
+
+SubClassOf(:C2 :Br)
+
+# Class: :G2 (:G2)
+
+SubClassOf(:G2 :Br)
+
+# Class: :H (great-grandchild)
+
+AnnotationAssertion(rdfs:label :H "great-grandchild")
+SubClassOf(:H :Br)
+
+# Class: :X (ex2)
+
+AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#hasExactSynonym> :X "exx")
+AnnotationAssertion(rdfs:label :X "ex"@en)
+AnnotationAssertion(rdfs:label :X "ex2")
+SubClassOf(:X :Z)
+
+# Class: :Z (zed)
+
+AnnotationAssertion(Annotation(rdfs:comment "on the label") rdfs:label :Z "zed")
+
+
+AnnotationAssertion(rdfs:comment :C1 "a comment on child one")
+AnnotationAssertion(rdfs:label :C1 "child one")
+AnnotationAssertion(rdfs:label :G1 "grandchild one")
+AnnotationAssertion(rdfs:label :Y "why")
+AnnotationAssertion(rdfs:label :p2 "pee two")
+)

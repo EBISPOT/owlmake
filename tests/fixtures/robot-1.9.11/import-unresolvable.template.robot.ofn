@@ -1,0 +1,34 @@
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(
+Declaration(Class(<http://example.org/t#A>))
+Declaration(Class(<http://example.org/t#C>))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/t#A> (a)
+
+AnnotationAssertion(rdfs:comment <http://example.org/t#A> "true"^^xsd:boolean)
+AnnotationAssertion(rdfs:comment <http://example.org/t#A> "2000.0"^^xsd:double)
+AnnotationAssertion(rdfs:comment <http://example.org/t#A> "5"^^xsd:integer)
+AnnotationAssertion(rdfs:label <http://example.org/t#A> "Foo"@en)
+AnnotationAssertion(rdfs:label <http://example.org/t#A> "a")
+
+# Class: <http://example.org/t#C> (Bar)
+
+AnnotationAssertion(rdfs:comment <http://example.org/t#C> "false"^^xsd:boolean)
+AnnotationAssertion(rdfs:comment <http://example.org/t#C> "-0.0"^^xsd:double)
+AnnotationAssertion(rdfs:comment <http://example.org/t#C> "007"^^xsd:integer)
+AnnotationAssertion(rdfs:label <http://example.org/t#C> "Bar"@en)
+AnnotationAssertion(rdfs:label <http://example.org/t#C> "c")
+
+
+)

@@ -1,0 +1,11 @@
+Prefix(:=<http://purl.obolibrary.org/obo/>)
+Ontology(<http://purl.obolibrary.org/obo/explain-unsat-top.owl>
+Declaration(Class(:X_1))
+Declaration(Class(:X_2))
+Declaration(ObjectProperty(:R_1))
+ReflexiveObjectProperty(:R_1)
+ObjectPropertyRange(:R_1 :X_2)
+SubClassOf(:X_2 :X_1)
+SubClassOf(:X_1 ObjectComplementOf(:X_2))
+SubClassOf(:X_1 ObjectMaxCardinality(3 :R_1))
+)

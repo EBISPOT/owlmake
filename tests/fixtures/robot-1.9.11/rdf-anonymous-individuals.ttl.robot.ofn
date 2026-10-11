@@ -1,0 +1,92 @@
+Prefix(:=<http://example.org/anon#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(anon:=<http://example.org/anon#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/anon>
+Annotation(anon:note _:genid2147483648)
+
+Declaration(Class(anon:A))
+Declaration(Class(anon:B))
+Declaration(Class(anon:C))
+Declaration(Class(anon:D))
+Declaration(ObjectProperty(anon:p))
+Declaration(ObjectProperty(anon:q))
+Declaration(DataProperty(anon:d))
+Declaration(NamedIndividual(anon:i))
+Declaration(NamedIndividual(anon:j))
+Declaration(NamedIndividual(anon:k))
+Declaration(AnnotationProperty(anon:note))
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: anon:A (anon:A)
+
+AnnotationAssertion(anon:note anon:A _:genid2147483661)
+SubClassOf(anon:A ObjectHasValue(anon:p _:genid2147483649))
+
+# Class: anon:B (anon:B)
+
+AnnotationAssertion(Annotation(rdfs:comment "on") anon:note anon:B _:genid2147483662)
+SubClassOf(anon:B ObjectOneOf(anon:i _:genid2147483650))
+
+# Class: anon:C (anon:C)
+
+SubClassOf(Annotation(anon:note _:genid2147483651) anon:C anon:D)
+SubClassOf(anon:C ObjectOneOf(anon:j _:genid2147483650))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: anon:i (anon:i)
+
+SameIndividual(anon:i anon:k)
+ObjectPropertyAssertion(anon:p anon:i _:genid2147483663)
+ObjectPropertyAssertion(Annotation(rdfs:comment "annotated") anon:q anon:i _:genid2147483666)
+
+# Individual: anon:j (anon:j)
+
+SameIndividual(anon:j _:genid2147483654)
+ObjectPropertyAssertion(anon:q anon:j _:genid2147483655)
+
+# Individual: anon:k (anon:k)
+
+SameIndividual(anon:k _:genid2147483653)
+
+
+SubClassOf(ObjectHasValue(anon:q _:genid2147483660) anon:D)
+ClassAssertion(anon:A _:genid2147483648)
+ClassAssertion(Annotation(rdfs:comment "typed") anon:B _:genid2147483649)
+ClassAssertion(anon:C _:genid2147483650)
+ClassAssertion(anon:A _:genid2147483651)
+ClassAssertion(anon:D _:genid2147483652)
+ClassAssertion(anon:A _:genid2147483654)
+ClassAssertion(anon:A _:genid2147483655)
+ClassAssertion(anon:B _:genid2147483657)
+ClassAssertion(anon:A _:genid2147483658)
+ClassAssertion(owl:Thing _:genid2147483658)
+ClassAssertion(Annotation(Annotation(rdfs:label "nested") rdfs:comment "deep") anon:C _:genid2147483659)
+ClassAssertion(Annotation(rdfs:comment "general") anon:C _:genid2147483660)
+ClassAssertion(Annotation(rdfs:comment "root") ObjectSomeValuesFrom(anon:p anon:B) _:genid2147483667)
+DifferentIndividuals(anon:i anon:j _:genid2147483657)
+DifferentIndividuals(Annotation(rdfs:comment "apart") anon:k _:genid2147483656)
+ObjectPropertyAssertion(anon:q _:genid2147483663 _:genid2147483652)
+ObjectPropertyAssertion(anon:p _:genid2147483664 _:genid2147483665)
+ObjectPropertyAssertion(anon:q _:genid2147483664 _:genid2147483665)
+NegativeObjectPropertyAssertion(anon:p _:genid2147483663 anon:k)
+DataPropertyAssertion(anon:d _:genid2147483648 "header")
+DataPropertyAssertion(Annotation(rdfs:comment "pulled") anon:d _:genid2147483666 "3"^^xsd:integer)
+NegativeDataPropertyAssertion(anon:d _:genid2147483668 "5")
+AnnotationAssertion(rdfs:label _:genid2147483661 "note")
+)

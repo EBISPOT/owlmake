@@ -1,0 +1,36 @@
+Prefix(:=<http://example.org/curies.owl#>)
+Prefix(ex:=<http://example.org/ex#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/curies.owl>
+Annotation(rdfs:comment "header")
+
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(Class(ex:C))
+
+
+############################
+#   Classes
+############################
+
+# Class: ex:A (a)
+
+AnnotationAssertion(rdfs:label ex:A "a")
+
+# Class: ex:B (b)
+
+AnnotationAssertion(rdfs:label ex:B "b")
+SubClassOf(ex:B ex:A)
+
+# Class: ex:C (ex:C)
+
+SubClassOf(ex:C ex:B)
+
+
+)

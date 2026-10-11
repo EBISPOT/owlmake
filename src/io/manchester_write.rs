@@ -540,6 +540,24 @@ struct Objects<'o> {
     names: &'o dyn Names,
 }
 
+/// The Manchester syntax for a facet: `>=` for `xsd:minInclusive`, `length` for
+/// `xsd:length`, and so on.
+pub(crate) fn facet_symbol(f: &Facet) -> &'static str {
+    match f {
+        Facet::Length => "length",
+        Facet::MinLength => "minLength",
+        Facet::MaxLength => "maxLength",
+        Facet::Pattern => "pattern",
+        Facet::MinInclusive => ">=",
+        Facet::MinExclusive => ">",
+        Facet::MaxInclusive => "<=",
+        Facet::MaxExclusive => "<",
+        Facet::TotalDigits => "totalDigits",
+        Facet::FractionDigits => "fractionDigits",
+        Facet::LangRange => "langRange",
+    }
+}
+
 impl Objects<'_> {
     fn entity(&mut self, iri: &str) {
         let s = self.names.entity(iri);
@@ -740,22 +758,6 @@ impl Objects<'_> {
         self.dr(filler);
     }
 
-    fn facet_symbol(f: &Facet) -> &'static str {
-        match f {
-            Facet::Length => "length",
-            Facet::MinLength => "minLength",
-            Facet::MaxLength => "maxLength",
-            Facet::Pattern => "pattern",
-            Facet::MinInclusive => ">=",
-            Facet::MinExclusive => ">",
-            Facet::MaxInclusive => "<=",
-            Facet::MaxExclusive => "<",
-            Facet::TotalDigits => "totalDigits",
-            Facet::FractionDigits => "fractionDigits",
-            Facet::LangRange => "langRange",
-        }
-    }
-
     fn dr(&mut self, dr: &DR<RcStr>) {
         let order = self.order;
         match dr {
@@ -806,7 +808,7 @@ impl Objects<'_> {
                 let indent = self.out.indent();
                 self.out.push_tab(indent);
                 for (i, f) in facets.iter().enumerate() {
-                    self.out.write(Self::facet_symbol(&f.f));
+                    self.out.write(facet_symbol(&f.f));
                     self.out.space();
                     self.literal(&f.l);
                     if i + 1 < facets.len() {
@@ -1249,7 +1251,7 @@ impl<'m> Renderer<'m> {
             Atom::DataPropertyAtom { pred, args } => {
                 self.entity(pred.0.as_ref());
                 self.out.write("(");
-                self.darg(&args.0);
+                self.iarg(&args.0);
                 self.out.write(", ");
                 self.darg(&args.1);
                 self.out.write(")");
@@ -2030,7 +2032,7 @@ impl<'m> Renderer<'m> {
                 None => groups.push((&s.sub, vec![ax])),
             }
         }
-        let hashes: Vec<i32> = groups.iter().map(|(k, _)| crate::owlapi_hash::ce_hash(k)).collect();
+        let hashes: Vec<i32> = groups.iter().map(|(k, _)| crate::owlapi_hash::ce_hash(k, order)).collect();
         let cap = crate::owlapi_hash::java_hashset_capacity(groups.len()) as u32;
         let mut idx: Vec<usize> = (0..groups.len()).collect();
         idx.sort_by_key(|&i| {
@@ -2193,7 +2195,7 @@ pub fn save<W: Write>(model: &Model, prefixes: &[(String, String)], w: &mut W) -
     let mut r = Renderer {
         out: Out::new(),
         sf: ShortForms::new(prefixes),
-        order: NaturalOrder::new(model.plain_literals_typed),
+        order: model.natural_order(),
         model,
         ix: Index::build(model),
         signature: &signature,

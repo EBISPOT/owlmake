@@ -1,0 +1,34 @@
+Prefix(:=<http://example.org/curies.owl#>)
+Prefix(ex:=<http://example.org/ex#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/curies.owl>
+Annotation(<http://purl.org/dc/terms/title> "curies")
+Annotation(<http://www.geneontology.org/formats/oboInOwl#date> "07:10:2026 03:41")
+Annotation(rdfs:seeAlso <http://purl.obolibrary.org/obo/GO_0000001>)
+
+Declaration(Class(ex:A))
+Declaration(Class(ex:B))
+Declaration(AnnotationProperty(<http://purl.org/dc/terms/title>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#date>))
+
+
+############################
+#   Classes
+############################
+
+# Class: ex:A (a)
+
+AnnotationAssertion(rdfs:label ex:A "a")
+
+# Class: ex:B (ex:B)
+
+SubClassOf(ex:B ex:A)
+
+
+)

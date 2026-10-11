@@ -1,0 +1,10 @@
+Prefix(:=<http://example.org/repeated-union#>)
+Ontology(<http://example.org/repeated-union>
+Declaration(Class(:C))
+Declaration(Class(:U))
+Declaration(Class(:V))
+Declaration(NamedIndividual(:m))
+DisjointUnion(:U :C :C)
+ClassAssertion(:C :m)
+SubClassOf(:V :U)
+)

@@ -1,0 +1,1246 @@
+Prefix(:=<http://example.org/w#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/w>
+
+Declaration(Class(:anon_s10_A))
+Declaration(Class(:anon_s11_A))
+Declaration(Class(:anon_s12_A))
+Declaration(Class(:anon_s12_B))
+Declaration(Class(:anon_s13_A))
+Declaration(Class(:anon_s15_A))
+Declaration(Class(:anon_s15_B))
+Declaration(Class(:anon_s17_A))
+Declaration(Class(:anon_s4_A))
+Declaration(Class(:anon_s5_A))
+Declaration(Class(:anon_s6_A))
+Declaration(Class(:anon_s6_B))
+Declaration(Class(:anon_s7_A))
+Declaration(Class(:anon_s8_A))
+Declaration(Class(:diff_only_A))
+Declaration(Class(:func_A))
+Declaration(Class(:func_inv_A))
+Declaration(Class(:func_invexpr_A))
+Declaration(Class(:func_sub_A))
+Declaration(Class(:held_h1_A))
+Declaration(Class(:held_h9_A))
+Declaration(Class(:i_chain_domain_D))
+Declaration(Class(:i_inv_domain_D))
+Declaration(Class(:i_inv_exist_D))
+Declaration(Class(:i_same_domain_D))
+Declaration(Class(:i_same_exist_D))
+Declaration(Class(:i_sub_domain_D))
+Declaration(Class(:i_sym_domain_D))
+Declaration(Class(:i_trans_exist_D))
+Declaration(Class(:invfunc_A))
+Declaration(Class(:link_y2_D))
+Declaration(Class(:link_y2_Y))
+Declaration(Class(:link_y2_Z))
+Declaration(Class(:link_y3_Y))
+Declaration(Class(:link_y3_Z))
+Declaration(Class(:npa_class_A))
+Declaration(Class(:npa_class_C))
+Declaration(Class(:pa_domain_A))
+Declaration(Class(:pa_domain_B))
+Declaration(Class(:pa_exist_A))
+Declaration(Class(:reflexive_A))
+Declaration(Class(:same_chain_A))
+Declaration(Class(:top_prop_B))
+Declaration(Class(:u_same_only_A))
+Declaration(ObjectProperty(:anon_s11_p))
+Declaration(ObjectProperty(:anon_s13_p))
+Declaration(ObjectProperty(:anon_s4_p))
+Declaration(ObjectProperty(:anon_s5_p))
+Declaration(ObjectProperty(:anon_s7_p))
+Declaration(ObjectProperty(:chain_invexpr_p))
+Declaration(ObjectProperty(:chain_invexpr_r))
+Declaration(ObjectProperty(:chain_invexpr_s))
+Declaration(ObjectProperty(:equiv_invexpr_p))
+Declaration(ObjectProperty(:equiv_invexpr_r))
+Declaration(ObjectProperty(:func_inv_p))
+Declaration(ObjectProperty(:func_inv_r))
+Declaration(ObjectProperty(:func_invexpr_p))
+Declaration(ObjectProperty(:func_p))
+Declaration(ObjectProperty(:func_sub_p))
+Declaration(ObjectProperty(:func_sub_r))
+Declaration(ObjectProperty(:held_h1_q))
+Declaration(ObjectProperty(:held_h9_q))
+Declaration(ObjectProperty(:i_chain_domain_p))
+Declaration(ObjectProperty(:i_chain_domain_q))
+Declaration(ObjectProperty(:i_chain_domain_s))
+Declaration(ObjectProperty(:i_inv_domain_p))
+Declaration(ObjectProperty(:i_inv_domain_pi))
+Declaration(ObjectProperty(:i_inv_exist_p))
+Declaration(ObjectProperty(:i_inv_exist_pi))
+Declaration(ObjectProperty(:i_same_domain_p))
+Declaration(ObjectProperty(:i_same_exist_p))
+Declaration(ObjectProperty(:i_sub_domain_p))
+Declaration(ObjectProperty(:i_sub_domain_r))
+Declaration(ObjectProperty(:i_sym_domain_p))
+Declaration(ObjectProperty(:i_trans_exist_p))
+Declaration(ObjectProperty(:inv_assert_p))
+Declaration(ObjectProperty(:inverse_invexpr_p))
+Declaration(ObjectProperty(:inverse_invexpr_r))
+Declaration(ObjectProperty(:invfunc_p))
+Declaration(ObjectProperty(:irrefl_invexpr_p))
+Declaration(ObjectProperty(:link_y2_p))
+Declaration(ObjectProperty(:link_y2_q))
+Declaration(ObjectProperty(:link_y2_r))
+Declaration(ObjectProperty(:link_y3_p))
+Declaration(ObjectProperty(:link_y3_q))
+Declaration(ObjectProperty(:link_y3_r))
+Declaration(ObjectProperty(:npa_class_q))
+Declaration(ObjectProperty(:npa_invexpr_p))
+Declaration(ObjectProperty(:pa_chain_p))
+Declaration(ObjectProperty(:pa_chain_q))
+Declaration(ObjectProperty(:pa_chain_s))
+Declaration(ObjectProperty(:pa_data_p))
+Declaration(ObjectProperty(:pa_domain_p))
+Declaration(ObjectProperty(:pa_equiv_e))
+Declaration(ObjectProperty(:pa_equiv_p))
+Declaration(ObjectProperty(:pa_exist_p))
+Declaration(ObjectProperty(:pa_inv_p))
+Declaration(ObjectProperty(:pa_inv_pi))
+Declaration(ObjectProperty(:pa_same_p))
+Declaration(ObjectProperty(:pa_sub_p))
+Declaration(ObjectProperty(:pa_sub_r))
+Declaration(ObjectProperty(:pa_sym_p))
+Declaration(ObjectProperty(:pa_trans_p))
+Declaration(ObjectProperty(:reflexive_p))
+Declaration(ObjectProperty(:self_p))
+Declaration(ObjectProperty(:sub_invexpr_p))
+Declaration(ObjectProperty(:sub_invexpr_r))
+Declaration(ObjectProperty(:sup_invexpr_p))
+Declaration(ObjectProperty(:sup_invexpr_r))
+Declaration(ObjectProperty(:sym_invexpr_p))
+Declaration(ObjectProperty(:top_prop_p))
+Declaration(ObjectProperty(:trans_invexpr_p))
+Declaration(DataProperty(:anon_s8_dp))
+Declaration(DataProperty(:pa_data_d))
+Declaration(NamedIndividual(:anon_s10_a))
+Declaration(NamedIndividual(:anon_s10_b))
+Declaration(NamedIndividual(:anon_s11_a))
+Declaration(NamedIndividual(:anon_s12_a))
+Declaration(NamedIndividual(:anon_s13_a))
+Declaration(NamedIndividual(:anon_s15_a))
+Declaration(NamedIndividual(:anon_s17_a))
+Declaration(NamedIndividual(:anon_s4_a))
+Declaration(NamedIndividual(:anon_s5_a))
+Declaration(NamedIndividual(:anon_s6_a))
+Declaration(NamedIndividual(:anon_s7_a))
+Declaration(NamedIndividual(:anon_s8_a))
+Declaration(NamedIndividual(:chain_invexpr_a))
+Declaration(NamedIndividual(:chain_invexpr_b))
+Declaration(NamedIndividual(:chain_invexpr_c))
+Declaration(NamedIndividual(:diff_only_a))
+Declaration(NamedIndividual(:diff_only_c))
+Declaration(NamedIndividual(:equiv_invexpr_a))
+Declaration(NamedIndividual(:equiv_invexpr_b))
+Declaration(NamedIndividual(:func_a))
+Declaration(NamedIndividual(:func_b))
+Declaration(NamedIndividual(:func_c))
+Declaration(NamedIndividual(:func_inv_a))
+Declaration(NamedIndividual(:func_inv_b))
+Declaration(NamedIndividual(:func_inv_c))
+Declaration(NamedIndividual(:func_invexpr_a))
+Declaration(NamedIndividual(:func_invexpr_b))
+Declaration(NamedIndividual(:func_invexpr_c))
+Declaration(NamedIndividual(:func_sub_a))
+Declaration(NamedIndividual(:func_sub_b))
+Declaration(NamedIndividual(:func_sub_c))
+Declaration(NamedIndividual(:held_h1_a))
+Declaration(NamedIndividual(:held_h1_d1))
+Declaration(NamedIndividual(:held_h1_e1))
+Declaration(NamedIndividual(:held_h9_a))
+Declaration(NamedIndividual(:held_h9_e2))
+Declaration(NamedIndividual(:i_chain_domain_a))
+Declaration(NamedIndividual(:i_chain_domain_b))
+Declaration(NamedIndividual(:i_chain_domain_c))
+Declaration(NamedIndividual(:i_inv_domain_a))
+Declaration(NamedIndividual(:i_inv_domain_b))
+Declaration(NamedIndividual(:i_inv_exist_a))
+Declaration(NamedIndividual(:i_inv_exist_b))
+Declaration(NamedIndividual(:i_same_domain_a))
+Declaration(NamedIndividual(:i_same_domain_b))
+Declaration(NamedIndividual(:i_same_domain_c))
+Declaration(NamedIndividual(:i_same_exist_a))
+Declaration(NamedIndividual(:i_same_exist_b))
+Declaration(NamedIndividual(:i_same_exist_c))
+Declaration(NamedIndividual(:i_sub_domain_a))
+Declaration(NamedIndividual(:i_sub_domain_b))
+Declaration(NamedIndividual(:i_sym_domain_a))
+Declaration(NamedIndividual(:i_sym_domain_b))
+Declaration(NamedIndividual(:i_trans_exist_a))
+Declaration(NamedIndividual(:i_trans_exist_b))
+Declaration(NamedIndividual(:i_trans_exist_c))
+Declaration(NamedIndividual(:inv_assert_a))
+Declaration(NamedIndividual(:inv_assert_b))
+Declaration(NamedIndividual(:inverse_invexpr_a))
+Declaration(NamedIndividual(:inverse_invexpr_b))
+Declaration(NamedIndividual(:invfunc_a))
+Declaration(NamedIndividual(:invfunc_b))
+Declaration(NamedIndividual(:invfunc_c))
+Declaration(NamedIndividual(:irrefl_invexpr_a))
+Declaration(NamedIndividual(:link_y2_a))
+Declaration(NamedIndividual(:link_y2_b))
+Declaration(NamedIndividual(:link_y3_a))
+Declaration(NamedIndividual(:link_y3_b))
+Declaration(NamedIndividual(:npa_class_a))
+Declaration(NamedIndividual(:npa_class_d))
+Declaration(NamedIndividual(:npa_invexpr_a))
+Declaration(NamedIndividual(:npa_invexpr_b))
+Declaration(NamedIndividual(:pa_chain_a))
+Declaration(NamedIndividual(:pa_chain_b))
+Declaration(NamedIndividual(:pa_chain_c))
+Declaration(NamedIndividual(:pa_data_a))
+Declaration(NamedIndividual(:pa_data_b))
+Declaration(NamedIndividual(:pa_domain_a))
+Declaration(NamedIndividual(:pa_domain_b))
+Declaration(NamedIndividual(:pa_equiv_a))
+Declaration(NamedIndividual(:pa_equiv_b))
+Declaration(NamedIndividual(:pa_exist_a))
+Declaration(NamedIndividual(:pa_exist_b))
+Declaration(NamedIndividual(:pa_inv_a))
+Declaration(NamedIndividual(:pa_inv_b))
+Declaration(NamedIndividual(:pa_same_a))
+Declaration(NamedIndividual(:pa_same_b))
+Declaration(NamedIndividual(:pa_same_c))
+Declaration(NamedIndividual(:pa_sub_a))
+Declaration(NamedIndividual(:pa_sub_b))
+Declaration(NamedIndividual(:pa_sym_a))
+Declaration(NamedIndividual(:pa_sym_b))
+Declaration(NamedIndividual(:pa_trans_a))
+Declaration(NamedIndividual(:pa_trans_b))
+Declaration(NamedIndividual(:pa_trans_c))
+Declaration(NamedIndividual(:reflexive_a))
+Declaration(NamedIndividual(:same_chain_a))
+Declaration(NamedIndividual(:same_chain_b))
+Declaration(NamedIndividual(:same_chain_c))
+Declaration(NamedIndividual(:self_a))
+Declaration(NamedIndividual(:sub_invexpr_a))
+Declaration(NamedIndividual(:sub_invexpr_b))
+Declaration(NamedIndividual(:sup_invexpr_a))
+Declaration(NamedIndividual(:sup_invexpr_b))
+Declaration(NamedIndividual(:sym_invexpr_a))
+Declaration(NamedIndividual(:sym_invexpr_b))
+Declaration(NamedIndividual(:top_prop_a))
+Declaration(NamedIndividual(:top_prop_b))
+Declaration(NamedIndividual(:top_prop_c))
+Declaration(NamedIndividual(:trans_invexpr_a))
+Declaration(NamedIndividual(:trans_invexpr_b))
+Declaration(NamedIndividual(:trans_invexpr_c))
+Declaration(NamedIndividual(:u_same_only_a))
+Declaration(NamedIndividual(:u_same_only_c))
+############################
+#   Object Properties
+############################
+
+# Object Property: :equiv_invexpr_p (:equiv_invexpr_p)
+
+EquivalentObjectProperties(:equiv_invexpr_p ObjectInverseOf(:equiv_invexpr_r))
+
+# Object Property: :func_inv_p (:func_inv_p)
+
+InverseObjectProperties(:func_inv_p :func_inv_r)
+
+# Object Property: :func_inv_r (:func_inv_r)
+
+FunctionalObjectProperty(:func_inv_r)
+
+# Object Property: :func_p (:func_p)
+
+FunctionalObjectProperty(:func_p)
+
+# Object Property: :func_sub_p (:func_sub_p)
+
+SubObjectPropertyOf(:func_sub_p :func_sub_r)
+
+# Object Property: :func_sub_r (:func_sub_r)
+
+FunctionalObjectProperty(:func_sub_r)
+
+# Object Property: :i_chain_domain_s (:i_chain_domain_s)
+
+ObjectPropertyDomain(:i_chain_domain_s :i_chain_domain_D)
+
+# Object Property: :i_inv_domain_p (:i_inv_domain_p)
+
+InverseObjectProperties(:i_inv_domain_p :i_inv_domain_pi)
+
+# Object Property: :i_inv_domain_pi (:i_inv_domain_pi)
+
+ObjectPropertyDomain(:i_inv_domain_pi :i_inv_domain_D)
+
+# Object Property: :i_inv_exist_p (:i_inv_exist_p)
+
+InverseObjectProperties(:i_inv_exist_p :i_inv_exist_pi)
+
+# Object Property: :i_same_domain_p (:i_same_domain_p)
+
+ObjectPropertyDomain(:i_same_domain_p :i_same_domain_D)
+
+# Object Property: :i_sub_domain_p (:i_sub_domain_p)
+
+SubObjectPropertyOf(:i_sub_domain_p :i_sub_domain_r)
+
+# Object Property: :i_sub_domain_r (:i_sub_domain_r)
+
+ObjectPropertyDomain(:i_sub_domain_r :i_sub_domain_D)
+
+# Object Property: :i_sym_domain_p (:i_sym_domain_p)
+
+SymmetricObjectProperty(:i_sym_domain_p)
+ObjectPropertyDomain(:i_sym_domain_p :i_sym_domain_D)
+
+# Object Property: :i_trans_exist_p (:i_trans_exist_p)
+
+TransitiveObjectProperty(:i_trans_exist_p)
+
+# Object Property: :inverse_invexpr_r (:inverse_invexpr_r)
+
+InverseObjectProperties(:inverse_invexpr_r ObjectInverseOf(:inverse_invexpr_p))
+
+# Object Property: :invfunc_p (:invfunc_p)
+
+InverseFunctionalObjectProperty(:invfunc_p)
+
+# Object Property: :link_y2_p (:link_y2_p)
+
+InverseObjectProperties(:link_y2_p :link_y2_q)
+ObjectPropertyDomain(:link_y2_p :link_y2_D)
+
+# Object Property: :link_y3_p (:link_y3_p)
+
+InverseObjectProperties(:link_y3_p :link_y3_q)
+
+# Object Property: :pa_domain_p (:pa_domain_p)
+
+ObjectPropertyDomain(:pa_domain_p :pa_domain_A)
+ObjectPropertyRange(:pa_domain_p :pa_domain_B)
+
+# Object Property: :pa_equiv_e (:pa_equiv_e)
+
+EquivalentObjectProperties(:pa_equiv_e :pa_equiv_p)
+
+# Object Property: :pa_inv_p (:pa_inv_p)
+
+InverseObjectProperties(:pa_inv_p :pa_inv_pi)
+
+# Object Property: :pa_sub_p (:pa_sub_p)
+
+SubObjectPropertyOf(:pa_sub_p :pa_sub_r)
+
+# Object Property: :pa_sym_p (:pa_sym_p)
+
+SymmetricObjectProperty(:pa_sym_p)
+
+# Object Property: :pa_trans_p (:pa_trans_p)
+
+TransitiveObjectProperty(:pa_trans_p)
+
+# Object Property: :reflexive_p (:reflexive_p)
+
+ReflexiveObjectProperty(:reflexive_p)
+
+# Object Property: :sup_invexpr_p (:sup_invexpr_p)
+
+SubObjectPropertyOf(:sup_invexpr_p ObjectInverseOf(:sup_invexpr_r))
+
+
+
+
+############################
+#   Classes
+############################
+
+# Class: :anon_s10_A (:anon_s10_A)
+
+SubClassOf(:anon_s10_A owl:Thing)
+
+# Class: :anon_s11_A (:anon_s11_A)
+
+SubClassOf(:anon_s11_A owl:Thing)
+
+# Class: :anon_s12_A (:anon_s12_A)
+
+SubClassOf(:anon_s12_A owl:Thing)
+
+# Class: :anon_s12_B (:anon_s12_B)
+
+SubClassOf(:anon_s12_B owl:Thing)
+DisjointClasses(:anon_s12_B ObjectOneOf(_:genid2147483649))
+
+# Class: :anon_s13_A (:anon_s13_A)
+
+SubClassOf(:anon_s13_A owl:Thing)
+
+# Class: :anon_s15_A (:anon_s15_A)
+
+SubClassOf(:anon_s15_A owl:Thing)
+
+# Class: :anon_s15_B (:anon_s15_B)
+
+SubClassOf(:anon_s15_B :anon_s15_A)
+SubClassOf(:anon_s15_B ObjectOneOf(:anon_s15_a _:genid2147483651))
+
+# Class: :anon_s17_A (:anon_s17_A)
+
+SubClassOf(:anon_s17_A owl:Thing)
+
+# Class: :anon_s4_A (:anon_s4_A)
+
+SubClassOf(:anon_s4_A owl:Thing)
+
+# Class: :anon_s5_A (:anon_s5_A)
+
+SubClassOf(:anon_s5_A owl:Thing)
+SubClassOf(:anon_s5_A ObjectHasValue(:anon_s5_p _:genid2147483654))
+
+# Class: :anon_s6_A (:anon_s6_A)
+
+SubClassOf(:anon_s6_A owl:Thing)
+
+# Class: :anon_s6_B (:anon_s6_B)
+
+SubClassOf(:anon_s6_B owl:Thing)
+SubClassOf(:anon_s6_B ObjectOneOf(_:genid2147483655))
+
+# Class: :anon_s7_A (:anon_s7_A)
+
+SubClassOf(:anon_s7_A owl:Thing)
+
+# Class: :anon_s8_A (:anon_s8_A)
+
+SubClassOf(:anon_s8_A owl:Thing)
+
+# Class: :diff_only_A (:diff_only_A)
+
+SubClassOf(:diff_only_A owl:Thing)
+
+# Class: :func_A (:func_A)
+
+SubClassOf(:func_A owl:Thing)
+
+# Class: :func_inv_A (:func_inv_A)
+
+SubClassOf(:func_inv_A owl:Thing)
+
+# Class: :func_invexpr_A (:func_invexpr_A)
+
+SubClassOf(:func_invexpr_A owl:Thing)
+
+# Class: :func_sub_A (:func_sub_A)
+
+SubClassOf(:func_sub_A owl:Thing)
+
+# Class: :held_h1_A (:held_h1_A)
+
+SubClassOf(:held_h1_A owl:Thing)
+
+# Class: :held_h9_A (:held_h9_A)
+
+SubClassOf(:held_h9_A owl:Thing)
+
+# Class: :i_chain_domain_D (:i_chain_domain_D)
+
+SubClassOf(:i_chain_domain_D owl:Thing)
+
+# Class: :i_inv_domain_D (:i_inv_domain_D)
+
+SubClassOf(:i_inv_domain_D owl:Thing)
+
+# Class: :i_inv_exist_D (:i_inv_exist_D)
+
+SubClassOf(:i_inv_exist_D owl:Thing)
+
+# Class: :i_same_domain_D (:i_same_domain_D)
+
+SubClassOf(:i_same_domain_D owl:Thing)
+
+# Class: :i_same_exist_D (:i_same_exist_D)
+
+SubClassOf(:i_same_exist_D owl:Thing)
+
+# Class: :i_sub_domain_D (:i_sub_domain_D)
+
+SubClassOf(:i_sub_domain_D owl:Thing)
+
+# Class: :i_sym_domain_D (:i_sym_domain_D)
+
+SubClassOf(:i_sym_domain_D owl:Thing)
+
+# Class: :i_trans_exist_D (:i_trans_exist_D)
+
+SubClassOf(:i_trans_exist_D owl:Thing)
+
+# Class: :invfunc_A (:invfunc_A)
+
+SubClassOf(:invfunc_A owl:Thing)
+
+# Class: :link_y2_D (:link_y2_D)
+
+SubClassOf(:link_y2_D owl:Thing)
+
+# Class: :link_y2_Y (:link_y2_Y)
+
+SubClassOf(:link_y2_Y :link_y2_Z)
+SubClassOf(:link_y2_Y ObjectSomeValuesFrom(:link_y2_r ObjectOneOf(:link_y2_a)))
+
+# Class: :link_y2_Z (:link_y2_Z)
+
+EquivalentClasses(:link_y2_Z ObjectSomeValuesFrom(:link_y2_r :link_y2_D))
+SubClassOf(:link_y2_Z owl:Thing)
+
+# Class: :link_y3_Y (:link_y3_Y)
+
+SubClassOf(:link_y3_Y :link_y3_Z)
+SubClassOf(:link_y3_Y ObjectSomeValuesFrom(:link_y3_r ObjectOneOf(:link_y3_a)))
+
+# Class: :link_y3_Z (:link_y3_Z)
+
+EquivalentClasses(:link_y3_Z ObjectSomeValuesFrom(:link_y3_r ObjectSomeValuesFrom(:link_y3_p ObjectOneOf(:link_y3_b))))
+SubClassOf(:link_y3_Z owl:Thing)
+
+# Class: :npa_class_A (:npa_class_A)
+
+SubClassOf(:npa_class_A owl:Thing)
+
+# Class: :npa_class_C (:npa_class_C)
+
+SubClassOf(:npa_class_C :npa_class_A)
+SubClassOf(:npa_class_C ObjectIntersectionOf(ObjectOneOf(:npa_class_a) ObjectSomeValuesFrom(:npa_class_q ObjectOneOf(:npa_class_d))))
+
+# Class: :pa_domain_A (:pa_domain_A)
+
+SubClassOf(:pa_domain_A owl:Thing)
+
+# Class: :pa_domain_B (:pa_domain_B)
+
+SubClassOf(:pa_domain_B owl:Thing)
+
+# Class: :pa_exist_A (:pa_exist_A)
+
+SubClassOf(:pa_exist_A owl:Thing)
+SubClassOf(:pa_exist_A ObjectSomeValuesFrom(:pa_exist_p ObjectOneOf(:pa_exist_b)))
+
+# Class: :reflexive_A (:reflexive_A)
+
+SubClassOf(:reflexive_A owl:Thing)
+
+# Class: :same_chain_A (:same_chain_A)
+
+SubClassOf(:same_chain_A owl:Thing)
+
+# Class: :top_prop_B (:top_prop_B)
+
+SubClassOf(:top_prop_B owl:Thing)
+
+# Class: :u_same_only_A (:u_same_only_A)
+
+SubClassOf(:u_same_only_A owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: :anon_s10_a (:anon_s10_a)
+
+ClassAssertion(:anon_s10_A :anon_s10_a)
+SameIndividual(:anon_s10_a :anon_s10_b)
+ObjectPropertyAssertion(:reflexive_p :anon_s10_a :anon_s10_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s10_a :anon_s10_b)
+
+# Individual: :anon_s10_b (:anon_s10_b)
+
+ClassAssertion(:anon_s10_A :anon_s10_b)
+ObjectPropertyAssertion(:reflexive_p :anon_s10_b :anon_s10_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s10_b :anon_s10_b)
+
+# Individual: :anon_s11_a (:anon_s11_a)
+
+ClassAssertion(:anon_s11_A :anon_s11_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s11_a :anon_s11_a)
+
+# Individual: :anon_s12_a (:anon_s12_a)
+
+ClassAssertion(:anon_s12_A :anon_s12_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s12_a :anon_s12_a)
+
+# Individual: :anon_s13_a (:anon_s13_a)
+
+ClassAssertion(:anon_s13_A :anon_s13_a)
+ClassAssertion(ObjectHasValue(:anon_s13_p _:genid2147483650) :anon_s13_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s13_a :anon_s13_a)
+
+# Individual: :anon_s15_a (:anon_s15_a)
+
+ClassAssertion(:anon_s15_A :anon_s15_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s15_a :anon_s15_a)
+
+# Individual: :anon_s17_a (:anon_s17_a)
+
+ClassAssertion(:anon_s17_A :anon_s17_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s17_a :anon_s17_a)
+
+# Individual: :anon_s4_a (:anon_s4_a)
+
+ClassAssertion(:anon_s4_A :anon_s4_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s4_a :anon_s4_a)
+
+# Individual: :anon_s5_a (:anon_s5_a)
+
+ClassAssertion(:anon_s5_A :anon_s5_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s5_a :anon_s5_a)
+
+# Individual: :anon_s6_a (:anon_s6_a)
+
+ClassAssertion(:anon_s6_A :anon_s6_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s6_a :anon_s6_a)
+
+# Individual: :anon_s7_a (:anon_s7_a)
+
+ClassAssertion(:anon_s7_A :anon_s7_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s7_a :anon_s7_a)
+
+# Individual: :anon_s8_a (:anon_s8_a)
+
+ClassAssertion(:anon_s8_A :anon_s8_a)
+ObjectPropertyAssertion(:reflexive_p :anon_s8_a :anon_s8_a)
+
+# Individual: :chain_invexpr_a (:chain_invexpr_a)
+
+ClassAssertion(owl:Thing :chain_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :chain_invexpr_a :chain_invexpr_a)
+
+# Individual: :chain_invexpr_b (:chain_invexpr_b)
+
+ClassAssertion(owl:Thing :chain_invexpr_b)
+ObjectPropertyAssertion(:chain_invexpr_p :chain_invexpr_b :chain_invexpr_a)
+ObjectPropertyAssertion(:chain_invexpr_r :chain_invexpr_b :chain_invexpr_c)
+ObjectPropertyAssertion(:reflexive_p :chain_invexpr_b :chain_invexpr_b)
+
+# Individual: :chain_invexpr_c (:chain_invexpr_c)
+
+ClassAssertion(owl:Thing :chain_invexpr_c)
+ObjectPropertyAssertion(:reflexive_p :chain_invexpr_c :chain_invexpr_c)
+
+# Individual: :diff_only_a (:diff_only_a)
+
+ClassAssertion(:diff_only_A :diff_only_a)
+ObjectPropertyAssertion(:reflexive_p :diff_only_a :diff_only_a)
+
+# Individual: :diff_only_c (:diff_only_c)
+
+ClassAssertion(owl:Thing :diff_only_c)
+ObjectPropertyAssertion(:reflexive_p :diff_only_c :diff_only_c)
+
+# Individual: :equiv_invexpr_a (:equiv_invexpr_a)
+
+ClassAssertion(owl:Thing :equiv_invexpr_a)
+ObjectPropertyAssertion(:equiv_invexpr_p :equiv_invexpr_a :equiv_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :equiv_invexpr_a :equiv_invexpr_a)
+
+# Individual: :equiv_invexpr_b (:equiv_invexpr_b)
+
+ClassAssertion(owl:Thing :equiv_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :equiv_invexpr_b :equiv_invexpr_b)
+
+# Individual: :func_a (:func_a)
+
+ClassAssertion(owl:Thing :func_a)
+ObjectPropertyAssertion(:func_p :func_a :func_b)
+ObjectPropertyAssertion(:func_p :func_a :func_c)
+ObjectPropertyAssertion(:reflexive_p :func_a :func_a)
+
+# Individual: :func_b (:func_b)
+
+ClassAssertion(:func_A :func_b)
+ObjectPropertyAssertion(:reflexive_p :func_b :func_b)
+ObjectPropertyAssertion(:reflexive_p :func_b :func_c)
+
+# Individual: :func_c (:func_c)
+
+ClassAssertion(:func_A :func_c)
+ObjectPropertyAssertion(:reflexive_p :func_c :func_b)
+ObjectPropertyAssertion(:reflexive_p :func_c :func_c)
+
+# Individual: :func_inv_a (:func_inv_a)
+
+ClassAssertion(owl:Thing :func_inv_a)
+ObjectPropertyAssertion(:func_inv_r :func_inv_a :func_inv_b)
+ObjectPropertyAssertion(:func_inv_r :func_inv_a :func_inv_c)
+ObjectPropertyAssertion(:reflexive_p :func_inv_a :func_inv_a)
+
+# Individual: :func_inv_b (:func_inv_b)
+
+ClassAssertion(:func_inv_A :func_inv_b)
+ObjectPropertyAssertion(:func_inv_p :func_inv_b :func_inv_a)
+ObjectPropertyAssertion(:reflexive_p :func_inv_b :func_inv_b)
+ObjectPropertyAssertion(:reflexive_p :func_inv_b :func_inv_c)
+
+# Individual: :func_inv_c (:func_inv_c)
+
+ClassAssertion(:func_inv_A :func_inv_c)
+ObjectPropertyAssertion(:func_inv_p :func_inv_c :func_inv_a)
+ObjectPropertyAssertion(:reflexive_p :func_inv_c :func_inv_b)
+ObjectPropertyAssertion(:reflexive_p :func_inv_c :func_inv_c)
+
+# Individual: :func_invexpr_a (:func_invexpr_a)
+
+ClassAssertion(owl:Thing :func_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :func_invexpr_a :func_invexpr_a)
+
+# Individual: :func_invexpr_b (:func_invexpr_b)
+
+ClassAssertion(:func_invexpr_A :func_invexpr_b)
+ObjectPropertyAssertion(:func_invexpr_p :func_invexpr_b :func_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :func_invexpr_b :func_invexpr_b)
+
+# Individual: :func_invexpr_c (:func_invexpr_c)
+
+ClassAssertion(owl:Thing :func_invexpr_c)
+ObjectPropertyAssertion(:func_invexpr_p :func_invexpr_c :func_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :func_invexpr_c :func_invexpr_c)
+
+# Individual: :func_sub_a (:func_sub_a)
+
+ClassAssertion(owl:Thing :func_sub_a)
+ObjectPropertyAssertion(:func_sub_p :func_sub_a :func_sub_b)
+ObjectPropertyAssertion(:func_sub_p :func_sub_a :func_sub_c)
+ObjectPropertyAssertion(:func_sub_r :func_sub_a :func_sub_b)
+ObjectPropertyAssertion(:func_sub_r :func_sub_a :func_sub_c)
+ObjectPropertyAssertion(:reflexive_p :func_sub_a :func_sub_a)
+
+# Individual: :func_sub_b (:func_sub_b)
+
+ClassAssertion(:func_sub_A :func_sub_b)
+ObjectPropertyAssertion(:reflexive_p :func_sub_b :func_sub_b)
+ObjectPropertyAssertion(:reflexive_p :func_sub_b :func_sub_c)
+
+# Individual: :func_sub_c (:func_sub_c)
+
+ClassAssertion(:func_sub_A :func_sub_c)
+ObjectPropertyAssertion(:reflexive_p :func_sub_c :func_sub_b)
+ObjectPropertyAssertion(:reflexive_p :func_sub_c :func_sub_c)
+
+# Individual: :held_h1_a (:held_h1_a)
+
+ClassAssertion(:held_h1_A :held_h1_a)
+ObjectPropertyAssertion(:reflexive_p :held_h1_a :held_h1_a)
+
+# Individual: :held_h1_d1 (:held_h1_d1)
+
+ClassAssertion(owl:Thing :held_h1_d1)
+
+# Individual: :held_h1_e1 (:held_h1_e1)
+
+ClassAssertion(owl:Thing :held_h1_e1)
+NegativeObjectPropertyAssertion(ObjectInverseOf(:held_h1_q) :held_h1_e1 :held_h1_d1)
+
+# Individual: :held_h9_a (:held_h9_a)
+
+ClassAssertion(:held_h9_A :held_h9_a)
+ObjectPropertyAssertion(:reflexive_p :held_h9_a :held_h9_a)
+
+# Individual: :held_h9_e2 (:held_h9_e2)
+
+ClassAssertion(owl:Thing :held_h9_e2)
+NegativeObjectPropertyAssertion(:held_h9_q :held_h9_e2 _:genid2147483658)
+
+# Individual: :i_chain_domain_a (:i_chain_domain_a)
+
+ClassAssertion(:i_chain_domain_D :i_chain_domain_a)
+ObjectPropertyAssertion(:i_chain_domain_p :i_chain_domain_a :i_chain_domain_b)
+ObjectPropertyAssertion(:i_chain_domain_s :i_chain_domain_a :i_chain_domain_c)
+ObjectPropertyAssertion(:reflexive_p :i_chain_domain_a :i_chain_domain_a)
+
+# Individual: :i_chain_domain_b (:i_chain_domain_b)
+
+ClassAssertion(owl:Thing :i_chain_domain_b)
+ObjectPropertyAssertion(:i_chain_domain_q :i_chain_domain_b :i_chain_domain_c)
+ObjectPropertyAssertion(:reflexive_p :i_chain_domain_b :i_chain_domain_b)
+
+# Individual: :i_chain_domain_c (:i_chain_domain_c)
+
+ClassAssertion(owl:Thing :i_chain_domain_c)
+ObjectPropertyAssertion(:reflexive_p :i_chain_domain_c :i_chain_domain_c)
+
+# Individual: :i_inv_domain_a (:i_inv_domain_a)
+
+ClassAssertion(owl:Thing :i_inv_domain_a)
+ObjectPropertyAssertion(:i_inv_domain_p :i_inv_domain_a :i_inv_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_inv_domain_a :i_inv_domain_a)
+
+# Individual: :i_inv_domain_b (:i_inv_domain_b)
+
+ClassAssertion(:i_inv_domain_D :i_inv_domain_b)
+ObjectPropertyAssertion(:i_inv_domain_pi :i_inv_domain_b :i_inv_domain_a)
+ObjectPropertyAssertion(:reflexive_p :i_inv_domain_b :i_inv_domain_b)
+
+# Individual: :i_inv_exist_a (:i_inv_exist_a)
+
+ClassAssertion(owl:Thing :i_inv_exist_a)
+ObjectPropertyAssertion(:i_inv_exist_p :i_inv_exist_a :i_inv_exist_b)
+ObjectPropertyAssertion(:reflexive_p :i_inv_exist_a :i_inv_exist_a)
+
+# Individual: :i_inv_exist_b (:i_inv_exist_b)
+
+ClassAssertion(:i_inv_exist_D :i_inv_exist_b)
+ObjectPropertyAssertion(:i_inv_exist_pi :i_inv_exist_b :i_inv_exist_a)
+ObjectPropertyAssertion(:reflexive_p :i_inv_exist_b :i_inv_exist_b)
+
+# Individual: :i_same_domain_a (:i_same_domain_a)
+
+ClassAssertion(:i_same_domain_D :i_same_domain_a)
+SameIndividual(:i_same_domain_a :i_same_domain_c)
+ObjectPropertyAssertion(:i_same_domain_p :i_same_domain_a :i_same_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_same_domain_a :i_same_domain_a)
+ObjectPropertyAssertion(:reflexive_p :i_same_domain_a :i_same_domain_c)
+
+# Individual: :i_same_domain_b (:i_same_domain_b)
+
+ClassAssertion(owl:Thing :i_same_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_same_domain_b :i_same_domain_b)
+
+# Individual: :i_same_domain_c (:i_same_domain_c)
+
+ClassAssertion(:i_same_domain_D :i_same_domain_c)
+ObjectPropertyAssertion(:i_same_domain_p :i_same_domain_c :i_same_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_same_domain_c :i_same_domain_a)
+ObjectPropertyAssertion(:reflexive_p :i_same_domain_c :i_same_domain_c)
+
+# Individual: :i_same_exist_a (:i_same_exist_a)
+
+ClassAssertion(:i_same_exist_D :i_same_exist_a)
+ObjectPropertyAssertion(:i_same_exist_p :i_same_exist_a :i_same_exist_b)
+ObjectPropertyAssertion(:i_same_exist_p :i_same_exist_a :i_same_exist_c)
+ObjectPropertyAssertion(:reflexive_p :i_same_exist_a :i_same_exist_a)
+
+# Individual: :i_same_exist_b (:i_same_exist_b)
+
+ClassAssertion(owl:Thing :i_same_exist_b)
+SameIndividual(:i_same_exist_b :i_same_exist_c)
+ObjectPropertyAssertion(:reflexive_p :i_same_exist_b :i_same_exist_b)
+ObjectPropertyAssertion(:reflexive_p :i_same_exist_b :i_same_exist_c)
+
+# Individual: :i_same_exist_c (:i_same_exist_c)
+
+ClassAssertion(owl:Thing :i_same_exist_c)
+ObjectPropertyAssertion(:reflexive_p :i_same_exist_c :i_same_exist_b)
+ObjectPropertyAssertion(:reflexive_p :i_same_exist_c :i_same_exist_c)
+
+# Individual: :i_sub_domain_a (:i_sub_domain_a)
+
+ClassAssertion(:i_sub_domain_D :i_sub_domain_a)
+ObjectPropertyAssertion(:i_sub_domain_p :i_sub_domain_a :i_sub_domain_b)
+ObjectPropertyAssertion(:i_sub_domain_r :i_sub_domain_a :i_sub_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_sub_domain_a :i_sub_domain_a)
+
+# Individual: :i_sub_domain_b (:i_sub_domain_b)
+
+ClassAssertion(owl:Thing :i_sub_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_sub_domain_b :i_sub_domain_b)
+
+# Individual: :i_sym_domain_a (:i_sym_domain_a)
+
+ClassAssertion(:i_sym_domain_D :i_sym_domain_a)
+ObjectPropertyAssertion(:i_sym_domain_p :i_sym_domain_a :i_sym_domain_b)
+ObjectPropertyAssertion(:reflexive_p :i_sym_domain_a :i_sym_domain_a)
+
+# Individual: :i_sym_domain_b (:i_sym_domain_b)
+
+ClassAssertion(:i_sym_domain_D :i_sym_domain_b)
+ObjectPropertyAssertion(:i_sym_domain_p :i_sym_domain_b :i_sym_domain_a)
+ObjectPropertyAssertion(:reflexive_p :i_sym_domain_b :i_sym_domain_b)
+
+# Individual: :i_trans_exist_a (:i_trans_exist_a)
+
+ClassAssertion(:i_trans_exist_D :i_trans_exist_a)
+ObjectPropertyAssertion(:i_trans_exist_p :i_trans_exist_a :i_trans_exist_b)
+ObjectPropertyAssertion(:i_trans_exist_p :i_trans_exist_a :i_trans_exist_c)
+ObjectPropertyAssertion(:reflexive_p :i_trans_exist_a :i_trans_exist_a)
+
+# Individual: :i_trans_exist_b (:i_trans_exist_b)
+
+ClassAssertion(:i_trans_exist_D :i_trans_exist_b)
+ObjectPropertyAssertion(:i_trans_exist_p :i_trans_exist_b :i_trans_exist_c)
+ObjectPropertyAssertion(:reflexive_p :i_trans_exist_b :i_trans_exist_b)
+
+# Individual: :i_trans_exist_c (:i_trans_exist_c)
+
+ClassAssertion(owl:Thing :i_trans_exist_c)
+ObjectPropertyAssertion(:reflexive_p :i_trans_exist_c :i_trans_exist_c)
+
+# Individual: :inv_assert_a (:inv_assert_a)
+
+ClassAssertion(owl:Thing :inv_assert_a)
+ObjectPropertyAssertion(:reflexive_p :inv_assert_a :inv_assert_a)
+ObjectPropertyAssertion(ObjectInverseOf(:inv_assert_p) :inv_assert_a :inv_assert_b)
+
+# Individual: :inv_assert_b (:inv_assert_b)
+
+ClassAssertion(owl:Thing :inv_assert_b)
+ObjectPropertyAssertion(:inv_assert_p :inv_assert_b :inv_assert_a)
+ObjectPropertyAssertion(:reflexive_p :inv_assert_b :inv_assert_b)
+
+# Individual: :inverse_invexpr_a (:inverse_invexpr_a)
+
+ClassAssertion(owl:Thing :inverse_invexpr_a)
+ObjectPropertyAssertion(:inverse_invexpr_p :inverse_invexpr_a :inverse_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :inverse_invexpr_a :inverse_invexpr_a)
+
+# Individual: :inverse_invexpr_b (:inverse_invexpr_b)
+
+ClassAssertion(owl:Thing :inverse_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :inverse_invexpr_b :inverse_invexpr_b)
+
+# Individual: :invfunc_a (:invfunc_a)
+
+ClassAssertion(owl:Thing :invfunc_a)
+ObjectPropertyAssertion(:reflexive_p :invfunc_a :invfunc_a)
+
+# Individual: :invfunc_b (:invfunc_b)
+
+ClassAssertion(:invfunc_A :invfunc_b)
+ObjectPropertyAssertion(:invfunc_p :invfunc_b :invfunc_a)
+ObjectPropertyAssertion(:reflexive_p :invfunc_b :invfunc_b)
+ObjectPropertyAssertion(:reflexive_p :invfunc_b :invfunc_c)
+
+# Individual: :invfunc_c (:invfunc_c)
+
+ClassAssertion(:invfunc_A :invfunc_c)
+ObjectPropertyAssertion(:invfunc_p :invfunc_c :invfunc_a)
+ObjectPropertyAssertion(:reflexive_p :invfunc_c :invfunc_b)
+ObjectPropertyAssertion(:reflexive_p :invfunc_c :invfunc_c)
+
+# Individual: :irrefl_invexpr_a (:irrefl_invexpr_a)
+
+ClassAssertion(owl:Thing :irrefl_invexpr_a)
+ObjectPropertyAssertion(:irrefl_invexpr_p :irrefl_invexpr_a :irrefl_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :irrefl_invexpr_a :irrefl_invexpr_a)
+
+# Individual: :link_y2_a (:link_y2_a)
+
+ClassAssertion(:link_y2_D :link_y2_a)
+ObjectPropertyAssertion(:link_y2_p :link_y2_a :link_y2_b)
+ObjectPropertyAssertion(:reflexive_p :link_y2_a :link_y2_a)
+
+# Individual: :link_y2_b (:link_y2_b)
+
+ClassAssertion(owl:Thing :link_y2_b)
+ObjectPropertyAssertion(:link_y2_q :link_y2_b :link_y2_a)
+ObjectPropertyAssertion(:reflexive_p :link_y2_b :link_y2_b)
+
+# Individual: :link_y3_a (:link_y3_a)
+
+ClassAssertion(owl:Thing :link_y3_a)
+ObjectPropertyAssertion(:link_y3_p :link_y3_a :link_y3_b)
+ObjectPropertyAssertion(:reflexive_p :link_y3_a :link_y3_a)
+
+# Individual: :link_y3_b (:link_y3_b)
+
+ClassAssertion(owl:Thing :link_y3_b)
+ObjectPropertyAssertion(:link_y3_q :link_y3_b :link_y3_a)
+ObjectPropertyAssertion(:reflexive_p :link_y3_b :link_y3_b)
+
+# Individual: :npa_class_a (:npa_class_a)
+
+ClassAssertion(:npa_class_A :npa_class_a)
+ObjectPropertyAssertion(:reflexive_p :npa_class_a :npa_class_a)
+NegativeObjectPropertyAssertion(:npa_class_q :npa_class_a :npa_class_d)
+
+# Individual: :npa_class_d (:npa_class_d)
+
+ClassAssertion(owl:Thing :npa_class_d)
+ObjectPropertyAssertion(:reflexive_p :npa_class_d :npa_class_d)
+
+# Individual: :npa_invexpr_a (:npa_invexpr_a)
+
+ClassAssertion(owl:Thing :npa_invexpr_a)
+ObjectPropertyAssertion(:npa_invexpr_p :npa_invexpr_a :npa_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :npa_invexpr_a :npa_invexpr_a)
+
+# Individual: :npa_invexpr_b (:npa_invexpr_b)
+
+ClassAssertion(owl:Thing :npa_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :npa_invexpr_b :npa_invexpr_b)
+NegativeObjectPropertyAssertion(ObjectInverseOf(:npa_invexpr_p) :npa_invexpr_b :npa_invexpr_a)
+
+# Individual: :pa_chain_a (:pa_chain_a)
+
+ClassAssertion(owl:Thing :pa_chain_a)
+ObjectPropertyAssertion(:pa_chain_p :pa_chain_a :pa_chain_b)
+ObjectPropertyAssertion(:pa_chain_s :pa_chain_a :pa_chain_c)
+ObjectPropertyAssertion(:reflexive_p :pa_chain_a :pa_chain_a)
+
+# Individual: :pa_chain_b (:pa_chain_b)
+
+ClassAssertion(owl:Thing :pa_chain_b)
+ObjectPropertyAssertion(:pa_chain_q :pa_chain_b :pa_chain_c)
+ObjectPropertyAssertion(:reflexive_p :pa_chain_b :pa_chain_b)
+
+# Individual: :pa_chain_c (:pa_chain_c)
+
+ClassAssertion(owl:Thing :pa_chain_c)
+ObjectPropertyAssertion(:reflexive_p :pa_chain_c :pa_chain_c)
+
+# Individual: :pa_data_a (:pa_data_a)
+
+ClassAssertion(owl:Thing :pa_data_a)
+ObjectPropertyAssertion(:pa_data_p :pa_data_a :pa_data_b)
+ObjectPropertyAssertion(:reflexive_p :pa_data_a :pa_data_a)
+DataPropertyAssertion(:pa_data_d :pa_data_a "1"^^xsd:integer)
+
+# Individual: :pa_data_b (:pa_data_b)
+
+ClassAssertion(owl:Thing :pa_data_b)
+ObjectPropertyAssertion(:reflexive_p :pa_data_b :pa_data_b)
+
+# Individual: :pa_domain_a (:pa_domain_a)
+
+ClassAssertion(:pa_domain_A :pa_domain_a)
+ObjectPropertyAssertion(:pa_domain_p :pa_domain_a :pa_domain_b)
+ObjectPropertyAssertion(:reflexive_p :pa_domain_a :pa_domain_a)
+
+# Individual: :pa_domain_b (:pa_domain_b)
+
+ClassAssertion(:pa_domain_B :pa_domain_b)
+ObjectPropertyAssertion(:reflexive_p :pa_domain_b :pa_domain_b)
+
+# Individual: :pa_equiv_a (:pa_equiv_a)
+
+ClassAssertion(owl:Thing :pa_equiv_a)
+ObjectPropertyAssertion(:pa_equiv_e :pa_equiv_a :pa_equiv_b)
+ObjectPropertyAssertion(:pa_equiv_p :pa_equiv_a :pa_equiv_b)
+ObjectPropertyAssertion(:reflexive_p :pa_equiv_a :pa_equiv_a)
+
+# Individual: :pa_equiv_b (:pa_equiv_b)
+
+ClassAssertion(owl:Thing :pa_equiv_b)
+ObjectPropertyAssertion(:reflexive_p :pa_equiv_b :pa_equiv_b)
+
+# Individual: :pa_exist_a (:pa_exist_a)
+
+ClassAssertion(:pa_exist_A :pa_exist_a)
+ObjectPropertyAssertion(:pa_exist_p :pa_exist_a :pa_exist_b)
+ObjectPropertyAssertion(:reflexive_p :pa_exist_a :pa_exist_a)
+
+# Individual: :pa_exist_b (:pa_exist_b)
+
+ClassAssertion(owl:Thing :pa_exist_b)
+ObjectPropertyAssertion(:reflexive_p :pa_exist_b :pa_exist_b)
+
+# Individual: :pa_inv_a (:pa_inv_a)
+
+ClassAssertion(owl:Thing :pa_inv_a)
+ObjectPropertyAssertion(:pa_inv_p :pa_inv_a :pa_inv_b)
+ObjectPropertyAssertion(:reflexive_p :pa_inv_a :pa_inv_a)
+
+# Individual: :pa_inv_b (:pa_inv_b)
+
+ClassAssertion(owl:Thing :pa_inv_b)
+ObjectPropertyAssertion(:pa_inv_pi :pa_inv_b :pa_inv_a)
+ObjectPropertyAssertion(:reflexive_p :pa_inv_b :pa_inv_b)
+
+# Individual: :pa_same_a (:pa_same_a)
+
+ClassAssertion(owl:Thing :pa_same_a)
+ObjectPropertyAssertion(:pa_same_p :pa_same_a :pa_same_b)
+ObjectPropertyAssertion(:pa_same_p :pa_same_a :pa_same_c)
+ObjectPropertyAssertion(:reflexive_p :pa_same_a :pa_same_a)
+
+# Individual: :pa_same_b (:pa_same_b)
+
+ClassAssertion(owl:Thing :pa_same_b)
+SameIndividual(:pa_same_b :pa_same_c)
+ObjectPropertyAssertion(:reflexive_p :pa_same_b :pa_same_b)
+ObjectPropertyAssertion(:reflexive_p :pa_same_b :pa_same_c)
+
+# Individual: :pa_same_c (:pa_same_c)
+
+ClassAssertion(owl:Thing :pa_same_c)
+ObjectPropertyAssertion(:reflexive_p :pa_same_c :pa_same_b)
+ObjectPropertyAssertion(:reflexive_p :pa_same_c :pa_same_c)
+
+# Individual: :pa_sub_a (:pa_sub_a)
+
+ClassAssertion(owl:Thing :pa_sub_a)
+ObjectPropertyAssertion(:pa_sub_p :pa_sub_a :pa_sub_b)
+ObjectPropertyAssertion(:pa_sub_r :pa_sub_a :pa_sub_b)
+ObjectPropertyAssertion(:reflexive_p :pa_sub_a :pa_sub_a)
+
+# Individual: :pa_sub_b (:pa_sub_b)
+
+ClassAssertion(owl:Thing :pa_sub_b)
+ObjectPropertyAssertion(:reflexive_p :pa_sub_b :pa_sub_b)
+
+# Individual: :pa_sym_a (:pa_sym_a)
+
+ClassAssertion(owl:Thing :pa_sym_a)
+ObjectPropertyAssertion(:pa_sym_p :pa_sym_a :pa_sym_b)
+ObjectPropertyAssertion(:reflexive_p :pa_sym_a :pa_sym_a)
+
+# Individual: :pa_sym_b (:pa_sym_b)
+
+ClassAssertion(owl:Thing :pa_sym_b)
+ObjectPropertyAssertion(:pa_sym_p :pa_sym_b :pa_sym_a)
+ObjectPropertyAssertion(:reflexive_p :pa_sym_b :pa_sym_b)
+
+# Individual: :pa_trans_a (:pa_trans_a)
+
+ClassAssertion(owl:Thing :pa_trans_a)
+ObjectPropertyAssertion(:pa_trans_p :pa_trans_a :pa_trans_b)
+ObjectPropertyAssertion(:pa_trans_p :pa_trans_a :pa_trans_c)
+ObjectPropertyAssertion(:reflexive_p :pa_trans_a :pa_trans_a)
+
+# Individual: :pa_trans_b (:pa_trans_b)
+
+ClassAssertion(owl:Thing :pa_trans_b)
+ObjectPropertyAssertion(:pa_trans_p :pa_trans_b :pa_trans_c)
+ObjectPropertyAssertion(:reflexive_p :pa_trans_b :pa_trans_b)
+
+# Individual: :pa_trans_c (:pa_trans_c)
+
+ClassAssertion(owl:Thing :pa_trans_c)
+ObjectPropertyAssertion(:reflexive_p :pa_trans_c :pa_trans_c)
+
+# Individual: :reflexive_a (:reflexive_a)
+
+ClassAssertion(:reflexive_A :reflexive_a)
+ObjectPropertyAssertion(:reflexive_p :reflexive_a :reflexive_a)
+
+# Individual: :same_chain_a (:same_chain_a)
+
+ClassAssertion(:same_chain_A :same_chain_a)
+SameIndividual(:same_chain_a :same_chain_b)
+ObjectPropertyAssertion(:reflexive_p :same_chain_a :same_chain_a)
+ObjectPropertyAssertion(:reflexive_p :same_chain_a :same_chain_b)
+ObjectPropertyAssertion(:reflexive_p :same_chain_a :same_chain_c)
+
+# Individual: :same_chain_b (:same_chain_b)
+
+ClassAssertion(:same_chain_A :same_chain_b)
+SameIndividual(:same_chain_b :same_chain_c)
+ObjectPropertyAssertion(:reflexive_p :same_chain_b :same_chain_a)
+ObjectPropertyAssertion(:reflexive_p :same_chain_b :same_chain_b)
+ObjectPropertyAssertion(:reflexive_p :same_chain_b :same_chain_c)
+
+# Individual: :same_chain_c (:same_chain_c)
+
+ClassAssertion(:same_chain_A :same_chain_c)
+ObjectPropertyAssertion(:reflexive_p :same_chain_c :same_chain_a)
+ObjectPropertyAssertion(:reflexive_p :same_chain_c :same_chain_b)
+ObjectPropertyAssertion(:reflexive_p :same_chain_c :same_chain_c)
+
+# Individual: :self_a (:self_a)
+
+ClassAssertion(owl:Thing :self_a)
+ClassAssertion(ObjectHasSelf(:self_p) :self_a)
+ObjectPropertyAssertion(:reflexive_p :self_a :self_a)
+ObjectPropertyAssertion(:self_p :self_a :self_a)
+
+# Individual: :sub_invexpr_a (:sub_invexpr_a)
+
+ClassAssertion(owl:Thing :sub_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :sub_invexpr_a :sub_invexpr_a)
+ObjectPropertyAssertion(:sub_invexpr_p :sub_invexpr_a :sub_invexpr_b)
+
+# Individual: :sub_invexpr_b (:sub_invexpr_b)
+
+ClassAssertion(owl:Thing :sub_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :sub_invexpr_b :sub_invexpr_b)
+
+# Individual: :sup_invexpr_a (:sup_invexpr_a)
+
+ClassAssertion(owl:Thing :sup_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :sup_invexpr_a :sup_invexpr_a)
+ObjectPropertyAssertion(:sup_invexpr_p :sup_invexpr_a :sup_invexpr_b)
+
+# Individual: :sup_invexpr_b (:sup_invexpr_b)
+
+ClassAssertion(owl:Thing :sup_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :sup_invexpr_b :sup_invexpr_b)
+
+# Individual: :sym_invexpr_a (:sym_invexpr_a)
+
+ClassAssertion(owl:Thing :sym_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :sym_invexpr_a :sym_invexpr_a)
+ObjectPropertyAssertion(:sym_invexpr_p :sym_invexpr_a :sym_invexpr_b)
+
+# Individual: :sym_invexpr_b (:sym_invexpr_b)
+
+ClassAssertion(owl:Thing :sym_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :sym_invexpr_b :sym_invexpr_b)
+
+# Individual: :top_prop_a (:top_prop_a)
+
+ClassAssertion(owl:Thing :top_prop_a)
+ObjectPropertyAssertion(:reflexive_p :top_prop_a :top_prop_a)
+ObjectPropertyAssertion(:top_prop_p :top_prop_a :top_prop_b)
+
+# Individual: :top_prop_b (:top_prop_b)
+
+ClassAssertion(owl:Thing :top_prop_b)
+ObjectPropertyAssertion(:reflexive_p :top_prop_b :top_prop_b)
+
+# Individual: :top_prop_c (:top_prop_c)
+
+ClassAssertion(owl:Thing :top_prop_c)
+ClassAssertion(ObjectSomeValuesFrom(owl:topObjectProperty :top_prop_B) :top_prop_c)
+ObjectPropertyAssertion(:reflexive_p :top_prop_c :top_prop_c)
+
+# Individual: :trans_invexpr_a (:trans_invexpr_a)
+
+ClassAssertion(owl:Thing :trans_invexpr_a)
+ObjectPropertyAssertion(:reflexive_p :trans_invexpr_a :trans_invexpr_a)
+ObjectPropertyAssertion(:trans_invexpr_p :trans_invexpr_a :trans_invexpr_b)
+
+# Individual: :trans_invexpr_b (:trans_invexpr_b)
+
+ClassAssertion(owl:Thing :trans_invexpr_b)
+ObjectPropertyAssertion(:reflexive_p :trans_invexpr_b :trans_invexpr_b)
+ObjectPropertyAssertion(:trans_invexpr_p :trans_invexpr_b :trans_invexpr_c)
+
+# Individual: :trans_invexpr_c (:trans_invexpr_c)
+
+ClassAssertion(owl:Thing :trans_invexpr_c)
+ObjectPropertyAssertion(:reflexive_p :trans_invexpr_c :trans_invexpr_c)
+
+# Individual: :u_same_only_a (:u_same_only_a)
+
+ClassAssertion(:u_same_only_A :u_same_only_a)
+SameIndividual(:u_same_only_a :u_same_only_c)
+ObjectPropertyAssertion(:reflexive_p :u_same_only_a :u_same_only_a)
+ObjectPropertyAssertion(:reflexive_p :u_same_only_a :u_same_only_c)
+
+# Individual: :u_same_only_c (:u_same_only_c)
+
+ClassAssertion(:u_same_only_A :u_same_only_c)
+ObjectPropertyAssertion(:reflexive_p :u_same_only_c :u_same_only_a)
+ObjectPropertyAssertion(:reflexive_p :u_same_only_c :u_same_only_c)
+
+
+SubClassOf(ObjectSomeValuesFrom(:i_inv_exist_pi ObjectOneOf(:i_inv_exist_a)) :i_inv_exist_D)
+SubClassOf(ObjectSomeValuesFrom(:i_same_exist_p ObjectOneOf(:i_same_exist_c)) :i_same_exist_D)
+SubClassOf(ObjectSomeValuesFrom(:i_trans_exist_p ObjectOneOf(:i_trans_exist_c)) :i_trans_exist_D)
+
+DifferentIndividuals(:diff_only_a :diff_only_c)
+ObjectPropertyAssertion(ObjectInverseOf(:anon_s11_p) _:genid2147483648 :anon_s11_a)
+ObjectPropertyAssertion(:anon_s4_p _:genid2147483653 :anon_s4_a)
+NegativeObjectPropertyAssertion(:anon_s7_p _:genid2147483656 :anon_s7_a)
+DataPropertyAssertion(:anon_s8_dp _:genid2147483657 "1")
+SubObjectPropertyOf(ObjectInverseOf(:sub_invexpr_p) :sub_invexpr_r)
+FunctionalObjectProperty(ObjectInverseOf(:func_invexpr_p))
+SymmetricObjectProperty(ObjectInverseOf(:sym_invexpr_p))
+TransitiveObjectProperty(ObjectInverseOf(:trans_invexpr_p))
+IrreflexiveObjectProperty(ObjectInverseOf(:irrefl_invexpr_p))
+SubObjectPropertyOf(ObjectPropertyChain(:i_chain_domain_p :i_chain_domain_q) :i_chain_domain_s)
+SubObjectPropertyOf(ObjectPropertyChain(:pa_chain_p :pa_chain_q) :pa_chain_s)
+SubObjectPropertyOf(ObjectPropertyChain(ObjectInverseOf(:chain_invexpr_p) :chain_invexpr_r) :chain_invexpr_s)
+)

@@ -32,6 +32,9 @@ use crate::model::Model;
 const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_DESCRIPTION: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Description";
+const RDFS_SUB_PROPERTY_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
+const RDFS_DOMAIN: &str = "http://www.w3.org/2000/01/rdf-schema#domain";
+const RDFS_RANGE: &str = "http://www.w3.org/2000/01/rdf-schema#range";
 const OWL: &str = "http://www.w3.org/2002/07/owl#";
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
@@ -107,7 +110,12 @@ pub fn save<W: std::io::Write>(model: &mut Model, prefixes: &[(String, String)],
         return crate::io::turtle::save_plain(model, prefixes, w);
     }
     let xml = String::from_utf8(xml).map_err(|e| anyhow!("RDF/XML output is not valid UTF-8: {e}"))?;
-    let (items, trailer) = parse(&xml)?;
+    let declared_aps: std::collections::HashSet<String> = crate::io::entities::declared(model)
+        .into_iter()
+        .filter(|(kind, _)| *kind == crate::io::entities::Kind::AnnotationProperty)
+        .map(|(_, iri)| iri)
+        .collect();
+    let (items, trailer) = parse(&xml, &declared_aps)?;
     let ontology_iri = crate::cmd::merge::ontology_iri(model);
 
     let pm = PrefixManager::new(ontology_iri.as_deref(), prefixes);
@@ -150,7 +158,8 @@ pub fn save<W: std::io::Write>(model: &mut Model, prefixes: &[(String, String)],
 // ---------------------------------------------------------------------------
 
 /// The document's items, and the text of its closing comment.
-fn parse(xml: &str) -> Result<(Vec<Item>, String)> {
+/// `declared_aps` are the annotation properties the ontology declares.
+fn parse(xml: &str, declared_aps: &std::collections::HashSet<String>) -> Result<(Vec<Item>, String)> {
     let mut r = NsReader::from_str(xml);
     let mut items = Vec::new();
     let mut trailer = String::new();
@@ -163,11 +172,11 @@ fn parse(xml: &str) -> Result<(Vec<Item>, String)> {
                 depth = 1;
             }
             Event::Start(e) => {
-                let node = node(&mut r, &e, false)?;
+                let node = node(&mut r, &e, false, declared_aps)?;
                 push_node(&mut items, node, &mut commented);
             }
             Event::Empty(e) if depth == 1 => {
-                let node = node(&mut r, &e, true)?;
+                let node = node(&mut r, &e, true, declared_aps)?;
                 push_node(&mut items, node, &mut commented);
             }
             Event::End(_) => depth = 0,
@@ -251,7 +260,12 @@ fn attrs(r: &NsReader<&[u8]>, e: &BytesStart) -> Result<Attrs> {
 }
 
 /// A node element and everything inside it.
-fn node(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Node> {
+fn node(
+    r: &mut NsReader<&[u8]>,
+    e: &BytesStart,
+    empty: bool,
+    declared_aps: &std::collections::HashSet<String>,
+) -> Result<Node> {
     let element = resolve(r, e.name(), false);
     let a = attrs(r, e)?;
     let subject = match (a.about, a.node_id) {
@@ -263,8 +277,8 @@ fn node(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Node> {
     if !empty {
         loop {
             match r.read_event()? {
-                Event::Start(p) => triples.push(property(r, &p, false)?),
-                Event::Empty(p) => triples.push(property(r, &p, true)?),
+                Event::Start(p) => triples.push(property(r, &p, false, declared_aps)?),
+                Event::Empty(p) => triples.push(property(r, &p, true, declared_aps)?),
                 Event::End(_) => break,
                 Event::Eof => return Err(anyhow!("RDF/XML ends inside a node element")),
                 _ => {}
@@ -272,13 +286,18 @@ fn node(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<Node> {
         }
     }
     if element != RDF_DESCRIPTION {
-        place_type(&subject, &element, &mut triples);
+        place_type(&subject, &element, &mut triples, declared_aps);
     }
     Ok(Node { subject, triples })
 }
 
 /// A property element: the predicate and its object.
-fn property(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<(String, Obj)> {
+fn property(
+    r: &mut NsReader<&[u8]>,
+    e: &BytesStart,
+    empty: bool,
+    declared_aps: &std::collections::HashSet<String>,
+) -> Result<(String, Obj)> {
     let pred = resolve(r, e.name(), false);
     let a = attrs(r, e)?;
     let fixed = match (&a.resource, &a.node_id) {
@@ -305,8 +324,8 @@ fn property(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<(Str
         let mut items = Vec::new();
         loop {
             match r.read_event()? {
-                Event::Start(n) => items.push(item(node(r, &n, false)?)),
-                Event::Empty(n) => items.push(item(node(r, &n, true)?)),
+                Event::Start(n) => items.push(item(node(r, &n, false, declared_aps)?)),
+                Event::Empty(n) => items.push(item(node(r, &n, true, declared_aps)?)),
                 Event::End(_) => break,
                 Event::Eof => return Err(anyhow!("RDF/XML ends inside a collection")),
                 _ => {}
@@ -320,8 +339,8 @@ fn property(r: &mut NsReader<&[u8]>, e: &BytesStart, empty: bool) -> Result<(Str
         match r.read_event()? {
             Event::Text(t) => text.push_str(&t.unescape()?),
             Event::CData(t) => text.push_str(&String::from_utf8_lossy(&t.into_inner())),
-            Event::Start(n) => nested = Some(item(node(r, &n, false)?)),
-            Event::Empty(n) => nested = Some(item(node(r, &n, true)?)),
+            Event::Start(n) => nested = Some(item(node(r, &n, false, declared_aps)?)),
+            Event::Empty(n) => nested = Some(item(node(r, &n, true, declared_aps)?)),
             Event::End(_) => break,
             Event::Eof => return Err(anyhow!("RDF/XML ends inside a property element")),
             _ => {}
@@ -354,7 +373,12 @@ fn skip_to_end(r: &mut NsReader<&[u8]>) -> Result<()> {
 
 /// Put the type a node element is named after among the node's other triples,
 /// where it was translated.
-fn place_type(subject: &Subject, ty: &str, triples: &mut Vec<(String, Obj)>) {
+fn place_type(
+    subject: &Subject,
+    ty: &str,
+    triples: &mut Vec<(String, Obj)>,
+    declared_aps: &std::collections::HashSet<String>,
+) {
     let is_type = |t: &(String, Obj)| t.0 == RDF_TYPE;
     let type_iri = |t: &(String, Obj)| match &t.1 {
         Obj::Iri(i) if t.0 == RDF_TYPE => Some(i.clone()),
@@ -375,6 +399,15 @@ fn place_type(subject: &Subject, ty: &str, triples: &mut Vec<(String, Obj)>) {
             i += 1;
         }
         i
+    } else if matches!(subject, Subject::Iri(iri) if ty == format!("{OWL}AnnotationProperty") && !declared_aps.contains(iri)) {
+        // An annotation property the ontology does not declare is typed where its
+        // first sub-property, domain or range axiom is translated, which comes
+        // after its annotation assertions; with none of those it is typed by a
+        // declaration, ahead of everything.
+        triples
+            .iter()
+            .position(|t| matches!(t.0.as_str(), RDFS_SUB_PROPERTY_OF | RDFS_DOMAIN | RDFS_RANGE))
+            .unwrap_or(0)
     } else if matches!(subject, Subject::Iri(_)) {
         // Declared: the last of the subject's declared types.
         triples.iter().take_while(|t| declared(t)).count()

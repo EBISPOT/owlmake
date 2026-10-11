@@ -11,6 +11,15 @@
 /// the closing `"`, `""` inside it is a literal quote, and the delimiter and line
 /// breaks inside it are data. A blank line yields no record.
 pub fn read(text: &str, delim: char) -> Vec<Vec<String>> {
+    read_records(text, delim, false)
+}
+
+/// [`read`], where a blank line is a record of one empty field.
+pub fn read_with_blank_lines(text: &str, delim: char) -> Vec<Vec<String>> {
+    read_records(text, delim, true)
+}
+
+fn read_records(text: &str, delim: char, blank_lines: bool) -> Vec<Vec<String>> {
     let mut records = Vec::new();
     let mut record: Vec<String> = Vec::new();
     let mut field = String::new();
@@ -38,8 +47,7 @@ pub fn read(text: &str, delim: char) -> Vec<Vec<String>> {
             '\r' => {}
             '\n' => {
                 record.push(std::mem::take(&mut field));
-                // A wholly blank line is skipped, not read as an empty row.
-                if !(record.len() == 1 && record[0].is_empty()) {
+                if blank_lines || !(record.len() == 1 && record[0].is_empty()) {
                     records.push(std::mem::take(&mut record));
                 } else {
                     record.clear();

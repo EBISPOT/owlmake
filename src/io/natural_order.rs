@@ -375,7 +375,7 @@ impl NaturalOrder {
         }
     }
 
-    fn darg(&self, a: &DArgument<RcStr>, b: &DArgument<RcStr>) -> Ordering {
+    pub(crate) fn darg(&self, a: &DArgument<RcStr>, b: &DArgument<RcStr>) -> Ordering {
         // A variable (6006) precedes a literal argument (6008).
         match (a, b) {
             (DArgument::Variable(x), DArgument::Variable(y)) => iri_cmp(x.0.as_ref(), y.0.as_ref()),
@@ -418,7 +418,7 @@ impl NaturalOrder {
                 .then_with(|| self.iarg(&aa.1, &ab.1)),
             (Atom::DataPropertyAtom { pred: pa, args: aa }, Atom::DataPropertyAtom { pred: pb, args: ab }) => {
                 iri_cmp(pa.0.as_ref(), pb.0.as_ref())
-                    .then_with(|| self.darg(&aa.0, &ab.0))
+                    .then_with(|| self.iarg(&aa.0, &ab.0))
                     .then_with(|| self.darg(&aa.1, &ab.1))
             }
             (Atom::BuiltInAtom { pred: pa, args: aa }, Atom::BuiltInAtom { pred: pb, args: ab }) => {

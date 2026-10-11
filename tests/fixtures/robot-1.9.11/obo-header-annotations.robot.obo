@@ -1,0 +1,33 @@
+format-version: 1.2
+default-namespace: dn
+idspace: dc http://purl.org/dc/elements/1.1/ 
+idspace: dcterms http://purl.org/dc/terms/ 
+idspace: oboInOwl http://www.geneontology.org/formats/oboInOwl# 
+remark: c1 {comment="q"}
+remark: say \"hi\" \{x\}
+ontology: h
+property_value: dc:creator "me" xsd:string {comment="by whom"}
+property_value: seeAlso http://example.org/x
+owl-axioms: Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\nPrefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)\nPrefix(xml:=<http://www.w3.org/XML/1998/namespace>)\nPrefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\nPrefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\n\nOntology(\nDeclaration(Class(<http://example.org/h#A>))\nDeclaration(Class(<http://example.org/h#B>))\nDeclaration(Class(<http://example.org/h#C>))\nDeclaration(AnnotationProperty(<http://purl.org/dc/terms/date>))\nDeclaration(Datatype(<http://example.org/dt>))\nDeclaration(Datatype(xsd:date))\n\n\n############################\n#   Classes\n############################\n\n# Class: <http://example.org/h#A> (<http://example.org/h#A>)\n\nAnnotationAssertion(<http://purl.org/dc/terms/date> <http://example.org/h#A> \"2024-01-01\"^^xsd:date)\nAnnotationAssertion(rdfs:seeAlso <http://example.org/h#A> \"lit\"^^<http://example.org/dt>)\nDisjointUnion(<http://example.org/h#A> <http://example.org/h#B> <http://example.org/h#C>)\n\n# Class: <http://example.org/h#C> (<http://example.org/h#C>)\n\nAnnotationAssertion(rdfs:comment <http://example.org/h#C> \"  \")\n\n\n)
+xref: DB:1
+xref: <DB:2 \"xl\">
+def: a def [PMID:1]
+is_metadata_tag: true
+treat-xrefs-as-has-subclass: X
+logical-definition-view-relation: part_of
+treat-xrefs-as-reverse-genus-differentia: Y part_of Z
+synonym: hsyn EXACT
+namespace: ns
+name: H label
+
+[Term]
+id: A
+name: A
+property_value: seeAlso "xl" http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral
+
+[Term]
+id: B
+
+[Term]
+id: C
+

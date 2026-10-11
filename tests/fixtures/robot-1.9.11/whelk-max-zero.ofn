@@ -1,0 +1,23 @@
+Prefix(:=<http://example.org/whelk-max-zero#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/whelk-max-zero>
+
+Declaration(Class(:C))
+Declaration(Class(:G))
+Declaration(Class(:K))
+Declaration(Class(:L))
+Declaration(ObjectProperty(:p))
+
+SubClassOf(:C ObjectMaxCardinality(0 :p))
+SubClassOf(:C ObjectSomeValuesFrom(:p :G))
+SubClassOf(:K ObjectMaxCardinality(0 :p :G))
+SubClassOf(:K ObjectSomeValuesFrom(:p :G))
+SubClassOf(:L ObjectMaxCardinality(0 :p :G))
+SubClassOf(:L ObjectSomeValuesFrom(:p :L))
+)

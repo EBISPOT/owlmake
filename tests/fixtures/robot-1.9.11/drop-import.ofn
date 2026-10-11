@@ -1,0 +1,8 @@
+Prefix(:=<http://example.org/p#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/parent.owl>
+Import(<http://example.org/drop-import-child.owl>)
+Declaration(Class(:A))
+Declaration(Class(:B))
+SubClassOf(Annotation(rdfs:comment "own") :B :A)
+)

@@ -113,10 +113,8 @@ fn mireot_keeps_hierarchy_up_to_upper_term() {
         sub(&b, "B", "C"),
         sub(&b, "C", "D"),
     ]);
-    let lower: HashSet<String> = [format!("{NS}A")].into_iter().collect();
-    let upper: HashSet<String> = [format!("{NS}C")].into_iter().collect();
-
-    let module = extract::mireot(&m, &lower, &upper);
+    let module =
+        extract::mireot(&m, &[format!("{NS}A")], &[format!("{NS}C")], &[], false, extract::Intermediates::All).unwrap();
     assert!(has_sub(&module, "A", "B"));
     assert!(has_sub(&module, "B", "C"));
     assert!(!has_sub(&module, "C", "D"), "MIREOT must stop at the upper term");

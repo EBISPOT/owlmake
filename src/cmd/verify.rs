@@ -30,10 +30,10 @@ pub struct Args {
     /// this says.
     #[arg(long = "format", hide = true)]
     pub format: Option<String>,
-    /// Logging level at which a non-empty result causes failure.
-    /// `none`/`false` reports violations without failing the command.
-    #[arg(short = 'F', long = "fail-on-violation")]
-    pub fail_on_violation: Option<String>,
+    /// If false, report violations without failing the command (`<bool>`,
+    /// default true).
+    #[arg(short = 'F', long = "fail-on-violation", num_args = 1, value_parser = crate::cmd::BoolParser)]
+    pub fail_on_violation: Option<bool>,
     #[command(flatten)]
     pub common: crate::cmd::CommonArgs,
 }
@@ -58,12 +58,7 @@ pub fn step(
     args.common.apply(&mut model)?;
     let q = Queryable::from_model(&model)?;
 
-    // Whether to actually fail the command on violations. The default is to fail
-    // on any violation; `--fail-on-violation none|false` only reports.
-    let fail = match args.fail_on_violation.as_deref() {
-        Some(s) if s.eq_ignore_ascii_case("none") || s.eq_ignore_ascii_case("false") => false,
-        _ => true,
-    };
+    let fail = args.fail_on_violation.unwrap_or(true);
 
     let mut total_violations = 0usize;
     for qpath in &args.queries {
@@ -180,7 +175,7 @@ mod tests {
             queries: vec![query],
             output_dir: Some(dir.join("reports")),
             format: None,
-            fail_on_violation: Some("none".into()),
+            fail_on_violation: Some(false),
             common: Default::default(),
         };
         step(None, &args).unwrap();

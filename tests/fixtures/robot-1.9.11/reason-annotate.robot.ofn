@@ -1,0 +1,48 @@
+Prefix(:=<http://example.org/inf.owl#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/inf.owl>
+
+Declaration(Class(<http://example.org/A>))
+Declaration(Class(<http://example.org/B>))
+Declaration(Class(<http://example.org/C>))
+Declaration(Class(<http://example.org/D>))
+Declaration(Class(<http://example.org/E>))
+Declaration(ObjectProperty(<http://example.org/p>))
+Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#is_inferred>))
+
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/A> (<http://example.org/A>)
+
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> "true") <http://example.org/A> <http://example.org/B>)
+
+# Class: <http://example.org/B> (<http://example.org/B>)
+
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> "true") <http://example.org/B> <http://example.org/C>)
+
+# Class: <http://example.org/C> (<http://example.org/C>)
+
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> "true") <http://example.org/C> owl:Thing)
+
+# Class: <http://example.org/D> (<http://example.org/D>)
+
+EquivalentClasses(<http://example.org/D> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/C>))
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> "true") <http://example.org/D> owl:Thing)
+
+# Class: <http://example.org/E> (<http://example.org/E>)
+
+SubClassOf(Annotation(<http://www.geneontology.org/formats/oboInOwl#is_inferred> "true") <http://example.org/E> <http://example.org/D>)
+SubClassOf(<http://example.org/E> ObjectSomeValuesFrom(<http://example.org/p> <http://example.org/A>))
+
+
+)

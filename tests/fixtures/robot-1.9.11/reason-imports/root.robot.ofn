@@ -1,0 +1,56 @@
+Prefix(:=<http://example.org/root3#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(<http://example.org/root3>
+<http://example.org/root3/v1>
+Import(<http://example.org/imp2>)
+Annotation(rdfs:comment "header")
+
+Declaration(Class(:E))
+Declaration(Class(:F))
+Declaration(NamedIndividual(:s))
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/imp2#C> (<http://example.org/imp2#C>)
+
+SubClassOf(<http://example.org/imp2#C> <http://example.org/imp2#D>)
+
+# Class: <http://example.org/imp2#D> (<http://example.org/imp2#D>)
+
+SubClassOf(<http://example.org/imp2#D> owl:Thing)
+
+# Class: :E (e)
+
+AnnotationAssertion(rdfs:label :E "e")
+SubClassOf(:E <http://example.org/imp2#C>)
+SubClassOf(Annotation(rdfs:comment "own") :E <http://example.org/imp2#D>)
+
+# Class: :F (f)
+
+AnnotationAssertion(rdfs:label :F "f")
+SubClassOf(:F owl:Thing)
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/imp2#r> (<http://example.org/imp2#r>)
+
+ClassAssertion(<http://example.org/imp2#C> <http://example.org/imp2#r>)
+
+# Individual: :s (:s)
+
+ClassAssertion(:E :s)
+
+
+)

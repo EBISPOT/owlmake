@@ -1,0 +1,103 @@
+Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: xml: <http://www.w3.org/XML/1998/namespace>
+Prefix: xsd: <http://www.w3.org/2001/XMLSchema#>
+Prefix: : <http://example.org/keys>
+
+
+
+Ontology: <http://example.org/keys>
+
+
+AnnotationProperty: rdfs:comment
+
+    
+Datatype: xsd:string
+
+    
+ObjectProperty: <http://example.org/keys#r>
+
+    
+DataProperty: <http://example.org/keys#d>
+
+    
+Class: <http://example.org/keys#A10>
+
+    
+Class: <http://example.org/keys#A11>
+
+    HasKey: 
+        
+    
+    
+Class: <http://example.org/keys#A12>
+
+    
+Class: <http://example.org/keys#A13>
+
+    
+Class: <http://example.org/keys#A14>
+
+    HasKey: 
+        <http://example.org/keys#r>, 
+        <http://example.org/keys#d>
+    
+    
+Class: <http://example.org/keys#A1>
+
+    
+Class: <http://example.org/keys#A4>
+
+    
+Class: <http://example.org/keys#A5>
+
+    
+Class: <http://example.org/keys#A6>
+
+    
+Class: <http://example.org/keys#A8>
+
+    
+Class: <http://example.org/keys#A9>
+
+    
+Class: <http://example.org/keys#B10>
+
+    
+Class: <http://example.org/keys#B12>
+
+    
+Class: <http://example.org/keys#B13>
+
+    
+Class: <http://example.org/keys#B1>
+
+    
+Class: <http://example.org/keys#B6>
+
+    
+Class: <http://example.org/keys#B8>
+
+    
+Class: <http://example.org/keys#B9>
+
+    
+Class: <http://example.org/keys#C12>
+
+    SubClassOf: 
+        <http://example.org/keys#A12> or <http://example.org/keys#B12>
+    
+    
+Individual: <http://example.org/keys#i7>
+
+    
+Individual: <http://example.org/keys#j7>
+
+    
+Class: <http://example.org/keys#A8> or <http://example.org/keys#B8>
+
+    SubClassOf: 
+        <http://example.org/keys#A8>
+    
+    

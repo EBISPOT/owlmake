@@ -189,7 +189,7 @@ pub fn step(piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     };
     let html = format.starts_with("html");
 
-    let ctx = Ctx::new(&model, &args.common)?;
+    let ctx = Ctx::new(&model)?;
     let names = java_split(header, '|');
     if names.is_empty() {
         bail!("export: --header '{header}' names no column");
@@ -583,9 +583,10 @@ fn string_set_order(values: Vec<String>) -> Vec<String> {
 }
 
 impl<'m> Ctx<'m> {
-    fn new(model: &'m Model, common: &crate::cmd::CommonArgs) -> Result<Ctx<'m>> {
-        let order = NaturalOrder::new(model.plain_literals_typed);
-        let terms = prefix_map(common)?;
+    fn new(model: &'m Model) -> Result<Ctx<'m>> {
+        let order = model.natural_order();
+        // CURIEs are written and read with the command line's context.
+        let terms = model.context.entries();
         let mut curies = terms.clone();
         // Longest namespace first; namespaces of one length in the order bound.
         curies.sort_by_key(|(_, ns)| std::cmp::Reverse(ns.encode_utf16().count()));
@@ -604,7 +605,7 @@ impl<'m> Ctx<'m> {
                     root_label_count += 1;
                     if let (AnnotationSubject::IRI(s), AnnotationValue::Literal(l)) = (&aa.subject, &aa.ann.av) {
                         let subject: &str = s.as_ref();
-                        let h = annotation_assertion_hash(subject, RDFS_LABEL, &aa.ann.av, &ac.ann);
+                        let h = annotation_assertion_hash(subject, RDFS_LABEL, &aa.ann.av, &ac.ann, order);
                         root_labels.push((h, l.literal().as_str(), subject));
                     }
                 }
@@ -1104,7 +1105,7 @@ impl<'m> Ctx<'m> {
         for ce in expressions {
             let ce: &'a CE<RcStr> = ce;
             let (mut display, mut sort) = (Vec::new(), Vec::new());
-            for conjunct in conjuncts(ce) {
+            for conjunct in conjuncts(ce, self.order) {
                 let Some((f, n)) = filler(conjunct) else { continue };
                 let anonymous = f.is_anonymous();
                 if !((anonymous && col.anonymous) || (!anonymous && col.named)) {
@@ -1350,9 +1351,9 @@ impl<'a> ObjectRef<'a> {
 }
 
 /// The conjuncts of an expression: an intersection's operands, nested
-/// intersections flattened, in the order a set of them is held; anything else
-/// alone.
-fn conjuncts(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
+/// intersections flattened, in the order a set of them is held, each hashed in
+/// the document's natural order; anything else alone.
+fn conjuncts(ce: &CE<RcStr>, order: NaturalOrder) -> Vec<&CE<RcStr>> {
     fn gather<'a>(ce: &'a CE<RcStr>, out: &mut Vec<&'a CE<RcStr>>) {
         match ce {
             CE::ObjectIntersectionOf(ops) => {
@@ -1371,7 +1372,7 @@ fn conjuncts(ce: &CE<RcStr>) -> Vec<&CE<RcStr>> {
     gather(ce, &mut out);
     let cap = java_hashset_capacity(out.len()) as u32;
     out.sort_by_key(|c| {
-        let h = crate::owlapi_hash::ce_hash(c) as u32;
+        let h = crate::owlapi_hash::ce_hash(c, order) as u32;
         (h ^ (h >> 16)) & (cap - 1)
     });
     out
@@ -1501,43 +1502,6 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::NamedIndividual => "Named individual",
         Kind::Datatype => "Datatype",
     }
-}
-
-/// The prefixes CURIEs are written and read with: the built-in map (or the
-/// `--prefixes` file in its place, or none with `--noprefixes`), then
-/// `--add-prefixes`, then each `--prefix` and `--add-prefix`. A prefix bound
-/// again keeps its place and takes the later namespace.
-fn prefix_map(common: &crate::cmd::CommonArgs) -> Result<Vec<(String, String)>> {
-    let mut map: Vec<(String, String)> = Vec::new();
-    let bind = |map: &mut Vec<(String, String)>, name: String, ns: String| {
-        match map.iter_mut().find(|(p, _)| *p == name) {
-            Some(slot) => slot.1 = ns,
-            None => map.push((name, ns)),
-        }
-    };
-    if let Some(file) = &common.prefixes {
-        let only = crate::cmd::CommonArgs { prefixes: Some(file.clone()), ..Default::default() };
-        for (name, ns) in only.given_prefixes()? {
-            bind(&mut map, name, ns);
-        }
-    } else if !common.noprefixes {
-        for (name, ns) in crate::report::obo_context_prefixes() {
-            bind(&mut map, name.clone(), ns.clone());
-        }
-    }
-    for file in &common.add_prefixes {
-        let only = crate::cmd::CommonArgs { add_prefixes: vec![file.clone()], ..Default::default() };
-        for (name, ns) in only.given_prefixes()? {
-            bind(&mut map, name, ns);
-        }
-    }
-    for spec in common.prefix.iter().chain(&common.add_prefix) {
-        let (name, ns) = spec
-            .split_once(':')
-            .with_context(|| format!("export: bad prefix (want \"name: iri\"): {spec}"))?;
-        bind(&mut map, name.trim().to_string(), ns.trim().to_string());
-    }
-    Ok(map)
 }
 
 // === Sorting and writing ==================================================

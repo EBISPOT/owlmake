@@ -1,0 +1,7 @@
+Prefix(:=<http://example.org/class-assertions-unsatisfiable-thing#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Ontology(<http://example.org/class-assertions-unsatisfiable-thing>
+Declaration(Class(:A))
+Declaration(NamedIndividual(:i))
+SubClassOf(owl:Thing owl:Nothing)
+)

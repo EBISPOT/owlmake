@@ -164,7 +164,9 @@ impl Default for ExtractOptions {
 
 /// Extract a locality-based module for `seed` from `model` with default options.
 pub fn extract(model: &Model, seed: &HashSet<String>, method: Method) -> Model {
-    extract_with(model, seed, method, &ExtractOptions::default())
+    let opts = ExtractOptions::default();
+    let module = select_individuals(locality(model, seed, method, &opts), &opts);
+    finish(module, model, &opts)
 }
 
 /// Extract a locality-based module, honoring the post-extraction `opts`.
@@ -173,7 +175,15 @@ pub fn extract_with(
     seed: &HashSet<String>,
     method: Method,
     opts: &ExtractOptions,
-) -> Model {
+) -> anyhow::Result<Model> {
+    let module = select_individuals(locality(model, seed, method, opts), opts);
+    let module = intermediates(module, seed, opts.intermediates)?;
+    Ok(finish(module, model, opts))
+}
+
+/// The locality-based module of `seed` in `model`, before the options that
+/// trim and annotate it.
+fn locality(model: &Model, seed: &HashSet<String>, method: Method, opts: &ExtractOptions) -> Model {
     let comps: Vec<Component<RcStr>> = model.ont.iter().map(|ac| ac.component.clone()).collect();
 
     // `--individuals exclude` is not a post-filter: every ABox axiom leaves the
@@ -211,12 +221,13 @@ pub fn extract_with(
     };
     let module: HashSet<usize> = module_idx.into_iter().collect();
 
-    let out = build_output(model, &comps, &module, &seed_sig);
-    post_process(out, model, seed, opts)
+    build_output(model, &comps, &module, &seed_sig)
 }
 
 /// The ⊥⊤*-module of exactly the axioms `comps` for the seed IRIs, as indices
-/// into `comps`. Each seed IRI enters as every kind of entity `comps` use it as.
+/// into `comps`: the non-local axioms, then every same- and
+/// different-individual axiom naming an individual of the seed or of those
+/// axioms. Each seed IRI enters as every kind of entity `comps` use it as.
 pub(crate) fn star_module_indices(comps: &[Component<RcStr>], seed: &HashSet<String>) -> Vec<usize> {
     let mut source_kinds: Sigma = Sigma::default();
     for c in comps {
@@ -228,7 +239,14 @@ pub(crate) fn star_module_indices(comps: &[Component<RcStr>], seed: &HashSet<Str
             seed_sig.add(k, iri);
         }
     }
-    star_module(comps, &seed_sig, &all_indices(comps))
+    let mut module = star_module(comps, &seed_sig, &all_indices(comps));
+    let mut sigma = seed_sig;
+    for &i in &module {
+        sigma.add_component(&comps[i]);
+    }
+    let held: HashSet<usize> = module.iter().copied().collect();
+    module.extend((0..comps.len()).filter(|i| !held.contains(i) && is_individual_identity_on(&comps[*i], &sigma)));
+    module
 }
 
 fn all_indices(comps: &[Component<RcStr>]) -> Vec<usize> {
@@ -440,19 +458,9 @@ fn build_output(
     out
 }
 
-/// Apply the post-extraction options to an assembled module: individual
-/// handling, intermediate collapsing, ontology-annotation copying, per-term
-/// source provenance, and the output IRI override.
-fn post_process(
-    mut module: Model,
-    source: &Model,
-    seed: &HashSet<String>,
-    opts: &ExtractOptions,
-) -> Model {
-    // A fresh IRI builder; interned IRIs compare by value across `Build`s.
-    let build: horned_owl::model::Build<RcStr> = horned_owl::model::Build::new();
-
-    // --individuals: drop or filter individual declarations/assertions.
+/// Apply `--individuals` to an assembled module: drop or filter individual
+/// declarations and assertions.
+fn select_individuals(mut module: Model, opts: &ExtractOptions) -> Model {
     if opts.individuals != Individuals::Include {
         let keep_defined = opts.individuals == Individuals::Definitions
             || opts.individuals == Individuals::Minimal;
@@ -508,10 +516,46 @@ fn post_process(
         }
     }
 
-    // --intermediates: collapse non-seed named classes.
-    if opts.intermediates != Intermediates::All {
-        module = collapse_intermediates(module, seed, opts.intermediates);
+    module
+}
+
+/// Apply `--intermediates` to a module of the terms `seed`. Under `minimal`
+/// the module is collapsed at threshold 2, keeping the terms. Under `none`
+/// every class goes but the terms and their asserted named superclasses, with
+/// every axiom naming one that goes, and nothing bridges across them.
+fn intermediates(mut module: Model, seed: &HashSet<String>, mode: Intermediates) -> anyhow::Result<Model> {
+    match mode {
+        Intermediates::All => Ok(module),
+        Intermediates::Minimal => Ok(crate::cmd::collapse::collapse(module, 2, seed)?.0),
+        Intermediates::None => {
+            let mut keep: HashSet<String> = seed.clone();
+            let mut classes: HashSet<String> = HashSet::new();
+            for ac in module.ont.iter() {
+                for (k, iri) in sig::typed_signature(&ac.component) {
+                    if k == sig::kind::CLASS {
+                        classes.insert(iri);
+                    }
+                }
+                if let Component::SubClassOf(sc) = &ac.component {
+                    if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
+                        if seed.contains(sub.0.as_ref()) {
+                            keep.insert(sup.0.to_string());
+                        }
+                    }
+                }
+            }
+            classes.retain(|c| !keep.contains(c) && c != OWL_THING && c != OWL_NOTHING);
+            crate::cmd::collapse::remove_classes(&mut module, &classes)?;
+            Ok(module)
+        }
     }
+}
+
+/// Apply the options that annotate a module and name it: ontology-annotation
+/// copying, per-term source provenance, and the output IRI override.
+fn finish(mut module: Model, source: &Model, opts: &ExtractOptions) -> Model {
+    // A fresh IRI builder; interned IRIs compare by value across `Build`s.
+    let build: horned_owl::model::Build<RcStr> = horned_owl::model::Build::new();
 
     // -c,--copy-ontology-annotations: copy the source's ontology annotations.
     if opts.copy_ontology_annotations {
@@ -576,7 +620,7 @@ fn post_process(
             ont.insert(ac);
         }
         ont.insert(Component::OntologyID(OntologyID {
-            iri: Some(build.iri(iri.as_str())),
+            iri: crate::model::ontology_iri_as_made(&build, iri),
             viri: None,
         }));
         let carried = std::mem::replace(&mut module, Model::new());
@@ -600,72 +644,6 @@ fn ontology_iri(model: &Model) -> Option<String> {
         }
     }
     None
-}
-
-/// Collapse intermediate (non-seed) named classes. For `none`, drop SubClassOf
-/// edges to/from non-seed classes and their declarations, keeping only seed
-/// terms. For `minimal`, re-link each kept class to its nearest seed ancestor so
-/// the seed hierarchy is preserved without the intermediates (best-effort: the
-/// rewiring follows the asserted hierarchy only).
-fn collapse_intermediates(model: Model, seed: &HashSet<String>, mode: Intermediates) -> Model {
-    // Build the asserted named-superclass map.
-    let mut parents: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
-                parents
-                    .entry(sub.0.as_ref().to_string())
-                    .or_default()
-                    .push(sup.0.as_ref().to_string());
-            }
-        }
-    }
-
-    // For `minimal`, compute, for each seed term, its nearest seed ancestors.
-    let mut new_edges: HashSet<(String, String)> = HashSet::new();
-    if mode == Intermediates::Minimal {
-        for s in seed {
-            let mut stack: Vec<String> = parents.get(s).cloned().unwrap_or_default();
-            let mut visited: HashSet<String> = HashSet::new();
-            while let Some(p) = stack.pop() {
-                if !visited.insert(p.clone()) {
-                    continue;
-                }
-                if seed.contains(&p) {
-                    new_edges.insert((s.clone(), p.clone()));
-                } else if let Some(gps) = parents.get(&p) {
-                    stack.extend(gps.iter().cloned());
-                }
-            }
-        }
-    }
-
-    let build: horned_owl::model::Build<RcStr> = horned_owl::model::Build::new();
-    let keep_class = |iri: &str| seed.contains(iri);
-    let mut out = crate::cmd::select::retain(model, |comp| match comp {
-        Component::DeclareClass(dc) => keep_class(dc.0 .0.as_ref()),
-        Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
-            (CE::Class(a), CE::Class(b)) => {
-                keep_class(a.0.as_ref()) && keep_class(b.0.as_ref())
-            }
-            // Keep class-to-expression axioms only if the subject is a seed term.
-            (CE::Class(a), _) => keep_class(a.0.as_ref()),
-            _ => true,
-        },
-        // Keep annotation assertions; declarations for dropped classes are gone
-        // but their labels are harmless, and a module keeps its term metadata.
-        _ => true,
-    });
-
-    // Re-link seed terms to their nearest seed ancestors (minimal only).
-    for (sub, sup) in new_edges {
-        out.ont.insert(Component::SubClassOf(horned_owl::model::SubClassOf {
-            sub: CE::Class(build.class(sub.as_str())),
-            sup: CE::Class(build.class(sup.as_str())),
-        }));
-    }
-    out
 }
 
 /// The datatype IRI of a typed literal annotation value. A literal's datatype is
@@ -1087,142 +1065,50 @@ fn is_top_ope(ope: &OPE<RcStr>, sigma: &Sigma, loc: Locality) -> bool {
 
 // --- MIREOT --------------------------------------------------------------
 
-/// MIREOT extraction: keep the named-class SubClassOf hierarchy connecting the
-/// `lower` seed terms up to the `upper` boundary terms (or to roots when no
-/// upper bound is given), plus declarations and annotations on those terms.
-pub fn mireot(model: &Model, lower: &HashSet<String>, upper: &HashSet<String>) -> Model {
-    mireot_with(model, lower, upper, &HashSet::new(), &ExtractOptions::default())
-}
-
-/// MIREOT extraction honoring the post-extraction `opts`. `lower`/`upper` bound
-/// an ancestor climb; `branch` terms contribute themselves, their descendants,
-/// and the subclass edges among that set — no climb.
-pub fn mireot_with(
+/// The MIREOT module of `model` (see [`crate::mireot`]): the `lower` terms with
+/// their ancestors up to the `upper` terms, and the `branch` terms with their
+/// descendants, each IRI naming every entity it is in `model`'s own signature.
+/// Lower terms given, even ones `model` does not name, give the module
+/// `model`'s ontology IRI and version IRI; branch terms alone give it none.
+/// Under `copy_ontology_annotations` it takes `model`'s ontology annotations
+/// and declares each property they use but the built-in ones.
+pub fn mireot(
     model: &Model,
-    lower: &HashSet<String>,
-    upper: &HashSet<String>,
-    branch: &HashSet<String>,
-    opts: &ExtractOptions,
-) -> Model {
-    let out = mireot_core(model, lower, upper, branch);
-    let mut seeds = lower.clone();
-    seeds.extend(branch.iter().cloned());
-    post_process(out, model, &seeds, opts)
-}
-
-fn mireot_core(
-    model: &Model,
-    lower: &HashSet<String>,
-    upper: &HashSet<String>,
-    branch: &HashSet<String>,
-) -> Model {
-    // Asserted named superclass edges.
-    let mut parents: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    for ac in model.ont.iter() {
-        if let Component::SubClassOf(sc) = &ac.component {
-            if let (CE::Class(sub), CE::Class(sup)) = (&sc.sub, &sc.sup) {
-                parents
-                    .entry(sub.0.as_ref().to_string())
-                    .or_default()
-                    .push(sup.0.as_ref().to_string());
-            }
-        }
-    }
-
-    // Walk up from each lower term, collecting terms and edges until reaching an
-    // upper-boundary term.
-    let mut keep_terms: HashSet<String> = HashSet::new();
-    let mut keep_edges: HashSet<(String, String)> = HashSet::new();
-    let mut stack: Vec<String> = lower.iter().cloned().collect();
-    keep_terms.extend(lower.iter().cloned());
-    while let Some(t) = stack.pop() {
-        if upper.contains(&t) {
-            continue; // boundary: include the term, but stop ascending
-        }
-        if let Some(sups) = parents.get(&t) {
-            for s in sups {
-                keep_edges.insert((t.clone(), s.clone()));
-                if keep_terms.insert(s.clone()) {
-                    stack.push(s.clone());
-                }
-            }
-        }
-    }
-
-    // Branch terms: the set itself, with the subclass edges INSIDE it. A branch
-    // member's superclass outside the set stays out — no ancestor climb.
-    keep_terms.extend(branch.iter().cloned());
-    for (sub, sups) in &parents {
-        if branch.contains(sub) {
-            for s in sups {
-                if branch.contains(s) {
-                    keep_edges.insert((sub.clone(), s.clone()));
-                }
-            }
-        }
-    }
-
-    let mut ont = SetOntology::new();
-    for ac in model.ont.iter() {
-        let keep = match &ac.component {
-            Component::SubClassOf(sc) => match (&sc.sub, &sc.sup) {
-                (CE::Class(sub), CE::Class(sup)) => keep_edges.contains(&(
-                    sub.0.as_ref().to_string(),
-                    sup.0.as_ref().to_string(),
-                )),
-                _ => false,
-            },
-            Component::DeclareClass(_) => {
-                sig::signature(&ac.component).iter().any(|s| keep_terms.contains(s))
-            }
-            Component::AnnotationAssertion(_) => is_annotation_on(&ac.component, &keep_terms),
-            // The module is a NEW, anonymous ontology: no ontology IRI, no
-            // version, no document IRI travels from the source.
-            Component::OntologyID(_) | Component::DocIRI(_) => false,
-            _ => false,
-        };
-        if keep {
-            ont.insert(ac.clone());
-        }
-    }
-
-    // The annotation PROPERTIES the module uses come with their own frames: any
-    // assertion in the source whose subject is a used property is copied, to a
-    // fixpoint (a property frame can use further properties, which then bring
-    // their frames too). Properties the source says nothing about stay bare.
-    let mut used_props: HashSet<String> = ont
-        .iter()
-        .filter_map(|ac| match &ac.component {
-            Component::AnnotationAssertion(aa) => Some(aa.ann.ap.0.as_ref().to_string()),
-            _ => None,
-        })
-        .collect();
-    loop {
-        let mut added = false;
-        for ac in model.ont.iter() {
-            if let Component::AnnotationAssertion(aa) = &ac.component {
-                if let horned_owl::model::AnnotationSubject::IRI(s) = &aa.subject {
-                    if used_props.contains(s.as_ref()) && ont.insert(ac.clone()) {
-                        added = true;
-                        used_props.insert(aa.ann.ap.0.as_ref().to_string());
-                    }
-                }
-            }
-        }
-        if !added {
-            break;
-        }
-    }
-    // Every annotation property the module uses is DECLARED — built-ins
-    // included; the module stands alone.
+    lower: &[String],
+    upper: &[String],
+    branch: &[String],
+    copy_ontology_annotations: bool,
+    intermediates: Intermediates,
+) -> anyhow::Result<Model> {
+    let closure = crate::mireot::closure_of(model)?;
+    let source = crate::mireot::Source::new(closure.as_ref().unwrap_or(model), model);
+    let (lower_terms, upper_terms, branch_terms) = (source.resolve(lower), source.resolve(upper), source.resolve(branch));
+    let spec = crate::mireot::Spec {
+        lower: &lower_terms,
+        upper: &upper_terms,
+        branch: &branch_terms,
+        only_annotations: None,
+        intermediates,
+    };
+    let mut ont = crate::mireot::module(&source, &spec)?;
     let build: horned_owl::model::Build<RcStr> = horned_owl::model::Build::new();
-    for p in &used_props {
-        ont.insert(Component::DeclareAnnotationProperty(
-            horned_owl::model::DeclareAnnotationProperty(build.annotation_property(p.as_str())),
-        ));
+    for ac in source.root() {
+        match &ac.component {
+            Component::OntologyID(_) if !lower.is_empty() => {
+                ont.insert(ac.component.clone());
+            }
+            Component::OntologyAnnotation(oa) if copy_ontology_annotations => {
+                ont.insert((*ac).clone());
+                if !is_builtin_annotation_property(oa.0.ap.0.as_ref()) {
+                    ont.insert(Component::DeclareAnnotationProperty(horned_owl::model::DeclareAnnotationProperty(
+                        build.annotation_property(oa.0.ap.0.as_ref()),
+                    )));
+                }
+            }
+            _ => {}
+        }
     }
-    Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes))
+    Ok(Model::from_parts(ont, crate::model::clone_prefixes(&model.prefixes)))
 }
 
 fn sub_property_is_bot(

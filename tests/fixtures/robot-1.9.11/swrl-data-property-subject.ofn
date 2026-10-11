@@ -1,0 +1,13 @@
+Prefix(:=<http://example.org/o#>)
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+Ontology(<http://example.org/o>
+Declaration(Class(:A))
+Declaration(Class(:B))
+Declaration(DataProperty(:d))
+Declaration(NamedIndividual(:i))
+DLSafeRule(Body(ClassAtom(:A Variable(:x)) DataPropertyAtom(:d :i Variable(:y))) Head(ClassAtom(:B Variable(:x))))
+DLSafeRule(Body(DataPropertyAtom(:d :i "v") DataPropertyAtom(:d Variable(:x) "w"^^xsd:string)) Head(DataPropertyAtom(:d :j Variable(:x))))
+)

@@ -1,0 +1,19 @@
+{
+  "graphs" : [ {
+    "id" : "http://example.org/o",
+    "nodes" : [ {
+      "id" : "http://example.org/o#A",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/o#B",
+      "type" : "CLASS"
+    }, {
+      "id" : "http://example.org/o#d",
+      "type" : "PROPERTY",
+      "propertyType" : "DATA"
+    }, {
+      "id" : "http://example.org/o#i",
+      "type" : "INDIVIDUAL"
+    } ]
+  } ]
+}

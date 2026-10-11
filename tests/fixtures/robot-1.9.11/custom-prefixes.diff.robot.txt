@@ -1,0 +1,12 @@
+1 axioms in left ontology but not in right ontology:
+- AnnotationAssertion(rdfs:seeAlso <http://purl.obolibrary.org/obo/EX_0000001> <http://example.org/foo/x>)
+
+8 axioms in right ontology but not in left ontology:
++ Annotation(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "1.2"^^xsd:string)
++ AnnotationAssertion(<http://purl.obolibrary.org/obo/ex#seeAlso> <http://purl.obolibrary.org/obo/EX_0000001> <http://example.org/foo/x>)
++ AnnotationAssertion(<http://www.geneontology.org/formats/oboInOwl#id> <http://purl.obolibrary.org/obo/EX_0000001> "EX:0000001"^^xsd:string)
++ AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion> "has_obo_format_version"^^xsd:string)
++ AnnotationAssertion(rdfs:label <http://www.geneontology.org/formats/oboInOwl#id> "id"^^xsd:string)
++ Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#hasOBOFormatVersion>))
++ Declaration(AnnotationProperty(<http://www.geneontology.org/formats/oboInOwl#id>))
++ Declaration(AnnotationProperty(rdfs:label))
