@@ -1,0 +1,16 @@
+ID	LABEL	TYPE	CLASS_TYPE	PROPERTY_TYPE	INDIVIDUAL_TYPE	C %	>A rdfs:comment	EC %	DC 'pee' some %	P %	>A rdfs:seeAlso	DOMAIN	RANGE	CHARACTERISTIC SPLIT=|	TI %	I 'pee'	I dee	SI %	DI %	A rdfs:comment SPLIT=|	>A rdfs:seeAlso	>>AI rdfs:isDefinedBy	AP SPLIT=|	AT rdfs:comment^^xsd:integer	AL rdfs:comment@en	AI rdfs:seeAlso
+ID	LABEL	TYPE	CLASS_TYPE	PROPERTY_TYPE	INDIVIDUAL_TYPE	C %	>A rdfs:comment	EC %	DC 'pee' some %	P %	>A rdfs:seeAlso	DOMAIN	RANGE	CHARACTERISTIC SPLIT=|	TI %	I 'pee'	I dee	SI %	DI %	A rdfs:comment SPLIT=|	>A rdfs:seeAlso	>>AI rdfs:isDefinedBy	AP SPLIT=|	AT rdfs:comment^^xsd:integer	AL rdfs:comment@en	AI rdfs:seeAlso
+http://example.org/x#C1	c one	class	equivalent			'dee' some xsd:integer[>= 5, < 10]	eq note	'pee' only 'double-u'	W																	
+http://example.org/x#C2	c two					'dee' only not xsd:string	note	'pee' value obo:i1	double-u											a|b	see	http://example.org/def				
+http://example.org/x#OP1	o p one	owl:ObjectProperty		inverse						pee	inv note	double-u	'pee' some double-u	functional|transitive									rdfs:seeAlso <http://example.org/see>			
+http://example.org/x#OP2	o p two	object property		disjoint						pee				symmetric												
+http://example.org/x#DP1	d p one	owl:DataProperty		equivalent						dee		double-u	xsd:integer	functional												
+http://example.org/x#DP2	d p two	data property		disjoint						dee																
+http://example.org/x#AP1	a p one	annotation property								ay pee	sub note	http://example.org/x#W	double-u											7	hello	double-u
+http://example.org/x#I1	i one	double-u			named										'pee' some double-u	obo:i2	5^^xsd:integer	obo:i3	obo:i4	x|y	s	http://example.org/def				
+http://example.org/x#I2	i two	named individual			same											obo:i5										
+http://example.org/x#I3	i three	individual			different												obo:i6									
+http://example.org/x#DT1	d t one	owl:Datatype																		a datatype						
+http://example.org/x#G1	pee																									
+http://example.org/x#C3	c three	class																					rdfs:comment 'quoted text'|rdfs:comment 'lang'@en|rdfs:comment '12'^^xsd:integer|rdfs:seeAlso <http://example.org/see>|rdfs:seeAlso double-u			
+http://example.org/x#C4	c four							'pee' some double-u	obo:q																	

@@ -1,0 +1,3 @@
+ID	LABEL	TYPE	SP %
+ID	LABEL	TYPE	SP %
+http://example.org/x#AP1	a p one	owl:AnnotationProperty	http://example.org/x#ap

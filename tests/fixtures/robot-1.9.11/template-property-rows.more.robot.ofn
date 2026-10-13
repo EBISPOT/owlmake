@@ -1,0 +1,171 @@
+Prefix(owl:=<http://www.w3.org/2002/07/owl#>)
+Prefix(rdf:=<http://www.w3.org/1999/02/22-rdf-syntax-ns#>)
+Prefix(xml:=<http://www.w3.org/XML/1998/namespace>)
+Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)
+Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)
+
+
+Ontology(
+Declaration(Class(<http://example.org/x#C1>))
+Declaration(Class(<http://example.org/x#C2>))
+Declaration(Class(<http://example.org/x#C3>))
+Declaration(Class(<http://example.org/x#C4>))
+Declaration(Class(<http://example.org/x#W>))
+Declaration(Class(<http://purl.obolibrary.org/obo/q>))
+Declaration(ObjectProperty(<http://example.org/x#G1>))
+Declaration(ObjectProperty(<http://example.org/x#OP1>))
+Declaration(ObjectProperty(<http://example.org/x#OP2>))
+Declaration(ObjectProperty(<http://example.org/x#p>))
+Declaration(DataProperty(<http://example.org/x#DP1>))
+Declaration(DataProperty(<http://example.org/x#DP2>))
+Declaration(DataProperty(<http://example.org/x#d>))
+Declaration(NamedIndividual(<http://example.org/x#I1>))
+Declaration(NamedIndividual(<http://example.org/x#I2>))
+Declaration(NamedIndividual(<http://example.org/x#I3>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/i1>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/i2>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/i3>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/i4>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/i5>))
+Declaration(NamedIndividual(<http://purl.obolibrary.org/obo/i6>))
+Declaration(AnnotationProperty(<http://example.org/x#AP1>))
+Declaration(AnnotationProperty(<http://example.org/x#ap>))
+Declaration(Datatype(<http://example.org/x#DT1>))
+############################
+#   Annotation Properties
+############################
+
+# Annotation Property: <http://example.org/x#AP1> (a p one)
+
+AnnotationAssertion(rdfs:comment <http://example.org/x#AP1> "hello"@en)
+AnnotationAssertion(rdfs:comment <http://example.org/x#AP1> "7"^^xsd:integer)
+AnnotationAssertion(rdfs:label <http://example.org/x#AP1> "a p one")
+AnnotationAssertion(rdfs:seeAlso <http://example.org/x#AP1> <http://example.org/x#W>)
+SubAnnotationPropertyOf(Annotation(rdfs:seeAlso "sub note") <http://example.org/x#AP1> <http://example.org/x#ap>)
+AnnotationPropertyRange(<http://example.org/x#AP1> <http://example.org/x#W>)
+AnnotationPropertyDomain(<http://example.org/x#AP1> <http://example.org/x#W>)
+
+
+############################
+#   Object Properties
+############################
+
+# Object Property: <http://example.org/x#G1> (pee)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#G1> "pee")
+
+# Object Property: <http://example.org/x#OP1> (o p one)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#OP1> "o p one")
+AnnotationAssertion(rdfs:seeAlso <http://example.org/x#OP1> <http://example.org/see>)
+InverseObjectProperties(Annotation(rdfs:seeAlso "inv note") <http://example.org/x#OP1> <http://example.org/x#p>)
+FunctionalObjectProperty(<http://example.org/x#OP1>)
+TransitiveObjectProperty(<http://example.org/x#OP1>)
+ObjectPropertyDomain(<http://example.org/x#OP1> <http://example.org/x#W>)
+ObjectPropertyRange(<http://example.org/x#OP1> ObjectSomeValuesFrom(<http://example.org/x#p> <http://example.org/x#W>))
+
+# Object Property: <http://example.org/x#OP2> (o p two)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#OP2> "o p two")
+SymmetricObjectProperty(<http://example.org/x#OP2>)
+DisjointObjectProperties(<http://example.org/x#OP2> <http://example.org/x#p>)
+
+
+############################
+#   Data Properties
+############################
+
+# Data Property: <http://example.org/x#DP1> (d p one)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#DP1> "d p one")
+EquivalentDataProperties(<http://example.org/x#DP1> <http://example.org/x#d>)
+FunctionalDataProperty(<http://example.org/x#DP1>)
+DataPropertyDomain(<http://example.org/x#DP1> <http://example.org/x#W>)
+DataPropertyRange(<http://example.org/x#DP1> xsd:integer)
+
+# Data Property: <http://example.org/x#DP2> (d p two)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#DP2> "d p two")
+DisjointDataProperties(<http://example.org/x#DP2> <http://example.org/x#d>)
+
+
+############################
+#   Datatypes
+############################
+
+# Datatype: <http://example.org/x#DT1> (<http://example.org/x#DT1>)
+
+AnnotationAssertion(rdfs:comment <http://example.org/x#DT1> "a datatype")
+
+
+############################
+#   Classes
+############################
+
+# Class: <http://example.org/x#C1> (c one)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#C1> "c one")
+EquivalentClasses(Annotation(rdfs:comment "eq note") <http://example.org/x#C1> ObjectIntersectionOf(ObjectAllValuesFrom(<http://example.org/x#p> <http://example.org/x#W>) DataSomeValuesFrom(<http://example.org/x#d> DatatypeRestriction(xsd:integer xsd:minInclusive "5"^^xsd:integer xsd:maxExclusive "10"^^xsd:integer))))
+DisjointClasses(<http://example.org/x#C1> ObjectSomeValuesFrom(<http://example.org/x#p> <http://example.org/x#W>))
+
+# Class: <http://example.org/x#C2> (c two)
+
+AnnotationAssertion(Annotation(Annotation(rdfs:isDefinedBy <http://example.org/def>) rdfs:seeAlso "see") rdfs:comment <http://example.org/x#C2> "a")
+AnnotationAssertion(Annotation(Annotation(rdfs:isDefinedBy <http://example.org/def>) rdfs:seeAlso "see") rdfs:comment <http://example.org/x#C2> "b")
+AnnotationAssertion(rdfs:label <http://example.org/x#C2> "c two")
+EquivalentClasses(<http://example.org/x#C2> ObjectHasValue(<http://example.org/x#p> <http://purl.obolibrary.org/obo/i1>))
+SubClassOf(Annotation(rdfs:comment "note") <http://example.org/x#C2> DataAllValuesFrom(<http://example.org/x#d> DataComplementOf(xsd:string)))
+DisjointClasses(<http://example.org/x#C2> ObjectSomeValuesFrom(<http://example.org/x#p> <http://example.org/x#W>))
+
+# Class: <http://example.org/x#C3> (c three)
+
+AnnotationAssertion(rdfs:comment <http://example.org/x#C3> "lang"@en)
+AnnotationAssertion(rdfs:comment <http://example.org/x#C3> "12"^^xsd:integer)
+AnnotationAssertion(rdfs:comment <http://example.org/x#C3> "quoted text")
+AnnotationAssertion(rdfs:label <http://example.org/x#C3> "c three")
+AnnotationAssertion(rdfs:seeAlso <http://example.org/x#C3> <http://example.org/see>)
+AnnotationAssertion(rdfs:seeAlso <http://example.org/x#C3> <http://example.org/x#W>)
+
+# Class: <http://example.org/x#C4> (c four)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#C4> "c four")
+EquivalentClasses(<http://example.org/x#C4> ObjectSomeValuesFrom(<http://example.org/x#p> <http://example.org/x#W>))
+DisjointClasses(<http://example.org/x#C4> ObjectSomeValuesFrom(<http://example.org/x#p> <http://purl.obolibrary.org/obo/q>))
+
+
+############################
+#   Named Individuals
+############################
+
+# Individual: <http://example.org/x#I1> (i one)
+
+AnnotationAssertion(Annotation(Annotation(rdfs:isDefinedBy <http://example.org/def>) rdfs:seeAlso "s") rdfs:comment <http://example.org/x#I1> "x")
+AnnotationAssertion(Annotation(Annotation(rdfs:isDefinedBy <http://example.org/def>) rdfs:seeAlso "s") rdfs:comment <http://example.org/x#I1> "y")
+AnnotationAssertion(rdfs:label <http://example.org/x#I1> "i one")
+ClassAssertion(<http://example.org/x#W> <http://example.org/x#I1>)
+ClassAssertion(ObjectSomeValuesFrom(<http://example.org/x#p> <http://example.org/x#W>) <http://example.org/x#I1>)
+SameIndividual(<http://example.org/x#I1> <http://purl.obolibrary.org/obo/i3>)
+ObjectPropertyAssertion(<http://example.org/x#p> <http://example.org/x#I1> <http://purl.obolibrary.org/obo/i2>)
+DataPropertyAssertion(<http://example.org/x#d> <http://example.org/x#I1> "5"^^xsd:integer)
+
+# Individual: <http://example.org/x#I2> (i two)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#I2> "i two")
+
+SameIndividual(<http://example.org/x#I2> <http://purl.obolibrary.org/obo/i5>)
+
+# Individual: <http://example.org/x#I3> (i three)
+
+AnnotationAssertion(rdfs:label <http://example.org/x#I3> "i three")
+
+# Individual: <http://purl.obolibrary.org/obo/i4> (<http://purl.obolibrary.org/obo/i4>)
+
+
+# Individual: <http://purl.obolibrary.org/obo/i6> (<http://purl.obolibrary.org/obo/i6>)
+
+
+
+DifferentIndividuals(<http://example.org/x#I1> <http://purl.obolibrary.org/obo/i4>)
+
+DifferentIndividuals(<http://example.org/x#I3> <http://purl.obolibrary.org/obo/i6>)
+)

@@ -210,22 +210,39 @@ fn query_two_arg_form_and_single_form() {
 
 /// Exercises the richer template DSL: TYPE handling, Manchester cells that
 /// reference entities by rdfs:label across rows, an axiom annotation (`>A`), a
-/// property characteristic, and a SPLIT column.
+/// property characteristic, and a SPLIT column. A template string the language
+/// does not have — `SC` with no expression — refuses the table.
 #[test]
 fn template_manchester_and_dsl() {
     let tmpl = tmp("dsl.tsv");
     // row1 = human headers, row2 = template strings, row3+ = data.
-    std::fs::write(
-        &tmpl,
-        "Class\tLabel\tType\tParent\tDef\tSource\tChar\tSyn\n\
-         ID\tLABEL\tTYPE\tSC\tA obo:IAO_0000115\t>A dc:source\tCHARACTERISTIC\tA oboInOwl:hasExactSynonym SPLIT=|\n\
-         EX:partof\tpart of\tobject property\t\t\t\ttransitive\t\n\
-         EX:ns\tnervous system\tclass\t\t\t\t\t\n\
-         EX:neuron\tneuron\tclass\t'part of' some 'nervous system'\ta neuron\tPMID:1\t\tnerve cell|neurocyte\n",
-    )
-    .unwrap();
-
+    let table = |parent: &str| {
+        format!(
+            "Class\tLabel\tType\tParent\tDef\tSource\tChar\tSyn\n\
+             ID\tLABEL\tTYPE\t{parent}\tA obo:IAO_0000115\t>A dc:source\tCHARACTERISTIC\tA oboInOwl:hasExactSynonym SPLIT=|\n\
+             EX:partof\tpart of\tobject property\t\t\t\ttransitive\t\n\
+             EX:ns\tnervous system\tclass\t\t\t\t\t\n\
+             EX:neuron\tneuron\tclass\t'part of' some 'nervous system'\ta neuron\tPMID:1\t\tnerve cell|neurocyte\n"
+        )
+    };
+    std::fs::write(&tmpl, table("SC")).unwrap();
     let owl = tmp("dsl.ofn");
+    let run = bin()
+        .args(["template", "--prefix", "EX: http://purl.obolibrary.org/obo/EX_", "--template"])
+        .arg(&tmpl)
+        .arg("-o")
+        .arg(&owl)
+        .args(["--format", "ofn"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        !run.status.success()
+            && said.contains("UNKNOWN TEMPLATE ERROR could not interpret template string \"SC\" for column 3 (\"Parent\")"),
+        "{said}"
+    );
+
+    std::fs::write(&tmpl, table("SC %")).unwrap();
     let status = bin()
         .args(["template", "--prefix", "EX: http://purl.obolibrary.org/obo/EX_", "--template"])
         .arg(&tmpl)
@@ -370,6 +387,37 @@ fn template_individual_types_and_property_assertions() {
 
     let _ = std::fs::remove_file(&tmpl);
     let _ = std::fs::remove_file(&owl);
+}
+
+/// Rows typed `owl:DataProperty` and `owl:AnnotationProperty` make data- and
+/// annotation-property axioms, a data property named by its label makes a data
+/// restriction, and an `SP` cell holding a full IRI names the IRI before its
+/// `#`. The wide table covers every kind of row with every kind of column:
+/// class, property and individual types, domains, ranges, characteristics,
+/// data ranges and literals, annotation pairs, and annotations on axioms and on
+/// those annotations. As ROBOT 1.9.11 writes each over
+/// `template-property-rows.ofn`.
+#[test]
+fn template_builds_property_rows_and_data_restrictions_as_robot_does() {
+    for table in ["dp", "ap", "label", "iri", "more"] {
+        let out = tmp(&format!("template-property-rows-{table}.ofn"));
+        let run = bin()
+            .args(["template", "-i"])
+            .arg(robot_fixture("template-property-rows.ofn"))
+            .arg("-t")
+            .arg(robot_fixture(&format!("template-property-rows-{table}.tsv")))
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{table}: {}", String::from_utf8_lossy(&run.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            fixture_text(&format!("template-property-rows.{table}.robot.ofn")),
+            "{table}"
+        );
+        let _ = std::fs::remove_file(&out);
+    }
 }
 
 #[test]
