@@ -44,6 +44,30 @@ pub fn set_nest_axiom_anns(on: bool) {
     NEST_AXIOM_ANNS.store(on, Ordering::Relaxed);
 }
 
+/// Whether an individual asserted to be `p some F` is linked to F by p, as a
+/// class under the same existential is.
+///
+/// obographs files a class assertion of an anonymous expression among the
+/// untranslated axioms, so ROBOT's JSON never carries the link, and a build that
+/// emulates an ODK release writes what ROBOT writes. Every other run writes the
+/// edge: it is the one existential an individual states (a cohort in COHO says
+/// what it studies so), and the graph had lost it. The plan decides it, as it
+/// decides OBO `[Instance]` frames (`io::obo::INSTANCE_FRAMES`):
+/// `build::set_emulation` sets it, in a build and in every owlmake process the
+/// build starts. There is deliberately no environment override: it decides
+/// artefact bytes.
+static INDIVIDUAL_RESTRICTIONS: AtomicBool = AtomicBool::new(true);
+
+/// Set whether an individual's existential is written as an edge — see
+/// `INDIVIDUAL_RESTRICTIONS`.
+pub fn set_individual_restrictions(on: bool) {
+    INDIVIDUAL_RESTRICTIONS.store(on, Ordering::Relaxed);
+}
+
+fn individual_restrictions() -> bool {
+    INDIVIDUAL_RESTRICTIONS.load(Ordering::Relaxed)
+}
+
 const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
 const IAO_DEF: &str = "http://purl.obolibrary.org/obo/IAO_0000115";
@@ -634,11 +658,21 @@ fn generate_graph(model: &Model) -> Graph {
                 }
             }
             Component::ClassAssertion(ca) => {
-                if let CE::Class(c) = &ca.ce {
-                    let i = individual_id(&ca.i);
-                    g.add_edge(&i, "type", c.0.as_ref(), &meta);
-                    g.add_node(&i);
-                    g.add_node(c.0.as_ref());
+                let i = individual_id(&ca.i);
+                match &ca.ce {
+                    CE::Class(c) => {
+                        g.add_edge(&i, "type", c.0.as_ref(), &meta);
+                        g.add_node(&i);
+                        g.add_node(c.0.as_ref());
+                    }
+                    // See `INDIVIDUAL_RESTRICTIONS`: ROBOT leaves this assertion out.
+                    CE::ObjectSomeValuesFrom { ope: OPE::ObjectProperty(p), bce } if individual_restrictions() => {
+                        if let CE::Class(filler) = bce.as_ref() {
+                            g.add_edge(&i, p.0.as_ref(), filler.0.as_ref(), &meta);
+                            g.add_node(&i);
+                        }
+                    }
+                    _ => {}
                 }
             }
             Component::ObjectPropertyAssertion(opa) => {

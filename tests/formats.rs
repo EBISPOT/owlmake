@@ -72,6 +72,75 @@ fn obograph_json_roundtrip() {
     assert_eq!(subclass_edges(&m2), 1);
 }
 
+/// The sample with one individual, asserted to be `r some X_2`.
+fn individual_under_an_existential() -> Model {
+    let b = Build::new();
+    let mut m = sample();
+    let r = b.object_property(format!("{NS}r"));
+    let i = b.named_individual(format!("{NS}i_1"));
+    m.ont.insert(Component::DeclareObjectProperty(horned_owl::model::DeclareObjectProperty(r.clone())));
+    m.ont.insert(Component::DeclareNamedIndividual(horned_owl::model::DeclareNamedIndividual(i.clone())));
+    m.ont.insert(Component::ClassAssertion(horned_owl::model::ClassAssertion {
+        ce: CE::ObjectSomeValuesFrom {
+            ope: horned_owl::model::ObjectPropertyExpression::ObjectProperty(r),
+            bce: Box::new(CE::Class(b.class(format!("{NS}X_2")))),
+        },
+        i: horned_owl::model::Individual::Named(i),
+    }));
+    m
+}
+
+fn edges_of(json: &[u8]) -> Vec<serde_json::Value> {
+    let doc: serde_json::Value = serde_json::from_slice(json).unwrap();
+    doc["graphs"][0]["edges"].as_array().unwrap().clone()
+}
+
+#[test]
+fn obograph_json_writes_an_individuals_existential_as_an_edge() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut json = Vec::new();
+    io::write_to_ref(&individual_under_an_existential(), &mut json, Format::OboGraph).unwrap();
+    let edges = edges_of(&json);
+    // The individual is linked to the filler by the property, as a class
+    // under the same existential would be.
+    assert!(
+        edges.iter().any(|e| e["sub"] == format!("{NS}i_1") && e["pred"] == format!("{NS}r") && e["obj"] == format!("{NS}X_2")),
+        "{edges:?}"
+    );
+}
+
+/// Turns the switch off as a build emulating an ODK release does, and back on
+/// when dropped, so the tests after it see the default whatever it asserts.
+struct EmulatingOdk;
+
+impl EmulatingOdk {
+    fn start() -> EmulatingOdk {
+        owlmake::io::obograph::set_individual_restrictions(false);
+        EmulatingOdk
+    }
+}
+
+impl Drop for EmulatingOdk {
+    fn drop(&mut self) {
+        owlmake::io::obograph::set_individual_restrictions(true);
+    }
+}
+
+/// obographs leaves a class assertion of an expression untranslated, so a build
+/// that emulates an ODK release writes the JSON ROBOT writes: no edge for it.
+#[test]
+fn obograph_json_omits_an_individuals_existential_when_emulating_odk() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let json = {
+        let _odk = EmulatingOdk::start();
+        let mut json = Vec::new();
+        io::write_to_ref(&individual_under_an_existential(), &mut json, Format::OboGraph).unwrap();
+        json
+    };
+    let edges = edges_of(&json);
+    assert!(!edges.iter().any(|e| e["pred"] == format!("{NS}r")), "{edges:?}");
+}
+
 #[test]
 fn manchester_roundtrip() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

@@ -847,6 +847,7 @@ pub fn set_emulation(emulation: Option<Emulation>) {
     crate::sssom::converter::set_obo_epm(post_1_9_9.unwrap_or(true));
     crate::report::set_obo_context(emulation.map(|e| e.robot));
     crate::io::obo::set_instance_frames(emulation.is_none_or(|e| e.odk.is_none()));
+    crate::io::obograph::set_individual_restrictions(emulation.is_none_or(|e| e.odk.is_none()));
     *EMULATION.lock().unwrap_or_else(|e| e.into_inner()) = emulation;
 }
 
