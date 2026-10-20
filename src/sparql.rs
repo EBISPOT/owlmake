@@ -518,88 +518,151 @@ impl ObjectOrder {
     }
 }
 
-/// How the renderer's bytes reach the reader on the other thread: a megabyte
-/// at a time, this many megabytes ahead at most.
-const CHUNK: usize = 1 << 20;
-const CHUNKS_AHEAD: usize = 16;
+#[cfg(not(target_arch = "wasm32"))]
+use threaded::{render_and_load, side_by_side};
+#[cfg(target_arch = "wasm32")]
+use unthreaded::{render_and_load, side_by_side};
 
-/// A writer that keeps the whole document and hands it, chunk by chunk, to a
-/// reader on another thread. Once the reader is gone, writing fails, so a
-/// renderer whose reader failed stops instead of rendering for nobody.
-struct Tee {
-    out: Vec<u8>,
-    chunk: Vec<u8>,
-    tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
-    reader_gone: bool,
-}
+/// A model's rendering and the store read from it, on a platform with threads:
+/// the renderer writes the document front to back (see `io::rendering_to`), so
+/// the graph is read from it as it is written, on a thread of its own. Rendering
+/// and reading overlap and cost the longer of the two, the rendering by some
+/// way, not their sum. The document is kept whole as well, for the scans that
+/// read it side by side once it is complete.
+#[cfg(not(target_arch = "wasm32"))]
+mod threaded {
+    use super::*;
 
-impl Tee {
-    fn new(tx: std::sync::mpsc::SyncSender<Vec<u8>>) -> Tee {
-        Tee { out: Vec::new(), chunk: Vec::with_capacity(CHUNK), tx: Some(tx), reader_gone: false }
+    /// How the renderer's bytes reach the reader on the other thread: a
+    /// megabyte at a time, this many megabytes ahead at most.
+    const CHUNK: usize = 1 << 20;
+    const CHUNKS_AHEAD: usize = 16;
+
+    /// A writer that keeps the whole document and hands it, chunk by chunk, to
+    /// a reader on another thread. Once the reader is gone, writing fails, so a
+    /// renderer whose reader failed stops instead of rendering for nobody.
+    struct Tee {
+        out: Vec<u8>,
+        chunk: Vec<u8>,
+        tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+        reader_gone: bool,
     }
 
-    fn send(&mut self) {
-        if self.chunk.is_empty() {
-            return;
+    impl Tee {
+        fn new(tx: std::sync::mpsc::SyncSender<Vec<u8>>) -> Tee {
+            Tee { out: Vec::new(), chunk: Vec::with_capacity(CHUNK), tx: Some(tx), reader_gone: false }
         }
-        let chunk = std::mem::replace(&mut self.chunk, Vec::with_capacity(CHUNK));
-        if let Some(tx) = &self.tx {
-            if tx.send(chunk).is_err() {
-                self.reader_gone = true;
-                self.tx = None;
+
+        fn send(&mut self) {
+            if self.chunk.is_empty() {
+                return;
             }
-        }
-    }
-
-    /// The rest of the document goes to the reader, which then sees its end.
-    fn finish(&mut self) {
-        self.send();
-        self.tx = None;
-    }
-}
-
-impl std::io::Write for Tee {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if self.reader_gone {
-            return Err(std::io::Error::other("the reader of the rendering stopped"));
-        }
-        self.out.extend_from_slice(bytes);
-        if self.tx.is_some() {
-            self.chunk.extend_from_slice(bytes);
-            if self.chunk.len() >= CHUNK {
-                self.send();
-            }
-        }
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-/// The reader's end of a [`Tee`].
-struct Chunks {
-    rx: std::sync::mpsc::Receiver<Vec<u8>>,
-    chunk: Vec<u8>,
-    at: usize,
-}
-
-impl std::io::Read for Chunks {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        while self.at >= self.chunk.len() {
-            match self.rx.recv() {
-                Ok(chunk) => {
-                    self.chunk = chunk;
-                    self.at = 0;
+            let chunk = std::mem::replace(&mut self.chunk, Vec::with_capacity(CHUNK));
+            if let Some(tx) = &self.tx {
+                if tx.send(chunk).is_err() {
+                    self.reader_gone = true;
+                    self.tx = None;
                 }
-                Err(_) => return Ok(0),
             }
         }
-        let n = buf.len().min(self.chunk.len() - self.at);
-        buf[..n].copy_from_slice(&self.chunk[self.at..self.at + n]);
-        self.at += n;
-        Ok(n)
+
+        /// The rest of the document goes to the reader, which then sees its end.
+        fn finish(&mut self) {
+            self.send();
+            self.tx = None;
+        }
+    }
+
+    impl std::io::Write for Tee {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.reader_gone {
+                return Err(std::io::Error::other("the reader of the rendering stopped"));
+            }
+            self.out.extend_from_slice(bytes);
+            if self.tx.is_some() {
+                self.chunk.extend_from_slice(bytes);
+                if self.chunk.len() >= CHUNK {
+                    self.send();
+                }
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The reader's end of a [`Tee`].
+    struct Chunks {
+        rx: std::sync::mpsc::Receiver<Vec<u8>>,
+        chunk: Vec<u8>,
+        at: usize,
+    }
+
+    impl std::io::Read for Chunks {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            while self.at >= self.chunk.len() {
+                match self.rx.recv() {
+                    Ok(chunk) => {
+                        self.chunk = chunk;
+                        self.at = 0;
+                    }
+                    Err(_) => return Ok(0),
+                }
+            }
+            let n = buf.len().min(self.chunk.len() - self.at);
+            buf[..n].copy_from_slice(&self.chunk[self.at..self.at + n]);
+            self.at += n;
+            Ok(n)
+        }
+    }
+
+    /// The rendering of `model`, and its store, read as the renderer writes it.
+    pub(super) fn render_and_load(model: &Model) -> Result<(Vec<u8>, Store)> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(CHUNKS_AHEAD);
+        std::thread::scope(|scope| -> Result<(Vec<u8>, Store)> {
+            let loading = scope.spawn(move || load_rendering(Chunks { rx, chunk: Vec::new(), at: 0 }));
+            let mut tee = Tee::new(tx);
+            let rendered = crate::io::rendering_to(model, &mut tee);
+            tee.finish();
+            let loaded = loading.join().map_err(|_| anyhow!("loading ontology triples: the reader panicked"))?;
+            // A reader that failed stops the renderer as well: its error is the cause.
+            match (rendered, loaded) {
+                (Err(e), _) if !tee.reader_gone => Err(e),
+                (_, Err(e)) => Err(e),
+                (Err(e), Ok(_)) => Err(e),
+                (Ok(()), Ok(store)) => Ok((tee.out, store)),
+            }
+        })
+    }
+
+    /// `a` and `b`, run on two threads.
+    pub(super) fn side_by_side<A: Send, B>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B) -> (A, B) {
+        std::thread::scope(|scope| {
+            let a = scope.spawn(a);
+            let b = b();
+            (a.join().expect("scanning the rendering"), b)
+        })
+    }
+}
+
+/// The same on a platform without threads (wasm32): the document is rendered
+/// whole and read afterwards, and the scans run one after the other.
+#[cfg(target_arch = "wasm32")]
+mod unthreaded {
+    use super::*;
+
+    /// The rendering of `model`, and its store, read once it is rendered.
+    pub(super) fn render_and_load(model: &Model) -> Result<(Vec<u8>, Store)> {
+        let rdf = crate::io::rendering(model)?;
+        let store = load_rendering(rdf.as_slice())?;
+        Ok((rdf, store))
+    }
+
+    /// `a` and `b`, run one after the other.
+    pub(super) fn side_by_side<A, B>(a: impl FnOnce() -> A, b: impl FnOnce() -> B) -> (A, B) {
+        (a(), b())
     }
 }
 
@@ -681,33 +744,11 @@ impl Queryable {
     /// carrying them then keeps axioms `filter` should drop, all the way into
     /// `mondo-simple.owl`.
     pub fn from_model(model: &Model) -> Result<Queryable> {
-        // The renderer writes the document front to back (see
-        // `io::rendering_to`), so the graph is read from it as it is written:
-        // rendering and reading overlap and cost the longer of the two, the
-        // rendering by some way, not their sum. The document is kept whole as
-        // well, for the two scans below, which read it side by side once it is
-        // complete.
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(CHUNKS_AHEAD);
-        let (rdf, store) = std::thread::scope(|scope| -> Result<(Vec<u8>, Store)> {
-            let loading = scope.spawn(move || load_rendering(Chunks { rx, chunk: Vec::new(), at: 0 }));
-            let mut tee = Tee::new(tx);
-            let rendered = crate::io::rendering_to(model, &mut tee);
-            tee.finish();
-            let loaded = loading.join().map_err(|_| anyhow!("loading ontology triples: the reader panicked"))?;
-            // A reader that failed stops the renderer as well: its error is the cause.
-            match (rendered, loaded) {
-                (Err(e), _) if !tee.reader_gone => Err(e),
-                (_, Err(e)) => Err(e),
-                (Err(e), Ok(_)) => Err(e),
-                (Ok(()), Ok(store)) => Ok((tee.out, store)),
-            }
-        })?;
+        // The graph is read from the rendering (see `render_and_load`), which
+        // is then kept whole for the two scans.
+        let (rdf, store) = render_and_load(model)?;
         type_list_cells(&store)?;
-        let (type_order, object_order) = std::thread::scope(|scope| {
-            let types = scope.spawn(|| scan_type_order(&rdf));
-            let objects = scan_object_order(&rdf);
-            (types.join().expect("scanning the rendering for its types"), objects)
-        });
+        let (type_order, object_order) = side_by_side(|| scan_type_order(&rdf), || scan_object_order(&rdf));
         let q = Queryable {
             store,
             type_order,
