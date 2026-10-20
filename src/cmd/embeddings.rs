@@ -706,6 +706,113 @@ fn read_hash_vectors(path: &Path) -> Result<Vec<(String, Vec<f32>)>> {
     Ok(out)
 }
 
+/// Query vectors made elsewhere: `text_to_embed` → `embedding`, from a parquet
+/// that carries those two columns — `om embeddings embed` output, or the file
+/// OLS's own embedder writes from a hash/text TSV. `om map --query-embeddings`
+/// runs its semantic channel on them and calls no API, so the vectors can come
+/// from a model that only runs on a GPU batch job. Keyed by the exact text.
+pub(crate) fn read_query_vectors(path: &Path) -> Result<HashMap<String, Vec<f32>>> {
+    let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let reader = ParquetRecordBatchReaderBuilder::try_new(file)?
+        .with_batch_size(WRITE_CHUNK)
+        .build()?;
+    let mut out = HashMap::new();
+    for batch in reader {
+        let batch = batch?;
+        let texts = str_col(&batch, "text_to_embed")?;
+        let embs = emb_col(&batch, "embedding")?;
+        for i in 0..batch.num_rows() {
+            if let Some(v) = &embs[i] {
+                out.insert(texts[i].clone(), v.clone());
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The PCA projection OLS publishes beside each `<model>_pca<k>` parquet, as
+/// `<model>_pca<k>.json`: `mean` (n_features) and `components` (n_features × k).
+/// OLS reduces every term vector with it and projects a query the same way
+/// before searching, `y = (x − mean) · components`; this does that to a
+/// full-width query vector so it can be scored against the reduced term
+/// vectors, which are a tenth the size of the full ones.
+#[derive(Debug)]
+pub(crate) struct PcaModel {
+    mean: Vec<f32>,
+    /// Row-major, n_features rows of k.
+    components: Vec<Vec<f32>>,
+    k: usize,
+}
+
+impl PcaModel {
+    pub(crate) fn load(path: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .with_context(|| format!("parsing {} as JSON", path.display()))?;
+        let floats = |v: &serde_json::Value, what: &str| -> Result<Vec<f32>> {
+            v.as_array()
+                .with_context(|| format!("{}: '{what}' is not an array", path.display()))?
+                .iter()
+                .map(|x| {
+                    x.as_f64()
+                        .map(|f| f as f32)
+                        .with_context(|| format!("{}: '{what}' holds a non-number", path.display()))
+                })
+                .collect()
+        };
+        let mean = floats(&json["mean"], "mean")?;
+        let components: Vec<Vec<f32>> = json["components"]
+            .as_array()
+            .with_context(|| format!("{}: 'components' is not an array", path.display()))?
+            .iter()
+            .map(|row| floats(row, "components"))
+            .collect::<Result<_>>()?;
+        if mean.is_empty() || components.len() != mean.len() {
+            bail!(
+                "{}: 'components' has {} rows but 'mean' has {} entries",
+                path.display(),
+                components.len(),
+                mean.len()
+            );
+        }
+        let k = components[0].len();
+        if k == 0 || components.iter().any(|row| row.len() != k) {
+            bail!("{}: 'components' rows are not all of one non-zero length", path.display());
+        }
+        Ok(Self { mean, components, k })
+    }
+
+    pub(crate) fn n_features(&self) -> usize {
+        self.mean.len()
+    }
+
+    pub(crate) fn n_components(&self) -> usize {
+        self.k
+    }
+
+    pub(crate) fn project(&self, x: &[f32]) -> Result<Vec<f32>> {
+        if x.len() != self.mean.len() {
+            bail!(
+                "pca: a query vector has {} dimensions, the model projects {}",
+                x.len(),
+                self.mean.len()
+            );
+        }
+        let mut y = vec![0f32; self.k];
+        for (i, row) in self.components.iter().enumerate() {
+            let d = x[i] - self.mean[i];
+            if d == 0.0 {
+                continue;
+            }
+            for (yj, c) in y.iter_mut().zip(row) {
+                *yj += d * c;
+            }
+        }
+        Ok(y)
+    }
+}
+
 fn append_batch(batch: &RecordBatch, rows: &mut Vec<Row>) -> Result<()> {
     let pk = str_col(batch, "pk")?;
     let ont = opt_str_col(batch, "ontology_id");
@@ -741,14 +848,26 @@ fn str_col(batch: &RecordBatch, name: &str) -> Result<Vec<String>> {
     opt_str_col(batch, name).with_context(|| format!("parquet missing column '{name}'"))
 }
 
+/// A string column in any of arrow's layouts: `Utf8` (duckdb, OLS's files),
+/// `LargeUtf8` (polars, so OLS's embedder and any pandas/polars-made parquet)
+/// or `Utf8View`.
 fn opt_str_col(batch: &RecordBatch, name: &str) -> Option<Vec<String>> {
+    use arrow_array::{LargeStringArray, StringViewArray};
     let col = batch.column_by_name(name)?;
-    let arr = col.as_any().downcast_ref::<StringArray>()?;
-    Some(
-        (0..arr.len())
-            .map(|i| if arr.is_null(i) { String::new() } else { arr.value(i).to_string() })
-            .collect(),
-    )
+    let n = col.len();
+    let value = |i: usize| -> Option<String> {
+        if let Some(a) = col.as_any().downcast_ref::<StringArray>() {
+            return Some(if a.is_null(i) { String::new() } else { a.value(i).to_string() });
+        }
+        if let Some(a) = col.as_any().downcast_ref::<LargeStringArray>() {
+            return Some(if a.is_null(i) { String::new() } else { a.value(i).to_string() });
+        }
+        if let Some(a) = col.as_any().downcast_ref::<StringViewArray>() {
+            return Some(if a.is_null(i) { String::new() } else { a.value(i).to_string() });
+        }
+        None
+    };
+    (0..n).map(value).collect()
 }
 
 fn emb_col(batch: &RecordBatch, name: &str) -> Result<Vec<Option<Vec<f32>>>> {
@@ -860,4 +979,28 @@ fn write_parquet(path: &Path, rows: &[Row]) -> Result<()> {
     }
     writer.close()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod pca_tests {
+    use super::*;
+
+    #[test]
+    fn pca_projects_as_ols_does() {
+        let dir = std::env::temp_dir().join(format!("owlmake_pca_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m_pca2.json");
+        // mean (1,1,1); components pick (x0, x2) and negate the second.
+        std::fs::write(
+            &path,
+            r#"{"mean":[1,1,1],"components":[[1,0],[0,0],[0,-1]],"n_components":2,"n_features":3}"#,
+        )
+        .unwrap();
+        let pca = PcaModel::load(&path).unwrap();
+        assert_eq!((pca.n_features(), pca.n_components()), (3, 2));
+        assert_eq!(pca.project(&[3.0, 9.0, 0.0]).unwrap(), vec![2.0, 1.0]);
+        assert!(pca.project(&[1.0, 2.0]).unwrap_err().to_string().contains("2 dimensions"));
+        std::fs::write(&path, r#"{"mean":[1,1],"components":[[1,0]]}"#).unwrap();
+        assert!(PcaModel::load(&path).unwrap_err().to_string().contains("rows"));
+    }
 }

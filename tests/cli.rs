@@ -10693,3 +10693,130 @@ fn template_brings_ancestors_as_robot_does() {
     assert!(!template(&["--ancestors", "true"]).status.success(), "--ancestors true was read");
     let _ = std::fs::remove_file(&out);
 }
+
+/// `map --query-embeddings` takes the query vectors from a parquet instead of
+/// an API, `--pca-model` projects them the way OLS does, and the two must then
+/// agree in width with the term vectors. The terms are written in OLS's reduced
+/// space (2-d), the queries full width (3-d).
+#[test]
+fn map_searches_precomputed_query_vectors_through_a_pca_model() {
+    use arrow_array::builder::{Float32Builder, ListBuilder};
+    use arrow_array::{ArrayRef, RecordBatch, StringArray};
+    use arrow_schema::{DataType, Field, Schema};
+    use std::sync::Arc;
+
+    // `large`: polars' string layout (LargeUtf8), which OLS's embedder writes;
+    // duckdb and OLS's published files use Utf8. om must read both.
+    fn parquet(path: &std::path::Path, strings: &[(&str, Vec<&str>)], vectors: &[Vec<f32>], large: bool) {
+        use arrow_array::LargeStringArray;
+        let text_type = if large { DataType::LargeUtf8 } else { DataType::Utf8 };
+        let mut fields: Vec<Field> =
+            strings.iter().map(|(name, _)| Field::new(*name, text_type.clone(), true)).collect();
+        fields.push(Field::new(
+            "embedding",
+            DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
+            true,
+        ));
+        let mut columns: Vec<ArrayRef> = strings
+            .iter()
+            .map(|(_, values)| -> ArrayRef {
+                if large {
+                    Arc::new(LargeStringArray::from(values.clone()))
+                } else {
+                    Arc::new(StringArray::from(values.clone()))
+                }
+            })
+            .collect();
+        let mut emb = ListBuilder::new(Float32Builder::new());
+        for v in vectors {
+            emb.values().append_slice(v);
+            emb.append(true);
+        }
+        columns.push(Arc::new(emb.finish()));
+        let schema = Arc::new(Schema::new(fields));
+        let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+        let file = std::fs::File::create(path).unwrap();
+        let mut w = parquet::arrow::ArrowWriter::try_new(file, schema, None).unwrap();
+        w.write(&batch).unwrap();
+        w.close().unwrap();
+    }
+
+    // Two terms, reduced to 2-d: A along the first axis, B along the second.
+    let terms = tmp("map-terms.parquet");
+    parquet(
+        &terms,
+        &[
+            ("pk", vec!["1", "2"]),
+            ("ontology_id", vec!["o", "o"]),
+            ("entity_type", vec!["class", "class"]),
+            ("iri", vec!["http://x.org/A", "http://x.org/B"]),
+            ("label", vec!["alpha", "beta"]),
+            ("hash", vec!["ha", "hb"]),
+            ("text_to_embed", vec!["alpha", "beta"]),
+            ("string_type", vec!["LABEL", "LABEL"]),
+        ],
+        &[vec![1.0, 0.0], vec![0.0, 1.0]],
+        false,
+    );
+    // The queries, full width (3-d): the PCA drops the middle dimension.
+    let queries_pq = tmp("map-queries.parquet");
+    parquet(
+        &queries_pq,
+        &[("text_to_embed", vec!["an alpha thing", "beta-ish"])],
+        &[vec![2.0, 5.0, 0.1], vec![0.0, 5.0, 3.0]],
+        true,
+    );
+    let pca = tmp("map-pca2.json");
+    std::fs::write(&pca, r#"{"mean":[0,0,0],"components":[[1,0],[0,0],[0,1]]}"#).unwrap();
+    let queries = tmp("map-queries.txt");
+    std::fs::write(&queries, "an alpha thing\nbeta-ish\n").unwrap();
+
+    let out = bin()
+        .args(["map", "--format", "json", "--queries"]).arg(&queries)
+        .arg("--embeddings").arg(&terms)
+        .arg("--query-embeddings").arg(&queries_pq)
+        .arg("--pca-model").arg(&pca)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let top = |i: usize| json[i]["candidates"][0]["iri"].as_str().unwrap().to_string();
+    assert_eq!(top(0), "http://x.org/A");
+    assert_eq!(top(1), "http://x.org/B");
+    assert_eq!(json[0]["candidates"][0]["channel"], "semantic");
+    // No API key was needed or consulted.
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("API key"));
+
+    // Without the projection the widths disagree, and it says so.
+    let out = bin()
+        .args(["map", "--queries"]).arg(&queries)
+        .arg("--embeddings").arg(&terms)
+        .arg("--query-embeddings").arg(&queries_pq)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("3 dimensions") && err.contains("--pca-model"), "{err}");
+
+    // A query the parquet lacks is an error naming it.
+    std::fs::write(&queries, "an alpha thing\nunknown query\n").unwrap();
+    let out = bin()
+        .args(["map", "--queries"]).arg(&queries)
+        .arg("--embeddings").arg(&terms)
+        .arg("--query-embeddings").arg(&queries_pq)
+        .arg("--pca-model").arg(&pca)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("1 of 2 queries") && err.contains("unknown query"), "{err}");
+
+    // The flags without a term parquet are refused.
+    let out = bin()
+        .args(["map", "--queries"]).arg(&queries)
+        .arg("--query-embeddings").arg(&queries_pq)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("need an --embeddings parquet"));
+}

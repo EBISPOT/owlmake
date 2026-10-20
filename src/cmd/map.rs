@@ -9,7 +9,9 @@
 //!    (label) / 0.9 (synonym); partial → coverage·0.89.
 //!    Dictionary from `--tagger-db` (published `.bin.gz` or `om text-tagger build`) or
 //!    a transient in-memory build from `--input <ontology>`.
-//!  * **semantic** — embed the query (same path as `om embeddings`) and cosine over an
+//!  * **semantic** — embed the query (same path as `om embeddings`), or take its vector
+//!    from `--query-embeddings` (made elsewhere, e.g. by a GPU batch job) projected by
+//!    `--pca-model` when the term vectors are OLS's reduced ones, and cosine over an
 //!    `--embeddings` parquet; score `(cos+1)/2`, gated ≥ `--min-similarity`, ·0.89.
 //!  * **fuzzy** (`--fuzzy`) — token-Jaccard over term text, ·0.70.
 //!
@@ -69,6 +71,16 @@ pub struct Args {
     pub base_url: String,
     #[arg(long = "api-key")]
     pub api_key: Option<String>,
+    /// Query vectors made elsewhere: a parquet with `text_to_embed` and `embedding`
+    /// (as `om embeddings embed`, or OLS's own embedder, writes), one row per query
+    /// text. The semantic channel then calls no API. Every query must be present.
+    #[arg(long = "query-embeddings")]
+    pub query_embeddings: Option<PathBuf>,
+    /// OLS's PCA model (`<model>_pca<k>.json`, published beside its `_pca<k>`
+    /// parquets): projects each query vector before scoring, so full-width
+    /// vectors can be searched against an `--embeddings` parquet of reduced ones.
+    #[arg(long = "pca-model")]
+    pub pca_model: Option<PathBuf>,
     /// Minimum embedding score (`(cos+1)/2`) to keep a semantic hit.
     #[arg(long = "min-similarity", default_value_t = 0.7)]
     pub min_similarity: f32,
@@ -128,6 +140,9 @@ fn run(args: &Args) -> Result<()> {
     if queries.is_empty() {
         bail!("map: no queries in {}", args.queries.display());
     }
+    if args.embeddings.is_none() && (args.query_embeddings.is_some() || args.pca_model.is_some()) {
+        bail!("map: --query-embeddings and --pca-model need an --embeddings parquet to search");
+    }
 
     // Lexical dictionary (tagger) — optional: skipped when no tagger source is
     // given but an --embeddings parquet is (semantic-/fuzzy-only mapping).
@@ -146,12 +161,58 @@ fn run(args: &Args) -> Result<()> {
         None => Vec::new(),
     };
 
-    // Embed all queries once (semantic channel), if enabled.
+    // Query vectors for the semantic channel, if enabled: precomputed, or embedded
+    // through the API once for all queries; then projected to the term vectors'
+    // space when a PCA model is given.
     let query_vecs: Option<Vec<Vec<f32>>> = if args.embeddings.is_some() {
-        let key = embeddings::resolve_api_key(args.api_key.as_deref())?;
-        let base = args.base_url.trim_end_matches('/');
-        let url = format!("{base}/embeddings");
-        Some(embeddings::embed_texts(&url, &key, &args.model, &queries, 2000)?)
+        let mut vecs = if let Some(p) = &args.query_embeddings {
+            let table = embeddings::read_query_vectors(p)?;
+            let mut vecs = Vec::with_capacity(queries.len());
+            let mut missing: Vec<&str> = Vec::new();
+            for q in &queries {
+                match table.get(q) {
+                    Some(v) => vecs.push(v.clone()),
+                    None => missing.push(q),
+                }
+            }
+            if !missing.is_empty() {
+                let shown: Vec<&str> = missing.iter().take(5).copied().collect();
+                bail!(
+                    "map: {} of {} queries have no vector in {} (e.g. {:?}); every query \
+                     text must appear in its text_to_embed column",
+                    missing.len(),
+                    queries.len(),
+                    p.display(),
+                    shown
+                );
+            }
+            vecs
+        } else {
+            let key = embeddings::resolve_api_key(args.api_key.as_deref())?;
+            let base = args.base_url.trim_end_matches('/');
+            let url = format!("{base}/embeddings");
+            embeddings::embed_texts(&url, &key, &args.model, &queries, 2000)?
+        };
+        if let Some(p) = &args.pca_model {
+            let pca = embeddings::PcaModel::load(p)?;
+            vecs = vecs.iter().map(|v| pca.project(v)).collect::<Result<Vec<_>>>()?;
+        }
+        // The two sides must live in one space, or every cosine is meaningless.
+        if let (Some(q), Some(t)) = (
+            vecs.first(),
+            term_rows.iter().find_map(|r| r.embedding.as_ref()),
+        ) {
+            if q.len() != t.len() {
+                bail!(
+                    "map: query vectors have {} dimensions but the term vectors in {} have {}; \
+                     a reduced (`_pca<k>`) term parquet needs --pca-model, a full one does not",
+                    q.len(),
+                    args.embeddings.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+                    t.len()
+                );
+            }
+        }
+        Some(vecs)
     } else {
         None
     };
