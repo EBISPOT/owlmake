@@ -518,6 +518,129 @@ impl ObjectOrder {
     }
 }
 
+/// How the renderer's bytes reach the reader on the other thread: a megabyte
+/// at a time, this many megabytes ahead at most.
+const CHUNK: usize = 1 << 20;
+const CHUNKS_AHEAD: usize = 16;
+
+/// A writer that keeps the whole document and hands it, chunk by chunk, to a
+/// reader on another thread. Once the reader is gone, writing fails, so a
+/// renderer whose reader failed stops instead of rendering for nobody.
+struct Tee {
+    out: Vec<u8>,
+    chunk: Vec<u8>,
+    tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    reader_gone: bool,
+}
+
+impl Tee {
+    fn new(tx: std::sync::mpsc::SyncSender<Vec<u8>>) -> Tee {
+        Tee { out: Vec::new(), chunk: Vec::with_capacity(CHUNK), tx: Some(tx), reader_gone: false }
+    }
+
+    fn send(&mut self) {
+        if self.chunk.is_empty() {
+            return;
+        }
+        let chunk = std::mem::replace(&mut self.chunk, Vec::with_capacity(CHUNK));
+        if let Some(tx) = &self.tx {
+            if tx.send(chunk).is_err() {
+                self.reader_gone = true;
+                self.tx = None;
+            }
+        }
+    }
+
+    /// The rest of the document goes to the reader, which then sees its end.
+    fn finish(&mut self) {
+        self.send();
+        self.tx = None;
+    }
+}
+
+impl std::io::Write for Tee {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.reader_gone {
+            return Err(std::io::Error::other("the reader of the rendering stopped"));
+        }
+        self.out.extend_from_slice(bytes);
+        if self.tx.is_some() {
+            self.chunk.extend_from_slice(bytes);
+            if self.chunk.len() >= CHUNK {
+                self.send();
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The reader's end of a [`Tee`].
+struct Chunks {
+    rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    chunk: Vec<u8>,
+    at: usize,
+}
+
+impl std::io::Read for Chunks {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while self.at >= self.chunk.len() {
+            match self.rx.recv() {
+                Ok(chunk) => {
+                    self.chunk = chunk;
+                    self.at = 0;
+                }
+                Err(_) => return Ok(0),
+            }
+        }
+        let n = buf.len().min(self.chunk.len() - self.at);
+        buf[..n].copy_from_slice(&self.chunk[self.at..self.at + n]);
+        self.at += n;
+        Ok(n)
+    }
+}
+
+/// The store of a rendering, read as the renderer writes it.
+///
+/// The parser names an unlabelled blank node for itself, and those names are
+/// drawn fresh every run — so a query that returns one would answer differently
+/// each time it ran. Number them by the order the document introduces them
+/// instead: the same document always gets the same names.
+fn load_rendering(rendering: impl std::io::Read) -> Result<Store> {
+    use oxigraph::model::{BlankNode, Quad};
+    let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
+    let mut names: std::collections::HashMap<String, BlankNode> = Default::default();
+    let mut next = 0usize;
+    let mut rename = |b: &BlankNode| -> BlankNode {
+        if let Some(n) = names.get(b.as_str()) {
+            return n.clone();
+        }
+        let n = BlankNode::new_unchecked(format!("b{next}"));
+        next += 1;
+        names.insert(b.as_str().to_string(), n.clone());
+        n
+    };
+    let parser = RdfParser::from_format(oxigraph::io::RdfFormat::RdfXml).for_reader(std::io::BufReader::new(rendering));
+    for quad in parser {
+        let q = quad.map_err(|e| anyhow!("loading ontology triples: {e}"))?;
+        let subject = match q.subject {
+            oxigraph::model::NamedOrBlankNode::BlankNode(b) => rename(&b).into(),
+            s => s,
+        };
+        let object = match q.object {
+            Term::BlankNode(b) => Term::BlankNode(rename(&b)),
+            o => o,
+        };
+        store
+            .insert(&Quad::new(subject, q.predicate, object, q.graph_name))
+            .map_err(|e| anyhow!("loading ontology triples: {e}"))?;
+    }
+    Ok(store)
+}
+
 /// Type as an `rdf:List` every list cell the document leaves untyped. The
 /// RDF/XML layout writes a list as a collection, whose cells it states no type
 /// of, while the graph it renders types each one.
@@ -558,45 +681,37 @@ impl Queryable {
     /// carrying them then keeps axioms `filter` should drop, all the way into
     /// `mondo-simple.owl`.
     pub fn from_model(model: &Model) -> Result<Queryable> {
-        let rdf = crate::io::rendering(model)?;
-        let store = Store::new().map_err(|e| anyhow!("store init: {e}"))?;
-        // The parser names an unlabelled blank node for itself, and those names are
-        // drawn fresh every run — so a query that returns one would answer
-        // differently each time it ran. Number them by the order the document
-        // introduces them instead: the same document always gets the same names.
-        {
-            use oxigraph::model::{BlankNode, Quad, Term};
-            let mut names: std::collections::HashMap<String, BlankNode> = Default::default();
-            let mut next = 0usize;
-            let mut rename = |b: &BlankNode| -> BlankNode {
-                if let Some(n) = names.get(b.as_str()) {
-                    return n.clone();
-                }
-                let n = BlankNode::new_unchecked(format!("b{next}"));
-                next += 1;
-                names.insert(b.as_str().to_string(), n.clone());
-                n
-            };
-            for quad in RdfParser::from_format(oxigraph::io::RdfFormat::RdfXml).for_slice(&rdf) {
-                let q = quad.map_err(|e| anyhow!("loading ontology triples: {e}"))?;
-                let subject = match q.subject {
-                    oxigraph::model::NamedOrBlankNode::BlankNode(b) => rename(&b).into(),
-                    s => s,
-                };
-                let object = match q.object {
-                    Term::BlankNode(b) => Term::BlankNode(rename(&b)),
-                    o => o,
-                };
-                store
-                    .insert(&Quad::new(subject, q.predicate, object, q.graph_name))
-                    .map_err(|e| anyhow!("loading ontology triples: {e}"))?;
+        // The renderer writes the document front to back (see
+        // `io::rendering_to`), so the graph is read from it as it is written:
+        // rendering and reading overlap and cost the longer of the two, the
+        // rendering by some way, not their sum. The document is kept whole as
+        // well, for the two scans below, which read it side by side once it is
+        // complete.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(CHUNKS_AHEAD);
+        let (rdf, store) = std::thread::scope(|scope| -> Result<(Vec<u8>, Store)> {
+            let loading = scope.spawn(move || load_rendering(Chunks { rx, chunk: Vec::new(), at: 0 }));
+            let mut tee = Tee::new(tx);
+            let rendered = crate::io::rendering_to(model, &mut tee);
+            tee.finish();
+            let loaded = loading.join().map_err(|_| anyhow!("loading ontology triples: the reader panicked"))?;
+            // A reader that failed stops the renderer as well: its error is the cause.
+            match (rendered, loaded) {
+                (Err(e), _) if !tee.reader_gone => Err(e),
+                (_, Err(e)) => Err(e),
+                (Err(e), Ok(_)) => Err(e),
+                (Ok(()), Ok(store)) => Ok((tee.out, store)),
             }
-        }
+        })?;
         type_list_cells(&store)?;
+        let (type_order, object_order) = std::thread::scope(|scope| {
+            let types = scope.spawn(|| scan_type_order(&rdf));
+            let objects = scan_object_order(&rdf);
+            (types.join().expect("scanning the rendering for its types"), objects)
+        });
         let q = Queryable {
             store,
-            type_order: scan_type_order(&rdf),
-            object_order: scan_object_order(&rdf),
+            type_order,
+            object_order,
             named_graphs: Default::default(),
             graph_docs: Vec::new(),
         };

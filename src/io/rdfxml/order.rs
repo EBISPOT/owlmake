@@ -39,7 +39,7 @@
 //! read in the middle of the one that imports it, and what it declares does not
 //! inform this one.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use anyhow::Result;
 
@@ -263,7 +263,7 @@ struct JMap<V> {
 
 impl<V> Default for JMap<V> {
     fn default() -> Self {
-        JMap { slots: Vec::new(), index: HashMap::new(), max: 0 }
+        JMap { slots: Vec::new(), index: HashMap::default(), max: 0 }
     }
 }
 
@@ -557,54 +557,54 @@ impl Order {
             terms,
             v,
             lits: Vec::new(),
-            lit_ids: HashMap::new(),
+            lit_ids: HashMap::default(),
             lit_hashes: Vec::new(),
-            synonyms: HashMap::new(),
-            builtin_types: HashMap::new(),
-            axiom_types: HashMap::new(),
-            predicates: HashMap::new(),
-            builtin_annotation_properties: HashSet::new(),
+            synonyms: HashMap::default(),
+            builtin_types: HashMap::default(),
+            axiom_types: HashMap::default(),
+            predicates: HashMap::default(),
+            builtin_annotation_properties: HashSet::default(),
             facets: Vec::new(),
             object_cardinalities: Vec::new(),
             data_cardinalities: Vec::new(),
             res: JMap::default(),
             lit: JMap::default(),
-            single: HashMap::new(),
-            first_res: HashMap::new(),
-            first_lit: HashMap::new(),
-            rest: HashMap::new(),
-            class_expressions: HashSet::new(),
-            object_properties: HashSet::new(),
-            data_properties: HashSet::new(),
-            annotation_properties: HashSet::new(),
-            data_ranges: HashSet::new(),
-            individuals: HashSet::new(),
-            restrictions: HashSet::new(),
-            axioms: HashSet::new(),
-            annotations: HashSet::new(),
-            ontologies: HashSet::new(),
+            single: HashMap::default(),
+            first_res: HashMap::default(),
+            first_lit: HashMap::default(),
+            rest: HashMap::default(),
+            class_expressions: HashSet::default(),
+            object_properties: HashSet::default(),
+            data_properties: HashSet::default(),
+            annotation_properties: HashSet::default(),
+            data_ranges: HashSet::default(),
+            individuals: HashSet::default(),
+            restrictions: HashSet::default(),
+            axioms: HashSet::default(),
+            annotations: HashSet::default(),
+            ontologies: HashSet::default(),
             swrl_rules: JMap::default(),
-            swrl_individual_property_atoms: HashSet::new(),
-            swrl_data_valued_property_atoms: HashSet::new(),
-            swrl_class_atoms: HashSet::new(),
-            swrl_data_range_atoms: HashSet::new(),
-            swrl_builtin_atoms: HashSet::new(),
-            swrl_variables: HashSet::new(),
-            swrl_same_as_atoms: HashSet::new(),
-            swrl_different_from_atoms: HashSet::new(),
-            annotated: HashMap::new(),
+            swrl_individual_property_atoms: HashSet::default(),
+            swrl_data_valued_property_atoms: HashSet::default(),
+            swrl_class_atoms: HashSet::default(),
+            swrl_data_range_atoms: HashSet::default(),
+            swrl_builtin_atoms: HashSet::default(),
+            swrl_variables: HashSet::default(),
+            swrl_same_as_atoms: HashSet::default(),
+            swrl_different_from_atoms: HashSet::default(),
+            annotated: HashMap::default(),
             annotation_order: Vec::new(),
-            annotation_seen: HashSet::new(),
-            remapped: HashMap::new(),
-            translated_classes: HashSet::new(),
-            translated_properties: HashSet::new(),
-            shared_lists: HashSet::new(),
+            annotation_seen: HashSet::default(),
+            remapped: HashMap::default(),
+            translated_classes: HashSet::default(),
+            translated_properties: HashSet::default(),
+            shared_lists: HashSet::default(),
             parsed_all: false,
             inverse_axioms: false,
             next: first_id,
-            named: HashMap::new(),
+            named: HashMap::default(),
             axiom_nodes: Vec::new(),
-            annotated_ontologies: HashSet::new(),
+            annotated_ontologies: HashSet::default(),
             block: None,
             header_copies: Vec::new(),
             trace,
@@ -713,7 +713,7 @@ impl Order {
         self.annotation_properties.extend(builtin_aps);
         let single = [v.owl_onproperty, v.owl_somevaluesfrom, v.owl_allvaluesfrom, v.owl_onclass, v.owl_ondatarange];
         for p in single {
-            self.single.insert(p, HashMap::new());
+            self.single.insert(p, HashMap::default());
         }
         self.class_expressions.extend([v.owl_thing, v.owl_nothing]);
         self.object_properties.extend([v.owl_topobjectproperty, v.owl_bottomobjectproperty]);

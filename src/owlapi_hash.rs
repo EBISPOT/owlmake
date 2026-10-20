@@ -97,12 +97,33 @@ pub(crate) fn is_ncname_char(c: char) -> bool {
 /// suffix that is a valid NCName (scanning back, remembering the last start
 /// char, stopping at the first non-NCName char).
 fn ncname_suffix_index(s: &str) -> Option<usize> {
+    if s.is_ascii() {
+        return ascii_ncname_suffix_index(s.as_bytes());
+    }
     let mut index = None;
     for (i, c) in s.char_indices().rev() {
         if is_ncname_start(c) {
             index = Some(i);
         }
         if !is_ncname_char(c) {
+            break;
+        }
+    }
+    index
+}
+
+/// [`ncname_suffix_index`] over ASCII, byte by byte. IRIs are nearly all ASCII,
+/// and an ordering splits every IRI it compares, so this is where the split
+/// is taken.
+pub(crate) fn ascii_ncname_suffix_index(bytes: &[u8]) -> Option<usize> {
+    let mut index = None;
+    for i in (0..bytes.len()).rev() {
+        let c = bytes[i];
+        let start = c.is_ascii_alphabetic() || c == b'_';
+        if start {
+            index = Some(i);
+        }
+        if !(start || c.is_ascii_digit() || c == b'-' || c == b'.') {
             break;
         }
     }

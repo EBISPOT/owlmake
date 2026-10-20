@@ -5910,6 +5910,9 @@ pub(crate) fn ncname_suffix_index(s: &str) -> Option<usize> {
     if b.len() > 1 && b[0] == b'_' && b[1] == b':' {
         return None;
     }
+    if s.is_ascii() {
+        return crate::owlapi_hash::ascii_ncname_suffix_index(b);
+    }
     let mut index = None;
     for (i, ch) in s.char_indices().rev() {
         let cp = ch as u32;

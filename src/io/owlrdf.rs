@@ -160,8 +160,13 @@ fn attributes_resolve(r: &quick_xml::NsReader<&[u8]>, e: &quick_xml::events::Byt
 
 /// XML-escape text content (`&`, `<`, `>`).
 pub(crate) fn esc(s: &str) -> String {
-    let mut o = String::with_capacity(s.len());
-    for c in s.chars() {
+    // Most text has nothing to escape and is copied whole.
+    let Some(first) = s.bytes().position(|b| matches!(b, b'&' | b'<' | b'>' | b'"' | b'\'')) else {
+        return s.to_string();
+    };
+    let mut o = String::with_capacity(s.len() + 16);
+    o.push_str(&s[..first]);
+    for c in s[first..].chars() {
         match c {
             '&' => o.push_str("&amp;"),
             '<' => o.push_str("&lt;"),

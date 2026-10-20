@@ -1915,11 +1915,18 @@ pub fn save_as(model: &mut Model, path: &Path, fmt: Format) -> Result<()> {
 /// of the model holds, written as [`save_as`] writes it, read back as a graph
 /// (every XML literal a typed literal — see [`owlrdf::read_as_graph`]).
 pub(crate) fn rendering(model: &Model) -> Result<Vec<u8>> {
+    let mut rdf = Vec::new();
+    rendering_to(model, &mut rdf)?;
+    Ok(rdf)
+}
+
+/// [`rendering`], written to `writer` as it is rendered. A document with an IRI
+/// and no anonymous individual streams out front to back (see
+/// [`owlrdf::try_save`]), so a reader on another thread can follow the renderer.
+pub(crate) fn rendering_to<W: Write>(model: &Model, writer: W) -> Result<()> {
     let mut copy = model.clone();
     normalize_set_operands(&mut copy);
-    let mut rdf = Vec::new();
-    owlrdf::read_as_graph(|| write_to_with(&mut copy, &mut rdf, Format::RdfXml, RdfXmlWriter::Owlapi))?;
-    Ok(rdf)
+    owlrdf::read_as_graph(|| write_to_with(&mut copy, writer, Format::RdfXml, RdfXmlWriter::Owlapi))
 }
 
 /// Build a `CmOnto` view for the XML/functional writers WITHOUT emptying the
