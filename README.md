@@ -9,7 +9,7 @@ owlmake uses [`horned-owl`](https://github.com/phillord/horned-owl) and [`whelk-
 1. Download the correct binary for your architecture from the [Releases page](https://github.com/EBISPOT/owlmake/releases). For example:
 
 ```
-wget https://github.com/EBISPOT/owlmake/releases/download/v0.1.0/om-macos-arm64
+wget https://github.com/EBISPOT/owlmake/releases/latest/download/om-macos-arm64
 ```
 
 2. Rename it to `om` and make sure it's on your `PATH` and executable. For example:
