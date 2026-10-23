@@ -1011,9 +1011,15 @@ fn plan_rule(
         let expanded = make.expand_with(line, &autos);
         if !names_target {
             // `$@` may reach the expanded text through a variable's value, so
-            // the expanded line is checked for both spellings of the target.
+            // the expanded line is checked for both spellings of the target. A
+            // token ends at shell punctuation as well as at whitespace: UBERON's
+            // `if [ … ]; then … -o $@; fi` leaves the target as `…owl;`.
             names_target = line.contains("$@")
-                || expanded.split_whitespace().any(|t| t == target || t == "$@");
+                || expanded
+                    .split(|c: char| {
+                        c.is_whitespace() || matches!(c, ';' | '|' | '&' | '(' | ')' | '<' | '>' | '\'' | '"' | '`')
+                    })
+                    .any(|t| t == target || t == "$@");
         }
         // The pipeline opens with the first ROBOT invocation's own input. A line
         // that runs something else — `$(MAKE) …`, `sssom convert …` — threads no

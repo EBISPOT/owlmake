@@ -465,6 +465,12 @@ pub fn parse_command(cmd: &str, robot_prefix: &str) -> Vec<Step> {
                 .cloned()
                 .collect();
             steps.push(Step::OwlmakeCli { name: "make".to_string(), args });
+        } else if crate::build::recipe::is_status_test(sub) {
+            // `test` and `[` do nothing but answer with their exit status, so
+            // recording one as inert answers "yes" whatever it asks. A stamped
+            // component's rule is `test -f $@ || touch $@`: with the test inert
+            // the `touch` never runs, and a missing component is never created.
+            steps.push(shell_step(sub.to_string()));
         } else if BENIGN_SHELL.contains(&toks[0].as_str()) && !writes_a_file(&toks) {
             steps.push(Step::Inert(sub.to_string()));
         } else if BENIGN_SHELL.contains(&toks[0].as_str()) {
@@ -2445,6 +2451,20 @@ mod annotate_tests {
 mod tests {
     use super::*;
     use crate::plan::step::Op;
+
+    /// A test's exit status is what `||` and `&&` act on, so it is a step that
+    /// runs, and the fallback stays a fallback.
+    #[test]
+    fn a_test_command_runs_so_its_fallback_can_fire() {
+        let steps = parse_command("test -f components/x.owl || touch components/x.owl", "robot");
+        assert!(
+            matches!(&steps[..], [Step::Shell { command, .. }, Step::Fallback { command: fallback, .. }]
+                if command == "test -f components/x.owl" && fallback == "touch components/x.owl"),
+            "{steps:?}"
+        );
+        let steps = parse_command("[ -s reports/x.tsv ] && echo found", "robot");
+        assert!(matches!(steps.first(), Some(Step::Shell { command, .. }) if command == "[ -s reports/x.tsv ]"), "{steps:?}");
+    }
 
     /// A recipe's `--prefix` binding is what a `--select` CURIE resolves through,
     /// so ingest has to record it. UBERON's `cumbo` term list is

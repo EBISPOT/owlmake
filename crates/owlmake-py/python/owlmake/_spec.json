@@ -1,6 +1,6 @@
 {
   "program": "owlmake",
-  "version": "0.4.19",
+  "version": "0.4.20",
   "about": "Self-contained OWL/OBO ontology build and QC toolkit",
   "commands": [
     {
@@ -10598,6 +10598,44 @@
           "help": null
         },
         {
+          "id": "query_embeddings",
+          "longs": [
+            "query-embeddings"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "QUERY_EMBEDDINGS"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Query vectors made elsewhere: a parquet with `text_to_embed` and `embedding` (as `om embeddings embed`, or OLS's own embedder, writes), one row per query text. The semantic channel then calls no API. Every query must be present"
+        },
+        {
+          "id": "pca_model",
+          "longs": [
+            "pca-model"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "PCA_MODEL"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "OLS's PCA model (`<model>_pca<k>.json`, published beside its `_pca<k>` parquets): projects each query vector before scoring, so full-width vectors can be searched against an `--embeddings` parquet of reduced ones"
+        },
+        {
           "id": "min_similarity",
           "longs": [
             "min-similarity"
@@ -16766,6 +16804,28 @@
           "defaults": [],
           "hidden": false,
           "help": "Print every target this repo can build, one per line, and exit"
+        },
+        {
+          "id": "list_files",
+          "longs": [
+            "list-files"
+          ],
+          "shorts": [],
+          "action": "set_true",
+          "value_names": [
+            "LIST_FILES"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [
+            "true",
+            "false"
+          ],
+          "defaults": [],
+          "hidden": false,
+          "help": "Print every FILE this repo can build, one per line, and exit: the targets `--list-targets` prints, less those that name no file \u2014 phony targets, bare names, and rules whose recipe never writes its own target (`check_rdfxml_%: %`, which reads its prerequisite and writes nothing). This is the surface a comparison of two builds' outputs walks"
         },
         {
           "id": "plan_only",

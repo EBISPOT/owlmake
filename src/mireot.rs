@@ -40,7 +40,8 @@ use std::rc::Rc;
 
 use anyhow::{bail, Result};
 use horned_owl::model::{
-    AnnotatedComponent, AnnotationSubject, Build, ClassExpression as CE, Component, DeclareAnnotationProperty,
+    AnnotatedComponent, AnnotationProperty, AnnotationSubject, Build, ClassExpression as CE, Component,
+    DeclareAnnotationProperty,
     DeclareClass, DeclareDataProperty, DeclareNamedIndividual, DeclareObjectProperty, MutableOntology,
     ObjectPropertyExpression as OPE, RcStr, SubAnnotationPropertyOf, SubClassOf, SubDataPropertyOf,
     SubObjectPropertyExpression, SubObjectPropertyOf,
@@ -607,8 +608,8 @@ impl Module {
         self.insert(declaration.into());
     }
 
-    /// Bring the root's annotation assertions about `iri`, each with a
-    /// declaration of its property when nothing the module holds names it.
+    /// Bring the root's annotation assertions about `iri`, each after its
+    /// property, as ROBOT's `OntologyHelper.copyAnnotations` does.
     fn bring_annotations(&mut self, index: &Index, iri: &str) {
         for ac in index.assertions.get(iri).into_iter().flatten() {
             let Component::AnnotationAssertion(aa) = &ac.component else { continue };
@@ -616,11 +617,25 @@ impl Module {
             if index.only.as_deref().is_some_and(|only| property != only) {
                 continue;
             }
-            if !self.properties.contains(property) {
-                self.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(aa.ann.ap.clone())).into());
-            }
+            self.bring_property(index, &aa.ann.ap);
             self.insert((*ac).clone());
         }
+    }
+
+    /// Bring the annotation property an assertion uses, as ROBOT's
+    /// `OntologyHelper.copy` does: nothing when the module already names it;
+    /// otherwise its declaration and then its own annotation assertions, each
+    /// bringing its property first. So a property's frame comes with the first
+    /// assertion that uses it (UBERON's stage ontologies carry labelled,
+    /// defined `end_dpf`-style properties into their MIREOT modules), and the
+    /// properties that frame uses bring theirs in turn.
+    fn bring_property(&mut self, index: &Index, property: &AnnotationProperty<RcStr>) {
+        let iri = property.0.as_ref();
+        if !self.properties.insert(iri.to_string()) {
+            return;
+        }
+        self.insert(Component::DeclareAnnotationProperty(DeclareAnnotationProperty(property.clone())).into());
+        self.bring_annotations(index, iri);
     }
 
     /// `term`'s ancestors up to the upper terms, each with what it brings,

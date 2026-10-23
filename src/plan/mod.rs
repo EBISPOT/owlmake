@@ -14,6 +14,22 @@ use std::fmt;
 pub use step::{Op, Step};
 use step as robot;
 
+/// Whether a recipe's steps leave nothing at `target`: there is at least one
+/// step, and every step only prints to the console or runs a shell command that
+/// never names the target. A rule whose whole recipe is `echo "SKIP $@"`, and a
+/// checking rule that reads its prerequisite and writes nowhere
+/// (`check_rdfxml_%: %`), are both of that shape: their target is never a file,
+/// and the rule simply runs again whenever it is asked for.
+pub fn steps_write_nothing(target: &str, steps: &[Step]) -> bool {
+    let name = std::path::Path::new(target).file_name().and_then(|s| s.to_str()).unwrap_or(target);
+    !steps.is_empty()
+        && steps.iter().all(|s| match s {
+            Step::File(crate::build::recipe::FileOp::Print { dst: None, .. }) => true,
+            Step::Shell { command, .. } => !command.contains(name),
+            _ => false,
+        })
+}
+
 /// The plan for one release artefact (e.g. `oba-full.owl`).
 pub struct ArtefactPlan {
     pub target: String,
@@ -524,6 +540,13 @@ impl Plan {
         let t = std::path::Path::new(target);
         let bare = t.parent().is_none_or(|p| p.as_os_str().is_empty()) && t.extension().is_none();
         !bare
+    }
+
+    /// Whether building `a` leaves a file at its target path: the target names a
+    /// file, and its recipe writes it — not only side files beside it, and not
+    /// nothing at all (see [`steps_write_nothing`]).
+    pub fn writes_target(&self, a: &ArtefactPlan) -> bool {
+        self.names_a_file(&a.target) && !a.side_effect_only && !steps_write_nothing(&a.target, &a.steps)
     }
 
     /// Whether `target` is declared `.PHONY`.

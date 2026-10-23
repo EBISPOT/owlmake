@@ -1112,3 +1112,68 @@ fn a_sharded_merged_import_is_one_document_per_source_behind_an_index() {
         assert!(text.contains(want), "`{want}` did not arrive through the sharded closure:\n{text}");
     }
 }
+
+/// Snapshot every file the plan can build.
+fn list_files(dir: &Path) -> Vec<String> {
+    let out = bin().args(["make", "--list-files", "-C"]).arg(dir).output().unwrap();
+    assert!(out.status.success(), "--list-files failed: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
+}
+
+/// `--list-files` names the files the plan builds. A checking rule that reads
+/// its prerequisite and writes nothing, and a phony target, are runnable targets
+/// but not files. The answer comes from the plan, so it is the same once the
+/// Makefile is gone. A stamped rule, `test -f $@ || touch $@`, creates its file
+/// empty when it is missing — the ontology its prerequisite brings is not put
+/// there for the test to find — and leaves it alone when it is not.
+#[test]
+fn list_files_names_only_targets_whose_rule_writes_them() {
+    let root = scratch("files");
+    fixture(&root);
+    let ont = root.join("src/ontology");
+    let own = std::fs::read_to_string(ont.join("tiny.Makefile")).unwrap();
+    write(
+        &ont.join("tiny.Makefile"),
+        &format!(
+            "{own}\n\
+             check_tiny.owl: tiny.owl\n\
+             \t@echo checked $<\n\
+             \n\
+             .PHONY: fetch-x.owl\n\
+             fetch-x.owl:\n\
+             \techo fetched > fetched.txt\n\
+             \n\
+             stamped.owl: tiny-edit.ofn\n\
+             \ttest -f $@ || touch $@\n"
+        ),
+    );
+    let planned = bin().args(["make", "--plan-only", "-C"]).arg(&ont).output().unwrap();
+    assert!(planned.status.success(), "{}", String::from_utf8_lossy(&planned.stderr));
+
+    let targets = list_targets(&ont);
+    for t in ["check_tiny.owl", "fetch-x.owl", "stamped.owl", "tiny.owl"] {
+        assert!(targets.lines().any(|l| l == t), "`{t}` missing from --list-targets:\n{targets}");
+    }
+    let files = list_files(&ont);
+    for t in ["stamped.owl", "tiny.owl"] {
+        assert!(files.iter().any(|l| l == t), "`{t}` missing from --list-files: {files:?}");
+    }
+    for t in ["check_tiny.owl", "fetch-x.owl", "qc", "greet"] {
+        assert!(!files.iter().any(|l| l == t), "`{t}` names no file but is listed: {files:?}");
+    }
+
+    let stash = scratch("files-stash");
+    std::fs::create_dir_all(&stash).unwrap();
+    std::fs::rename(ont.join("Makefile"), stash.join("Makefile")).unwrap();
+    std::fs::rename(ont.join("tiny.Makefile"), stash.join("tiny.Makefile")).unwrap();
+    assert_eq!(list_files(&ont), files, "the file surface changed when the Makefile was removed");
+
+    let stamped = ont.join("stamped.owl");
+    let run = bin().args(["make", "stamped.owl", "-C"]).arg(&ont).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read(&stamped).unwrap(), b"", "a missing stamped file is created empty");
+    std::fs::write(&stamped, "kept").unwrap();
+    let run = bin().args(["make", "stamped.owl", "-C"]).arg(&ont).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(std::fs::read_to_string(&stamped).unwrap(), "kept", "a present stamped file is left alone");
+}

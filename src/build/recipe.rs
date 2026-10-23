@@ -1465,6 +1465,12 @@ fn strip_redirects(toks: &[(String, bool)]) -> (Vec<String>, Redirects) {
     (argv, redir)
 }
 
+/// Whether a command line is `test …` or `[ … ]`: a question about files whose
+/// whole answer is its exit status. It reads no file's content and writes none.
+pub(crate) fn is_status_test(command: &str) -> bool {
+    matches!(command.trim().trim_start_matches(['@', '+']).split_whitespace().next(), Some("test" | "["))
+}
+
 /// Whether a command line contains a top-level single `|` (a pipeline).
 pub(crate) fn has_pipe(s: &str) -> bool {
     split_pipe(s).len() > 1

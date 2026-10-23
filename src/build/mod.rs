@@ -3578,7 +3578,11 @@ fn run_shell_step_in_pipeline(
     if let Step::OwlmakeCli { name, args } = step {
         return run_cli_robot_step(repo, name, args, model, work, pipeline_input);
     }
-    let touches_target = match (target, step_command_text(step)) {
+    // A `test`/`[` command asks whether the target is there; handing it the
+    // pipeline's model would answer by writing the file it asks about, and the
+    // `|| touch $@` that follows a stamped component's test would never run.
+    let status_test = step_command_text(step).is_some_and(|c| crate::build::recipe::is_status_test(&c));
+    let touches_target = !status_test && match (target, step_command_text(step)) {
         // Only an ontology target can be round-tripped; a rule writing a `.tsv`
         // has no model on disk for the command to read or rewrite.
         //
@@ -5493,17 +5497,8 @@ fn surface_produced(repo: &Repo, target: &str, steps: &[Step], out: &Path) -> Re
         }
         // A step that cannot name the target cannot have written it. There is no
         // post-condition on a recipe: a rule whose commands create nothing is
-        // simply always out of date, so an absent target is not a failure. A rule
-        // whose whole recipe is `echo "SKIP $@"`, and a checking rule that reads
-        // its prerequisite and writes nowhere, are both of that shape.
-        let name = Path::new(target).file_name().and_then(|s| s.to_str()).unwrap_or(target);
-        let writes_nothing = !steps.is_empty()
-            && steps.iter().all(|s| match s {
-                Step::File(recipe::FileOp::Print { dst: None, .. }) => true,
-                Step::Shell { command, .. } => !command.contains(name),
-                _ => false,
-            });
-        if writes_nothing {
+        // simply always out of date, so an absent target is not a failure.
+        if crate::plan::steps_write_nothing(target, steps) {
             return Ok(());
         }
         bail!("steps completed but did not produce {}", produced.display());

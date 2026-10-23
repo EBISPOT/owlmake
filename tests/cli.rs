@@ -10820,3 +10820,98 @@ fn map_searches_precomputed_query_vectors_through_a_pca_model() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("need an --embeddings parquet"));
 }
+
+/// An unprefixed qualifier key or custom tag that names a `[Typedef]` whose
+/// `xref` renames it is that xref's property, as OWL API's relation-shorthand
+/// rule reads it: UBERON's `{seeAlso="…"}` is `rdfs:seeAlso`, the xref of its
+/// `seeAlso` typedef, declared once. Without such a typedef the key is in the
+/// oboInOwl namespace. ROBOT 1.9.10 writes both so.
+#[test]
+fn obo_qualifier_key_named_by_a_typedef_xref() {
+    let body = "format-version: 1.2\nontology: q\n\n[Term]\nid: Q:1\nname: one\n\
+                xref: E:1 {seeAlso=\"https://x.org/i\", source=\"s\"}\n\
+                property_value: taxon_notes \"n\" xsd:string {seeAlso=\"Q:2\"}\n\n\
+                [Typedef]\nid: taxon_notes\nname: taxon notes\nis_metadata_tag: true\n";
+    let typedef = "\n[Typedef]\nid: seeAlso\nname: see also\n\
+                   xref: http://www.w3.org/2000/01/rdf-schema#seeAlso\nis_metadata_tag: true\n";
+    for (with_typedef, property, other) in [
+        (true, "rdfs:seeAlso", "oboInOwl#seeAlso"),
+        (false, "<http://www.geneontology.org/formats/oboInOwl#seeAlso>", "rdf-schema#seeAlso"),
+    ] {
+        let src = tmp("typedef-qualifier.obo");
+        std::fs::write(&src, format!("{body}{}", if with_typedef { typedef } else { "" })).unwrap();
+        let out = tmp("typedef-qualifier.ofn");
+        let run = bin().args(["convert", "-i"]).arg(&src).arg("-o").arg(&out).output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let text = std::fs::read_to_string(&out).unwrap();
+        assert!(!text.contains(other), "{with_typedef}: {text}");
+        assert_eq!(text.matches(&format!("Annotation({property} ")).count(), 2, "{with_typedef}: {text}");
+        assert_eq!(text.matches(&format!("Declaration(AnnotationProperty({property}))")).count(), 1, "{with_typedef}: {text}");
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&out);
+    }
+}
+
+/// A MIREOT module brings each annotation property an assertion uses as
+/// ROBOT's `OntologyHelper.copy` does: with the property's own frame the first
+/// time, and the properties that frame uses with theirs. ROBOT 1.9.10 brings
+/// the label and definition of `end_dpf`, its `has_unit`, and the labels of
+/// `has_unit` and of the definition property, and declares `has_unit`, which
+/// no term's assertion uses.
+#[test]
+fn extract_mireot_brings_annotation_property_frames() {
+    let src = tmp("mireot-frames.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+         Prefix(obo:=<http://purl.obolibrary.org/obo/>)\n\
+         Prefix(oio:=<http://www.geneontology.org/formats/oboInOwl#>)\n\
+         Ontology(<http://example.org/p/src.owl>\n\
+         Declaration(Class(obo:EX_0000000))\n\
+         Declaration(Class(obo:EX_0000001))\n\
+         Declaration(Class(obo:EX_0000009))\n\
+         Declaration(AnnotationProperty(obo:ex#end_dpf))\n\
+         Declaration(AnnotationProperty(obo:ex#has_unit))\n\
+         Declaration(AnnotationProperty(obo:IAO_0000115))\n\
+         Declaration(AnnotationProperty(oio:hasDbXref))\n\
+         AnnotationAssertion(rdfs:label obo:ex#end_dpf \"end, days post fertilization\")\n\
+         AnnotationAssertion(obo:IAO_0000115 obo:ex#end_dpf \"a definition of the property\")\n\
+         AnnotationAssertion(obo:ex#has_unit obo:ex#end_dpf obo:UO_0000033)\n\
+         AnnotationAssertion(rdfs:label obo:ex#has_unit \"has unit\")\n\
+         AnnotationAssertion(rdfs:label obo:IAO_0000115 \"definition\")\n\
+         AnnotationAssertion(rdfs:label obo:EX_0000000 \"root\")\n\
+         AnnotationAssertion(rdfs:label obo:EX_0000001 \"child one\")\n\
+         AnnotationAssertion(Annotation(oio:hasDbXref \"PMID:1\") obo:IAO_0000115 obo:EX_0000001 \"def of child one\")\n\
+         AnnotationAssertion(obo:ex#end_dpf obo:EX_0000001 \"3\"^^xsd:integer)\n\
+         AnnotationAssertion(rdfs:label obo:EX_0000009 \"unrelated\")\n\
+         SubClassOf(obo:EX_0000001 obo:EX_0000000)\n\
+         )\n",
+    )
+    .unwrap();
+    let out = tmp("mireot-frames.out.ofn");
+    let run = bin()
+        .args(["extract", "-i"])
+        .arg(&src)
+        .args(["--method", "MIREOT", "--branch-from-term", "http://purl.obolibrary.org/obo/EX_0000000"])
+        .args(["--copy-ontology-annotations", "false", "-o"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    let text = std::fs::read_to_string(&out).unwrap();
+    for brought in [
+        "<http://purl.obolibrary.org/obo/ex#end_dpf> \"end, days post fertilization\"",
+        "<http://purl.obolibrary.org/obo/ex#end_dpf> \"a definition of the property\"",
+        "<http://purl.obolibrary.org/obo/ex#end_dpf> <http://purl.obolibrary.org/obo/UO_0000033>",
+        "<http://purl.obolibrary.org/obo/ex#has_unit> \"has unit\"",
+        "<http://purl.obolibrary.org/obo/IAO_0000115> \"definition\"",
+        "Declaration(AnnotationProperty(<http://purl.obolibrary.org/obo/ex#has_unit>))",
+        "\"def of child one\"",
+    ] {
+        assert!(text.contains(brought), "{brought}: {text}");
+    }
+    assert!(!text.contains("unrelated"), "{text}");
+    let _ = std::fs::remove_file(&src);
+    let _ = std::fs::remove_file(&out);
+}

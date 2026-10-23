@@ -2470,7 +2470,7 @@ def _chain_text_tagger(self) -> 'Chain':
 Chain.text_tagger = _chain_text_tagger
 
 
-def map(*, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, delimiters: Optional[StrOrPath] = None, no_substrings: bool = False, embeddings: Optional[StrOrPath] = None, model: Optional[StrOrPath] = None, base_url: Optional[StrOrPath] = None, api_key: Optional[StrOrPath] = None, min_similarity: Optional[StrOrPath] = None, fuzzy: bool = False, target_ontology: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, top_n: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def map(*, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, delimiters: Optional[StrOrPath] = None, no_substrings: bool = False, embeddings: Optional[StrOrPath] = None, model: Optional[StrOrPath] = None, base_url: Optional[StrOrPath] = None, api_key: Optional[StrOrPath] = None, query_embeddings: Optional[StrOrPath] = None, pca_model: Optional[StrOrPath] = None, min_similarity: Optional[StrOrPath] = None, fuzzy: bool = False, target_ontology: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, top_n: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Map free-text strings to ontology terms (hybrid: tagger lexical + embedding + fuzzy, fused and ranked)
 
     Flags:
@@ -2486,6 +2486,8 @@ def map(*, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] =
     model: (--model) Embedding model for the query
     base_url: (--base-url)
     api_key: (--api-key)
+    query_embeddings: (--query-embeddings) Query vectors made elsewhere: a parquet with `text_to_embed` and `embedding` (as `om embeddings embed`, or OLS's own embedder, writes), one row per query text. The semantic channel then calls no API. Every query must be present
+    pca_model: (--pca-model) OLS's PCA model (`<model>_pca<k>.json`, published beside its `_pca<k>` parquets): projects each query vector before scoring, so full-width vectors can be searched against an `--embeddings` parquet of reduced ones
     min_similarity: (--min-similarity) Minimum embedding score (`(cos+1)/2`) to keep a semantic hit
     fuzzy: (--fuzzy) Enable the token-Jaccard fuzzy channel (owlmake extension; needs a term source)
     target_ontology: (--target-ontology) Target ontology id(s), priority-ordered; filters and tie-breaks results
@@ -2506,6 +2508,8 @@ def map(*, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] =
         "model": model,
         "base_url": base_url,
         "api_key": api_key,
+        "query_embeddings": query_embeddings,
+        "pca_model": pca_model,
         "min_similarity": min_similarity,
         "fuzzy": fuzzy,
         "target_ontology": target_ontology,
@@ -2515,7 +2519,7 @@ def map(*, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] =
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_map(self, *, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, delimiters: Optional[StrOrPath] = None, no_substrings: bool = False, embeddings: Optional[StrOrPath] = None, model: Optional[StrOrPath] = None, base_url: Optional[StrOrPath] = None, api_key: Optional[StrOrPath] = None, min_similarity: Optional[StrOrPath] = None, fuzzy: bool = False, target_ontology: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, top_n: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None) -> 'Chain':
+def _chain_map(self, *, queries: Optional[StrOrPath] = None, tagger_db: Optional[StrOrPath] = None, input: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, delimiters: Optional[StrOrPath] = None, no_substrings: bool = False, embeddings: Optional[StrOrPath] = None, model: Optional[StrOrPath] = None, base_url: Optional[StrOrPath] = None, api_key: Optional[StrOrPath] = None, query_embeddings: Optional[StrOrPath] = None, pca_model: Optional[StrOrPath] = None, min_similarity: Optional[StrOrPath] = None, fuzzy: bool = False, target_ontology: Optional[Sequence[StrOrPath]] = None, limit: Optional[StrOrPath] = None, top_n: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None) -> 'Chain':
     """Map free-text strings to ontology terms (hybrid: tagger lexical + embedding + fuzzy, fused and ranked)
 
     Flags:
@@ -2531,6 +2535,8 @@ def _chain_map(self, *, queries: Optional[StrOrPath] = None, tagger_db: Optional
     model: (--model) Embedding model for the query
     base_url: (--base-url)
     api_key: (--api-key)
+    query_embeddings: (--query-embeddings) Query vectors made elsewhere: a parquet with `text_to_embed` and `embedding` (as `om embeddings embed`, or OLS's own embedder, writes), one row per query text. The semantic channel then calls no API. Every query must be present
+    pca_model: (--pca-model) OLS's PCA model (`<model>_pca<k>.json`, published beside its `_pca<k>` parquets): projects each query vector before scoring, so full-width vectors can be searched against an `--embeddings` parquet of reduced ones
     min_similarity: (--min-similarity) Minimum embedding score (`(cos+1)/2`) to keep a semantic hit
     fuzzy: (--fuzzy) Enable the token-Jaccard fuzzy channel (owlmake extension; needs a term source)
     target_ontology: (--target-ontology) Target ontology id(s), priority-ordered; filters and tie-breaks results
@@ -2551,6 +2557,8 @@ def _chain_map(self, *, queries: Optional[StrOrPath] = None, tagger_db: Optional
         "model": model,
         "base_url": base_url,
         "api_key": api_key,
+        "query_embeddings": query_embeddings,
+        "pca_model": pca_model,
         "min_similarity": min_similarity,
         "fuzzy": fuzzy,
         "target_ontology": target_ontology,
@@ -4074,7 +4082,7 @@ def _chain_ubergraph(self, *, input: Optional[Sequence[StrOrPath]] = None, mirro
 Chain.ubergraph = _chain_ubergraph
 
 
-def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, jobs: Optional[StrOrPath] = None, assume_new: Optional[Sequence[StrOrPath]] = None, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, regenerate: bool = False, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, jobs: Optional[StrOrPath] = None, assume_new: Optional[Sequence[StrOrPath]] = None, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, list_files: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, regenerate: bool = False, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
     """Build an ontology's release artefacts: resolve the repo's plan (a committed `owlmake.yaml`, or one regenerated from its build configuration), then run the requested targets. Defaults to the current directory
 
     Flags:
@@ -4087,6 +4095,7 @@ def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = F
     rebuild: (--rebuild) Rebuild these target groups even where their outputs are present, e.g. `--rebuild imports --rebuild mirrors`
     keep: (--keep) Reuse these groups' existing outputs instead of rebuilding them
     list_targets: (--list-targets) Print every target this repo can build, one per line, and exit
+    list_files: (--list-files) Print every FILE this repo can build, one per line, and exit: the targets `--list-targets` prints, less those that name no file — phony targets, bare names, and rules whose recipe never writes its own target (`check_rdfxml_%: %`, which reads its prerequisite and writes nothing). This is the surface a comparison of two builds' outputs walks
     plan_only: (--plan-only) Only print the plan; do not build anything. (Still writes the plan file when it is being generated, so the plan can be checked in.)
     plan_format: (--plan-format) Serialization of the generated plan: `yaml` (default, `owlmake.yaml`) or `json` (`owlmake.json`). Both are accepted when building; if a repo commits both they must describe the same build
     regenerate: (--regenerate) Rewrite the committed plan from the repository's build configuration
@@ -4116,6 +4125,7 @@ def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = F
         "rebuild": rebuild,
         "keep": keep,
         "list_targets": list_targets,
+        "list_files": list_files,
         "plan_only": plan_only,
         "plan_format": plan_format,
         "regenerate": regenerate,
@@ -4137,7 +4147,7 @@ def make(*, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = F
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, jobs: Optional[StrOrPath] = None, assume_new: Optional[Sequence[StrOrPath]] = None, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, regenerate: bool = False, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_make: bool = False, keep_going: bool = False, jobs: Optional[StrOrPath] = None, assume_new: Optional[Sequence[StrOrPath]] = None, directory: Optional[StrOrPath] = None, rebuild: Optional[Sequence[StrOrPath]] = None, keep: Optional[Sequence[StrOrPath]] = None, list_targets: bool = False, list_files: bool = False, plan_only: bool = False, plan_format: Optional[StrOrPath] = None, regenerate: bool = False, imports: Optional[StrOrPath] = None, patterns: Optional[StrOrPath] = None, output_dir: Optional[StrOrPath] = None, artefact: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
     """Build an ontology's release artefacts: resolve the repo's plan (a committed `owlmake.yaml`, or one regenerated from its build configuration), then run the requested targets. Defaults to the current directory
 
     Flags:
@@ -4150,6 +4160,7 @@ def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_m
     rebuild: (--rebuild) Rebuild these target groups even where their outputs are present, e.g. `--rebuild imports --rebuild mirrors`
     keep: (--keep) Reuse these groups' existing outputs instead of rebuilding them
     list_targets: (--list-targets) Print every target this repo can build, one per line, and exit
+    list_files: (--list-files) Print every FILE this repo can build, one per line, and exit: the targets `--list-targets` prints, less those that name no file — phony targets, bare names, and rules whose recipe never writes its own target (`check_rdfxml_%: %`, which reads its prerequisite and writes nothing). This is the surface a comparison of two builds' outputs walks
     plan_only: (--plan-only) Only print the plan; do not build anything. (Still writes the plan file when it is being generated, so the plan can be checked in.)
     plan_format: (--plan-format) Serialization of the generated plan: `yaml` (default, `owlmake.yaml`) or `json` (`owlmake.json`). Both are accepted when building; if a repo commits both they must describe the same build
     regenerate: (--regenerate) Rewrite the committed plan from the repository's build configuration
@@ -4179,6 +4190,7 @@ def _chain_make(self, *, targets: Optional[Sequence[StrOrPath]] = None, always_m
         "rebuild": rebuild,
         "keep": keep,
         "list_targets": list_targets,
+        "list_files": list_files,
         "plan_only": plan_only,
         "plan_format": plan_format,
         "regenerate": regenerate,

@@ -85,6 +85,14 @@ pub struct Args {
     #[arg(long)]
     pub list_targets: bool,
 
+    /// Print every FILE this repo can build, one per line, and exit: the
+    /// targets `--list-targets` prints, less those that name no file — phony
+    /// targets, bare names, and rules whose recipe never writes its own target
+    /// (`check_rdfxml_%: %`, which reads its prerequisite and writes nothing).
+    /// This is the surface a comparison of two builds' outputs walks.
+    #[arg(long, conflicts_with = "list_targets")]
+    pub list_files: bool,
+
     /// Only print the plan; do not build anything. (Still writes the plan file
     /// when it is being generated, so the plan can be checked in.)
     #[arg(long)]
@@ -552,12 +560,13 @@ pub fn step(_piped: Option<Model>, args: &Args) -> Result<Option<Model>> {
     };
     let full_plan = spec::bind_switches(full_plan, &switches);
 
-    if args.list_targets {
+    if args.list_targets || args.list_files {
         let mut names: Vec<String> = full_plan
             .artefacts
             .iter()
             .chain(full_plan.prerequisites.iter())
             .filter(|a| !a.missing_rule)
+            .filter(|a| !args.list_files || full_plan.writes_target(a))
             .map(|a| a.target.clone())
             .chain(pattern_product_targets(&full_plan))
             .chain(full_plan.merged_import.clone())
@@ -953,6 +962,7 @@ fn make_target(
         rebuild: Vec::new(),
         keep: Vec::new(),
         list_targets: false,
+        list_files: false,
         plan_only: false,
         plan_format: "yaml".to_string(),
         regenerate: false,

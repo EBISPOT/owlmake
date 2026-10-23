@@ -132,6 +132,13 @@ thread_local! {
     /// `http://purl.obolibrary.org/obo/<ontology>#`, the ontology being the
     /// header's `ontology:` id as written, or `TEMP`.
     static DEFAULT_ID_SPACE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    /// The bare `[Typedef]` ids of the document being parsed that an `xref`
+    /// renames, with the IRI each names. OWL API resolves an unprefixed tag or
+    /// qualifier key through such a typedef (its relation-shorthand rule), so
+    /// UBERON's `{seeAlso="…"}` is `rdfs:seeAlso`, the xref of its `seeAlso`
+    /// typedef, not `oboInOwl:seeAlso`. Empty outside a read.
+    static TYPEDEF_XREF_IRIS: std::cell::RefCell<HashMap<String, String>> =
+        std::cell::RefCell::new(HashMap::new());
 }
 
 /// `prop`, recorded as introduced by a tag of the document being parsed.
@@ -256,9 +263,11 @@ const XSD_TERMS: &[&str] = &[
 /// The annotation property a tag or a qualifier key names: `name` is
 /// `rdfs:label`, `comment` `rdfs:comment`, `is_obsolete` `owl:deprecated`, `def`
 /// `IAO:0000115`, `xref` `oboInOwl:hasDbXref` and so on through the OBO
-/// annotation vocabulary; an id with a prefix or a scheme expands as an id; any
-/// other name is in the oboInOwl namespace. A name with a space names no
-/// property, and the read fails ([`load`] reports it).
+/// annotation vocabulary; an id with a prefix or a scheme expands as an id; a
+/// bare name that a `[Typedef]` with an `xref` declares is that xref's IRI
+/// (OWL API's `oboIdToIRI` with its typedef lookup); any other name is in the
+/// oboInOwl namespace. A name with a space names no property, and the read
+/// fails ([`load`] reports it).
 fn tag_iri(tag: &str) -> String {
     if let Some(iri) = annotation_vocabulary(tag) {
         return iri.to_string();
@@ -270,6 +279,8 @@ fn tag_iri(tag: &str) -> String {
     }
     if tag.contains(':') {
         expand_curie(tag)
+    } else if let Some(iri) = TYPEDEF_XREF_IRIS.with(|t| t.borrow().get(tag).cloned()) {
+        iri
     } else {
         format!("{OIO}{}", url_encode_local(tag))
     }
@@ -762,6 +773,7 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
     // `idspace: PREFIX NAMESPACE [description]` header lines: the document's own
     // CURIE bindings, consulted by `expand_curie` for the rest of the parse.
     TAG_PROPERTIES.with(|t| t.borrow_mut().clear());
+    TYPEDEF_XREF_IRIS.with(|t| t.borrow_mut().clear());
     READ_ERROR.with(|e| e.borrow_mut().take());
     IDSPACES.with(|m| {
         let mut m = m.borrow_mut();
@@ -904,8 +916,12 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
                 let iri = if id.contains(':') {
                     expand_curie(id)
                 } else {
-                    let i = typedef_iri(id, st.get("xref"), onto_ns.as_deref());
+                    let xref = shorthand_xref(id, st);
+                    let i = typedef_iri(id, xref.as_deref(), onto_ns.as_deref());
                     rel_map.insert(id.to_string(), i.clone());
+                    if xref.is_some() {
+                        TYPEDEF_XREF_IRIS.with(|t| t.borrow_mut().insert(id.to_string(), i.clone()));
+                    }
                     i
                 };
                 if st.get("is_metadata_tag") == Some("true") {
@@ -1039,6 +1055,7 @@ pub fn load<R: BufRead>(reader: R) -> Result<Model> {
         }
     }
 
+    TYPEDEF_XREF_IRIS.with(|t| t.borrow_mut().clear());
     if let Some(e) = READ_ERROR.with(|e| e.borrow_mut().take()) {
         anyhow::bail!("could not read the OBO document: {e}");
     }
@@ -1944,6 +1961,26 @@ fn resolve_local(name: &str, onto_ns: Option<&str>) -> String {
 /// shorthands (`disease_has_basis_in_dysfunction_of` ⇒ `RO_0004020`).
 fn resolve_rel(r: &str, rel_map: &HashMap<String, String>) -> String {
     rel_map.get(r).cloned().unwrap_or_else(|| expand_curie(r))
+}
+
+/// The `xref` of a bare-id `[Typedef]` that renames it, picked as OWL API's
+/// relation-shorthand rule picks it: the first xref that is not the id itself,
+/// unless a later one is an RO or BFO id, which takes precedence. None when no
+/// xref renames it.
+fn shorthand_xref(id: &str, st: &Stanza) -> Option<String> {
+    let mut chosen: Option<&str> = None;
+    for v in st.all("xref") {
+        let x = v.split_whitespace().next().unwrap_or("");
+        if x.is_empty() || x == id {
+            continue;
+        }
+        match chosen {
+            None => chosen = Some(x),
+            Some(_) if x.starts_with("RO") || x.starts_with("BFO") => chosen = Some(x),
+            Some(_) => {}
+        }
+    }
+    chosen.map(str::to_string)
 }
 
 /// The IRI of a `[Typedef]` with a bare (non-CURIE) `id`: its single `xref`
