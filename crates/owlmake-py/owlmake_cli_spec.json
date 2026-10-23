@@ -1,6 +1,6 @@
 {
   "program": "owlmake",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "about": "Self-contained OWL/OBO ontology build and QC toolkit",
   "commands": [
     {
