@@ -10915,3 +10915,72 @@ fn extract_mireot_brings_annotation_property_frames() {
     let _ = std::fs::remove_file(&src);
     let _ = std::fs::remove_file(&out);
 }
+
+/// `extract-strings --names` lists every name of every scope beside the strings
+/// table, which stays what it is without the option: labels and exact synonyms.
+#[test]
+fn extract_strings_names_lists_every_scope_and_leaves_the_strings_alone() {
+    let src = tmp("names.ofn");
+    std::fs::write(
+        &src,
+        "Prefix(obo:=<http://purl.obolibrary.org/obo/>)\n\
+         Prefix(oio:=<http://www.geneontology.org/formats/oboInOwl#>)\n\
+         Prefix(owl:=<http://www.w3.org/2002/07/owl#>)\n\
+         Prefix(rdfs:=<http://www.w3.org/2000/01/rdf-schema#>)\n\
+         Prefix(xsd:=<http://www.w3.org/2001/XMLSchema#>)\n\
+         Ontology(<http://purl.obolibrary.org/obo/ex.owl>\n\
+         Declaration(Class(obo:EX_0000001))\n\
+         Declaration(Class(obo:EX_0000002))\n\
+         Declaration(Class(obo:OTHER_0000001))\n\
+         AnnotationAssertion(rdfs:label obo:EX_0000001 \"bis(2-ethylhexyl) phthalate\"@en)\n\
+         AnnotationAssertion(oio:hasExactSynonym obo:EX_0000001 \"di(2-ethylhexyl) phthalate\")\n\
+         AnnotationAssertion(Annotation(oio:hasSynonymType obo:OMO_0003000) oio:hasRelatedSynonym obo:EX_0000001 \"DEHP\")\n\
+         AnnotationAssertion(oio:hasRelatedSynonym obo:EX_0000001 \"DEHP\")\n\
+         AnnotationAssertion(oio:hasBroadSynonym obo:EX_0000001 \"phthalate ester\")\n\
+         AnnotationAssertion(oio:hasNarrowSynonym obo:EX_0000001 \"DEHP isomer\")\n\
+         AnnotationAssertion(rdfs:label obo:EX_0000002 \"old term\")\n\
+         AnnotationAssertion(owl:deprecated obo:EX_0000002 \"true\"^^xsd:boolean)\n\
+         AnnotationAssertion(rdfs:label obo:OTHER_0000001 \"another ontology's term\")\n\
+         AnnotationAssertion(oio:hasRelatedSynonym obo:OTHER_0000001 \"not ours\")\n\
+         )\n",
+    )
+    .unwrap();
+    let extract = |strings: &std::path::Path, names: Option<&std::path::Path>| {
+        let mut cmd = bin();
+        cmd.args(["extract-strings", "-i"]).arg(&src);
+        cmd.args(["--ontology-id", "ex", "--preferred-prefix", "EX", "-o"]).arg(strings);
+        if let Some(names) = names {
+            cmd.arg("--names").arg(names);
+        }
+        let run = cmd.output().unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    };
+    let (plain, strings, names) = (tmp("names.plain.tsv"), tmp("names.strings.tsv"), tmp("names.names.tsv"));
+    extract(&plain, None);
+    extract(&strings, Some(&names));
+
+    let ex1 = "ex\tclass\thttp://purl.obolibrary.org/obo/EX_0000001";
+    let expected = format!(
+        "ontology_id\tentity_type\tiri\tname\tscope\tsynonym_type\tlang\tis_obsolete\n\
+         {ex1}\tbis(2-ethylhexyl) phthalate\tlabel\t\ten\t\n\
+         {ex1}\tdi(2-ethylhexyl) phthalate\texact\t\t\t\n\
+         {ex1}\tDEHP\trelated\t\t\t\n\
+         {ex1}\tDEHP\trelated\thttp://purl.obolibrary.org/obo/OMO_0003000\t\t\n\
+         {ex1}\tphthalate ester\tbroad\t\t\t\n\
+         {ex1}\tDEHP isomer\tnarrow\t\t\t\n\
+         ex\tclass\thttp://purl.obolibrary.org/obo/EX_0000002\told term\tlabel\t\t\ttrue\n"
+    );
+    assert_eq!(std::fs::read_to_string(&names).unwrap(), expected);
+
+    // The strings table is the same bytes with and without the names beside it,
+    // and holds none of the other scopes.
+    let table = std::fs::read_to_string(&strings).unwrap();
+    assert_eq!(table, std::fs::read_to_string(&plain).unwrap());
+    assert_eq!(table.lines().count(), 4, "{table}");
+    for absent in ["DEHP", "phthalate ester", "not ours"] {
+        assert!(!table.contains(&format!("\t{absent}\t")), "{absent}: {table}");
+    }
+    for f in [&src, &plain, &strings, &names] {
+        let _ = std::fs::remove_file(f);
+    }
+}

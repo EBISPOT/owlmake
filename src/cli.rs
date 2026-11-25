@@ -86,6 +86,7 @@ pub enum Command {
     Extract(cmd::extract::Args),
     /// Extract per-entity label / exact-synonym strings for embedding, in the byte form
     /// an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string.
+    /// `--names` also writes every name of every scope, with its scope and synonym type.
     #[command(name = "extract-strings")]
     ExtractStrings(cmd::extract_strings::Args),
     /// Materialize uPheno's phenotype shortcut relations from EQ definitions

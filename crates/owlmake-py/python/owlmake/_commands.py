@@ -2250,8 +2250,8 @@ def _chain_extract(self, *, input: Optional[StrOrPath] = None, output: Optional[
 Chain.extract = _chain_extract
 
 
-def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
-    """Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string
+def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, names: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0, binary: Optional[StrOrPath] = None, cwd: Optional[StrOrPath] = None, env: Optional[Mapping[str, str]] = None, capture: bool = True, raise_on_error: bool = True, timeout: Optional[float] = None) -> OwlmakeResult:
+    """Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string. `--names` also writes every name of every scope, with its scope and synonym type
 
     Flags:
     input: (--input / -i)
@@ -2261,6 +2261,7 @@ def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
     base_iri: (--base-iri) Base IRI(s) whose entities are "defining" (embedded): an entity is included iff its IRI starts with one of these. Repeatable — these are the base IRIs that define internal/owned terms
     preferred_prefix: (--preferred-prefix) OBO preferred prefix (e.g. `ECTO`); adds `obo/<PREFIX>_` as a base IRI and is used for the shortForm fallback
     label_property: (--label-property) Annotation property IRI(s) to treat as labels. If given, **replaces** the default set (rdfs:label, dc:title, dcterms:title, skos:prefLabel), matching OLS `LabelAnnotator`. Repeatable
+    names: (--names) Also write the names table to this file: every label and every synonym of every scope of each defining entity, one row per name, with its scope (`label`, `exact`, `related`, `broad`, `narrow`), synonym type and language
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -2281,6 +2282,7 @@ def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
         "base_iri": base_iri,
         "preferred_prefix": preferred_prefix,
         "label_property": label_property,
+        "names": names,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,
@@ -2295,8 +2297,8 @@ def extract_strings(*, input: Optional[StrOrPath] = None, output: Optional[StrOr
     }, binary=binary, cwd=cwd, env=env, capture=capture, raise_on_error=raise_on_error, timeout=timeout)
 
 
-def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
-    """Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string
+def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: Optional[StrOrPath] = None, format: Optional[StrOrPath] = None, ontology_id: Optional[StrOrPath] = None, base_iri: Optional[Sequence[StrOrPath]] = None, preferred_prefix: Optional[StrOrPath] = None, label_property: Optional[Sequence[StrOrPath]] = None, names: Optional[StrOrPath] = None, input_iri: Optional[Sequence[StrOrPath]] = None, input_format: Optional[StrOrPath] = None, prefixes: Optional[StrOrPath] = None, prefix: Optional[Sequence[StrOrPath]] = None, add_prefix: Optional[Sequence[StrOrPath]] = None, add_prefixes: Optional[Sequence[StrOrPath]] = None, noprefixes: bool = False, xml_entities: bool = False, catalog: Optional[StrOrPath] = None, strict: bool = False, verbose: int = 0) -> 'Chain':
+    """Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string. `--names` also writes every name of every scope, with its scope and synonym type
 
     Flags:
     input: (--input / -i)
@@ -2306,6 +2308,7 @@ def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: O
     base_iri: (--base-iri) Base IRI(s) whose entities are "defining" (embedded): an entity is included iff its IRI starts with one of these. Repeatable — these are the base IRIs that define internal/owned terms
     preferred_prefix: (--preferred-prefix) OBO preferred prefix (e.g. `ECTO`); adds `obo/<PREFIX>_` as a base IRI and is used for the shortForm fallback
     label_property: (--label-property) Annotation property IRI(s) to treat as labels. If given, **replaces** the default set (rdfs:label, dc:title, dcterms:title, skos:prefLabel), matching OLS `LabelAnnotator`. Repeatable
+    names: (--names) Also write the names table to this file: every label and every synonym of every scope of each defining entity, one row per name, with its scope (`label`, `exact`, `related`, `broad`, `narrow`), synonym type and language
     input_iri: (--input-iri / -I) Load the input ontology from an IRI instead of a file. Repeatable: a command that reads one input reads the first, and `merge` reads every one, after its `--input` files
     input_format: (--input-format) Override the input parser format
     prefixes: (--prefixes / -P) Bind the prefixes of a JSON-LD context file for reading CURIEs
@@ -2326,6 +2329,7 @@ def _chain_extract_strings(self, *, input: Optional[StrOrPath] = None, output: O
         "base_iri": base_iri,
         "preferred_prefix": preferred_prefix,
         "label_property": label_property,
+        "names": names,
         "input_iri": input_iri,
         "input_format": input_format,
         "prefixes": prefixes,

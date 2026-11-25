@@ -9568,7 +9568,7 @@
     {
       "name": "extract-strings",
       "aliases": [],
-      "about": "Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string",
+      "about": "Extract per-entity label / exact-synonym strings for embedding, in the byte form an OLS4 index keys on (cl100k truncation + SHA-1 content hash). One row per string. `--names` also writes every name of every scope, with its scope and synonym type",
       "passthrough": false,
       "args": [
         {
@@ -9711,6 +9711,25 @@
           "defaults": [],
           "hidden": false,
           "help": "Annotation property IRI(s) to treat as labels. If given, **replaces** the default set (rdfs:label, dc:title, dcterms:title, skos:prefLabel), matching OLS `LabelAnnotator`. Repeatable"
+        },
+        {
+          "id": "names",
+          "longs": [
+            "names"
+          ],
+          "shorts": [],
+          "action": "set",
+          "value_names": [
+            "FILE"
+          ],
+          "min_values": 1,
+          "max_values": 1,
+          "variadic": false,
+          "required": false,
+          "possible_values": [],
+          "defaults": [],
+          "hidden": false,
+          "help": "Also write the names table to this file: every label and every synonym of every scope of each defining entity, one row per name, with its scope (`label`, `exact`, `related`, `broad`, `narrow`), synonym type and language"
         },
         {
           "id": "input_iri",
