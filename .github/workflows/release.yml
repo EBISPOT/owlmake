@@ -14,6 +14,12 @@ name: Release
 #   * Windows binaries use the gnullvm ABI (the cross-from-Linux flavour); they are
 #     standalone .exe files, fine for a CLI.
 #
+# Every tool is pinned: the runner image, the compiler, Zig, cargo-zigbuild and
+# each action, by commit. A release is built by exactly these until this file
+# says otherwise. To move any of them, change it here and run the workflow by
+# hand (it then builds all six targets and publishes nothing) before tagging: a
+# newer compiler or cargo-zigbuild can stop a cross-link that worked.
+#
 # Triggers:
 #   * pushing a tag `v*`  -> build all targets AND publish a GitHub Release.
 #   * manual dispatch     -> build all targets, upload as artifacts only.
@@ -34,7 +40,7 @@ concurrency:
 jobs:
   build:
     name: build ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -46,25 +52,26 @@ jobs:
           - { target: x86_64-pc-windows-gnullvm,    os: windows, arch: amd64, ext: ".exe" }
           - { target: aarch64-pc-windows-gnullvm,   os: windows, arch: arm64, ext: ".exe" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
+          toolchain: 1.99.1
           targets: ${{ matrix.target }}
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@53fc45b17fe98b52f92ee5ea08ff48a85a3e7eb7  # v1
         with:
           version: 0.13.0
 
       - name: Install cargo-zigbuild
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177  # v2
         with:
-          tool: cargo-zigbuild
+          tool: cargo-zigbuild@0.23.4
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           key: ${{ matrix.target }}
 
@@ -102,7 +109,7 @@ jobs:
           sha256sum "$out" > "$out.sha256"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: om-${{ matrix.os }}-${{ matrix.arch }}
           path: om-${{ matrix.os }}-${{ matrix.arch }}*
@@ -112,18 +119,18 @@ jobs:
     name: publish release
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: dist
           merge-multiple: true
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: dist/*
           generate_release_notes: true
