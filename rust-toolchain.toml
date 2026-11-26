@@ -1,0 +1,6 @@
+# The one compiler owlmake is built with: rustup installs and uses it for
+# every cargo command run in this repository, and each workflow asks for the
+# same version by name.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy"]

@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 
 # owlmake in a minimal Alpine image, with PATH shims so a repository's existing
 # CI, which invokes `robot`, `jq`, `sssom` and `make` by name, resolves them to om.
@@ -22,8 +22,12 @@
 # under the target architecture.
 
 # ---- build: cross-compile a static musl binary for the target arch ----
-FROM --platform=$BUILDPLATFORM ghcr.io/rust-cross/cargo-zigbuild:0.22.3 AS build
+FROM --platform=$BUILDPLATFORM ghcr.io/rust-cross/cargo-zigbuild:0.23.4@sha256:d8313491ec5798de0633fdc1c5753761bff79967bea69076020dc78121b2cca8 AS build
 ARG TARGETARCH
+WORKDIR /src
+# The compiler is the one rust-toolchain.toml names, installed with the standard
+# library of the target architecture; cargo then uses it for the build below.
+COPY rust-toolchain.toml .
 RUN set -eux; \
     case "$TARGETARCH" in \
       amd64) target=x86_64-unknown-linux-musl ;; \
@@ -31,8 +35,9 @@ RUN set -eux; \
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
     echo "$target" > /tmp/target; \
-    rustup target add "$target"
-WORKDIR /src
+    channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"; \
+    test -n "$channel"; \
+    rustup toolchain install "$channel" --profile minimal --target "$target"
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,sharing=locked \
@@ -42,7 +47,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     install -Dm755 "target/$target/release/om" /out/om
 
 # ---- base: minimal Alpine + om + tool shims (shared by both images) ----
-FROM alpine:3.24 AS base
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base
 # ca-certificates: owlmake fetches imports over HTTPS and trusts the system CA
 # store (ureq native-certs).
 #

@@ -1,0 +1,9 @@
+# What the Python API reference is built with: every package of the install,
+# by version.
+pip==26.3
+maturin==1.16.0
+pdoc==16.0.0
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+markdown2==2.5.5
+pygments==2.21.0

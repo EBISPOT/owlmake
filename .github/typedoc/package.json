@@ -1,0 +1,8 @@
+{
+  "name": "owlmake-js-docs",
+  "private": true,
+  "description": "The tool the JS/TypeScript API reference is rendered with (docs.yml), with every package it needs by version in package-lock.json.",
+  "devDependencies": {
+    "typedoc": "0.28.20"
+  }
+}

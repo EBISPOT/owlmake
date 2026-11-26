@@ -18,5 +18,5 @@ owlmake = { path = "../.." }
 # generate-import-lib: synthesize the Windows python3 import library at build
 # time so the Windows arm64 wheel can cross-compile on the x86_64 windows-latest
 # runner, which has no aarch64 Python interpreter (see .github/workflows/wheels.yml).
-pyo3 = { version = "0.29", features = ["extension-module", "abi3-py39", "anyhow", "generate-import-lib"] }
-anyhow = "1"
+pyo3 = { version = "=0.29.0", features = ["extension-module", "abi3-py39", "anyhow", "generate-import-lib"] }
+anyhow = "=1.0.102"

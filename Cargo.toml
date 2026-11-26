@@ -29,43 +29,43 @@ path = "src/main.rs"
 # ureq (and its rustls, which does not build on wasm32-unknown-unknown) out of
 # the wasm dependency graph. owlmake does its own HTTP via the separately
 # target-gated ureq below, so dropping horned-owl's `remote` costs nothing.
-clap = { version = "4", features = ["derive"] }
-anyhow = "1"
-thiserror = "1"
+clap = { version = "=4.6.1", features = ["derive"] }
+anyhow = "=1.0.102"
+thiserror = "=1.0.69"
 # The XML reader behind the OWL/XML reader's IRI pass and `semsql`'s RDF/XML
 # statement loader. The `statements` table groups triples by the document's
 # top-level elements, which is an XML fact no triple-level API reports, so the
 # loader reads the XML itself. horned-owl depends on the same version on every
 # target, so the wasm build carries no second copy.
-quick-xml = "0.37"
+quick-xml = "=0.37.5"
 # default-features disabled to drop the `rocksdb` feature: it pulls in
 # `oxrocksdb-sys`, which compiles a bundled RocksDB C++ library (cc + bindgen)
 # for oxigraph's on-disk persistent `Store`. We only ever use the in-memory
 # store (`Store::new()`) plus RDF I/O and SPARQL eval, none of which need it,
 # so this removes the C++ toolchain dependency and keeps the static binary lean.
-oxigraph = { version = "0.5", default-features = false }
-serde = { version = "1", features = ["derive"] }
+oxigraph = { version = "=0.5.8", default-features = false }
+serde = { version = "=1.0.228", features = ["derive"] }
 # `preserve_order` keeps a serialized plan in struct-declaration order (`id`,
 # `version`, … then `steps`) rather than alphabetical: the plan is written to be
 # read, and it round-trips through a `serde_json::Value` to rebase its paths.
-serde_json = { version = "1", features = ["preserve_order"] }
-serde_yaml = "0.9"
+serde_json = { version = "=1.0.150", features = ["preserve_order"] }
+serde_yaml = "=0.9.34+deprecated"
 # The path to the value a DOSDP pattern could not be decoded at, for a pattern
 # decoded from a resolved YAML document rather than from the parser's events.
-serde_path_to_error = "0.1"
+serde_path_to_error = "=0.1.20"
 # JSON-Schema derivation (schemars) + validation (jsonschema) for `owlmake.json`,
 # the declarative build plan that is the whole contract between planning and
 # execution.
-schemars = "0.8"
-jsonschema = { version = "0.18", default-features = false }
-rustc-hash = "2"
+schemars = "=0.8.22"
+jsonschema = { version = "=0.18.3", default-features = false }
+rustc-hash = "=2.1.2"
 # Used by `ubergraph` to apply ubergraph's biolink-model namespace rewrite
 # (`<…/vocab/PREFIX:LOCAL>` → `<…/obo/PREFIX_LOCAL>`); already in the dep tree.
-regex = "1"
+regex = "=1.12.3"
 # A pattern's regular expressions, matched with the semantics of the Java
 # engine its substitutions are written for (`dosdp::java`): backreferences,
 # lookaround and possessive quantifiers. Already in the tree through deps/sed.
-fancy-regex = "0.17"
+fancy-regex = "=0.17.0"
 # ureq (HTTP client) is declared in the per-OS `[target.*.dependencies]` tables
 # below the dependency list, because its `native-certs` feature is enabled on
 # every OS except macOS.
@@ -83,7 +83,7 @@ fancy-regex = "0.17"
 # src/jq.rs is built on (the REPL is left out). Default features pull
 # jaq-fmts/all (yaml/toml/xml/…), all pure Rust, so `__jq` is a superset of the
 # jq language and the binary stays standalone.
-jaq-all = "0.1"
+jaq-all = "=0.1.0"
 # Bundled GNU-compatible text utilities, so build recipes that shell out to
 # `sed`/`comm`/`grep` are satisfied from inside the single static binary (the
 # same motivation as the embedded `jq`). This removes the system-coreutils
@@ -119,10 +119,10 @@ jaq-all = "0.1"
 # macOS and breaks the SDK-free cross-build — same class of problem as the ureq
 # target sections below. See .github/workflows/release.yml.) wasm enables jiff's
 # `js` feature below so the clock works in the browser.
-jiff = "0.2"
+jiff = "=0.2.28"
 # ANSI styling for status/progress output. Zero-dependency; we gate it ourselves
 # on TTY / NO_COLOR / OWLMAKE_COLOR rather than using a detection feature.
-owo-colors = "4"
+owo-colors = "=4.3.0"
 # `extract-strings` / text tagger / mapping — all pure Rust and wasm-safe, so they
 # are general dependencies (the string-extraction, hashing, tagging and gunzip logic
 # builds for the browser too; only the columnar/network/thread parts stay native):
@@ -132,12 +132,12 @@ owo-colors = "4"
 #   * flate2 — gunzip the published `text_tagger_db.bin.gz`, and inflate the
 #     character names `\N{…}` takes (miniz_oxide backend = pure Rust, no C
 #     toolchain).
-tiktoken-rs = "0.7"
-sha1 = "0.10"
+tiktoken-rs = "=0.7.0"
+sha1 = "=0.10.6"
 # md-5 — a Turtle blank-node label longer than 32 UTF-16 units is named by its
 # MD5 digest.
-md-5 = "0.10"
-flate2 = "1"
+md-5 = "=0.10.6"
+flate2 = "=1.1.9"
 
 # hermit-rs: the OWL 2 DL reasoner backend (`--reasoner hermit`/`jfact`;
 # src/reason/dl.rs is a thin adapter). From the EBISPOT/hermit-rs fork, which
@@ -154,7 +154,7 @@ hermit-rs = { git = "https://github.com/EBISPOT/hermit-rs", rev = "49faccd24a19e
 # dependency. Depends on horned-owl ^4.0,
 # redirected by the root `[patch.crates-io]` so the object model is identical
 # across the boundary.
-whelk = { git = "https://github.com/EBISPOT/whelk-rs", rev = "7b28364" }
+whelk = { git = "https://github.com/EBISPOT/whelk-rs", rev = "7b28364c533e830ae5c6a434e3d39d01c0ce1068" }
 
 # HTTP client. `native-certs` makes HTTPS trust the system CA store (works behind
 # a TLS-intercepting proxy, like git does), not just bundled roots. It is enabled
@@ -164,10 +164,10 @@ whelk = { git = "https://github.com/EBISPOT/whelk-rs", rev = "7b28364" }
 # macOS therefore falls back to ureq's bundled webpki-roots, letting every target
 # cross-compile on cheap Linux with no Apple SDK. See .github/workflows/release.yml.
 [target.'cfg(all(not(target_os = "macos"), not(target_arch = "wasm32")))'.dependencies]
-ureq = { version = "2", default-features = false, features = ["tls", "native-certs", "gzip"] }
+ureq = { version = "=2.12.1", default-features = false, features = ["tls", "native-certs", "gzip"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+ureq = { version = "=2.12.1", default-features = false, features = ["tls", "gzip"] }
 
 # mimalloc bundles a C allocator, which has no wasm target; the default allocator
 # is used on wasm. (Network/`ureq` is likewise unavailable on wasm — see the
@@ -175,8 +175,8 @@ ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native build: horned-owl with default features (the OWL object model the whole
 # crate is built on). See the note at the top of [dependencies].
-horned-owl = "4.0.0"
-mimalloc = "0.1"
+horned-owl = "=4.0.0"
+mimalloc = "=0.1.52"
 # SQLite, the engine `sssom dosql` runs its queries on. The dialect is the
 # contract, not an implementation detail: type affinity, NULL handling, LIKE,
 # collation, and the fallback that reads a double-quoted word naming no column
@@ -190,7 +190,7 @@ mimalloc = "0.1"
 # on both counts — `sqlparser` is +3.2 MB and parses only (it reads that same
 # double-quoted word as an Identifier, so the fallback would still be ours), and
 # turso is +21 MB and wants bindgen/libclang.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
 # Columnar I/O for the embedding parquet (read `ecto.parquet`, write compatible
 # output). Apache Arrow/Parquet, pure Rust; `zstd` matches OLS's compression (its
 # C is statically linked like mimalloc, native-only — not in the wasm core).
@@ -199,19 +199,19 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # against the CoreFoundation framework. Zig ships stubs for libSystem only, so
 # that breaks the SDK-free macOS cross-build the release workflow depends on.
 # Nothing here needs a wall clock — the parquet I/O is columnar data only.
-arrow-array = { version = "53", default-features = false }
-arrow-schema = { version = "53", default-features = false }
-arrow-buffer = { version = "53", default-features = false }
-parquet = { version = "53", default-features = false, features = ["arrow", "zstd"] }
+arrow-array = { version = "=53.4.1", default-features = false }
+arrow-schema = { version = "=53.4.1", default-features = false }
+arrow-buffer = { version = "=53.4.1", default-features = false }
+parquet = { version = "=53.4.1", default-features = false, features = ["arrow", "zstd"] }
 # All-pairs cosine in `embeddings semsim`, fanned out across cores with rayon.
 # rayon needs OS threads, so it is native-only (embeddings/semsim is native anyway).
-rayon = "1"
+rayon = "=1.12.0"
 # Embedded GNU-compatible CLI tools backing `src/util` (binary-only); not part of
 # the wasm reasoning core.
-sed = "0.1"
-uu_comm = "0.9"
-uucore = "0.9"
-grep = { version = "0.4", default-features = false }
+sed = "=0.1.1"
+uu_comm = "=0.9.0"
+uucore = "=0.9.0"
+grep = { version = "=0.4.1", default-features = false }
 
 # wasm-only: enable getrandom's browser backend (RandomState pulls it in), and
 # `web-time` — a drop-in `Instant`/`SystemTime` that works on wasm where
@@ -221,19 +221,19 @@ grep = { version = "0.4", default-features = false }
 # crate in the wasm graph pulls ureq/rustls. hermit-rs and whelk both request
 # horned-owl without `remote` too, so both build for wasm and are general
 # dependencies (see above).
-horned-owl = { version = "4.0.0", default-features = false }
+horned-owl = { version = "=4.0.0", default-features = false }
 # oxigraph's `js` feature routes its clock (oxsdatatypes) through js_sys::Date
 # instead of std SystemTime::now(), which traps on wasm — needed for SPARQL
 # `query` (the NOW()/date machinery) to run in the browser. Feature-unified with
 # the default-features=false entry in [dependencies]; native is unaffected.
-oxigraph = { version = "0.5", default-features = false, features = ["js"] }
-getrandom = { version = "0.3", features = ["wasm_js"] }
-web-time = "1"
+oxigraph = { version = "=0.5.8", default-features = false, features = ["js"] }
+getrandom = { version = "=0.3.4", features = ["wasm_js"] }
+web-time = "=1.1.0"
 # jiff's `js` feature makes `Zoned::now()` read the time via the JS `Date` API
 # instead of std `SystemTime::now()`, which traps on wasm. Feature-unified with
 # the entry in [dependencies], so on wasm jiff gets `js` and the `[HH:MM:SS]`
 # status timestamps work; native is unaffected.
-jiff = { version = "0.2", features = ["js"] }
+jiff = { version = "=0.2.28", features = ["js"] }
 
 [profile.release]
 opt-level = 3
@@ -250,7 +250,7 @@ debug = 1
 [dev-dependencies]
 # regex-syntax — the recorded `java.util.regex` cases read a translated character
 # class back into the code points it holds (src/dosdp/java.rs).
-regex-syntax = "0.8"
+regex-syntax = "=0.8.10"
 
 # horned-owl and hermit-rs are consumed from their EBISPOT forks rather than
 # vendored in-tree, so they track upstream directly. This root patch unifies the
@@ -266,7 +266,7 @@ regex-syntax = "0.8"
 # satisfies every requirement in the graph and keeps one shared model. Pinned
 # by rev, not by branch, so a build is reproducible without the lockfile; bump
 # it when devel moves.
-horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "694b756" }
+horned-owl = { git = "https://github.com/EBISPOT/horned-owl", rev = "694b75650c27cf0c1deb30ac184ab83feb5e06b4" }
 # pretty_rdf is no longer a separate dependency: horned-owl now vendors it as the
 # `horned-pretty-rdf` workspace member, so no patch is needed here.
 # oxigraph SPARQL optimizer (sparopt) — kept in-tree under deps/ (the one

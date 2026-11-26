@@ -1,0 +1,10 @@
+# What the CI job that builds and smoke-tests the Python extension installs:
+# every package of the install, by version.
+pip==26.3
+maturin==1.16.0
+numpy==2.4.6
+pandas==3.1.1
+polars==2.2.0
+polars-runtime-32==2.2.0
+python-dateutil==4.0.0
+tzdata==2026.6

@@ -48,22 +48,22 @@ name = "spargebra"
 path = "src/lib.rs"
 
 [dependencies.oxilangtag]
-version = "0.1"
+version = "=0.1.6"
 
 [dependencies.oxiri]
-version = "0.2.11"
+version = "=0.2.11"
 
 [dependencies.oxrdf]
 version = "=0.3.3"
 
 [dependencies.peg]
-version = "0.8"
+version = "=0.8.6"
 
 [dependencies.rand]
-version = ">=0.8,<0.10"
+version = "=0.9.4"
 
 [dependencies.thiserror]
-version = ">=1.0.50, <3.0"
+version = "=2.0.18"
 
 [lints.clippy]
 allow_attributes = "warn"

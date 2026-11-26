@@ -13,15 +13,15 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 owlmake = { path = "../.." }
-anyhow = "1"
-serde = "1"
-wasm-bindgen = "0.2"
+anyhow = "=1.0.102"
+serde = "=1.0.228"
+wasm-bindgen = "=0.2.122"
 # Rich, idiomatic JS return values (arrays of arrays, etc.) instead of JSON
 # strings, so subclassPairs() reads natively on the JS side.
-serde-wasm-bindgen = "0.6"
+serde-wasm-bindgen = "=0.6.5"
 # Surface Rust panics as JS exceptions with a stack trace instead of an opaque
 # "unreachable" trap — invaluable when a malformed ontology trips an assert.
-console_error_panic_hook = "0.1"
+console_error_panic_hook = "=0.1.7"
 
 # wasm-opt (binaryen) is fetched from a GitHub release at build time, which is
 # not available in every CI/sandbox; leave it off here. The publish workflow can

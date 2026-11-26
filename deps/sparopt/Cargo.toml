@@ -50,7 +50,7 @@ path = "src/lib.rs"
 version = "=0.3.3"
 
 [dependencies.rand]
-version = ">=0.8,<0.10"
+version = "=0.9.4"
 
 [dependencies.spargebra]
 version = "=0.4.6"

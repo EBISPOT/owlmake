@@ -26,35 +26,36 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
+          toolchain: 1.99.1
           targets: wasm32-unknown-unknown
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2
         with:
           workspaces: . -> target
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e  # v2
         with:
-          tool: wasm-pack
+          tool: wasm-pack@0.15.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
-          node-version: '20'
+          node-version: '20.20.2'
           registry-url: 'https://registry.npmjs.org'
 
       # nodejs build + smoke test (the assertion suite runs under Node).
       - name: Build (nodejs) and smoke-test
         working-directory: crates/owlmake-wasm
         run: |
-          wasm-pack build --target nodejs --out-dir pkg-node
+          wasm-pack build --target nodejs --out-dir pkg-node -- --locked
           node --input-type=module -e "
             import { Ontology } from './pkg-node/owlmake_wasm.js';
             const o = Ontology.parse(new TextEncoder().encode('Prefix(:=<http://x/>)\nOntology(<http://x/o>\nDeclaration(Class(:A))\nDeclaration(Class(:B))\nSubClassOf(:A :B)\n)\n'), 'ofn');
@@ -67,7 +68,7 @@ jobs:
       # vite / rollup and Node ESM). Same API; only the loader glue differs.
       - name: Build (bundler) for publish
         working-directory: crates/owlmake-wasm
-        run: wasm-pack build --target bundler --out-dir pkg
+        run: wasm-pack build --target bundler --out-dir pkg -- --locked
 
       # Publishing disabled until we're ready to release to npm. To re-enable,
       # restore `if: startsWith(github.ref, 'refs/tags/')` on both steps below.
@@ -85,7 +86,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: npm-package
           path: crates/owlmake-wasm/pkg

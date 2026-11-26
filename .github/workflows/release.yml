@@ -1,7 +1,7 @@
 name: Release
 
 # Cross-build the `om` binary for Linux, macOS, and Windows (amd64 + arm64)
-# entirely on cheap `ubuntu-latest` runners using cargo-zigbuild, which uses Zig
+# entirely on cheap Ubuntu runners using cargo-zigbuild, which uses Zig
 # as the C compiler/linker so the C/asm deps in the tree (mimalloc, ring) and the
 # platform cert crates (security-framework on macOS, schannel on Windows) all
 # cross-compile and link from a single Linux host.

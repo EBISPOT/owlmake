@@ -70,11 +70,11 @@ name = "fancy_regex"
 path = "src/lib.rs"
 
 [dependencies.bit-set]
-version = "0.8"
+version = "=0.8.0"
 default-features = false
 
 [dependencies.regex-automata]
-version = "0.4"
+version = "=0.4.14"
 features = [
     "alloc",
     "syntax",
@@ -86,5 +86,5 @@ features = [
 default-features = false
 
 [dependencies.regex-syntax]
-version = "0.8"
+version = "=0.8.10"
 default-features = false
